@@ -249,7 +249,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   - Interactive session/findings/compare endpoints fail closed behind the per-client rollout flag; when rollout is disabled the page remains on the overview/readiness surface.
   - If Console branch context is missing, the page now renders an inline branch gate; owner/admin can choose and apply the branch in place instead of being sent to another page.
   - The inline branch gate now reuses the same owner scope-gate primitive as `Knowledge`, so branch apply semantics and query invalidation stay aligned across both pages.
-  - The top scope card shows the selected client/branch plus current knowledge freshness and sync state so the owner can see exactly which branch is being tested.
+  - The top scope card shows the selected client/branch plus separate `Проверка консультанта` and `Обновление для клиентов` statuses so the owner can see what is being previewed versus what is still activating for live traffic.
   - Wave2 adds safe simulation sessions on the real consultant runtime with rollback-only execution, persisted owner/admin transcripts, and explicit preview flags (`would_handoff`, `would_book`, `gap_detected`).
   - Wave3 adds the owner-readable workspace: `как клиент` / `найти слабые места` mode selection, recent sessions, transcript bubbles, verdict chips, source refs, preview-only impact badges, and an optional advanced-details disclosure.
   - Wave4 adds a data-driven scenario catalog sourced from onboarding blueprints, capabilities, and reference packs; session summaries with honest category counts (`answered / clarification / handoff / gap`); and replay actions that always start a fresh simulation session instead of mutating prior evidence.
@@ -258,7 +258,9 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   - UX-52 slice A6 reduces default owner density: recent sessions, compare, and findings now live inside the shared `Инструменты команды` disclosure instead of competing with the primary owner scan path.
   - UX-52 slice A7 extracts the remaining consultant-verification lane JSX into dedicated owner/review components (`OwnerSetupLane`, `TranscriptLane`, `ReviewLane`) so future owner/admin tweaks stay local to one lane instead of editing the whole workspace.
   - UX-52 slice A8 moves consultant-verification queries, mutations, and derived labels into `useConsultantVerificationWorkspaceState`, leaving `ConsultantVerificationWorkspace.tsx` as a thin composition shell over the extracted owner/review lanes.
-  - Readiness is sync-aware: if the latest published knowledge is still `pending` or `failed`, or the branch is in `knowledge_safe_mode`, the page shows `needs_attention` and keeps the interactive workspace hidden until sync is actually ready.
+  - Consultant verification is preview-first: if the selected branch has previewable truth (`live` or latest validated `draft`), the interactive workspace remains available even while live activation is `pending` or `failed`.
+  - Each consultant-verification session pins an immutable truth snapshot inside `runtime_snapshot`; later `Validate` or `Publish` edits do not change the truth used by existing session turns.
+  - Operational `sync` / `knowledge_safe_mode` detail is still available as secondary disclosure, but the primary owner language is `Проверка консультанта` versus `Обновление для клиентов`.
   - Closeout status on this branch: local deterministic proof, owner/admin compare lane, and screenshot audit are green; one-client canary and post-merge monitoring remain release-only steps after merge/deploy.
   - Simulation turns must never leak real outbound, booking, or handoff side effects into production flows.
 
@@ -270,17 +272,19 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - RBAC: owner/admin write; manager read-only; support no access.
 - Требует branch selection (`X-Branch-Id`).
 - Rollback требует подтверждения: `POST /console/v1/confirmations` (action=`knowledge_rollback`) → `confirmation_id`.
-- `GET /console/v1/knowledge/current` now returns both knowledge provenance (`published`, saved draft, edit base) and branch sync health (`sync_status`, `sync_error`, `knowledge_safe_mode`).
+- `GET /console/v1/knowledge/current` now returns both candidate provenance (`published`, saved draft, edit base) and live activation state (`active_version_id`, `activation_status`, `activation_job_id`, legacy `sync_*` aliases). Consultant verification maps this into separate preview-vs-live activation statuses instead of one merged owner gate.
 - `Knowledge` now reuses the same owner scope-gate primitive as `Проверка консультанта`; both pages apply branch context through the same storage + query invalidation contract.
 - Owner sync-state must be derived from `GET /console/v1/knowledge/current`; `console-me` remains scope/context only and must not be treated as the source of truth for sync-safe-mode rendering after publish/retry/rollback.
 - `Publish` is now an async owner contract:
-  - phase 1: create/publish the knowledge version,
-  - phase 2: enqueue branch-local sync on the durable outbox worker (`knowledge.sync`), outside the owner request path.
-- A successful publish response now returns `sync_status=pending` and `partial_success=false`; owner copy stays bounded (`Синхронизация выполняется`) instead of surfacing raw timeout text as the primary message.
-- `retry-sync` requeues branch-local sync for the current published version; it does not create a new published knowledge version.
+  - phase 1: create/publish the knowledge artifact and preview candidate,
+  - phase 2: enqueue a `knowledge_activation_jobs` record and let the dedicated activation worker/service claim it directly while live runtime stays pinned to the previous `active_version_id` until activation succeeds.
+- A successful publish response now returns `activation_status=queued`, `active_version_id` for the still-live version, and legacy `sync_status=pending`; owner copy stays bounded (`Обновление для клиентов выполняется`) instead of surfacing raw timeout text as the primary message.
+- `retry-sync` requeues branch-local activation for the selected published version; it does not create a new published knowledge version and it does not switch live runtime inline.
+- Default activation transport is no longer generic outbox delivery. Legacy `knowledge.sync` handling in `webhook/outbox.py` remains only as compatibility fallback for pre-existing outbox rows; new publish/retry/rollback mutations create jobs directly in `knowledge_activation_jobs`.
 - Cross-branch backfill is no longer part of the owner publish/retry click path.
 - After `publish`, `retry-sync`, or `rollback`, the frontend must refetch dependent server-state (`console-me`, `knowledge/current`, `knowledge/history`, consultant-verification readiness) so owner UI cannot show stale `safe_mode/timed out` together with fresh `pending`.
-- History, current state, rollback, and consultant-verification readiness all treat `sync_status=pending|failed` as blocking for owner verification until sync is actually `ready`.
+- History/current state/rollback now expose both `activation_*` and legacy `sync_*` fields; consultant-verification readiness no longer blocks owner preview on `pending|failed` activation, and pending candidate versions show up as `published` preview sources while `live` stays pinned to the old active pointer.
+- The `Knowledge` owner/admin surface now renders `Live версия` and `Published candidate` separately and uses `knowledge_activation_jobs.current_stage` plus `activation_queued_at` / `activation_heartbeat_at` as secondary execution disclosure; the default owner message remains business-readable (`Обновление для клиентов`) while raw `safe mode` stays out of the primary path.
 - UX-52 slice A6 reduces default owner density: `Client Pack Inspector` and `Кандидаты обучения` are now support disclosures instead of always-inline blocks in the main authoring path.
 - UX-52 slice A7 extracts the main `Knowledge` step flow into `KnowledgeStudioFlow` and moves rollback confirmation into `KnowledgeRollbackConfirmDialog`, so `page.tsx` remains orchestration-first instead of holding most of the stage JSX inline.
 - UX-52 slice A8 moves `Knowledge` queries, mutations, fleet controls, readiness wiring, and branch-gate state into `useKnowledgeStudioState`; `page.tsx` is now only the route shell, and the route-level fleet/readiness panels live in `KnowledgePlatformAdminFleetPanel` plus `KnowledgeBranchReadinessPanel`.
@@ -305,8 +309,13 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Ops**
 - UI: `console-web/src/components/OpsPage.tsx`
 - API: `GET /console/v1/health`, `/console/v1/metrics/daily`, `/console/v1/telegram/health`,
-  `GET /console/v1/ops/outbox`, `POST /console/v1/ops/outbox/retry`
+  `GET /console/v1/ops/outbox`, `POST /console/v1/ops/outbox/retry`,
+  `GET /console/v1/ops/knowledge-activation`, `POST /console/v1/ops/knowledge-activation/retry`
 - RBAC: owner/admin/support read; owner/admin write (retry/verify/test).
+- `GET /console/v1/health` now returns `knowledge_activation` summary (`counts`, `failed_24h`, stale heartbeat, oldest queued age) so Ops can separate activation transport health from generic outbox pressure.
+- `OpsPage` now renders a dedicated `Активация знаний` card for latest activation jobs per version; retry always creates a new queued `knowledge_activation_jobs` attempt and never mutates the old execution row in place.
+- Release/canary for the dedicated activation transport now stays on one path: `scripts/restart_release.sh` can include `truffles-knowledge-activation-service` in parity checks, while `truffles-api/scripts/knowledge_activation_release_guard.py` writes the post-deploy `go|no_go` artifact described in `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md`.
+- Final rollout closeout is now tenant-aware: `ops/knowledge_activation_closeout.py` combines the P5 guard with one branch snapshot and verifies that preview remains available separately from live activation while the active pointer follows the activation job state contract.
 
 **Insights KPI (truth-first)**
 - Статусы: `FACT` (полные данные), `EST` (оценка), `NEED` (неполнота данных).

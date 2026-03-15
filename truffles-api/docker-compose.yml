@@ -50,6 +50,23 @@ services:
     deploy:
       replicas: 1
 
+  truffles-knowledge-activation:
+    build:
+      context: ..
+      dockerfile: truffles-api/Dockerfile
+    container_name: truffles-knowledge-activation
+    command: python -m app.workers.knowledge_activation
+    env_file:
+      - .env
+    environment:
+      - DEBUG=false
+      - KNOWLEDGE_ACTIVATION_WORKER_ENABLED=${KNOWLEDGE_ACTIVATION_WORKER_ENABLED:-1}
+    networks:
+      - truffles_internal-net
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+
   truffles-sentinel:
     build:
       context: ..

@@ -69,6 +69,7 @@ const OUTCOME_LABELS: Record<ConsultantVerificationOutcome, string> = {
 
 const SOURCE_MODE_LABELS: Record<ConsultantVerificationSourceMode, string> = {
     live: "Текущая версия",
+    published: "Кандидат после publish",
     draft: "Черновик",
 };
 
@@ -216,7 +217,12 @@ export function buildSessionTitle(
     sourceMode: ConsultantVerificationSourceMode,
 ): string {
     const modeLabel = mode === "stress" ? "Стресс-проверка" : "Проверка как клиент";
-    const sourceLabel = sourceMode === "draft" ? "черновик" : "текущая версия";
+    const sourceLabel =
+        sourceMode === "draft"
+            ? "черновик"
+            : sourceMode === "published"
+              ? "кандидат после publish"
+              : "текущая live версия";
     return `${modeLabel} • ${sourceLabel}`;
 }
 

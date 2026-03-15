@@ -148,12 +148,18 @@ type PublishStageProps = {
     consultantVerificationReadinessErrorMessage?: string | null;
     lastValidatedDraftHash?: string | null;
     currentVersionId?: string | null;
+    currentActiveVersionId?: string | null;
+    hasPublishedCandidate: boolean;
     currentSyncStatus?: string | null;
     currentSyncStatusLabel: string;
-    currentSyncError?: string | null;
+    currentActivationStage?: string | null;
+    currentActivationStageLabel?: string | null;
+    currentActivationHeartbeatAt?: string | null;
+    currentActivationQueuedAt?: string | null;
+    currentActivationAttemptCount?: number | null;
     knowledgeSyncStatusClass: (status?: string | null) => string;
     resolveKnowledgeSyncMessage: (status?: string | null) => string;
-    resolveKnowledgeSyncDetails: (error?: string | null) => string | null;
+    resolveKnowledgeSyncDetails: () => string | null;
     ackWarnings: boolean;
     onAckWarningsChange: (value: boolean) => void;
     canEdit: boolean;
@@ -192,6 +198,39 @@ type KnowledgeStudioFlowProps = {
     isFirstStep: boolean;
     isLastStep: boolean;
 };
+
+function formatStageTimestamp(value?: string | null): string | null {
+    if (!value) {
+        return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+    return parsed.toLocaleString("ru-RU");
+}
+
+function resolveHistoryVersionRole(item: KnowledgeHistoryItem): {
+    label: string;
+    className: string;
+} {
+    if (item.is_active) {
+        return {
+            label: "Live",
+            className: "bg-emerald-100 text-emerald-800",
+        };
+    }
+    if (item.status === "published") {
+        return {
+            label: "Published candidate",
+            className: "bg-amber-100 text-amber-900",
+        };
+    }
+    return {
+        label: "Архив",
+        className: "bg-slate-100 text-slate-700",
+    };
+}
 
 function KnowledgeFlowSidebar({ steps, stepIndex, stepStatus, onSelectStep }: FlowSidebarProps) {
     return (
@@ -697,9 +736,15 @@ function KnowledgePublishStage({
     consultantVerificationReadinessErrorMessage,
     lastValidatedDraftHash,
     currentVersionId,
+    currentActiveVersionId,
+    hasPublishedCandidate,
     currentSyncStatus,
     currentSyncStatusLabel,
-    currentSyncError,
+    currentActivationStage,
+    currentActivationStageLabel,
+    currentActivationHeartbeatAt,
+    currentActivationQueuedAt,
+    currentActivationAttemptCount,
     knowledgeSyncStatusClass,
     resolveKnowledgeSyncMessage,
     resolveKnowledgeSyncDetails,
@@ -710,6 +755,11 @@ function KnowledgePublishStage({
     isPublishing,
     onPublish,
 }: PublishStageProps) {
+    const activationDetails = resolveKnowledgeSyncDetails();
+    const liveMatchesCandidate = Boolean(currentVersionId && currentVersionId === currentActiveVersionId);
+    const queuedAtLabel = formatStageTimestamp(currentActivationQueuedAt);
+    const heartbeatAtLabel = formatStageTimestamp(currentActivationHeartbeatAt);
+
     return (
         <div className="mt-4 space-y-4">
             <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm">
@@ -766,14 +816,67 @@ function KnowledgePublishStage({
             {currentVersionId ? (
                 <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm" data-testid="knowledge-publish-sync-status">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-medium text-foreground">Статус текущей публикации</p>
+                        <p className="font-medium text-foreground">Обновление для клиентов</p>
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${knowledgeSyncStatusClass(currentSyncStatus)}`}>
                             {currentSyncStatusLabel}
                         </span>
                     </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-lg border border-border/60 bg-background/70 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                Live версия
+                            </p>
+                            <p className="mt-2 font-mono text-xs text-foreground">
+                                {currentActiveVersionId ?? "ещё не активирована"}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                {currentActiveVersionId
+                                    ? "Эта версия сейчас обслуживает клиентские каналы."
+                                    : "Live pointer ещё не подтверждён."}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-background/70 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                Published candidate
+                            </p>
+                            <p className="mt-2 font-mono text-xs text-foreground">{currentVersionId}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                {liveMatchesCandidate
+                                    ? "Published candidate уже совпадает с live версией."
+                                    : hasPublishedCandidate
+                                        ? "Эта версия уже доступна для preview, но ещё не включена в live."
+                                        : "Отдельного candidate сейчас нет: опубликованная версия уже в live."}
+                            </p>
+                        </div>
+                    </div>
                     <p className="mt-2 text-muted-foreground">{resolveKnowledgeSyncMessage(currentSyncStatus)}</p>
-                    {resolveKnowledgeSyncDetails(currentSyncError) ? (
-                        <p className="mt-2 text-xs text-muted-foreground">{resolveKnowledgeSyncDetails(currentSyncError)}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        {currentActivationStageLabel ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                Этап: {currentActivationStageLabel}
+                            </span>
+                        ) : null}
+                        {typeof currentActivationAttemptCount === "number" && currentActivationAttemptCount > 0 ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                Попытка: {currentActivationAttemptCount}
+                            </span>
+                        ) : null}
+                        {queuedAtLabel ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                В очереди: {queuedAtLabel}
+                            </span>
+                        ) : null}
+                        {heartbeatAtLabel ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                Heartbeat: {heartbeatAtLabel}
+                            </span>
+                        ) : null}
+                    </div>
+                    {activationDetails ? (
+                        <p className="mt-2 text-xs text-muted-foreground">{activationDetails}</p>
+                    ) : null}
+                    {currentActivationStage && !currentActivationStageLabel ? (
+                        <p className="mt-2 text-xs text-muted-foreground">Текущий stage code: {currentActivationStage}</p>
                     ) : null}
                 </div>
             ) : null}
@@ -807,9 +910,36 @@ function KnowledgeHistoryStage({ items, selectedVersionId, onSelectVersion, know
                                 <div className="font-medium">{item.summary || item.id || "unknown-version"}</div>
                                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <span>{item.status ?? "status неизвестен"}</span>
-                                    {item.sync_status_label ? (
-                                        <span className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(item.sync_status)}`}>
-                                            {item.sync_status_label}
+                                    <span className={`rounded-full px-2 py-0.5 ${resolveHistoryVersionRole(item).className}`}>
+                                        {resolveHistoryVersionRole(item).label}
+                                    </span>
+                                    {item.activation_status_label || item.sync_status_label ? (
+                                        <span
+                                            className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(item.activation_status ?? item.sync_status)}`}
+                                        >
+                                            {item.activation_status_label ?? item.sync_status_label}
+                                        </span>
+                                    ) : null}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                    {item.activation_stage_label ? (
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                            Этап: {item.activation_stage_label}
+                                        </span>
+                                    ) : null}
+                                    {typeof item.activation_attempt_count === "number" && item.activation_attempt_count > 0 ? (
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                            Попытка: {item.activation_attempt_count}
+                                        </span>
+                                    ) : null}
+                                    {formatStageTimestamp(item.activation_queued_at) ? (
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                            В очереди: {formatStageTimestamp(item.activation_queued_at)}
+                                        </span>
+                                    ) : null}
+                                    {formatStageTimestamp(item.activation_heartbeat_at) ? (
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                            Heartbeat: {formatStageTimestamp(item.activation_heartbeat_at)}
                                         </span>
                                     ) : null}
                                 </div>
@@ -818,7 +948,14 @@ function KnowledgeHistoryStage({ items, selectedVersionId, onSelectVersion, know
                                         Published: {new Date(item.published_at).toLocaleString("ru-RU")}
                                     </div>
                                 ) : null}
-                                {item.sync_status === "failed" ? <div className="text-xs text-red-700">Синхронизация требует внимания.</div> : null}
+                                {item.activation_error_message ? (
+                                    <div className="mt-1 text-xs text-red-700">
+                                        Техническая причина: {item.activation_error_message}
+                                    </div>
+                                ) : null}
+                                {item.activation_status === "failed" || item.activation_status === "stuck" || item.sync_status === "failed" ? (
+                                    <div className="text-xs text-red-700">Обновление для клиентов требует внимания.</div>
+                                ) : null}
                             </div>
                             <input
                                 type="radio"

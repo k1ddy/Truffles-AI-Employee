@@ -104,7 +104,7 @@ def test_build_knowledge_snapshot_happy_path():
 
     tenant_context = TenantContext(client_id=client_id, branch_id=branch_id)
     with patch(
-        "app.services.knowledge_snapshot_service.get_current_published",
+        "app.services.knowledge_snapshot_service.get_active_knowledge_version",
         return_value=version,
     ):
         snapshot, error = build_knowledge_snapshot(db, tenant_context=tenant_context)
@@ -140,7 +140,7 @@ def test_build_knowledge_snapshot_requires_compiled_pack():
 
     tenant_context = TenantContext(client_id=client_id, branch_id=branch_id)
     with patch(
-        "app.services.knowledge_snapshot_service.get_current_published",
+        "app.services.knowledge_snapshot_service.get_active_knowledge_version",
         return_value=version,
     ):
         snapshot, error = build_knowledge_snapshot(db, tenant_context=tenant_context)

@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Branch, Conversation, Handover, OutboxMessage, User
-from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_registry_service import (
+    get_active_knowledge_version,
+    list_latest_knowledge_activation_jobs,
+    resolve_knowledge_activation_state,
+)
 from app.services.knowledge_validation import (
     MINIMUM_DATA_CONTRACT_VERSION,
     evaluate_minimum_data_contract,
@@ -118,6 +122,204 @@ def build_outbox_health_snapshot(db: Session, *, now: datetime | None = None) ->
             "pending_critical": pending_critical,
             "failed_24h_warning": failed_warning,
             "failed_24h_critical": failed_critical,
+        },
+    }
+
+
+def _build_empty_knowledge_activation_snapshot(
+    *,
+    queued_warning: int,
+    queued_critical: int,
+    failed_warning: int,
+    failed_critical: int,
+    stuck_warning: int,
+    stuck_critical: int,
+    oldest_queued_warning_seconds: int,
+    oldest_queued_critical_seconds: int,
+) -> dict:
+    return {
+        "status": "healthy",
+        "metric_basis": "latest_activation_job_per_version",
+        "counts": {
+            "queued": 0,
+            "running": 0,
+            "ready": 0,
+            "failed": 0,
+            "stuck": 0,
+        },
+        "failed_24h": 0,
+        "stale_running": 0,
+        "oldest_queued_age_seconds": None,
+        "oldest_running_heartbeat_age_seconds": None,
+        "thresholds": {
+            "queued_warning": queued_warning,
+            "queued_critical": queued_critical,
+            "failed_24h_warning": failed_warning,
+            "failed_24h_critical": failed_critical,
+            "stuck_warning": stuck_warning,
+            "stuck_critical": stuck_critical,
+            "oldest_queued_warning_seconds": oldest_queued_warning_seconds,
+            "oldest_queued_critical_seconds": oldest_queued_critical_seconds,
+            "stale_running_critical": 1,
+        },
+    }
+
+
+def build_knowledge_activation_health_snapshot(
+    db: Session,
+    *,
+    now: datetime | None = None,
+    client_id=None,
+    branch_ids: set | list | None = None,
+) -> dict:
+    reference_now = now or datetime.now(timezone.utc)
+    cutoff = reference_now - timedelta(hours=24)
+    queued_warning = _int_env("KNOWLEDGE_ACTIVATION_HEALTH_QUEUED_WARNING", 5, minimum=0)
+    queued_critical = _int_env(
+        "KNOWLEDGE_ACTIVATION_HEALTH_QUEUED_CRITICAL",
+        20,
+        minimum=queued_warning,
+    )
+    failed_warning = _int_env("KNOWLEDGE_ACTIVATION_HEALTH_FAILED_24H_WARNING", 1, minimum=0)
+    failed_critical = _int_env(
+        "KNOWLEDGE_ACTIVATION_HEALTH_FAILED_24H_CRITICAL",
+        5,
+        minimum=failed_warning,
+    )
+    stuck_warning = _int_env("KNOWLEDGE_ACTIVATION_HEALTH_STUCK_WARNING", 1, minimum=0)
+    stuck_critical = _int_env(
+        "KNOWLEDGE_ACTIVATION_HEALTH_STUCK_CRITICAL",
+        3,
+        minimum=stuck_warning,
+    )
+    oldest_queued_warning_seconds = _int_env(
+        "KNOWLEDGE_ACTIVATION_HEALTH_OLDEST_QUEUED_WARNING_SECONDS",
+        15 * 60,
+        minimum=0,
+    )
+    oldest_queued_critical_seconds = _int_env(
+        "KNOWLEDGE_ACTIVATION_HEALTH_OLDEST_QUEUED_CRITICAL_SECONDS",
+        45 * 60,
+        minimum=oldest_queued_warning_seconds,
+    )
+
+    normalized_branch_ids = None
+    if branch_ids is not None:
+        normalized_branch_ids = set(branch_ids)
+        if not normalized_branch_ids:
+            return _build_empty_knowledge_activation_snapshot(
+                queued_warning=queued_warning,
+                queued_critical=queued_critical,
+                failed_warning=failed_warning,
+                failed_critical=failed_critical,
+                stuck_warning=stuck_warning,
+                stuck_critical=stuck_critical,
+                oldest_queued_warning_seconds=oldest_queued_warning_seconds,
+                oldest_queued_critical_seconds=oldest_queued_critical_seconds,
+            )
+
+    latest_jobs = list_latest_knowledge_activation_jobs(
+        db,
+        client_id=client_id,
+        branch_ids=normalized_branch_ids,
+    )
+    if not latest_jobs:
+        return _build_empty_knowledge_activation_snapshot(
+            queued_warning=queued_warning,
+            queued_critical=queued_critical,
+            failed_warning=failed_warning,
+            failed_critical=failed_critical,
+            stuck_warning=stuck_warning,
+            stuck_critical=stuck_critical,
+            oldest_queued_warning_seconds=oldest_queued_warning_seconds,
+            oldest_queued_critical_seconds=oldest_queued_critical_seconds,
+        )
+
+    counts = {
+        "queued": 0,
+        "running": 0,
+        "ready": 0,
+        "failed": 0,
+        "stuck": 0,
+    }
+    failed_24h = 0
+    stale_running = 0
+    oldest_queued_age_seconds = None
+    oldest_running_heartbeat_age_seconds = None
+
+    for job in latest_jobs:
+        resolved_state = resolve_knowledge_activation_state(job, now=reference_now)
+        if resolved_state in counts:
+            counts[resolved_state] += 1
+
+        queued_at = getattr(job, "queued_at", None) or getattr(job, "created_at", None)
+        if resolved_state == "queued" and isinstance(queued_at, datetime):
+            age_seconds = max(int((reference_now - queued_at).total_seconds()), 0)
+            oldest_queued_age_seconds = max(oldest_queued_age_seconds or 0, age_seconds)
+
+        heartbeat_at = (
+            getattr(job, "heartbeat_at", None)
+            or getattr(job, "started_at", None)
+            or queued_at
+        )
+        if resolved_state == "running" and isinstance(heartbeat_at, datetime):
+            age_seconds = max(int((reference_now - heartbeat_at).total_seconds()), 0)
+            oldest_running_heartbeat_age_seconds = max(oldest_running_heartbeat_age_seconds or 0, age_seconds)
+
+        raw_state = str(getattr(job, "state", "") or "").strip().lower()
+        if resolved_state == "stuck" and raw_state == "running":
+            stale_running += 1
+
+        finished_at = (
+            getattr(job, "finished_at", None)
+            or getattr(job, "updated_at", None)
+            or getattr(job, "created_at", None)
+            or queued_at
+        )
+        if resolved_state in {"failed", "stuck"} and isinstance(finished_at, datetime) and finished_at >= cutoff:
+            failed_24h += 1
+
+    status = "healthy"
+    if (
+        stale_running > 0
+        or counts["queued"] >= queued_critical
+        or counts["stuck"] >= stuck_critical
+        or failed_24h >= failed_critical
+        or (
+            isinstance(oldest_queued_age_seconds, int)
+            and oldest_queued_age_seconds >= oldest_queued_critical_seconds
+        )
+    ):
+        status = "critical"
+    elif (
+        counts["queued"] >= queued_warning
+        or counts["stuck"] >= stuck_warning
+        or failed_24h >= failed_warning
+        or (
+            isinstance(oldest_queued_age_seconds, int)
+            and oldest_queued_age_seconds >= oldest_queued_warning_seconds
+        )
+    ):
+        status = "warning"
+
+    return {
+        "status": status,
+        "metric_basis": "latest_activation_job_per_version",
+        "counts": counts,
+        "failed_24h": failed_24h,
+        "stale_running": stale_running,
+        "oldest_queued_age_seconds": oldest_queued_age_seconds,
+        "oldest_running_heartbeat_age_seconds": oldest_running_heartbeat_age_seconds,
+        "thresholds": {
+            "queued_warning": queued_warning,
+            "queued_critical": queued_critical,
+            "failed_24h_warning": failed_warning,
+            "failed_24h_critical": failed_critical,
+            "stuck_warning": stuck_warning,
+            "stuck_critical": stuck_critical,
+            "oldest_queued_warning_seconds": oldest_queued_warning_seconds,
+            "oldest_queued_critical_seconds": oldest_queued_critical_seconds,
+            "stale_running_critical": 1,
         },
     }
 
@@ -314,7 +516,7 @@ def build_minimum_data_status(db: Session) -> dict:
     ready_count = 0
 
     for branch in branches:
-        published = get_current_published(db, branch_id=branch.id)
+        published = get_active_knowledge_version(db, branch_id=branch.id)
         if not published or not isinstance(published.payload_json, dict):
             missing_fields = ["knowledge_published"]
         else:
@@ -422,6 +624,37 @@ def check_and_alert_health(checks: dict) -> list[str]:
         msg = (
             "Outbox warning: "
             f"pending={pending}, failed_24h={failed_24h}, failed_total={failed_total}"
+        )
+        logger.warning(msg)
+
+    activation_status = checks.get("knowledge_activation", {})
+    if not isinstance(activation_status, dict):
+        activation_status = {}
+    activation_counts = activation_status.get("counts", {})
+    if not isinstance(activation_counts, dict):
+        activation_counts = {}
+    queued = _coerce_int(activation_counts.get("queued"), 0)
+    running = _coerce_int(activation_counts.get("running"), 0)
+    failed = _coerce_int(activation_counts.get("failed"), 0)
+    stuck = _coerce_int(activation_counts.get("stuck"), 0)
+    stale_running = _coerce_int(activation_status.get("stale_running"), 0)
+    failed_24h = _coerce_int(activation_status.get("failed_24h"), 0)
+    oldest_queued_age_seconds = _coerce_int(activation_status.get("oldest_queued_age_seconds"), 0)
+    if activation_status.get("status") == "critical":
+        msg = (
+            "Knowledge activation critical: "
+            f"queued={queued}, running={running}, failed={failed}, stuck={stuck}, "
+            f"failed_24h={failed_24h}, stale_running={stale_running}, "
+            f"oldest_queued_age_seconds={oldest_queued_age_seconds}"
+        )
+        logger.error(msg)
+        alerts_sent.append(msg)
+    elif activation_status.get("status") == "warning":
+        msg = (
+            "Knowledge activation warning: "
+            f"queued={queued}, running={running}, failed={failed}, stuck={stuck}, "
+            f"failed_24h={failed_24h}, stale_running={stale_running}, "
+            f"oldest_queued_age_seconds={oldest_queued_age_seconds}"
         )
         logger.warning(msg)
     

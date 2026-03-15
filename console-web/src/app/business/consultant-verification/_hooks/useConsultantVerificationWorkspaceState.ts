@@ -75,6 +75,10 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
     const [findingNote, setFindingNote] = useState("");
     const [selectedSourceMode, setSelectedSourceMode] = useState<ConsultantVerificationSourceMode>("live");
     const [selectedChallengeMode, setSelectedChallengeMode] = useState<ConsultantVerificationChallengeMode>("as_client");
+    const availableSourceModes = useMemo(
+        () => overview.available_source_modes?.filter(Boolean) ?? [],
+        [overview.available_source_modes],
+    );
 
     const sessionsQuery = useQuery({
         queryKey: SESSIONS_QUERY_KEY,
@@ -151,6 +155,19 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
         setSelectedSourceMode(selectedSessionSummary.source_mode);
         setSelectedChallengeMode(selectedSessionSummary.challenge_mode);
     }, [selectedSessionSummary]);
+
+    useEffect(() => {
+        if (selectedSessionSummary) {
+            return;
+        }
+        if (availableSourceModes.length === 0) {
+            return;
+        }
+        if (availableSourceModes.includes(selectedSourceMode)) {
+            return;
+        }
+        setSelectedSourceMode((overview.default_source_mode ?? availableSourceModes[0]) as ConsultantVerificationSourceMode);
+    }, [availableSourceModes, overview.default_source_mode, selectedSessionSummary, selectedSourceMode]);
 
     const applySessionPayload = (payload: ConsultantVerificationSessionResponse) => {
         queryClient.setQueryData(["business-consultant-verification-session", payload.session.id], payload);
@@ -489,6 +506,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
         selectedChallengeModeLabel,
         ownerSetupLaneProps: {
             selectedSourceMode,
+            availableSourceModes,
             selectedChallengeMode,
             selectedSessionSummary,
             isBusy,
@@ -499,7 +517,12 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
                 setDraft("");
                 setErrorMessage(null);
             },
-            onSelectSourceMode: setSelectedSourceMode,
+            onSelectSourceMode: (mode: ConsultantVerificationSourceMode) => {
+                if (!availableSourceModes.includes(mode)) {
+                    return;
+                }
+                setSelectedSourceMode(mode);
+            },
             onSelectChallengeMode: setSelectedChallengeMode,
             onStartSession: () => {
                 void (async () => {

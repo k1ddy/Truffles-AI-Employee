@@ -399,7 +399,7 @@ from app.services.intent_service import (
     route_llm_policy_core,
     should_escalate,
 )
-from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_registry_service import get_active_knowledge_version
 from app.services.knowledge_runtime import (
     build_runtime_truth,
     set_runtime_truth,
@@ -8814,7 +8814,7 @@ def _build_minimum_data_contract_status(
 ) -> MinimumDataContractStatus:
     if not branch_id:
         return MinimumDataContractStatus(ready=True, missing_fields=[])
-    published = get_current_published(db, branch_id=branch_id)
+    published = get_active_knowledge_version(db, branch_id=branch_id)
     if not published or not isinstance(published.payload_json, dict):
         return MinimumDataContractStatus(ready=False, missing_fields=["knowledge_published"])
     return evaluate_minimum_data_contract(published.payload_json)

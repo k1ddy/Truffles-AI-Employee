@@ -37,7 +37,8 @@
 - `ops/diagnose.py dialog-report` — one‑command отчёт по диалогу (таймлайн + решения + outbox + media/ASR).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
-- `/home/zhan/truffles-main/scripts/restart_release.sh` — единый release API+workers (migration gate + parity check).
+- `/home/zhan/truffles-main/scripts/restart_release.sh` — единый release API+workers (+ optional knowledge activation service, migration gate + parity/canary check).
+- `/home/zhan/truffles-main/ops/knowledge_activation_closeout.py` — tenant-level closeout artifact (`release guard + branch preview/live invariants`).
 - `/home/zhan/truffles-main/scripts/restart_api.sh` — restart API контейнера (используется release flow).
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
 - `docs/runbooks/TRACE_BUNDLE.md` — как читать trace‑bundle (timing + correlation).
@@ -174,11 +175,11 @@ python3 ops/diagnose.py dialog-report \
 
 ## 4. Деплой
 
-**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. Прод релиз — через `/home/zhan/truffles-main/scripts/restart_release.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
+**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. Прод релиз — через `/home/zhan/truffles-main/scripts/restart_release.sh` (API + workers + optional activation service canary). `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 **Стандарт (CI/GHCR):**
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash /home/zhan/truffles-main/scripts/restart_release.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 RUN_KNOWLEDGE_ACTIVATION_CANARY=1 KNOWLEDGE_ACTIVATION_CANARY_OUTPUT=/tmp/knowledge_activation_release_guard.json bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
 
 **Fallback (локальная сборка):**
@@ -192,13 +193,14 @@ ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto RE
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
-`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
+`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`, `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1`, `KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1`, `RUN_KNOWLEDGE_ACTIVATION_CANARY=1`, `KNOWLEDGE_ACTIVATION_CANARY_OUTPUT`, `ACTIVATION_GUARD_PYTHON`.
 `restart_api.sh` поддерживает `EXPECTED_IMAGE` и `MIGRATION_BOOTSTRAP_MODE`.
 
 **restart_release.sh:**
 - canonical path: `/home/zhan/truffles-main/scripts/restart_release.sh`
-- порядок: `docker pull` (optional) → digest resolve → `restart_api.sh` → `restart_workers.sh` → parity check API/workers image id
-- устраняет drift API vs workers и защищает от mutable tag ошибок.
+- порядок: `docker pull` (optional) → digest resolve → `restart_api.sh` → `restart_workers.sh` → optional `restart_knowledge_activation_service.sh` → parity check image id → optional `knowledge_activation_release_guard.py` JSON artifact
+- устраняет drift API vs workers, при включённом activation rollout ещё и drift activation service, и защищает от mutable tag ошибок.
+- финальный tenant closeout после deploy выполняется отдельным чтением `ops/knowledge_activation_closeout.py`, который объединяет guard artifact и branch-level invariants в один `go|no_go`.
 
 **restart_api.sh:**
 - canonical path: `/home/zhan/truffles-main/scripts/restart_api.sh`

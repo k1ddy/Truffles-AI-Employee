@@ -18,6 +18,7 @@ from app.logging_config import (
     http_in_progress_inc,
     record_http_request,
     set_database_health,
+    set_knowledge_activation_health,
     set_outbox_backlog,
     set_qdrant_health,
     setup_logging,
@@ -185,6 +186,8 @@ _setup_otel(app)
 
 @app.get("/metrics")
 def metrics(db: Session = Depends(get_db)):
+    from app.services.health_service import build_knowledge_activation_health_snapshot
+
     db_healthy = True
     db_latency_ms = None
     try:
@@ -223,6 +226,16 @@ def metrics(db: Session = Depends(get_db)):
             extra={"context": {"error": str(exc)[:200]}},
         )
         set_outbox_backlog({})
+
+    try:
+        activation_snapshot = build_knowledge_activation_health_snapshot(db)
+        set_knowledge_activation_health(activation_snapshot)
+    except Exception as exc:
+        metrics_logger.warning(
+            "Knowledge activation health query failed",
+            extra={"context": {"error": str(exc)[:200]}},
+        )
+        set_knowledge_activation_health({})
 
     qdrant_healthy = True
     qdrant_latency_ms = None
@@ -330,7 +343,11 @@ async def _compute_admin_health_payload(db: Session) -> dict:
         checks["qdrant"] = {"status": "unhealthy", "error": str(e)[:100]}
         overall_healthy = False
     
-    from app.services.health_service import build_outbox_health_snapshot, check_and_alert_health
+    from app.services.health_service import (
+        build_knowledge_activation_health_snapshot,
+        build_outbox_health_snapshot,
+        check_and_alert_health,
+    )
 
     # Outbox check uses pending + actionable failed_24h gates while still exposing failed_total.
     try:
@@ -340,6 +357,14 @@ async def _compute_admin_health_payload(db: Session) -> dict:
             overall_healthy = False
     except Exception as e:
         checks["outbox"] = {"status": "error", "error": str(e)[:100]}
+
+    try:
+        activation_check = build_knowledge_activation_health_snapshot(db)
+        checks["knowledge_activation"] = activation_check
+        if activation_check.get("status") == "critical":
+            overall_healthy = False
+    except Exception as e:
+        checks["knowledge_activation"] = {"status": "error", "error": str(e)[:100]}
     
     # Active handovers
     try:
