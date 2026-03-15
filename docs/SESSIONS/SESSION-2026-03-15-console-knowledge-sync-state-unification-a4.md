@@ -1,0 +1,35 @@
+# SESSION 2026-03-15-console-knowledge-sync-state-unification-a4 — Session 2026-03-15-console-knowledge-sync-state-unification-a4
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md
+- block_id: CONSOLE-KNOWLEDGE-SYNC-STATE-UNIFICATION-A4
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-console-knowledge-sync-state-unification-a4
+- worktree: /home/zhan/worktrees/2026-03-15-console-knowledge-sync-state-unification-a4
+- base_ref: origin/main
+- scope: Remove contradictory owner sync-state rendering after async knowledge mutations by unifying `Knowledge` on one server-owned sync-state source, refetching all dependent queries, and proving the exact `pending + safe_mode + timed out` contradiction is gone.
+- done:
+  - Session created.
+  - Wrote the canonical Task Package `docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md` with RCA, one mandatory web search, residual debt, and next-block contract.
+  - Confirmed the root cause in live code: `Knowledge` mixed `knowledge/current` sync fields with stale `console-me` branch safe-mode fields, while `retrySyncMutation` did not refetch `console-me`.
+  - Unified owner-facing sync-state rendering on `Knowledge` around `knowledge/current` (`sync_status`, `sync_error`, `knowledge_safe_mode`, `knowledge_safe_mode_reason`) and stopped showing stale failure detail while sync is `pending`.
+  - Added a shared mutation refresh path so `publish`, `retry-sync`, and `rollback` refetch `console-me`, `knowledge/current`, `knowledge/history`, and consultant-verification readiness together.
+  - Extended mocked Playwright coverage so a stale `console-me` branch context can no longer force `Safe mode: включен` / `timed out` after the page has already moved to `pending`.
+- next:
+  - Run `SESSION_AGENT=a4 scripts/session_check.sh`, then sync `STATE.md` with proof and open the implementation PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md
+  - console-web/src/app/knowledge/page.tsx
+  - console-web/e2e/owner-admin-business.spec.ts
+  - docs/CONSOLE_GUIDE.md
+  - docs/CONSOLE_AUDIT/UX_BACKLOG.md
+  - Checks:
+    - `cd /home/zhan/worktrees/2026-03-15-console-knowledge-sync-state-unification-a4/console-web && npm run lint -- --file src/app/knowledge/page.tsx --file src/app/business/consultant-verification/page.tsx --file e2e/owner-admin-business.spec.ts` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-console-knowledge-sync-state-unification-a4/console-web && npm run build` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-console-knowledge-sync-state-unification-a4/console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep 'knowledge sync contradiction|consultant verification sync state'` (`1 passed`)
+- last_updated: 2026-03-15T10:58:00+05:00

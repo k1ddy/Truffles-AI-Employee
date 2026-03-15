@@ -1100,9 +1100,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const currentSyncStatus = currentQuery.data?.sync_status ?? null;
     const currentSyncStatusLabel = currentQuery.data?.sync_status_label ?? "Синхронизация не подтверждена";
     const currentSyncError = currentQuery.data?.sync_error ?? null;
+    const currentSafeMode = Boolean(currentQuery.data?.knowledge_safe_mode);
+    const currentSafeModeReason = currentQuery.data?.knowledge_safe_mode_reason ?? null;
     const currentSyncPending = isKnowledgeSyncPending(currentSyncStatus);
-    const currentSyncFailed = currentSyncStatus === "failed" || Boolean(currentQuery.data?.knowledge_safe_mode);
+    const currentSyncFailed = currentSyncStatus === "failed" || currentSafeMode;
     const currentSyncBlocked = currentSyncPending || currentSyncFailed;
+    const currentSyncDetails = currentSyncPending
+        ? null
+        : resolveKnowledgeSyncDetails(currentSyncError ?? currentSafeModeReason);
 
     const historyItems = useMemo(
         () => extractHistoryItems(historyQuery.data),
@@ -1353,12 +1358,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.publish(draftText.trim());
             return response.data;
         },
-        onSuccess: (data) => {
+        onSuccess: async (data) => {
             setLastPublishAt(data?.published_at ?? new Date().toISOString());
             toast.success(data?.message || "Версия опубликована. Синхронизация выполняется.");
-            currentQuery.refetch();
-            historyQuery.refetch();
-            consultantVerificationReadinessQuery.refetch();
+            await refreshKnowledgeServerState();
         },
         onError: (error) => {
             if (isApiUnavailable(error)) {
@@ -1400,11 +1403,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.retrySync(versionId);
             return response.data;
         },
-        onSuccess: (data) => {
+        onSuccess: async (data) => {
             toast.success(data?.message || "Синхронизация запущена повторно.");
-            currentQuery.refetch();
-            historyQuery.refetch();
-            consultantVerificationReadinessQuery.refetch();
+            await refreshKnowledgeServerState();
         },
         onError: (error) => {
             if (isApiUnavailable(error)) {
@@ -1433,12 +1434,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.rollback(selectedVersionId, confirmationId);
             return response.data;
         },
-        onSuccess: (data) => {
+        onSuccess: async (data) => {
             setLastRollbackAt(new Date().toISOString());
             toast.success(data?.message || "Версия восстановлена. Синхронизация выполняется.");
-            currentQuery.refetch();
-            historyQuery.refetch();
-            consultantVerificationReadinessQuery.refetch();
+            await refreshKnowledgeServerState();
             setShowRollbackConfirm(false);
             setRollbackReason("");
         },
@@ -1570,6 +1569,25 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             setIsApplyingFleetContext(false);
         }
     }, [queryClient]);
+
+    const refreshKnowledgeServerState = useCallback(async () => {
+        const currentKey = ["knowledge-current", selectedClientId, selectedBranchId] as const;
+        const historyKey = ["knowledge-history", selectedClientId, selectedBranchId] as const;
+        const readinessKey = ["knowledge-consultant-verification-readiness", selectedClientId, selectedBranchId] as const;
+
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["console-me"] }),
+            queryClient.invalidateQueries({ queryKey: currentKey, exact: true }),
+            queryClient.invalidateQueries({ queryKey: historyKey, exact: true }),
+            queryClient.invalidateQueries({ queryKey: readinessKey, exact: true }),
+        ]);
+        await Promise.all([
+            queryClient.refetchQueries({ queryKey: ["console-me"], exact: true }),
+            queryClient.refetchQueries({ queryKey: currentKey, exact: true }),
+            queryClient.refetchQueries({ queryKey: historyKey, exact: true }),
+            queryClient.refetchQueries({ queryKey: readinessKey, exact: true }),
+        ]);
+    }, [queryClient, selectedBranchId, selectedClientId]);
 
     const resolveFleetCompanyId = useCallback((clientId?: string | null): string | null => {
         if (clientId) {
@@ -1999,7 +2017,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         Синхронизация знаний: <span className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(currentSyncStatus)}`}>{currentSyncStatusLabel}</span>
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        Safe mode: {selectedBranchContext.knowledge_safe_mode ? "включен" : "выключен"}
+                        Safe mode: {currentSafeMode ? "включен" : "выключен"}
                     </div>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
@@ -2011,9 +2029,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         data-testid="knowledge-sync-warning"
                     >
                         <p className="font-medium">{resolveKnowledgeSyncMessage(currentSyncStatus)}</p>
-                        {resolveKnowledgeSyncDetails(currentSyncError ?? selectedBranchContext.knowledge_safe_mode_reason) ? (
+                        {currentSyncDetails ? (
                             <p className="mt-2 text-xs">
-                                {resolveKnowledgeSyncDetails(currentSyncError ?? selectedBranchContext.knowledge_safe_mode_reason)}
+                                {currentSyncDetails}
                             </p>
                         ) : null}
                         {currentSyncFailed && currentQuery.data?.version_id ? (

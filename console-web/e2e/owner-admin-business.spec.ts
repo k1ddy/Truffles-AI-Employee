@@ -42,12 +42,14 @@ async function mockKnowledgeWorkspace(
         validateResponse,
         history,
         retrySyncResponse,
+        branchContext,
     }: {
         current: Record<string, unknown>;
         readiness?: Record<string, unknown>;
         validateResponse?: Record<string, unknown>;
         history?: Record<string, unknown>[];
         retrySyncResponse?: Record<string, unknown> | (() => Record<string, unknown>);
+        branchContext?: Record<string, unknown>;
     },
 ) {
     const companyId = '11111111-1111-4111-8111-111111111111';
@@ -92,6 +94,7 @@ async function mockKnowledgeWorkspace(
                         open: '10:00',
                         close: '21:00',
                     },
+                    ...(branchContext ?? {}),
                 },
             ],
         });
@@ -136,6 +139,7 @@ function isMockedKnowledgeWorkspaceTest(title: string) {
         || title.includes('knowledge structured draft preservation')
         || title.includes('knowledge remediation')
         || title.includes('knowledge lossy rewrite')
+        || title.includes('knowledge sync contradiction')
         || title.includes('consultant verification branch gate')
         || title.includes('consultant verification readiness')
         || title.includes('knowledge publish sync failure');
@@ -831,7 +835,7 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-actions')).toContainText('Дождитесь завершения синхронизации');
     });
 
-    test('should show bounded sync status and queue retry knowledge publish sync failure knowledge sync', async ({ page }) => {
+    test('should clear stale safe mode after retry knowledge publish sync failure knowledge sync contradiction consultant verification sync state', async ({ page }) => {
         let syncQueued = false;
 
         await mockKnowledgeWorkspace(page, {
@@ -891,6 +895,10 @@ test.describe('Owner/Admin Business Control', () => {
                     knowledge_safe_mode_reason: null,
                 };
             },
+            branchContext: {
+                knowledge_safe_mode: true,
+                knowledge_safe_mode_reason: 'timed out',
+            },
         });
 
         await page.route(/.*\/api\/proxy\/knowledge\/current(?:\?.*)?$/, async (route) => {
@@ -947,10 +955,13 @@ test.describe('Owner/Admin Business Control', () => {
 
         await page.goto(`${resolvedBaseURL}/knowledge`, { waitUntil: 'domcontentloaded' });
         await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Синхронизация требует внимания');
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Safe mode: включен');
         await page.getByTestId('knowledge-sync-retry').click();
         await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Синхронизация выполняется');
         await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Синхронизация выполняется');
         await expect(page.getByTestId('knowledge-sync-retry')).toBeHidden();
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Safe mode: выключен');
+        await expect(page.getByTestId('knowledge-sync-warning')).not.toContainText('Техническая причина: timed out');
     });
 
     test('should render simple owner settings and explainability surface', async ({ page }) => {

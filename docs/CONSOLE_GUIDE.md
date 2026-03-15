@@ -267,12 +267,14 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Требует branch selection (`X-Branch-Id`).
 - Rollback требует подтверждения: `POST /console/v1/confirmations` (action=`knowledge_rollback`) → `confirmation_id`.
 - `GET /console/v1/knowledge/current` now returns both knowledge provenance (`published`, saved draft, edit base) and branch sync health (`sync_status`, `sync_error`, `knowledge_safe_mode`).
+- Owner sync-state must be derived from `GET /console/v1/knowledge/current`; `console-me` remains scope/context only and must not be treated as the source of truth for sync-safe-mode rendering after publish/retry/rollback.
 - `Publish` is now an async owner contract:
   - phase 1: create/publish the knowledge version,
   - phase 2: enqueue branch-local sync on the durable outbox worker (`knowledge.sync`), outside the owner request path.
 - A successful publish response now returns `sync_status=pending` and `partial_success=false`; owner copy stays bounded (`Синхронизация выполняется`) instead of surfacing raw timeout text as the primary message.
 - `retry-sync` requeues branch-local sync for the current published version; it does not create a new published knowledge version.
 - Cross-branch backfill is no longer part of the owner publish/retry click path.
+- After `publish`, `retry-sync`, or `rollback`, the frontend must refetch dependent server-state (`console-me`, `knowledge/current`, `knowledge/history`, consultant-verification readiness) so owner UI cannot show stale `safe_mode/timed out` together with fresh `pending`.
 - History, current state, rollback, and consultant-verification readiness all treat `sync_status=pending|failed` as blocking for owner verification until sync is actually `ready`.
 
 **Team (Команда)**
