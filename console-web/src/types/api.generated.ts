@@ -795,6 +795,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/console/v1/ops/knowledge-activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Knowledge Activation Jobs
+         * @description List latest knowledge activation jobs for ops.
+         */
+        get: operations["list_knowledge_activation_jobs_console_v1_ops_knowledge_activation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/ops/knowledge-activation/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Knowledge Activation Jobs
+         * @description Create new queued activation attempts for failed or stuck jobs.
+         */
+        post: operations["retry_knowledge_activation_jobs_console_v1_ops_knowledge_activation_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/console/v1/ops/outbox": {
         parameters: {
             query?: never;
@@ -6359,6 +6399,7 @@ export interface components {
             redis: string;
             /** Outbox Backlog */
             outbox_backlog: number;
+            knowledge_activation?: components["schemas"]["ConsoleKnowledgeActivationHealth"] | null;
         };
         /** ConsoleHumanLockPauseRequest */
         ConsoleHumanLockPauseRequest: {
@@ -6580,6 +6621,149 @@ export interface components {
              * @default []
              */
             provider_ops_queue: components["schemas"]["ConsoleProviderOpsQueueItem"][];
+        };
+        /** ConsoleKnowledgeActivationCounts */
+        ConsoleKnowledgeActivationCounts: {
+            /** Queued */
+            queued: number;
+            /** Running */
+            running: number;
+            /** Ready */
+            ready: number;
+            /** Failed */
+            failed: number;
+            /** Stuck */
+            stuck: number;
+        };
+        /** ConsoleKnowledgeActivationHealth */
+        ConsoleKnowledgeActivationHealth: {
+            /** Status */
+            status: string;
+            /** Metric Basis */
+            metric_basis: string;
+            counts: components["schemas"]["ConsoleKnowledgeActivationCounts"];
+            /** Failed 24H */
+            failed_24h: number;
+            /** Stale Running */
+            stale_running: number;
+            /** Oldest Queued Age Seconds */
+            oldest_queued_age_seconds?: number | null;
+            /** Oldest Running Heartbeat Age Seconds */
+            oldest_running_heartbeat_age_seconds?: number | null;
+            thresholds: components["schemas"]["ConsoleKnowledgeActivationHealthThresholds"];
+        };
+        /** ConsoleKnowledgeActivationHealthThresholds */
+        ConsoleKnowledgeActivationHealthThresholds: {
+            /** Queued Warning */
+            queued_warning: number;
+            /** Queued Critical */
+            queued_critical: number;
+            /** Failed 24H Warning */
+            failed_24h_warning: number;
+            /** Failed 24H Critical */
+            failed_24h_critical: number;
+            /** Stuck Warning */
+            stuck_warning: number;
+            /** Stuck Critical */
+            stuck_critical: number;
+            /** Oldest Queued Warning Seconds */
+            oldest_queued_warning_seconds: number;
+            /** Oldest Queued Critical Seconds */
+            oldest_queued_critical_seconds: number;
+            /** Stale Running Critical */
+            stale_running_critical: number;
+        };
+        /** ConsoleKnowledgeActivationOpsCounts */
+        ConsoleKnowledgeActivationOpsCounts: {
+            /** Queued */
+            queued: number;
+            /** Running */
+            running: number;
+            /** Ready */
+            ready: number;
+            /** Failed */
+            failed: number;
+            /** Stuck */
+            stuck: number;
+            /** Total */
+            total: number;
+        };
+        /** ConsoleKnowledgeActivationOpsItem */
+        ConsoleKnowledgeActivationOpsItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** State */
+            state: string;
+            /** State Label */
+            state_label: string;
+            /** Stage */
+            stage?: string | null;
+            /** Stage Label */
+            stage_label?: string | null;
+            /** Source */
+            source: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Queued At */
+            queued_at?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Heartbeat At */
+            heartbeat_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+        };
+        /** ConsoleKnowledgeActivationOpsListResponse */
+        ConsoleKnowledgeActivationOpsListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleKnowledgeActivationOpsItem"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+            counts: components["schemas"]["ConsoleKnowledgeActivationOpsCounts"];
+        };
+        /** ConsoleKnowledgeActivationRetryRequest */
+        ConsoleKnowledgeActivationRetryRequest: {
+            /** Ids */
+            ids?: string[] | null;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number | null;
+            /**
+             * Status
+             * @default all
+             * @enum {string}
+             */
+            status: "failed" | "stuck" | "all";
+        };
+        /** ConsoleKnowledgeActivationRetryResponse */
+        ConsoleKnowledgeActivationRetryResponse: {
+            /** Success */
+            success: boolean;
+            /** Retried */
+            retried: number;
+            /** Skipped */
+            skipped: number;
         };
         /** ConsoleKnowledgeCurrentResponse */
         ConsoleKnowledgeCurrentResponse: {
@@ -12948,6 +13132,117 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsoleHealthResponse"];
+                };
+            };
+        };
+    };
+    list_knowledge_activation_jobs_console_v1_ops_knowledge_activation_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeActivationOpsListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_knowledge_activation_jobs_console_v1_ops_knowledge_activation_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleKnowledgeActivationRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeActivationRetryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
