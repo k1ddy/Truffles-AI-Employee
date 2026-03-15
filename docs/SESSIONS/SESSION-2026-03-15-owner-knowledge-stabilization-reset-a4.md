@@ -1,6 +1,6 @@
 # SESSION 2026-03-15-owner-knowledge-stabilization-reset-a4 — Session 2026-03-15-owner-knowledge-stabilization-reset-a4
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md
 - block_id: CONSOLE-OWNER-KNOWLEDGE-STABILIZATION-RESET-A4
@@ -19,9 +19,10 @@
   - Replaced request-bound knowledge publish/retry/rollback sync with durable outbox-queued `knowledge.sync` events and branch-local worker processing.
   - Simplified owner-facing sync copy on `Knowledge` and `Проверка консультанта`; consultant verification workspace now stays hidden while sync is `pending` or `failed`.
   - Added deterministic backend and Playwright proof for queued sync and sync-blocked consultant verification readiness.
+  - Merged via #967 (`c448be05`) on 2026-03-15T09:31:30+05:00; local worktree/branch cleanup completed.
 - next:
-  - Sync `STATE.md` with evidence and residual debt.
-  - Remove local-only runtime artifacts (`console-web/node_modules` symlink) before commit/PR.
+  - Follow `UX-51` with a shared owner scope-gate extraction once canary/monitoring confirms the async sync contract is stable.
+  - Follow `UX-52` to decompose overloaded owner surfaces after the shared scope gate lands.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md
   - truffles-api/app/services/knowledge_registry_service.py
@@ -34,4 +35,4 @@
   - truffles-api/tests/test_console_consultant_verification_api.py
   - truffles-api/tests/test_knowledge_registry_sync_backfill.py
   - console-web/e2e/owner-admin-business.spec.ts
-- last_updated: 2026-03-15
+- last_updated: 2026-03-15T10:10:00+05:00

@@ -1,6 +1,6 @@
 # SESSION 2026-03-14-owner-consultant-verification-knowledge-safety-program-a921 — Session 2026-03-14-owner-consultant-verification-knowledge-safety-program-a921
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md
 - block_id: CONSOLE-OWNER-CONSULTANT-VERIFICATION-KNOWLEDGE-SAFETY-PROGRAM-A921
@@ -67,7 +67,8 @@
     - `pytest -q tests/test_console_consultant_verification_api.py tests/test_console_owner_business.py tests/test_console_knowledge_preflight.py tests/test_knowledge_validation.py tests/test_knowledge_registry_sync_backfill.py -k 'consultant_verification or knowledge'`
     - `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep "knowledge saved draft provenance|knowledge structured draft preservation|knowledge remediation|knowledge lossy rewrite"`
     - `SESSION_AGENT=a921 ./scripts/session_check.sh`
+  - Merged via #965 (`f3d645bb`) on 2026-03-14T17:28:00+05:00; local worktree/branch cleanup completed.
 - next:
   - Decide whether the remaining deferred debt on `UX-44` needs a dedicated follow-up for true merge-patch authoring beyond the current preservation guard.
   - If product wants even stricter closure, widen the guarded-path envelope beyond current `guest_policy` + `policy.*` objects only after domain review confirms those migrations are always invalid.
-- last_updated: 2026-03-14T20:32:00+05:00
+- last_updated: 2026-03-15T10:10:00+05:00

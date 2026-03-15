@@ -1,6 +1,6 @@
 # SESSION 2026-03-15-consultant-verification-branch-publish-flow-a3 — Session 2026-03-15-consultant-verification-branch-publish-flow-a3
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-03-15-consultant-verification-branch-publish-flow-a3.md
 - block_id: CONSOLE-CONSULTANT-VERIFICATION-BRANCH-PUBLISH-FLOW-A3
@@ -48,7 +48,8 @@
     - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && npm run lint -- --file src/app/business/consultant-verification/page.tsx --file src/app/knowledge/page.tsx --file e2e/owner-admin-business.spec.ts --file src/lib/api-client.ts` (`pass`)
     - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && npm run build` (`pass`)
     - `cd /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3/console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep 'consultant verification branch gate|knowledge publish sync failure'` (`2 passed`)
+  - Merged via #966 (`a751e1d7`) on 2026-03-15T03:58:00+05:00; local worktree/branch cleanup completed.
 - next:
   - If timeout family repeats after these truthful semantics land, publish `TP-2026-03-15-knowledge-sync-jobs-and-retry-observability-a3` and move sync execution to an explicit async job contract.
   - If another owner surface duplicates branch/client repair logic, publish `TP-2026-03-15-console-scope-gate-unification-a3` and extract one shared owner scope gate.
-- last_updated: 2026-03-15T01:04:06+05:00
+- last_updated: 2026-03-15T10:10:00+05:00
