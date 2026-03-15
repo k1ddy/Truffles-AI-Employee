@@ -7,9 +7,10 @@ import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
+import ConsoleOwnerScopeGate from "@/components/ConsoleOwnerScopeGate";
 import { ConsolePageError, ConsolePageSkeleton } from "@/components/PageStates";
 import { authApi, businessApi, canAccessConsole } from "@/lib/api-client";
-import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
+import { applyConsoleScopeContext } from "@/lib/console-scope-gate";
 import ConsultantVerificationWorkspace from "./_components/ConsultantVerificationWorkspace";
 import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
@@ -128,17 +129,18 @@ export default function BusinessConsultantVerificationPage() {
             toast.error("Сначала выберите филиал.");
             return;
         }
-        writeConsoleContextScopeToStorage({
-            companyId: selectedCompanyId || "",
-            clientId: selectedClientId || "",
+        await applyConsoleScopeContext({
+            queryClient,
+            companyId: selectedCompanyId || null,
+            clientId: selectedClientId || null,
             branchId: branchDraftId,
+            invalidateKeys: [
+                ["business-consultant-verification-overview"],
+                ["business-consultant-verification-sessions"],
+                ["business-consultant-verification-findings"],
+                ["business-consultant-verification-readiness"],
+            ],
         });
-        await queryClient.invalidateQueries({ queryKey: ["console-me"] });
-        await queryClient.refetchQueries({ queryKey: ["console-me"], exact: true });
-        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-overview"] });
-        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-sessions"] });
-        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-findings"] });
-        await queryClient.invalidateQueries({ queryKey: ["business-consultant-verification-readiness"] });
         toast.success("Контекст филиала применен.");
     }
 
@@ -262,54 +264,27 @@ export default function BusinessConsultantVerificationPage() {
             </section>
 
             {branchSelectionRequired ? (
-                <section
-                    className="mt-4 rounded-xl border border-amber-300/70 bg-amber-50 p-4"
-                    data-testid="consultant-verification-branch-gate"
-                >
-                    <p className="text-xs uppercase tracking-[0.16em] text-amber-800">Требуется выбор</p>
-                    <h2 className="mt-1 text-lg font-semibold text-foreground">Выберите филиал прямо здесь</h2>
-                    <p className="mt-2 text-sm text-muted-foreground">Выберите филиал здесь и продолжайте проверку без переходов между вкладками.</p>
-                    {branchOptions.length > 0 ? (
-                        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                            <select
-                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                value={branchDraftId}
-                                onChange={(event) => setBranchDraftId(event.target.value)}
-                                data-testid="consultant-verification-branch-select"
-                            >
-                                <option value="">Выберите филиал</option>
-                                {branchOptions.map((branch) => (
-                                    <option key={branch.id} value={branch.id}>
-                                        {`${branch.name ?? branch.slug ?? branch.id} · ${branch.slug ?? String(branch.id).slice(0, 8)}`}
-                                    </option>
-                                ))}
-                            </select>
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => {
-                                    void applyBranchContext();
-                                }}
-                                disabled={!canApplyBranchContext || isFetching}
-                                data-testid="consultant-verification-apply-branch"
-                            >
-                                Применить контекст
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="mt-4 rounded-lg border border-border/60 bg-background px-3 py-3 text-sm text-muted-foreground">
-                            Нет доступных филиалов в текущем контексте. Сначала выберите клиента или откройте Workspace.
-                        </div>
-                    )}
-                    <div className="mt-4 flex flex-wrap gap-3 text-sm">
-                        <Link href="/knowledge" className="btn-ghost">
-                            Открыть Знания
-                        </Link>
-                        <Link href="/company-workspace" className="btn-ghost">
-                            Открыть Workspace
-                        </Link>
-                    </div>
-                </section>
+                <ConsoleOwnerScopeGate
+                    rootTestId="consultant-verification-branch-gate"
+                    selectTestId="consultant-verification-branch-select"
+                    applyTestId="consultant-verification-apply-branch"
+                    title="Выберите филиал прямо здесь"
+                    description="Выберите филиал здесь и продолжайте проверку без переходов между вкладками."
+                    branchOptions={branchOptions}
+                    selectedBranchId={branchDraftId}
+                    onSelectedBranchChange={setBranchDraftId}
+                    onApply={applyBranchContext}
+                    applyLabel="Применить контекст"
+                    applyPendingLabel="Применяю..."
+                    isApplying={isFetching}
+                    disabled={!canApplyBranchContext}
+                    emptyStateDescription="Нет доступных филиалов в текущем контексте. Сначала выберите клиента или откройте Workspace."
+                    links={[
+                        { href: "/knowledge", label: "Открыть Знания" },
+                        { href: "/company-workspace", label: "Открыть Workspace" },
+                    ]}
+                    className="mt-4"
+                />
             ) : null}
 
             <section

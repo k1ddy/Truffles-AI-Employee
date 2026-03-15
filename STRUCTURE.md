@@ -154,6 +154,7 @@
 | `console-web/src/components/TenantsSensitiveIdCell.tsx` | Mask/reveal/copy ячейка чувствительного `instance_id` с audit hook | Frontend |
 | `console-web/src/components/TenantsQuickCreatePanel.tsx` | Вынесенный quick-create блок Tenants (компания/клиент/филиал) с явными label-id для a11y | Frontend |
 | `console-web/src/components/TenantsOperationalKpiPanel.tsx` | Вынесенная панель операционных KPI/alert hooks/weekly snapshots для Tenants (platform_admin) | Frontend |
+| `console-web/src/components/ConsoleOwnerScopeGate.tsx` | Shared owner branch-selection gate reused by `Knowledge` and `Проверка консультанта` | Frontend |
 | `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` | Derived scope/state hook для `/tenants` (context names/maps/filter options) | Frontend |
 | `console-web/src/app/tenants/tenants-page-helpers.ts` | Shared helpers/types/formatters for Tenants page (lifecycle audit, branch patch/snapshot, scope/date labels) | Frontend |
 | `console-web/src/app/tenants/use-tenants-action-queue.ts` | Hook для action-queue orchestration и archive predicate в `/tenants` | Frontend |
@@ -238,6 +239,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-15-consultant-verification-branch-publish-flow-a3.md` | Task Package for inline branch repair on consultant verification and truthful publish/sync semantics with retry-sync | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Stabilization-reset Task Package for async knowledge sync, bounded owner states, and owner-surface overload containment | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md` | RCA-backed Task Package for unifying owner-facing sync-state truth after async publish/retry/rollback mutations | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-console-owner-scope-gate-unification-a5.md` | Task Package for extracting one shared owner scope-gate across `Knowledge` and `Проверка консультанта` | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave2-a920.md` | Session log for Wave2 safe simulation kernel implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave3-a920.md` | Session log for Wave3 owner-readable chat workspace implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave4-a920.md` | Session log for Wave4 scenario library, replay, and session summary implementation | Brain/Architect |
@@ -247,6 +249,8 @@
 | `docs/SESSIONS/SESSION-2026-03-15-consultant-verification-branch-publish-flow-a3.md` | Session log for inline branch repair and truthful publish/sync semantics on owner surfaces | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Session log for the async knowledge sync + owner-surface stabilization reset block | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-console-knowledge-sync-state-unification-a4.md` | Session log for the sync-state truth unification block after async knowledge mutations | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-15-console-owner-scope-gate-unification-a5.md` | Session log for the shared owner scope-gate extraction block | Brain/Architect |
+| `console-web/src/lib/console-scope-gate.ts` | Shared scope-apply helper that writes Console context storage and keeps dependent queries coherent after branch changes | Frontend |
 | `console-web/src/lib/calendar-action-registry.ts` | Canonical Calendar action registry and role/status/action scenario matrix used by booking cards, action panel, and deterministic operator proof | Frontend |
 | `truffles-api/app/services/calendar_action_contract.py` | Server-owned Calendar booking action contract builder for `allowed_actions` / `blocked_actions` and machine-readable blocked reasons | Backend |
 | `truffles-api/app/logging_config.py` | Shared Prometheus counters/helpers, now including Calendar action-family observability for denied/version-conflict/double-submit/filter/follow-up events | Backend |

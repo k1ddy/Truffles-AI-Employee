@@ -43,6 +43,8 @@ async function mockKnowledgeWorkspace(
         history,
         retrySyncResponse,
         branchContext,
+        meSelectedBranchId,
+        meBranches,
     }: {
         current: Record<string, unknown>;
         readiness?: Record<string, unknown>;
@@ -50,6 +52,8 @@ async function mockKnowledgeWorkspace(
         history?: Record<string, unknown>[];
         retrySyncResponse?: Record<string, unknown> | (() => Record<string, unknown>);
         branchContext?: Record<string, unknown>;
+        meSelectedBranchId?: string | null;
+        meBranches?: Record<string, unknown>[];
     },
 ) {
     const companyId = '11111111-1111-4111-8111-111111111111';
@@ -81,8 +85,8 @@ async function mockKnowledgeWorkspace(
                 slug: 'demo_salon',
             },
             selected_company_id: companyId,
-            selected_branch_id: branchId,
-            branches: [
+            selected_branch_id: meSelectedBranchId === undefined ? branchId : meSelectedBranchId,
+            branches: meBranches ?? [
                 {
                     id: branchId,
                     client_id: clientId,
@@ -139,6 +143,7 @@ function isMockedKnowledgeWorkspaceTest(title: string) {
         || title.includes('knowledge structured draft preservation')
         || title.includes('knowledge remediation')
         || title.includes('knowledge lossy rewrite')
+        || title.includes('knowledge scope gate')
         || title.includes('knowledge sync contradiction')
         || title.includes('consultant verification branch gate')
         || title.includes('consultant verification readiness')
@@ -387,6 +392,86 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-readiness-grid')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-examples')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-actions')).toBeVisible();
+    });
+
+    test('should reuse shared owner scope gate on knowledge knowledge scope gate', async ({ page }) => {
+        const companyId = '11111111-1111-4111-8111-111111111111';
+        const clientId = '22222222-2222-4222-8222-222222222222';
+        const branchId = '33333333-3333-4333-8333-333333333333';
+        let branchSelected = false;
+
+        await mockKnowledgeWorkspace(page, {
+            current: {
+                version_id: null,
+                content: '',
+                sync_status: null,
+                sync_status_label: null,
+                sync_error: null,
+                knowledge_safe_mode: false,
+                knowledge_safe_mode_reason: null,
+                edit_base_source: 'none',
+            },
+            meSelectedBranchId: '',
+            meBranches: [
+                {
+                    id: branchId,
+                    client_id: clientId,
+                    company_id: companyId,
+                    name: 'Almaty Downtown',
+                    slug: 'almaty-downtown',
+                    knowledge_tag: 'demo_salon',
+                    working_hours: {
+                        days: 'Пн-Вс',
+                        open: '10:00',
+                        close: '21:00',
+                    },
+                },
+            ],
+        });
+
+        await page.route('**/api/proxy/me', async (route) => {
+            await toJsonResponse(route, {
+                agent: {
+                    id: '44444444-4444-4444-8444-444444444444',
+                    role: 'owner',
+                    name: 'Owner',
+                },
+                client: {
+                    id: clientId,
+                    company_id: companyId,
+                    name: 'Demo Salon',
+                    slug: 'demo_salon',
+                },
+                selected_company_id: companyId,
+                selected_branch_id: branchSelected ? branchId : '',
+                branches: [
+                    {
+                        id: branchId,
+                        client_id: clientId,
+                        company_id: companyId,
+                        name: 'Almaty Downtown',
+                        slug: 'almaty-downtown',
+                        knowledge_tag: 'demo_salon',
+                        working_hours: {
+                            days: 'Пн-Вс',
+                            open: '10:00',
+                            close: '21:00',
+                        },
+                    },
+                ],
+            });
+        });
+
+        await page.addInitScript(() => {
+            window.localStorage.clear();
+        });
+
+        await page.goto(`${resolvedBaseURL}/knowledge`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('knowledge-branch-gate')).toBeVisible();
+        await page.getByTestId('knowledge-branch-select').selectOption(branchId);
+        branchSelected = true;
+        await page.getByTestId('knowledge-apply-branch').click();
+        await expect(page.getByTestId('knowledge-branch-gate')).toBeHidden();
     });
 
     test('should render consultant verification chat workspace, scenario tools, compare, and findings when rollout is enabled consultant verification chat consultant verification scenarios consultant verification findings consultant verification compare', async ({ page }) => {

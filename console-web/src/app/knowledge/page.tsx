@@ -20,9 +20,10 @@ import {
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
+import ConsoleOwnerScopeGate from "@/components/ConsoleOwnerScopeGate";
 import { MISSING_LABELS } from "@/components/provisioning-wizard-domain";
 import api from "@/lib/api";
-import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
+import { applyConsoleScopeContext } from "@/lib/console-scope-gate";
 import type { components } from "@/types/api.generated";
 
 type SessionData = ReturnType<typeof useSession>["data"];
@@ -1550,25 +1551,26 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         setIsApplyingFleetContext(true);
         setGatewayError(null);
         try {
-            writeConsoleContextScopeToStorage({
-                companyId: companyId ?? "",
-                clientId: clientId ?? "",
-                branchId: nextBranchId ?? "",
+            await applyConsoleScopeContext({
+                queryClient,
+                companyId,
+                clientId,
+                branchId: nextBranchId,
+                invalidateKeys: [
+                    ["knowledge-current", selectedClientId, selectedBranchId],
+                    ["knowledge-history", selectedClientId, selectedBranchId],
+                    ["learning-candidates"],
+                    ["knowledge-specialists", selectedClientId, selectedBranchId],
+                    ["knowledge-specialists-all", selectedClientId],
+                ],
             });
-            await queryClient.invalidateQueries({ queryKey: ["console-me"] });
-            await queryClient.refetchQueries({ queryKey: ["console-me"], exact: true });
-            await queryClient.invalidateQueries({ queryKey: ["knowledge-current"] });
-            await queryClient.invalidateQueries({ queryKey: ["knowledge-history"] });
-            await queryClient.invalidateQueries({ queryKey: ["learning-candidates"] });
-            await queryClient.invalidateQueries({ queryKey: ["knowledge-specialists"] });
-            await queryClient.invalidateQueries({ queryKey: ["knowledge-specialists-all"] });
             if (successMessage) {
                 toast.success(successMessage);
             }
         } finally {
             setIsApplyingFleetContext(false);
         }
-    }, [queryClient]);
+    }, [queryClient, selectedBranchId, selectedClientId]);
 
     const refreshKnowledgeServerState = useCallback(async () => {
         const currentKey = ["knowledge-current", selectedClientId, selectedBranchId] as const;
@@ -2205,64 +2207,39 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             <div className="space-y-4">
                 {renderPlatformAdminFleetPanel()}
                 {renderBranchKnowledgeReadiness()}
-                <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate">
-                    <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется выбор</p>
-                    <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал</h2>
-                    <p className="text-sm text-muted-foreground mb-6">
-                        Управление знаниями выполняется отдельно для каждого филиала.
-                    </p>
-                    {branchOptions.length > 0 ? (
-                        <select
-                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            value={branchId}
-                            onChange={(event) => setBranchId(event.target.value)}
-                        >
-                            <option value="">Выберите филиал</option>
-                            {branchOptions.map((branch) => (
-                                <option key={branch.id} value={branch.id ?? ""}>
-                                    {`${branch.name ?? branch.slug ?? branch.id} · ${branch.slug ?? String(branch.id).slice(0, 8)}`}
-                                </option>
-                            ))}
-                        </select>
-                    ) : (
-                        <div className="space-y-3 rounded-lg border border-border bg-muted px-3 py-3 text-sm text-muted-foreground">
-                            <p>Нет доступных филиалов в текущем контексте.</p>
-                            <p className="text-xs">
-                                Проверьте выбранного клиента в верхней панели или откройте Workspace и активируйте филиал.
-                            </p>
-                            <div>
-                                <Link href="/company-workspace" className="btn-ghost text-xs">
-                                    Открыть Workspace
-                                </Link>
-                            </div>
-                        </div>
-                    )}
-                    <div className="mt-6 flex justify-end">
-                        <button
-                            className="btn-primary"
-                            onClick={async () => {
-                                if (!branchId) {
-                                    toast.error("Выберите филиал");
-                                    return;
-                                }
-                                setIsSelectingBranch(true);
-                                try {
-                                    await applyConsoleContext({
-                                        companyId: selectedCompanyId || null,
-                                        clientId: selectedClientId || null,
-                                        branchId,
-                                        successMessage: "Филиал выбран",
-                                    });
-                                } finally {
-                                    setIsSelectingBranch(false);
-                                }
-                            }}
-                            disabled={!branchId || isSelectingBranch || branchOptions.length === 0}
-                        >
-                            {isSelectingBranch ? "Загрузка..." : "Продолжить"}
-                        </button>
-                    </div>
-                </div>
+                <ConsoleOwnerScopeGate
+                    rootTestId="knowledge-branch-gate"
+                    selectTestId="knowledge-branch-select"
+                    applyTestId="knowledge-apply-branch"
+                    title="Выберите филиал"
+                    description="Управление знаниями выполняется отдельно для каждого филиала."
+                    branchOptions={branchOptions}
+                    selectedBranchId={branchId}
+                    onSelectedBranchChange={setBranchId}
+                    onApply={async () => {
+                        if (!branchId) {
+                            toast.error("Выберите филиал");
+                            return;
+                        }
+                        setIsSelectingBranch(true);
+                        try {
+                            await applyConsoleContext({
+                                companyId: selectedCompanyId || null,
+                                clientId: selectedClientId || null,
+                                branchId,
+                                successMessage: "Филиал выбран",
+                            });
+                        } finally {
+                            setIsSelectingBranch(false);
+                        }
+                    }}
+                    applyLabel="Продолжить"
+                    isApplying={isSelectingBranch}
+                    disabled={branchOptions.length === 0}
+                    emptyStateDescription="Проверьте выбранного клиента в верхней панели или откройте Workspace и активируйте филиал."
+                    links={[{ href: "/company-workspace", label: "Открыть Workspace" }]}
+                    className="card-surface max-w-xl p-8"
+                />
             </div>
         );
     }
