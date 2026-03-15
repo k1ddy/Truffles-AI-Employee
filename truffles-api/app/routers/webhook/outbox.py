@@ -42,6 +42,10 @@ from app.services.calendar_sync_service import (
     process_outbound_sync_event,
 )
 from app.services.escalation_service import get_telegram_credentials
+from app.services.knowledge_registry_service import (
+    OUTBOX_EVENT_KNOWLEDGE_SYNC,
+    process_knowledge_sync_event,
+)
 from app.services.outbox_service import (
     build_inbound_message_id,
     enqueue_outbox_message,
@@ -1063,6 +1067,34 @@ async def _process_outbox_rows(
                             results["failed"] += 1
                             return
                         raise RuntimeError(f"calendar_sync_failed:{error or 'unknown'}")
+                    results["sent"] += 1
+                    return
+                if event_type == OUTBOX_EVENT_KNOWLEDGE_SYNC:
+                    ok, error = process_knowledge_sync_event(
+                        db=db,
+                        payload_json=payload_json,
+                    )
+                    if not ok:
+                        _record_outbox_action_error(
+                            outbox_id=outbox_id_str,
+                            error=f"knowledge_sync:{error or 'unknown'}",
+                        )
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="FAILED",
+                            last_error=f"knowledge_sync:{error or 'unknown'}"[:500],
+                            next_attempt_at=None,
+                        )
+                        _notify_outbox_failure(
+                            outbox_id=outbox_id_str,
+                            reason="knowledge_sync_failed",
+                            error=error or "unknown",
+                            provider="knowledge",
+                            attempts=int(row.get("attempts") or 0),
+                        )
+                        results["failed"] += 1
+                        return
                     results["sent"] += 1
                     return
                 if event_type not in {"whatsapp.send_text", "whatsapp.send_media"}:

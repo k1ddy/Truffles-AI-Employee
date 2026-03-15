@@ -1053,6 +1053,7 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
         payload_json={"client_pack": {"salon": {"name": "Demo"}}},
         published_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
+        sync_status="ready",
     )
 
     monkeypatch.setattr(
@@ -1088,7 +1089,54 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
     assert response.branch_selection_required is False
     assert response.selected_branch_id == branch_id
     assert response.selected_branch_name == "Almaty Downtown"
-    assert response.knowledge_sync_status == "pending" or response.knowledge_sync_status == "ready"
+    assert response.knowledge_sync_status == "ready"
+
+
+def test_build_consultant_verification_overview_blocks_pending_knowledge_sync(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(role="owner", branch_id=branch_id)
+    version = KnowledgeVersion(
+        id=uuid4(),
+        client_id=context.client.id,
+        branch_id=branch_id,
+        status="published",
+        payload_json={"client_pack": {"salon": {"name": "Demo"}}},
+        published_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+        sync_status="pending",
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_effective_capabilities",
+        lambda *_args, **_kwargs: CapabilitiesPayload(),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_reference_pack",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_build_scenario_catalog",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
+
+    response = verification_service.build_consultant_verification_overview(
+        db=Mock(),
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=[branch_id],
+    )
+
+    assert response.status == "needs_attention"
+    assert response.knowledge_sync_status == "pending"
+    assert "синхронизац" in response.summary.lower()
 
 
 def test_build_consultant_verification_overview_flags_failed_knowledge_sync(monkeypatch) -> None:

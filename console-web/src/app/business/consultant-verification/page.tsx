@@ -120,6 +120,8 @@ export default function BusinessConsultantVerificationPage() {
     }, [branchOptions, data?.selected_branch_id, meData?.selected_branch_id]);
     const branchSelectionRequired = Boolean(meData) && Boolean(data?.branch_selection_required);
     const canApplyBranchContext = Boolean(branchDraftId && selectedClientId);
+    const syncBlocked = Boolean(data?.knowledge_safe_mode) || (data?.knowledge_sync_status ?? "pending") !== "ready";
+    const workspaceReady = data?.feature_enabled && !branchSelectionRequired && data?.status === "ready" && !syncBlocked;
 
     async function applyBranchContext() {
         if (!canApplyBranchContext) {
@@ -222,10 +224,7 @@ export default function BusinessConsultantVerificationPage() {
                         <p className="mt-1 text-base font-semibold text-foreground">
                             {meData?.client?.name ?? "Клиент не выбран"} · {data.selected_branch_name ?? selectedBranchContext?.name ?? "Филиал не выбран"}
                         </p>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                            Проверка использует только знания и ответы выбранного филиала. Если branch не выбран, страница не
-                            должна отправлять вас в слепой цикл между вкладками.
-                        </p>
+                        <p className="mt-2 text-sm text-muted-foreground">Проверка использует только знания выбранного филиала.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span className={`rounded-full px-3 py-1 font-semibold ${syncChipClass(data.knowledge_sync_status)}`}>
@@ -250,12 +249,14 @@ export default function BusinessConsultantVerificationPage() {
                         Статус синхронизации: {data.knowledge_sync_status_label ?? "—"}
                     </div>
                 </div>
-                {data.knowledge_sync_error ? (
+                {syncBlocked && !branchSelectionRequired ? (
                     <p
-                        className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                        className={`mt-3 rounded-lg px-3 py-2 text-sm ${data.knowledge_sync_status === "failed" || data.knowledge_safe_mode ? "border border-red-200 bg-red-50 text-red-800" : "border border-slate-300/70 bg-slate-50 text-slate-800"}`}
                         data-testid="consultant-verification-sync-warning"
                     >
-                        Последняя синхронизация завершилась с ошибкой: {data.knowledge_sync_error}
+                        {data.knowledge_sync_status === "failed" || data.knowledge_safe_mode
+                            ? "Сначала восстановите синхронизацию знаний в разделе `Знания`, затем возвращайтесь к проверке консультанта."
+                            : "Синхронизация знаний еще выполняется. Проверка консультанта откроется после завершения."}
                     </p>
                 ) : null}
             </section>
@@ -267,9 +268,7 @@ export default function BusinessConsultantVerificationPage() {
                 >
                     <p className="text-xs uppercase tracking-[0.16em] text-amber-800">Требуется выбор</p>
                     <h2 className="mt-1 text-lg font-semibold text-foreground">Выберите филиал прямо здесь</h2>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                        `Проверка консультанта` больше не должна отправлять owner в другую вкладку только ради выбора branch.
-                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">Выберите филиал здесь и продолжайте проверку без переходов между вкладками.</p>
                     {branchOptions.length > 0 ? (
                         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                             <select
@@ -390,7 +389,7 @@ export default function BusinessConsultantVerificationPage() {
                 ))}
             </section>
 
-            {data.feature_enabled && !branchSelectionRequired ? <ConsultantVerificationWorkspace overview={data} /> : null}
+            {workspaceReady ? <ConsultantVerificationWorkspace overview={data} /> : null}
 
             <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
                 <article

@@ -249,19 +249,30 @@ function knowledgeSyncStatusClass(status?: string | null): string {
     return "bg-slate-100 text-slate-700";
 }
 
+function isKnowledgeSyncPending(status?: string | null): boolean {
+    return status === "pending";
+}
+
 function resolveKnowledgeSyncMessage(
     status?: string | null,
-    error?: string | null,
 ): string {
     if (status === "failed") {
-        return error
-            ? `Версия опубликована, но синхронизация завершилась с ошибкой: ${error}`
-            : "Версия опубликована, но синхронизация завершилась с ошибкой.";
+        return "Синхронизация требует внимания. Повторите ее перед проверкой консультанта.";
     }
     if (status === "ready") {
         return "Последняя версия опубликована и синхронизирована.";
     }
+    if (status === "pending") {
+        return "Синхронизация выполняется. Проверка консультанта откроется после завершения.";
+    }
     return "Синхронизация еще не подтверждена.";
+}
+
+function resolveKnowledgeSyncDetails(error?: string | null): string | null {
+    if (!error || !error.trim()) {
+        return null;
+    }
+    return `Техническая причина: ${error}`;
 }
 
 function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
@@ -711,6 +722,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
+        refetchInterval: (query) => (isKnowledgeSyncPending(query.state.data?.sync_status) ? 5000 : false),
     });
 
     const historyQuery = useQuery({
@@ -721,6 +733,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
+        refetchInterval: (query) =>
+            (query.state.data?.items ?? []).some((item: { sync_status?: string | null }) => isKnowledgeSyncPending(item?.sync_status))
+                ? 5000
+                : false,
     });
 
     const consultantVerificationReadinessQuery = useQuery({
@@ -731,6 +747,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         enabled: !!session && !!meData && !apiUnavailable && canEdit && !branchSelectionRequired && !!selectedBranchId,
         retry: false,
+        refetchInterval: isKnowledgeSyncPending(currentQuery.data?.sync_status) ? 5000 : false,
     });
 
     const candidatesQuery = useQuery({
@@ -1083,7 +1100,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const currentSyncStatus = currentQuery.data?.sync_status ?? null;
     const currentSyncStatusLabel = currentQuery.data?.sync_status_label ?? "Синхронизация не подтверждена";
     const currentSyncError = currentQuery.data?.sync_error ?? null;
+    const currentSyncPending = isKnowledgeSyncPending(currentSyncStatus);
     const currentSyncFailed = currentSyncStatus === "failed" || Boolean(currentQuery.data?.knowledge_safe_mode);
+    const currentSyncBlocked = currentSyncPending || currentSyncFailed;
 
     const historyItems = useMemo(
         () => extractHistoryItems(historyQuery.data),
@@ -1336,11 +1355,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         onSuccess: (data) => {
             setLastPublishAt(data?.published_at ?? new Date().toISOString());
-            if (data?.sync_status === "failed") {
-                toast.error(data?.message || resolveKnowledgeSyncMessage(data?.sync_status, data?.sync_error));
-            } else {
-                toast.success(data?.message || "Знания опубликованы");
-            }
+            toast.success(data?.message || "Версия опубликована. Синхронизация выполняется.");
             currentQuery.refetch();
             historyQuery.refetch();
             consultantVerificationReadinessQuery.refetch();
@@ -1386,11 +1401,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return response.data;
         },
         onSuccess: (data) => {
-            if (data?.sync_status === "ready") {
-                toast.success(data?.message || "Синхронизация успешно завершена");
-            } else {
-                toast.error(data?.message || resolveKnowledgeSyncMessage(data?.sync_status, data?.sync_error));
-            }
+            toast.success(data?.message || "Синхронизация запущена повторно.");
             currentQuery.refetch();
             historyQuery.refetch();
             consultantVerificationReadinessQuery.refetch();
@@ -1424,11 +1435,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         onSuccess: (data) => {
             setLastRollbackAt(new Date().toISOString());
-            if (data?.sync_status === "failed") {
-                toast.error(data?.message || resolveKnowledgeSyncMessage(data?.sync_status, data?.sync_error));
-            } else {
-                toast.success(data?.message || "Версия восстановлена");
-            }
+            toast.success(data?.message || "Версия восстановлена. Синхронизация выполняется.");
             currentQuery.refetch();
             historyQuery.refetch();
             consultantVerificationReadinessQuery.refetch();
@@ -1992,19 +1999,24 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         Синхронизация знаний: <span className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(currentSyncStatus)}`}>{currentSyncStatusLabel}</span>
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        Safe mode: {selectedBranchContext.knowledge_safe_mode ? `включен${selectedBranchContext.knowledge_safe_mode_reason ? ` (${selectedBranchContext.knowledge_safe_mode_reason})` : ""}` : "выключен"}
+                        Safe mode: {selectedBranchContext.knowledge_safe_mode ? "включен" : "выключен"}
                     </div>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
                     Поля ниже применятся только после кнопки `Сохранить изменение филиала`.
                 </div>
-                {currentSyncFailed ? (
+                {currentSyncBlocked ? (
                     <div
-                        className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800"
+                        className={`mt-3 rounded-lg px-3 py-3 text-sm ${currentSyncFailed ? "border border-red-200 bg-red-50 text-red-800" : "border border-slate-300/70 bg-slate-50 text-slate-800"}`}
                         data-testid="knowledge-sync-warning"
                     >
-                        <p className="font-medium">{resolveKnowledgeSyncMessage(currentSyncStatus, currentSyncError ?? selectedBranchContext.knowledge_safe_mode_reason)}</p>
-                        {currentQuery.data?.version_id ? (
+                        <p className="font-medium">{resolveKnowledgeSyncMessage(currentSyncStatus)}</p>
+                        {resolveKnowledgeSyncDetails(currentSyncError ?? selectedBranchContext.knowledge_safe_mode_reason) ? (
+                            <p className="mt-2 text-xs">
+                                {resolveKnowledgeSyncDetails(currentSyncError ?? selectedBranchContext.knowledge_safe_mode_reason)}
+                            </p>
+                        ) : null}
+                        {currentSyncFailed && currentQuery.data?.version_id ? (
                             <div className="mt-3">
                                 <button
                                     type="button"
@@ -2944,8 +2956,13 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                         </span>
                                     </div>
                                     <p className="mt-2 text-muted-foreground">
-                                        {resolveKnowledgeSyncMessage(currentSyncStatus, currentSyncError)}
+                                        {resolveKnowledgeSyncMessage(currentSyncStatus)}
                                     </p>
+                                    {resolveKnowledgeSyncDetails(currentSyncError) ? (
+                                        <p className="mt-2 text-xs text-muted-foreground">
+                                            {resolveKnowledgeSyncDetails(currentSyncError)}
+                                        </p>
+                                    ) : null}
                                 </div>
                             ) : null}
 
@@ -2998,11 +3015,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                                         Published: {new Date(item.published_at).toLocaleString("ru-RU")}
                                                     </div>
                                                 )}
-                                                {item.sync_error && (
+                                                {item.sync_status === "failed" ? (
                                                     <div className="text-xs text-red-700">
-                                                        Sync error: {item.sync_error}
+                                                        Синхронизация требует внимания.
                                                     </div>
-                                                )}
+                                                ) : null}
                                             </div>
                                             <input
                                                 type="radio"

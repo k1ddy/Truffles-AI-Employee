@@ -5,12 +5,13 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
 from app.logging_config import get_logger
 from app.models import Branch, Client, KnowledgeVersion
+from app.services.audit_service import record_audit_event
 from app.services.knowledge_service import QDRANT_API_KEY, QDRANT_COLLECTION, QDRANT_HOST, get_embedding
 from app.services.knowledge_validation import (
     LOSSY_STRUCTURED_REWRITE_ERROR_PREFIX,
@@ -23,10 +24,14 @@ from app.services.knowledge_validation import (
     strip_compiled_artifacts,
     validate_payload,
 )
+from app.services.outbox_service import enqueue_outbox_message
 from app.services.pack_compiler_service import (
     PackCompilerError,
+    build_compiled_pack_meta,
     compile_pack_payload,
+    extract_compiled_artifacts,
     inject_compiled_artifacts,
+    parse_compiled_at,
 )
 
 logger = get_logger("knowledge_registry")
@@ -36,6 +41,7 @@ PACK_INDEX_SCHEMA_VERSION = "pack_index.v1"
 KNOWLEDGE_SYNC_STATUS_PENDING = "pending"
 KNOWLEDGE_SYNC_STATUS_READY = "ready"
 KNOWLEDGE_SYNC_STATUS_FAILED = "failed"
+OUTBOX_EVENT_KNOWLEDGE_SYNC = "knowledge.sync"
 
 
 def _coerce_string_list(value: Any) -> list[str]:
@@ -400,8 +406,214 @@ def knowledge_sync_status_label(value: Any) -> str:
     if normalized == KNOWLEDGE_SYNC_STATUS_READY:
         return "Синхронизировано"
     if normalized == KNOWLEDGE_SYNC_STATUS_FAILED:
-        return "Нужна синхронизация"
-    return "Синхронизация в очереди"
+        return "Синхронизация требует внимания"
+    return "Синхронизация выполняется"
+
+
+def enqueue_knowledge_sync_event(
+    db,
+    *,
+    client: Client,
+    branch: Branch,
+    version: KnowledgeVersion,
+    actor_id: UUID | None,
+    actor_name: str | None,
+    source: str,
+) -> bool:
+    payload_json = {
+        "schema_version": "outbox.v1",
+        "event_type": OUTBOX_EVENT_KNOWLEDGE_SYNC,
+        "provider": "internal",
+        "channel": "knowledge",
+        "client_id": str(client.id),
+        "branch_id": str(branch.id),
+        "payload": {
+            "client_id": str(client.id),
+            "branch_id": str(branch.id),
+            "version_id": str(version.id),
+            "source": source,
+            "actor_id": str(actor_id) if actor_id else None,
+            "actor_name": actor_name,
+        },
+    }
+    return enqueue_outbox_message(
+        db,
+        client_id=client.id,
+        conversation_id=None,
+        branch_id=branch.id,
+        inbound_message_id=f"knowledge:sync:{version.id}:{uuid4()}",
+        payload_json=payload_json,
+    )
+
+
+def _parse_event_uuid(value: Any) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str):
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+    return None
+
+
+def process_knowledge_sync_event(
+    db,
+    *,
+    payload_json: dict[str, Any] | None,
+) -> tuple[bool, str | None]:
+    payload = payload_json.get("payload") if isinstance(payload_json, dict) else None
+    if not isinstance(payload, dict):
+        return False, "missing_payload"
+
+    client_id = _parse_event_uuid(payload.get("client_id"))
+    branch_id = _parse_event_uuid(payload.get("branch_id"))
+    version_id = _parse_event_uuid(payload.get("version_id"))
+    source = str(payload.get("source") or "knowledge_sync")
+    actor_id = _parse_event_uuid(payload.get("actor_id"))
+    actor_name = payload.get("actor_name") if isinstance(payload.get("actor_name"), str) else None
+    if not client_id or not branch_id or not version_id:
+        return False, "missing_fields"
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if client is None:
+        return False, "client_not_found"
+    branch = (
+        db.query(Branch)
+        .filter(
+            Branch.id == branch_id,
+            Branch.client_id == client_id,
+        )
+        .first()
+    )
+    if branch is None:
+        return False, "branch_not_found"
+    version = (
+        db.query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.id == version_id,
+            KnowledgeVersion.client_id == client_id,
+        )
+        .first()
+    )
+    if version is None:
+        return False, "version_not_found"
+    if version.branch_id != branch.id:
+        return False, "branch_mismatch"
+    if version.status != "published":
+        return False, "version_not_published"
+
+    if normalize_knowledge_sync_status(version.sync_status) == KNOWLEDGE_SYNC_STATUS_READY and not bool(
+        getattr(branch, "knowledge_safe_mode", False)
+    ):
+        return True, None
+
+    now = datetime.now(timezone.utc)
+    try:
+        sync_published_branch_docs(
+            db,
+            client_slug=client.name,
+            branch=branch,
+            version=version,
+            backfill_other_branches=False,
+        )
+        compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
+        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
+        if pack_index:
+            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
+            apply_pack_index_to_client_config(
+                client,
+                pack_index=pack_index,
+                version_id=version.id,
+                compiled_at=compiled_at or now,
+                source=source,
+                compiled_meta=build_compiled_pack_meta(
+                    compiled,
+                    version_id=version.id,
+                    source=source,
+                )
+                if isinstance(compiled, dict)
+                else None,
+            )
+        mark_knowledge_version_sync_ready(version, completed_at=now)
+        branch.knowledge_safe_mode = False
+        branch.knowledge_safe_mode_reason = None
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=None,
+            event_type="knowledge_sync_completed",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "version_id": str(version.id),
+                "source": source,
+            },
+            client_id=client.id,
+            branch_id=branch.id,
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        db.commit()
+        return True, None
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "Knowledge sync event failed",
+            extra={
+                "context": {
+                    "client_id": str(client_id),
+                    "branch_id": str(branch_id),
+                    "version_id": str(version_id),
+                    "source": source,
+                    "error": str(exc),
+                }
+            },
+        )
+        branch = (
+            db.query(Branch)
+            .filter(
+                Branch.id == branch_id,
+                Branch.client_id == client_id,
+            )
+            .first()
+        )
+        version = (
+            db.query(KnowledgeVersion)
+            .filter(
+                KnowledgeVersion.id == version_id,
+                KnowledgeVersion.client_id == client_id,
+            )
+            .first()
+        )
+        if branch is not None and version is not None:
+            error_message = str(exc)
+            mark_knowledge_version_sync_failed(
+                version,
+                error_message=error_message,
+                completed_at=now,
+            )
+            branch.knowledge_safe_mode = True
+            branch.knowledge_safe_mode_reason = error_message
+            branch.knowledge_safe_mode_at = now
+            record_audit_event(
+                db,
+                actor=None,
+                event_type="knowledge_sync_failed",
+                entity_type="branch",
+                entity_id=branch.id,
+                payload={
+                    "version_id": str(version.id),
+                    "source": source,
+                    "error": error_message,
+                },
+                client_id=client_id,
+                branch_id=branch.id,
+                actor_id=actor_id,
+                actor_name=actor_name,
+            )
+            db.commit()
+        return False, str(exc)
 
 
 def restore_version(

@@ -583,7 +583,7 @@ def derive_consultant_verification_status(
     branch_selected: bool,
     has_published_knowledge: bool,
     knowledge_stale_hours: Optional[int],
-    knowledge_sync_failed: bool,
+    knowledge_sync_blocking: bool,
 ) -> tuple[str, str, str]:
     if not feature_enabled:
         return (
@@ -603,11 +603,11 @@ def derive_consultant_verification_status(
             "Сначала опубликуйте знания бизнеса",
             "Без опубликованных знаний владелец увидит только ограничения, а не качество ответов консультанта.",
         )
-    if knowledge_sync_failed:
+    if knowledge_sync_blocking:
         return (
             "needs_attention",
             "Сначала завершите синхронизацию знаний",
-            "Последняя версия уже опубликована, но синхронизация завершилась с ошибкой. Пока это не исправлено, проверка консультанта не будет честной.",
+            "Пока опубликованная версия еще не синхронизирована, проверка консультанта не будет честной. Сначала дождитесь завершения синхронизации или повторите ее.",
         )
     if knowledge_stale_hours is not None and knowledge_stale_hours > _KNOWLEDGE_STALE_HOURS_WARN:
         return (
@@ -654,12 +654,18 @@ def _build_readiness_cards(
             "Опубликуйте актуальные знания бизнеса, чтобы будущий тест отражал реальные услуги, цены и правила."
         )
         evidence_label = "Публикация не найдена"
+    elif normalize_knowledge_sync_status(knowledge_sync_status) == "pending":
+        knowledge_state = "needs_attention"
+        knowledge_summary = (
+            "Версия уже опубликована, но синхронизация еще выполняется. Дождитесь завершения перед проверкой консультанта."
+        )
+        evidence_label = "Синхронизация выполняется"
     elif normalize_knowledge_sync_status(knowledge_sync_status) == "failed":
         knowledge_state = "needs_attention"
         knowledge_summary = (
-            "Последняя версия уже опубликована, но синхронизация завершилась с ошибкой. Сначала повторите синхронизацию, иначе owner увидит частично деградированную систему."
+            "Синхронизация требует внимания. Повторите ее перед проверкой консультанта, иначе owner увидит неполный контур."
         )
-        evidence_label = knowledge_sync_error or "Синхронизация завершилась с ошибкой"
+        evidence_label = "Синхронизация требует внимания"
     elif knowledge_stale_hours is not None and knowledge_stale_hours > _KNOWLEDGE_STALE_HOURS_WARN:
         knowledge_state = "needs_attention"
         knowledge_summary = (
@@ -757,8 +763,11 @@ def _build_consultant_verification_actions(
     branch_selected: bool,
     has_published_knowledge: bool,
     knowledge_stale_hours: Optional[int],
+    knowledge_sync_status: Optional[str],
+    knowledge_safe_mode: bool,
 ) -> list[ConsoleBusinessActionItem]:
     actions: list[ConsoleBusinessActionItem] = []
+    sync_status = normalize_knowledge_sync_status(knowledge_sync_status)
     if not branch_selected:
         actions.append(
             ConsoleBusinessActionItem(
@@ -776,6 +785,26 @@ def _build_consultant_verification_actions(
                 severity="critical",
                 title="Опубликуйте знания перед проверкой",
                 description="Без опубликованных знаний будущий тест не сможет доказать качество ответов по вашему бизнесу.",
+                href="/knowledge",
+            )
+        )
+    elif knowledge_safe_mode or sync_status == "failed":
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="retry_knowledge_sync_before_verification",
+                severity="critical",
+                title="Повторите синхронизацию перед проверкой",
+                description="Пока синхронизация не завершена успешно, проверка консультанта будет заблокирована для этого филиала.",
+                href="/knowledge",
+            )
+        )
+    elif sync_status == "pending":
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="wait_for_knowledge_sync_before_verification",
+                severity="warn",
+                title="Дождитесь завершения синхронизации",
+                description="Версия уже опубликована. Как только синхронизация завершится, можно возвращаться к проверке консультанта.",
                 href="/knowledge",
             )
         )
@@ -905,7 +934,11 @@ def build_consultant_verification_overview(
         branch_selected=branch_id is not None,
         has_published_knowledge=has_published_knowledge,
         knowledge_stale_hours=knowledge_stale_hours,
-        knowledge_sync_failed=knowledge_sync_status == "failed" or bool(getattr(selected_branch, "knowledge_safe_mode", False)),
+        knowledge_sync_blocking=has_published_knowledge
+        and (
+            knowledge_sync_status != "ready"
+            or bool(getattr(selected_branch, "knowledge_safe_mode", False))
+        ),
     )
     return ConsoleConsultantVerificationOverviewResponse(
         generated_at=now.isoformat(),
@@ -949,6 +982,8 @@ def build_consultant_verification_overview(
             branch_selected=branch_id is not None,
             has_published_knowledge=has_published_knowledge,
             knowledge_stale_hours=knowledge_stale_hours,
+            knowledge_sync_status=knowledge_sync_status,
+            knowledge_safe_mode=bool(getattr(selected_branch, "knowledge_safe_mode", False)),
         ),
     )
 

@@ -321,35 +321,35 @@ def test_derive_consultant_verification_status_thresholds() -> None:
         branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=4,
-        knowledge_sync_failed=False,
+        knowledge_sync_blocking=False,
     )
     missing_status, missing_label, missing_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
         has_published_knowledge=False,
         knowledge_stale_hours=None,
-        knowledge_sync_failed=False,
+        knowledge_sync_blocking=False,
     )
     branch_status, branch_label, branch_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=False,
         has_published_knowledge=True,
         knowledge_stale_hours=None,
-        knowledge_sync_failed=False,
+        knowledge_sync_blocking=False,
     )
     sync_status, sync_label, sync_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=None,
-        knowledge_sync_failed=True,
+        knowledge_sync_blocking=True,
     )
     ready_status, ready_label, ready_summary = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
         has_published_knowledge=True,
         knowledge_stale_hours=12,
-        knowledge_sync_failed=False,
+        knowledge_sync_blocking=False,
     )
 
     assert disabled_status == "not_enabled"
@@ -363,7 +363,7 @@ def test_derive_consultant_verification_status_thresholds() -> None:
     assert "branch" in branch_summary.lower()
     assert sync_status == "needs_attention"
     assert "синхронизац" in sync_label.lower()
-    assert "опубликована" in sync_summary.lower()
+    assert "синхрониз" in sync_summary.lower()
     assert ready_status == "ready"
     assert "основа" in ready_label.lower()
     assert "без реальных действий" in ready_summary.lower()
@@ -1026,8 +1026,7 @@ async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatc
             published_at=datetime.now(timezone.utc),
         ),
     )
-    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.publish_knowledge(
@@ -1038,9 +1037,9 @@ async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatc
 
     assert response.success is True
     assert response.version_id == version_id
-    assert response.sync_status == "ready"
+    assert response.sync_status == "pending"
     assert response.partial_success is False
-    assert "синхрониз" in (response.message or "").lower()
+    assert "выполня" in (response.message or "").lower()
 
 
 @pytest.mark.asyncio
@@ -1095,8 +1094,7 @@ async def test_publish_knowledge_allows_live_update_without_compare_when_rollout
             published_at=datetime.now(timezone.utc),
         ),
     )
-    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.publish_knowledge(
@@ -1107,7 +1105,7 @@ async def test_publish_knowledge_allows_live_update_without_compare_when_rollout
 
     assert response.success is True
     assert response.version_id == version_id
-    assert response.sync_status == "ready"
+    assert response.sync_status == "pending"
     assert response.partial_success is False
 
 
@@ -1156,8 +1154,7 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
             published_at=datetime.now(timezone.utc),
         ),
     )
-    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.publish_knowledge(
@@ -1171,15 +1168,15 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
 
     assert response.success is True
     assert response.version_id == version_id
-    assert response.sync_status == "ready"
+    assert response.sync_status == "pending"
     assert response.partial_success is False
     assert branch.knowledge_safe_mode is False
     assert branch.knowledge_safe_mode_reason is None
-    assert db.commit.call_count == 2
+    assert db.commit.call_count == 1
 
 
 @pytest.mark.asyncio
-async def test_publish_knowledge_reports_partial_success_when_sync_fails(monkeypatch):
+async def test_publish_knowledge_queues_sync_without_running_it_inline(monkeypatch):
     branch = SimpleNamespace(
         id=uuid4(),
         knowledge_safe_mode=False,
@@ -1222,10 +1219,11 @@ async def test_publish_knowledge_reports_partial_success_when_sync_fails(monkeyp
             sync_completed_at=None,
         ),
     )
+    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         console_router,
         "sync_published_branch_docs",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("timed out")),
+        lambda *_args, **_kwargs: pytest.fail("publish must not run sync inline"),
     )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
@@ -1237,15 +1235,15 @@ async def test_publish_knowledge_reports_partial_success_when_sync_fails(monkeyp
 
     assert response.success is True
     assert response.version_id == version_id
-    assert response.sync_status == "failed"
-    assert response.partial_success is True
-    assert response.sync_error == "timed out"
-    assert branch.knowledge_safe_mode is True
-    assert branch.knowledge_safe_mode_reason == "timed out"
+    assert response.sync_status == "pending"
+    assert response.partial_success is False
+    assert response.sync_error is None
+    assert branch.knowledge_safe_mode is False
+    assert branch.knowledge_safe_mode_reason is None
 
 
 @pytest.mark.asyncio
-async def test_retry_knowledge_sync_recovers_failed_published_version(monkeypatch):
+async def test_retry_knowledge_sync_requeues_failed_published_version(monkeypatch):
     branch = SimpleNamespace(
         id=uuid4(),
         knowledge_safe_mode=True,
@@ -1278,8 +1276,12 @@ async def test_retry_knowledge_sync_recovers_failed_published_version(monkeypatc
     monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
-    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "sync_published_branch_docs",
+        lambda *_args, **_kwargs: pytest.fail("retry must not run sync inline"),
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.retry_knowledge_version_sync(
@@ -1290,9 +1292,10 @@ async def test_retry_knowledge_sync_recovers_failed_published_version(monkeypatc
 
     assert response.success is True
     assert response.version_id == version_id
-    assert response.sync_status == "ready"
+    assert response.sync_status == "pending"
     assert response.sync_error is None
     assert branch.knowledge_safe_mode is False
+    assert branch.knowledge_safe_mode_reason is None
 
 
 @pytest.mark.asyncio

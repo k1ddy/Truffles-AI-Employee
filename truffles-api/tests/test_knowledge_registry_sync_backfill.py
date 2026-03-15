@@ -1,4 +1,6 @@
+from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -139,3 +141,147 @@ def test_publish_version_blocks_lossy_structured_rewrite_before_compile(monkeypa
         "Lossy structured field rewrite blocked: client_pack.guest_policy",
         "Lossy structured field rewrite blocked: client_pack.policy.payment_info",
     ]
+
+
+def test_process_knowledge_sync_event_runs_branch_only_sync_and_marks_ready(monkeypatch):
+    client = SimpleNamespace(id=uuid4(), name="demo_salon", config={})
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        knowledge_tag="branch-a",
+        knowledge_safe_mode=True,
+        knowledge_safe_mode_reason="old",
+        knowledge_safe_mode_at=None,
+    )
+    version = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        branch_id=branch.id,
+        status="published",
+        payload_json={"client_pack": {"salon": {"name": "Demo"}}},
+        sync_status="pending",
+        sync_error=None,
+        sync_completed_at=None,
+    )
+    db = Mock()
+
+    class _Query:
+        def __init__(self, row):
+            self._row = row
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return self._row
+
+    db.query.side_effect = lambda model: _Query(
+        {
+            service.Client: client,
+            service.Branch: branch,
+            service.KnowledgeVersion: version,
+        }[model]
+    )
+    captured: dict[str, object] = {}
+
+    def _sync(*_args, **kwargs):
+        captured["backfill_other_branches"] = kwargs["backfill_other_branches"]
+        return {"docs_synced": 2, "services_synced": 1, "backfill_synced": 0, "backfill_skipped": 0}
+
+    monkeypatch.setattr(service, "sync_published_branch_docs", _sync)
+    monkeypatch.setattr(service, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(service, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    ok, error = service.process_knowledge_sync_event(
+        db,
+        payload_json={
+            "payload": {
+                "client_id": str(client.id),
+                "branch_id": str(branch.id),
+                "version_id": str(version.id),
+                "source": "knowledge_publish",
+                "actor_id": str(uuid4()),
+                "actor_name": "Owner",
+            }
+        },
+    )
+
+    assert ok is True
+    assert error is None
+    assert captured["backfill_other_branches"] is False
+    assert version.sync_status == service.KNOWLEDGE_SYNC_STATUS_READY
+    assert version.sync_error is None
+    assert isinstance(version.sync_completed_at, datetime)
+    assert branch.knowledge_safe_mode is False
+    assert branch.knowledge_safe_mode_reason is None
+    db.commit.assert_called_once()
+
+
+def test_process_knowledge_sync_event_marks_failed_and_safe_mode_on_sync_error(monkeypatch):
+    client = SimpleNamespace(id=uuid4(), name="demo_salon", config={})
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        knowledge_tag="branch-a",
+        knowledge_safe_mode=False,
+        knowledge_safe_mode_reason=None,
+        knowledge_safe_mode_at=None,
+    )
+    version = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        branch_id=branch.id,
+        status="published",
+        payload_json={"client_pack": {"salon": {"name": "Demo"}}},
+        sync_status="pending",
+        sync_error=None,
+        sync_completed_at=None,
+    )
+    db = Mock()
+
+    class _Query:
+        def __init__(self, row):
+            self._row = row
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return self._row
+
+    db.query.side_effect = lambda model: _Query(
+        {
+            service.Client: client,
+            service.Branch: branch,
+            service.KnowledgeVersion: version,
+        }[model]
+    )
+
+    monkeypatch.setattr(
+        service,
+        "sync_published_branch_docs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("timed out")),
+    )
+    monkeypatch.setattr(service, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    ok, error = service.process_knowledge_sync_event(
+        db,
+        payload_json={
+            "payload": {
+                "client_id": str(client.id),
+                "branch_id": str(branch.id),
+                "version_id": str(version.id),
+                "source": "knowledge_sync_retry",
+            }
+        },
+    )
+
+    assert ok is False
+    assert error == "timed out"
+    assert version.sync_status == service.KNOWLEDGE_SYNC_STATUS_FAILED
+    assert version.sync_error == "timed out"
+    assert isinstance(version.sync_completed_at, datetime)
+    assert branch.knowledge_safe_mode is True
+    assert branch.knowledge_safe_mode_reason == "timed out"
+    db.rollback.assert_called_once()
+    db.commit.assert_called_once()

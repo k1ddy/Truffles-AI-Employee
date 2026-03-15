@@ -248,13 +248,13 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   - First screen still shows readiness/gaps/next-wave promise as the default owner entrypoint.
   - Interactive session/findings/compare endpoints fail closed behind the per-client rollout flag; when rollout is disabled the page remains on the overview/readiness surface.
   - If Console branch context is missing, the page now renders an inline branch gate; owner/admin can choose and apply the branch in place instead of being sent to another page.
-  - The top scope card shows the selected client/branch plus current knowledge freshness, sync status, and safe-mode reason so the owner can see exactly which branch is being tested.
+  - The top scope card shows the selected client/branch plus current knowledge freshness and sync state so the owner can see exactly which branch is being tested.
   - Wave2 adds safe simulation sessions on the real consultant runtime with rollback-only execution, persisted owner/admin transcripts, and explicit preview flags (`would_handoff`, `would_book`, `gap_detected`).
   - Wave3 adds the owner-readable workspace: `как клиент` / `найти слабые места` mode selection, recent sessions, transcript bubbles, verdict chips, source refs, preview-only impact badges, and an optional advanced-details disclosure.
   - Wave4 adds a data-driven scenario catalog sourced from onboarding blueprints, capabilities, and reference packs; session summaries with honest category counts (`answered / clarification / handoff / gap`); and replay actions that always start a fresh simulation session instead of mutating prior evidence.
   - Wave5 adds owner-detected findings: weak answers can be flagged from the explainer panel, clustered into failure families, linked to `knowledge_backlog` / `learning_candidates`, and tracked via statuses (`new / in_review / needs_data / fixed / retested`).
   - Wave6 adds `live vs draft` compare and publish readiness: the same prompt or finding can be rerun against published knowledge and the latest saved draft; the result records a compare audit event, surfaces regressions in owner language, supports finding retest, and becomes a required gate before `Knowledge -> Publish`.
-  - Readiness is sync-aware: if the latest published knowledge exists but branch sync failed or the branch is in `knowledge_safe_mode`, the page shows `needs_attention` instead of pretending knowledge is merely missing/stale.
+  - Readiness is sync-aware: if the latest published knowledge is still `pending` or `failed`, or the branch is in `knowledge_safe_mode`, the page shows `needs_attention` and keeps the interactive workspace hidden until sync is actually ready.
   - Closeout status on this branch: local deterministic proof, owner/admin compare lane, and screenshot audit are green; one-client canary and post-merge monitoring remain release-only steps after merge/deploy.
   - Simulation turns must never leak real outbound, booking, or handoff side effects into production flows.
 
@@ -267,17 +267,13 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Требует branch selection (`X-Branch-Id`).
 - Rollback требует подтверждения: `POST /console/v1/confirmations` (action=`knowledge_rollback`) → `confirmation_id`.
 - `GET /console/v1/knowledge/current` now returns both knowledge provenance (`published`, saved draft, edit base) and branch sync health (`sync_status`, `sync_error`, `knowledge_safe_mode`).
-- `Publish` is a two-phase owner contract:
+- `Publish` is now an async owner contract:
   - phase 1: create/publish the knowledge version,
-  - phase 2: run post-publish sync/backfill for the selected branch.
-- If phase 1 succeeds but phase 2 fails, the response is a truthful partial success:
-  - `success=true`
-  - `partial_success=true`
-  - `sync_status=failed`
-  - published `version_id` is still durable
-  - branch may enter `knowledge_safe_mode`
-- Owner/Admin must not republish just to recover a sync timeout; use `POST /console/v1/knowledge/versions/{version_id}/retry-sync` on the current published version.
-- History and rollback surfaces carry the same sync metadata; rollback can also end in `published + sync_failed`, which is shown as a sync problem, not as a fake total rollback failure.
+  - phase 2: enqueue branch-local sync on the durable outbox worker (`knowledge.sync`), outside the owner request path.
+- A successful publish response now returns `sync_status=pending` and `partial_success=false`; owner copy stays bounded (`Синхронизация выполняется`) instead of surfacing raw timeout text as the primary message.
+- `retry-sync` requeues branch-local sync for the current published version; it does not create a new published knowledge version.
+- Cross-branch backfill is no longer part of the owner publish/retry click path.
+- History, current state, rollback, and consultant-verification readiness all treat `sync_status=pending|failed` as blocking for owner verification until sync is actually `ready`.
 
 **Team (Команда)**
 - UI: `console-web/src/app/team/page.tsx`
