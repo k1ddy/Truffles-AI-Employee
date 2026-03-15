@@ -1,0 +1,37 @@
+# SESSION 2026-03-15-owner-knowledge-stabilization-reset-a4 — Session 2026-03-15-owner-knowledge-stabilization-reset-a4
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md
+- block_id: CONSOLE-OWNER-KNOWLEDGE-STABILIZATION-RESET-A4
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-owner-knowledge-stabilization-reset-a4
+- worktree: /home/zhan/worktrees/2026-03-15-owner-knowledge-stabilization-reset-a4
+- base_ref: origin/main
+- scope: Stabilize owner/admin `Knowledge -> Проверка консультанта` by moving publish sync out of the owner request path, bounding owner-facing sync states, and blocking consultant verification until branch sync is truly ready.
+- done:
+  - Session created.
+  - Canonized the stabilization-reset block in `docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md` with RCA, one-search gate, residual debt, and next-block contract.
+  - Replaced request-bound knowledge publish/retry/rollback sync with durable outbox-queued `knowledge.sync` events and branch-local worker processing.
+  - Simplified owner-facing sync copy on `Knowledge` and `Проверка консультанта`; consultant verification workspace now stays hidden while sync is `pending` or `failed`.
+  - Added deterministic backend and Playwright proof for queued sync and sync-blocked consultant verification readiness.
+- next:
+  - Sync `STATE.md` with evidence and residual debt.
+  - Remove local-only runtime artifacts (`console-web/node_modules` symlink) before commit/PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md
+  - truffles-api/app/services/knowledge_registry_service.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/routers/webhook/outbox.py
+  - truffles-api/app/services/console_consultant_verification.py
+  - console-web/src/app/knowledge/page.tsx
+  - console-web/src/app/business/consultant-verification/page.tsx
+  - truffles-api/tests/test_console_owner_business.py
+  - truffles-api/tests/test_console_consultant_verification_api.py
+  - truffles-api/tests/test_knowledge_registry_sync_backfill.py
+  - console-web/e2e/owner-admin-business.spec.ts
+- last_updated: 2026-03-15

@@ -137,6 +137,7 @@ function isMockedKnowledgeWorkspaceTest(title: string) {
         || title.includes('knowledge remediation')
         || title.includes('knowledge lossy rewrite')
         || title.includes('consultant verification branch gate')
+        || title.includes('consultant verification readiness')
         || title.includes('knowledge publish sync failure');
 }
 
@@ -752,8 +753,86 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-status-chip')).toContainText('ready');
     });
 
-    test('should show published plus sync failed and allow sync retry knowledge publish sync failure', async ({ page }) => {
-        let syncRecovered = false;
+    test('should block consultant verification workspace while sync is pending consultant verification readiness', async ({ page }) => {
+        const companyId = '11111111-1111-4111-8111-111111111111';
+        const clientId = '22222222-2222-4222-8222-222222222222';
+        const branchId = '33333333-3333-4333-8333-333333333333';
+        const agentId = '44444444-4444-4444-8444-444444444444';
+
+        await page.route(/.*\/api\/auth\/session(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                user: { name: 'Owner', email: 'owner@example.com' },
+                accessToken: 'e2e-owner-token',
+                expires: '2030-01-01T00:00:00.000Z',
+            });
+        });
+        await page.route('**/api/proxy/me', async (route) => {
+            await toJsonResponse(route, {
+                agent: { id: agentId, role: 'owner', name: 'Owner' },
+                client: {
+                    id: clientId,
+                    company_id: companyId,
+                    name: 'Demo Salon',
+                    slug: 'demo_salon',
+                },
+                selected_company_id: companyId,
+                selected_branch_id: branchId,
+                branches: [
+                    { id: branchId, client_id: clientId, company_id: companyId, name: 'Almaty Downtown' },
+                ],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/overview(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                generated_at: '2026-03-15T11:30:00Z',
+                feature_enabled: true,
+                status: 'needs_attention',
+                status_label: 'Сначала завершите синхронизацию знаний',
+                summary: 'Пока опубликованная версия еще не синхронизирована, проверка консультанта не будет честной.',
+                next_wave_summary: 'Контур проверки уже включает safe simulation.',
+                branch_selection_required: false,
+                selected_branch_id: branchId,
+                selected_branch_name: 'Almaty Downtown',
+                knowledge_last_published_at: '2026-03-15T11:00:00Z',
+                knowledge_stale_hours: 0,
+                knowledge_sync_status: 'pending',
+                knowledge_sync_status_label: 'Синхронизация выполняется',
+                knowledge_sync_error: null,
+                knowledge_safe_mode: false,
+                knowledge_safe_mode_reason: null,
+                readiness_cards: [
+                    {
+                        id: 'knowledge_readiness',
+                        title: 'Актуальные знания бизнеса',
+                        summary: 'Версия уже опубликована, но синхронизация еще выполняется.',
+                        state: 'needs_attention',
+                        state_label: 'Нужно подготовить',
+                        evidence_label: 'Синхронизация выполняется',
+                        href: '/knowledge',
+                    },
+                ],
+                stress_test_examples: ['Сколько стоит?'],
+                scenario_catalog: [],
+                actions: [
+                    {
+                        id: 'wait_for_knowledge_sync_before_verification',
+                        title: 'Дождитесь завершения синхронизации',
+                        description: 'Версия уже опубликована. Как только синхронизация завершится, можно возвращаться к проверке консультанта.',
+                        href: '/knowledge',
+                        severity: 'warn',
+                    },
+                ],
+            });
+        });
+
+        await page.goto(`${resolvedBaseURL}/business/consultant-verification`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('consultant-verification-sync-warning')).toContainText('Синхронизация знаний еще выполняется');
+        await expect(page.getByTestId('consultant-verification-workspace')).toBeHidden();
+        await expect(page.getByTestId('consultant-verification-actions')).toContainText('Дождитесь завершения синхронизации');
+    });
+
+    test('should show bounded sync status and queue retry knowledge publish sync failure knowledge sync', async ({ page }) => {
+        let syncQueued = false;
 
         await mockKnowledgeWorkspace(page, {
             current: {
@@ -770,7 +849,7 @@ test.describe('Owner/Admin Business Control', () => {
                 }, null, 2),
                 updated_at: '2026-03-15T10:00:00Z',
                 sync_status: 'failed',
-                sync_status_label: 'Нужна синхронизация',
+                sync_status_label: 'Синхронизация требует внимания',
                 sync_error: 'timed out',
                 knowledge_safe_mode: true,
                 knowledge_safe_mode_reason: 'timed out',
@@ -795,19 +874,19 @@ test.describe('Owner/Admin Business Control', () => {
                     summary: 'Sync Risk Salon',
                     published_at: '2026-03-15T10:00:00Z',
                     sync_status: 'failed',
-                    sync_status_label: 'Нужна синхронизация',
+                    sync_status_label: 'Синхронизация требует внимания',
                     sync_error: 'timed out',
                 },
             ],
             retrySyncResponse: () => {
-                syncRecovered = true;
+                syncQueued = true;
                 return {
                     success: true,
                     version_id: '99999999-9999-4999-8999-999999999999',
-                    sync_status: 'ready',
-                    sync_status_label: 'Синхронизировано',
+                    sync_status: 'pending',
+                    sync_status_label: 'Синхронизация выполняется',
                     sync_error: null,
-                    message: 'Синхронизация успешно повторена.',
+                    message: 'Синхронизация запущена повторно.',
                     knowledge_safe_mode: false,
                     knowledge_safe_mode_reason: null,
                 };
@@ -815,14 +894,14 @@ test.describe('Owner/Admin Business Control', () => {
         });
 
         await page.route(/.*\/api\/proxy\/knowledge\/current(?:\?.*)?$/, async (route) => {
-            await toJsonResponse(route, syncRecovered
+            await toJsonResponse(route, syncQueued
                 ? {
                     version_id: '99999999-9999-4999-8999-999999999999',
                     payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
                     content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
                     updated_at: '2026-03-15T10:00:00Z',
-                    sync_status: 'ready',
-                    sync_status_label: 'Синхронизировано',
+                    sync_status: 'pending',
+                    sync_status_label: 'Синхронизация выполняется',
                     sync_error: null,
                     knowledge_safe_mode: false,
                     knowledge_safe_mode_reason: null,
@@ -838,7 +917,7 @@ test.describe('Owner/Admin Business Control', () => {
                     content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
                     updated_at: '2026-03-15T10:00:00Z',
                     sync_status: 'failed',
-                    sync_status_label: 'Нужна синхронизация',
+                    sync_status_label: 'Синхронизация требует внимания',
                     sync_error: 'timed out',
                     knowledge_safe_mode: true,
                     knowledge_safe_mode_reason: 'timed out',
@@ -858,19 +937,20 @@ test.describe('Owner/Admin Business Control', () => {
                         status: 'published',
                         summary: 'Sync Risk Salon',
                         published_at: '2026-03-15T10:00:00Z',
-                        sync_status: syncRecovered ? 'ready' : 'failed',
-                        sync_status_label: syncRecovered ? 'Синхронизировано' : 'Нужна синхронизация',
-                        sync_error: syncRecovered ? null : 'timed out',
+                        sync_status: syncQueued ? 'pending' : 'failed',
+                        sync_status_label: syncQueued ? 'Синхронизация выполняется' : 'Синхронизация требует внимания',
+                        sync_error: syncQueued ? null : 'timed out',
                     },
                 ],
             });
         });
 
         await page.goto(`${resolvedBaseURL}/knowledge`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('timed out');
+        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Синхронизация требует внимания');
         await page.getByTestId('knowledge-sync-retry').click();
-        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Синхронизировано');
-        await expect(page.getByTestId('knowledge-sync-warning')).toBeHidden();
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Синхронизация выполняется');
+        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Синхронизация выполняется');
+        await expect(page.getByTestId('knowledge-sync-retry')).toBeHidden();
     });
 
     test('should render simple owner settings and explainability surface', async ({ page }) => {
