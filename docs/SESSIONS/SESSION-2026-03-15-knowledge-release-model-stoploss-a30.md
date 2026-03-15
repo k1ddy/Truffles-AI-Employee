@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-closeout-p6-a30.md
-- block_id: CONSOLE-KNOWLEDGE-ACTIVATION-CLOSEOUT-P6-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-ci-deploy-ssh-auth-unification-p7-a30.md
+- block_id: CI-DEPLOY-SSH-AUTH-UNIFICATION-P7-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0/P1/P2/P3/P4/P5 remain in place; this slice closes the remaining program gap with one tenant-level closeout artifact that combines release guard signals and branch-specific preview/live invariants without mutating runtime state.
+- scope: P0-P6 remain merged; this slice fixes the new post-merge `main` deploy failure by unifying deploy SSH auth/bootstrap with the already working livecheck path, without changing runtime product behavior.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -23,8 +23,10 @@
   - Deterministic backend/OpenAPI/frontend proof is green for the dedicated transport plus admin observability contract.
   - P5 rollout safety is now implemented: `scripts/restart_release.sh` can restart `truffles-knowledge-activation-service`, parity-check it against API/workers, and emit a `go|no_go` artifact via `truffles-api/scripts/knowledge_activation_release_guard.py`; `scripts/restart_knowledge_activation_service.sh` now verifies image identity + `/health`, and `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md` captures the canonical deploy/canary/rollback SOP.
   - P6 closeout automation is now implemented: `ops/knowledge_activation_closeout.py` reuses the P5 guard artifact, snapshots one tenant branch from Postgres, evaluates preview/live invariants, and emits a single closeout `go|no_go` verdict without mutating runtime state.
+  - New merge-only regression surfaced after PR `#974`: `main` run `23112703782` failed solely in `deploy` because `.github/workflows/ci.yml` still routes deploy via raw `appleboy/ssh-action` secret parsing while livecheck already normalizes/validates the same SSH key on-runner.
 - next:
-  - Final rollout step only: run `ops/knowledge_activation_closeout.py` on the rollout target and record the explicit closeout artifact before declaring the program done.
+  - First restore green `main` deploy by reusing the validated SSH bootstrap in deploy.
+  - After deploy is stable again, wire the P5/P6 release guard + closeout into post-deploy automation.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
   - truffles-api/app/services/knowledge_registry_service.py
@@ -65,8 +67,10 @@
   - `pytest -q tests/test_knowledge_activation_closeout.py tests/test_knowledge_activation_release_guard.py tests/test_restart_release_scripts.py`
   - `python3 -m py_compile ops/knowledge_activation_closeout.py`
   - `ruff check ops/knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_closeout.py`
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/23112703782
+  - `.github/workflows/ci.yml`
   - `npm run generate:api`
   - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
   - `npm run build`
   - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-15T19:11:09+05:00
+- last_updated: 2026-03-15T20:01:23+05:00
