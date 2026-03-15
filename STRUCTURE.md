@@ -146,11 +146,16 @@
 | `console-web/src/app/marketing/page.tsx` | Marketing Pro lifecycle UI (preview/approval/preflight/execute) | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx` | Owner/Admin consultant verification interactive workspace (sessions, transcript, explainer) | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationTeamToolsPanel.tsx` | Secondary team-tools disclosure for consultant verification (`recent sessions`, `compare`, `findings`) | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationOwnerSetupLane.tsx` | Left owner lane for consultant verification (`new session`, source/mode controls, scenario library) | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationTranscriptLane.tsx` | Middle transcript/composer lane for consultant verification | Frontend |
+| `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationReviewLane.tsx` | Right review lane for consultant verification (`explainer`, summary, team tools) | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationComparePanel.tsx` | Owner/Admin consultant verification live-vs-draft compare panel and readiness scorecard | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationFindingsPanel.tsx` | Owner/Admin consultant verification findings list, status updates, and draft retest actions | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationScenarioLibrary.tsx` | Owner/Admin consultant verification scenario catalog cards and quick-run actions | Frontend |
 | `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationSessionSummaryPanel.tsx` | Owner/Admin consultant verification session summary and replay controls | Frontend |
 | `console-web/src/app/knowledge/_components/KnowledgePackInspectorPanel.tsx` | Support-only Client Pack inspector panel used inside `Knowledge` disclosure | Frontend |
+| `console-web/src/app/knowledge/_components/KnowledgeStudioFlow.tsx` | Main owner flow shell for `Knowledge` stepper + stage panels | Frontend |
+| `console-web/src/app/knowledge/_components/KnowledgeRollbackConfirmDialog.tsx` | Rollback confirmation dialog extracted from `Knowledge` page | Frontend |
 | `console-web/src/app/knowledge/_components/KnowledgeLearningCandidatesPanel.tsx` | Support-only learning-candidates panel used inside `Knowledge` disclosure | Frontend |
 | `console-web/src/app/business/consultant-verification/_lib/presentation.ts` | Owner-facing verdict/explanation presentation helpers for consultant verification | Frontend |
 | `console-web/src/components/TenantsScopedErrorSummary.tsx` | Scoped error summary для Tenants workspace зон | Frontend |

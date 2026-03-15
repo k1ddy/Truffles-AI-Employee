@@ -1,11 +1,11 @@
 "use client";
 
-type KnowledgePackInspectorItem = {
+export type KnowledgePackInspectorItem = {
     path: string;
     preview: string;
 };
 
-type KnowledgePackInspectorSummary = {
+export type KnowledgePackInspectorSummary = {
     flattenedFieldsCount: number;
     servicesCount: number;
     priceRowsCount: number;
