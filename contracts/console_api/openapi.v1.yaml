@@ -56,17 +56,13 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Case Id
       - name: conversation_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Conversation Id
       responses:
         '200':
@@ -236,6 +232,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Not Found
         '422':
           description: Validation Error
           content:
@@ -398,33 +400,25 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: queue_view
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Queue View
       - name: q
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Q
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       - name: assigned_to_me
         in: query
@@ -437,9 +431,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Assignee Id
       - name: unassigned
         in: query
@@ -452,9 +444,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Phone
       - name: has_delivery_error
         in: query
@@ -481,57 +471,43 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Last Activity Since
       - name: sort_by
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Sort By
       - name: date_from
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Date From
       - name: date_to
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Date To
       - name: resolved_from
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Resolved From
       - name: resolved_to
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Resolved To
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -595,9 +571,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       responses:
         '200':
@@ -630,12 +604,10 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - enum:
-            - least_open_cases
-            - follow_up_sla_balance
-            type: string
-          - type: 'null'
+          enum:
+          - least_open_cases
+          - follow_up_sla_balance
+          type: string
           title: Policy
       responses:
         '200':
@@ -848,15 +820,15 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -1379,6 +1351,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
   /console/v1/business/consultant-verification/sessions:
     get:
       tags:
@@ -1400,6 +1378,12 @@ paths:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '409':
+          description: Conflict
           content:
             application/json:
               schema:
@@ -1479,6 +1463,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Conflict
         '422':
           description: Validation Error
           content:
@@ -1547,9 +1537,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: limit
         in: query
@@ -1579,6 +1567,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
           description: Forbidden
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Conflict
         '422':
           description: Validation Error
           content:
@@ -1648,6 +1642,12 @@ paths:
                 $ref: '#/components/schemas/ConsoleErrorResponse'
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '409':
+          description: Conflict
           content:
             application/json:
               schema:
@@ -2009,23 +2009,21 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -2109,23 +2107,21 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -2209,31 +2205,27 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: template
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Template
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -2347,15 +2339,15 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -2477,31 +2469,27 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Entity Type
       - name: entity_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Entity Id
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -2575,17 +2563,16 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
           title: Date
       - name: trend_days
         in: query
         required: false
         schema:
-          anyOf:
-          - type: integer
-          - type: 'null'
+          type: integer
+          maximum: 60
+          minimum: 3
           title: Trend Days
       responses:
         '200':
@@ -2710,10 +2697,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       responses:
         '200':
@@ -2751,10 +2736,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       responses:
         '200':
@@ -3102,9 +3085,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: limit
         in: query
@@ -3119,9 +3100,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       responses:
         '200':
@@ -3249,9 +3228,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -3264,9 +3241,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Q
       responses:
         '200':
@@ -3334,9 +3309,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -3349,65 +3322,49 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Q
       - name: company_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Company Id
       - name: lifecycle
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Lifecycle
       - name: include_fleet
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Fleet
       - name: include_summary
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Summary
       - name: fleet_lifecycle
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Fleet Lifecycle
       - name: payment_status
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Payment Status
       - name: service_state
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Service State
       responses:
         '200':
@@ -3481,9 +3438,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -3496,41 +3451,31 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Q
       - name: company_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Company Id
       - name: client_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Id
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       - name: lifecycle
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Lifecycle
       responses:
         '200':
@@ -3604,46 +3549,42 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Limit
       - name: q
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Q
       - name: company_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Company Id
       - name: lifecycle
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Lifecycle
       - name: attention_limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Attention Limit
       - name: stale_after_minutes
@@ -3659,9 +3600,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Low
       responses:
         '200':
@@ -3705,31 +3644,27 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Id
       - name: include_branches
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Branches
       - name: lifecycle
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Lifecycle
       - name: client_limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Client Limit
       - name: branch_limit
@@ -3737,39 +3672,33 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Branch Limit
       - name: client_cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Cursor
       - name: branch_cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Cursor
       - name: client_q
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Q
       - name: branch_q
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Q
       responses:
         '200':
@@ -3813,17 +3742,13 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Week Key
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -3966,17 +3891,13 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       - name: status
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       responses:
         '200':
@@ -4139,6 +4060,7 @@ paths:
         required: true
         schema:
           type: string
+          format: uuid
           title: Campaign Id
       - name: include_suppressed
         in: query
@@ -4152,6 +4074,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 500
+          minimum: 1
           default: 100
           title: Limit
       responses:
@@ -4279,6 +4203,7 @@ paths:
         required: true
         schema:
           type: string
+          format: uuid
           title: Campaign Id
       responses:
         '200':
@@ -4449,14 +4374,15 @@ paths:
         required: true
         schema:
           type: string
+          format: uuid
           title: Campaign Id
       - name: sample_limit
         in: query
         required: false
         schema:
-          anyOf:
-          - type: integer
-          - type: 'null'
+          type: integer
+          maximum: 20
+          minimum: 1
           title: Sample Limit
       responses:
         '200':
@@ -4547,9 +4473,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -4562,33 +4486,25 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Only Problematic
       - name: company_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Company Id
       - name: client_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Id
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       responses:
         '200':
@@ -4635,9 +4551,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -4650,25 +4564,19 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Company Id
       - name: client_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Id
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       responses:
         '200':
@@ -4764,6 +4672,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Limit
       - name: stale_after_minutes
@@ -4779,9 +4689,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Low
       responses:
         '200':
@@ -4820,6 +4728,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -4859,6 +4769,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Attention Limit
       - name: incident_limit
@@ -4866,6 +4778,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Incident Limit
       - name: ops_jobs_limit
@@ -4873,6 +4787,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 20
           title: Ops Jobs Limit
       - name: stale_after_minutes
@@ -4888,9 +4804,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Low
       responses:
         '200':
@@ -4929,15 +4843,15 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       - name: include_ready
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Ready
       responses:
         '200':
@@ -4976,6 +4890,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       - name: stale_after_minutes
@@ -4991,9 +4907,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Only Problematic
       responses:
         '200':
@@ -5032,6 +4946,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       - name: stale_after_minutes
@@ -5047,9 +4963,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include P2
       responses:
         '200':
@@ -5088,6 +5002,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       - name: stale_after_minutes
@@ -5103,9 +5019,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include P2
       responses:
         '200':
@@ -5154,6 +5068,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       - name: stale_after_minutes
@@ -5169,9 +5085,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include P2
       responses:
         '200':
@@ -5452,32 +5366,28 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       - name: status
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
         required: false
         schema:
           type: integer
+          maximum: 100
+          minimum: 1
           default: 50
           title: Limit
       responses:
@@ -5941,49 +5851,37 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Agent Id
       - name: scope
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Scope
       - name: company_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Company Id
       - name: client_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Client Id
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       - name: include_inactive
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Include Inactive
       responses:
         '200':
@@ -6102,17 +6000,13 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Agent Id
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       responses:
         '200':
@@ -6199,17 +6093,13 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       - name: reason
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Reason
       responses:
         '200':
@@ -6382,10 +6272,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       responses:
         '200':
@@ -6457,10 +6345,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       - name: limit
         in: query
@@ -6595,18 +6481,14 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Domain Key
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       - name: limit
         in: query
@@ -6761,26 +6643,20 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       - name: data_class
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Data Class
       - name: operation
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Operation
       - name: limit
         in: query
@@ -6838,10 +6714,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       - name: records_limit
         in: query
@@ -6905,10 +6779,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       responses:
         '200':
@@ -6958,18 +6830,14 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Domain Key
       - name: branch_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       - name: limit
         in: query
@@ -7084,17 +6952,13 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: certification_status
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Certification Status
       responses:
         '200':
@@ -7164,10 +7028,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       responses:
         '200':
@@ -7229,10 +7091,8 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Branch Id
       responses:
         '200':
@@ -7295,9 +7155,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       responses:
         '200':
@@ -7398,9 +7256,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Domain Slug
       responses:
         '200':
@@ -7432,9 +7288,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Domain Slug
       responses:
         '200':
@@ -7505,9 +7359,7 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Branch Id
       - name: include_inactive
         in: query
@@ -7652,12 +7504,14 @@ paths:
         required: true
         schema:
           type: string
+          format: uuid
           title: Specialist Id
       - name: date
         in: query
         required: true
         schema:
           type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
           title: Date
       - name: duration
         in: query
@@ -7721,25 +7575,19 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Specialist Id
       - name: conversation_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Conversation Id
       - name: case_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Case Id
       - name: lane
         in: query
@@ -7755,57 +7603,43 @@ paths:
         in: query
         required: false
         schema:
-          anyOf:
-          - type: boolean
-          - type: 'null'
+          type: boolean
           title: Needs Action
       - name: follow_up_owner_id
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Follow Up Owner Id
       - name: follow_up_overdue
         in: query
         required: false
         schema:
-          anyOf:
-          - type: boolean
-          - type: 'null'
+          type: boolean
           title: Follow Up Overdue
       - name: date_from
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Date From
       - name: date_to
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Date To
       - name: status
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Status
       - name: cursor
         in: query
         required: false
         schema:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Cursor
       - name: limit
         in: query
@@ -8031,11 +7865,8 @@ paths:
         Redirects to Google consent screen.'
       operationId: google_connect_console_v1_calendar_google_connect_get
       responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema: {}
+        '307':
+          description: Temporary redirect to Google OAuth
   /console/v1/calendar/google/callback:
     get:
       tags:
@@ -8059,11 +7890,8 @@ paths:
           type: string
           title: State
       responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema: {}
+        '307':
+          description: Temporary redirect back to Console settings
         '422':
           description: Validation Error
           content:

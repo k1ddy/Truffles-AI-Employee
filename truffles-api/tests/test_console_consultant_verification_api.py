@@ -161,6 +161,14 @@ def test_consultant_verification_routes_registered_in_openapi() -> None:
     assert "/console/v1/business/consultant-verification/compare" in paths
     assert "/console/v1/knowledge/versions/{version_id}/retry-sync" in paths
 
+    assert "409" in (paths["/console/v1/business/consultant-verification/overview"]["get"]["responses"] or {})
+    assert "409" in (paths["/console/v1/business/consultant-verification/sessions"]["get"]["responses"] or {})
+    assert "409" in (
+        paths["/console/v1/business/consultant-verification/sessions/{session_id}"]["get"]["responses"] or {}
+    )
+    assert "409" in (paths["/console/v1/business/consultant-verification/findings"]["get"]["responses"] or {})
+    assert "409" in (paths["/console/v1/business/consultant-verification/readiness"]["get"]["responses"] or {})
+
 
 @pytest.mark.asyncio
 async def test_create_consultant_verification_session_endpoint_delegates(monkeypatch) -> None:

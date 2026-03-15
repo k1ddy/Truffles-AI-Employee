@@ -1414,13 +1414,43 @@ jobs:
               except Exception as exc:
                   return {}, 0, str(exc)
 
+          def _normalize_branch_items(items) -> list[dict]:
+              return [item for item in items if isinstance(item, dict) and item.get("id")]
+
+          def _branch_sort_key(item: dict) -> tuple[int, int, str, str]:
+              slug = str(item.get("slug") or "").strip().lower()
+              name = str(item.get("name") or "").strip().lower()
+              is_active = bool(item.get("is_active"))
+              return (
+                  0 if is_active else 1,
+                  0 if slug == "main" or "основной" in name else 1,
+                  slug,
+                  str(item.get("id") or ""),
+              )
+
+          def _choose_branch(branch_items: list[dict], preferred_id: str | None = None) -> str | None:
+              if preferred_id:
+                  for item in branch_items:
+                      if item.get("id") == preferred_id and bool(item.get("is_active")):
+                          return preferred_id
+              active_items = [item for item in branch_items if bool(item.get("is_active"))]
+              if active_items:
+                  return sorted(active_items, key=_branch_sort_key)[0].get("id")
+              if preferred_id:
+                  for item in branch_items:
+                      if item.get("id") == preferred_id:
+                          return preferred_id
+              if branch_items:
+                  return sorted(branch_items, key=_branch_sort_key)[0].get("id")
+              return None
+
           data, me_status, me_error = fetch_json("/me")
           if me_status != 200:
               print(f"Selection headers from /me failed: status={me_status}, error={me_error or 'n/a'}")
 
           client = data.get("client") or {}
           clients = data.get("clients") or []
-          branches = data.get("branches") or []
+          branches = _normalize_branch_items(data.get("branches") or [])
 
           client_id = client.get("id")
           if not client_id and clients:
@@ -1429,26 +1459,26 @@ jobs:
           if not client_id:
               client_id = fallback_client_id
 
-          branch_id = data.get("selected_branch_id")
-          if not branch_id and branches:
-              first_branch = branches[0] if isinstance(branches[0], dict) else {}
-              branch_id = first_branch.get("id")
+          branch_id = None
+          if fallback_branch_id:
+              branch_id = fallback_branch_id
 
-          if client_id and not branch_id:
+          if not branch_id:
+              branch_id = _choose_branch(branches, preferred_id=data.get("selected_branch_id"))
+
+          if client_id:
               scoped_data, scoped_status, scoped_error = fetch_json("/me", {"X-Client-Id": client_id})
               if scoped_status != 200:
                   print(
                       "Selection headers from /me with X-Client-Id failed: "
                       f"status={scoped_status}, error={scoped_error or 'n/a'}"
                   )
-              scoped_branches = scoped_data.get("branches") or []
-              branch_id = scoped_data.get("selected_branch_id") or branch_id
-              if not branch_id and scoped_branches:
-                  first_scoped_branch = scoped_branches[0] if isinstance(scoped_branches[0], dict) else {}
-                  branch_id = first_scoped_branch.get("id")
+              scoped_branches = _normalize_branch_items(scoped_data.get("branches") or [])
+              preferred_branch_id = fallback_branch_id or scoped_data.get("selected_branch_id") or data.get("selected_branch_id")
+              branch_id = _choose_branch(scoped_branches, preferred_id=preferred_branch_id) or branch_id
 
-          if client_id and not branch_id:
-              params = urllib.parse.urlencode({"client_id": client_id, "lifecycle": "active", "limit": 1})
+          if client_id and (not branch_id or branch_id == data.get("selected_branch_id")):
+              params = urllib.parse.urlencode({"client_id": client_id, "lifecycle": "active", "limit": 50})
               branch_data, branch_status, branch_error = fetch_json(
                   f"/admin/branches?{params}",
                   {"X-Client-Id": client_id},
@@ -1458,13 +1488,8 @@ jobs:
                       "Selection headers from /admin/branches failed: "
                       f"status={branch_status}, error={branch_error or 'n/a'}"
                   )
-              branch_items = branch_data.get("items") or []
-              if branch_items:
-                  first_admin_branch = branch_items[0] if isinstance(branch_items[0], dict) else {}
-                  branch_id = first_admin_branch.get("id")
-
-          if not branch_id:
-              branch_id = fallback_branch_id
+              branch_items = _normalize_branch_items(branch_data.get("items") or [])
+              branch_id = _choose_branch(branch_items, preferred_id=fallback_branch_id) or branch_id
 
           if not client_id or not branch_id:
               raise SystemExit(
@@ -1496,24 +1521,26 @@ jobs:
             --url https://api.truffles.kz \
             --include-method=GET \
             --phases examples,fuzzing,stateful \
-            --exclude-path /ops/outbox \
-            --exclude-path /ops/jobs \
-            --exclude-path /ops/jobs/catalog \
-            --exclude-path /ops/jobs/{job_id} \
-            --exclude-path /admin/companies \
-            --exclude-path /admin/clients \
-            --exclude-path /admin/branches \
-            --exclude-path /admin/integrations \
-            --exclude-path /admin/capabilities \
-            --exclude-path /admin/reference-packs \
-            --exclude-path /admin/onboarding-contract \
-            --exclude-path /admin/webhook-secret \
-            --exclude-path /knowledge/current \
-            --exclude-path /knowledge/history \
-            --exclude-path /inbox/macros \
-            --exclude-path /onboarding/status \
-            --exclude-path /onboarding/advance \
-            --exclude-path /learning/candidates \
+            --exclude-path /console/v1/calendar/google/connect \
+            --exclude-path /console/v1/calendar/google/callback \
+            --exclude-path /console/v1/ops/outbox \
+            --exclude-path /console/v1/ops/jobs \
+            --exclude-path /console/v1/ops/jobs/catalog \
+            --exclude-path /console/v1/ops/jobs/{job_id} \
+            --exclude-path /console/v1/admin/companies \
+            --exclude-path /console/v1/admin/clients \
+            --exclude-path /console/v1/admin/branches \
+            --exclude-path /console/v1/admin/integrations \
+            --exclude-path /console/v1/admin/capabilities \
+            --exclude-path /console/v1/admin/reference-packs \
+            --exclude-path /console/v1/admin/onboarding-contract \
+            --exclude-path /console/v1/admin/webhook-secret \
+            --exclude-path /console/v1/knowledge/current \
+            --exclude-path /console/v1/knowledge/history \
+            --exclude-path /console/v1/inbox/macros \
+            --exclude-path /console/v1/onboarding/status \
+            --exclude-path /console/v1/onboarding/advance \
+            --exclude-path /console/v1/learning/candidates \
             --checks all \
             --request-timeout 20 \
             --max-examples=3 \
@@ -1712,6 +1739,44 @@ jobs:
           OUTBOX_WORKER_INTERVAL_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_INTERVAL_SECONDS:-}"')
           OUTBOX_COALESCE_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_COALESCE_SECONDS:-}"')
           QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
+          ADMIN_HEALTH_JSON="$(curl -fsS http://localhost:8000/admin/health || true)"
+          if [ -n "${ADMIN_HEALTH_JSON}" ]; then
+            HEALTH_FLAGS="$(
+              ADMIN_HEALTH_JSON="${ADMIN_HEALTH_JSON}" python3 - <<'PY'
+          import json
+          import os
+
+          raw = os.environ.get("ADMIN_HEALTH_JSON", "")
+          try:
+              payload = json.loads(raw)
+          except Exception:
+              print("|")
+              raise SystemExit(0)
+
+          safety = payload.get("safety") or {}
+
+          def normalize_bool(value):
+              if value is True:
+                  return "1"
+              if value is False:
+                  return "0"
+              return ""
+
+          print(
+              f"{normalize_bool(safety.get('test_mode_enabled'))}|"
+              f"{normalize_bool(safety.get('outbox_worker_enabled'))}"
+          )
+          PY
+            )"
+            HEALTH_TEST_MODE="${HEALTH_FLAGS%%|*}"
+            HEALTH_OUTBOX_WORKER_ENABLED="${HEALTH_FLAGS#*|}"
+            if [ -n "${HEALTH_TEST_MODE}" ]; then
+              TEST_MODE="${HEALTH_TEST_MODE}"
+            fi
+            if [ -n "${HEALTH_OUTBOX_WORKER_ENABLED}" ]; then
+              OUTBOX_WORKER_ENABLED="${HEALTH_OUTBOX_WORKER_ENABLED}"
+            fi
+          fi
           QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
           if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
             QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"

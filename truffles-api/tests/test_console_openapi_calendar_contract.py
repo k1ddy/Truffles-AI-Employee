@@ -19,6 +19,16 @@ def _find_path(paths: dict, path: str) -> dict | None:
     return None
 
 
+def _get_parameter(spec: dict, path: str, method: str, name: str) -> dict:
+    paths = spec.get("paths") or {}
+    prefixed_path = path if path.startswith("/console/v1/") else f"/console/v1{path}"
+    operation = ((paths.get(prefixed_path) or paths.get(path) or {}).get(method)) or {}
+    for parameter in operation.get("parameters") or []:
+        if parameter.get("name") == name:
+            return parameter
+    raise AssertionError(f"missing parameter {name} on {method.upper()} {path}")
+
+
 def _has_string_type(schema: dict) -> bool:
     if schema.get("type") == "string":
         return True
@@ -70,6 +80,60 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         available_ops = {key for key in (path_item or {}).keys() if isinstance(key, str)}
         for method in required_ops:
             assert method in available_ops, f"missing operation {method.upper()} {path}"
+
+
+def test_queue_state_view_contract_documents_not_found_and_google_oauth_redirects() -> None:
+    spec = _load_console_contract()
+    paths = spec.get("paths") or {}
+
+    queue_view_op = ((_find_path(paths, "/queue-state/views/{view_id}") or {}).get("get")) or {}
+    queue_view_responses = queue_view_op.get("responses") or {}
+    assert "404" in queue_view_responses
+
+    for path in ("/calendar/google/connect", "/calendar/google/callback"):
+        op = ((_find_path(paths, path) or {}).get("get")) or {}
+        responses = op.get("responses") or {}
+        assert "307" in responses, f"{path} must document 307 redirect response"
+
+
+def test_calendar_and_marketing_query_contracts_constrain_live_fuzz_inputs() -> None:
+    spec = _load_console_contract()
+
+    slots_date = (_get_parameter(spec, "/calendar/slots", "get", "date").get("schema") or {})
+    assert slots_date.get("pattern") == r"^\d{4}-\d{2}-\d{2}$"
+
+    slots_specialist = (_get_parameter(spec, "/calendar/slots", "get", "specialist_id").get("schema") or {})
+    assert slots_specialist.get("format") == "uuid"
+
+    diagnostics_campaign = (
+        _get_parameter(spec, "/admin/marketing/campaigns/{campaign_id}/diagnostics", "get", "campaign_id").get("schema")
+        or {}
+    )
+    assert diagnostics_campaign.get("format") == "uuid"
+
+    diagnostics_sample_limit = (
+        _get_parameter(spec, "/admin/marketing/campaigns/{campaign_id}/diagnostics", "get", "sample_limit").get("schema")
+        or {}
+    )
+    assert diagnostics_sample_limit.get("minimum") == 1
+
+    audience_campaign = (
+        _get_parameter(spec, "/admin/marketing/campaigns/{campaign_id}/audience", "get", "campaign_id").get("schema")
+        or {}
+    )
+    assert audience_campaign.get("format") == "uuid"
+
+    audience_limit = (
+        _get_parameter(spec, "/admin/marketing/campaigns/{campaign_id}/audience", "get", "limit").get("schema")
+        or {}
+    )
+    assert audience_limit.get("minimum") == 1
+
+    preflight_campaign = (
+        _get_parameter(spec, "/admin/marketing/campaigns/{campaign_id}/preflight", "get", "campaign_id").get("schema")
+        or {}
+    )
+    assert preflight_campaign.get("format") == "uuid"
 
 
 def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:

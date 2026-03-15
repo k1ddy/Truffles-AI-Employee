@@ -1,9 +1,167 @@
 # Schemathesis overrides for stable Console contract checks.
 [parameters]
-# demo_salon handover + conversation (stable prod seed)
+# demo_salon stable prod seeds
 case_id = "39af8e47-a062-4b81-8343-34bdc3084ef9"
 conversation_id = "e03933eb-780e-4d0d-890f-741bc3ca9733"
+client_id = "c839d5dd-65be-4733-a5d2-72c9f70707f0"
+company_id = "6a510116-a633-4ce0-91e2-972e51221b49"
+campaign_id = "4c95e9e0-c42d-44e0-8f54-eebd27f4fb46"
+specialist_id = "f3306db3-1028-4125-a50e-0c28535c2ef9"
+agent_id = "aaaaaaaa-0000-0000-0000-000000000001"
+assignee_id = "cccccccc-0000-0000-0000-000000000002"
+follow_up_owner_id = "cccccccc-0000-0000-0000-000000000002"
+change_id = "4a88822a-4291-49f2-9d85-4ba755489fce"
+
+# Common query defaults for live-safe positive generation
+limit = 20
+attention_limit = 20
+incident_limit = 20
+ops_jobs_limit = 20
+client_limit = 20
+branch_limit = 20
+records_limit = 100
+sample_limit = 5
+trend_days = 7
+stale_after_minutes = 60
+cursor = "2026-03-16T13:00:00+00:00"
+date = "2026-03-16"
+surface = "cases"
+scope = "client"
+lifecycle = "active"
+include_low = "false"
+include_p2 = "true"
+include_ready = "false"
+include_fleet = "true"
+include_summary = "false"
+include_branches = "true"
+include_inactive = "false"
+only_problematic = "false"
+policy = "least_open_cases"
+needs_action = "false"
+date_from = "2026-03-16"
+date_to = "2026-03-17"
+follow_up_overdue = "false"
 
 [generation]
 mode = "positive"
 allow-extra-parameters = false
+
+[[operations]]
+include-path = "/console/v1/learning/candidates"
+parameters = { status = "pending" }
+
+[[operations]]
+include-path = "/console/v1/business/consultant-verification/findings"
+parameters = { status = "new" }
+
+[[operations]]
+include-path = "/console/v1/audit"
+parameters = { entity_type = "branch", entity_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/admin/domain-catalog"
+parameters = { status = "active" }
+
+[[operations]]
+include-path = "/console/v1/admin/onboarding-blueprints"
+parameters = { domain_slug = "beauty" }
+
+[[operations]]
+include-path = "/console/v1/admin/branch-changes"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799", status = "draft" }
+
+[[operations]]
+include-path = "/console/v1/admin/tool-registry"
+parameters = { status = "active", certification_status = "certified" }
+
+[[operations]]
+include-path = "/console/v1/admin/marketing/campaigns"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799", status = "draft" }
+
+[[operations]]
+include-path = "/console/v1/admin/compliance-lifecycle/runs"
+parameters = { scope = "branch", branch_id = "b7f75692-951e-421a-aae6-f5db97394799", data_class = "learned_responses", operation = "retention_scan" }
+
+[[operations]]
+include-path = "/console/v1/admin/compliance-lifecycle/runs/{run_id}"
+parameters = { scope = "branch", branch_id = "b7f75692-951e-421a-aae6-f5db97394799", data_class = "learned_responses", operation = "retention_scan" }
+
+[[operations]]
+include-path = "/console/v1/admin/compliance-lifecycle/runs/{run_id}/artifact"
+parameters = { scope = "branch", branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/admin/compliance-policy-registry"
+parameters = { scope = "domain", domain_key = "beauty", data_class = "learned_responses" }
+
+[[operations]]
+include-path = "/console/v1/admin/policy-registry"
+parameters = { scope = "branch", branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/admin/sla-profile-registry"
+parameters = { scope = "domain", domain_key = "beauty" }
+
+[[operations]]
+include-path = "/console/v1/admin/provider-lifecycle"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/admin/memberships"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/admin/routing-profiles"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/admin/tenants/weekly-snapshots"
+parameters = { week_key = "2026-W11" }
+
+[[operations]]
+include-path = "/console/v1/admin/tenants/portfolio"
+parameters = { q = "demo" }
+
+[[operations]]
+include-path = "/console/v1/admin/tenants/company-cockpit"
+parameters = { client_q = "demo", branch_q = "main" }
+
+[[operations]]
+include-path = "/console/v1/ops/knowledge-activation"
+parameters = { status = "ready" }
+
+[[operations]]
+include-path = "/console/v1/ops/outbox"
+parameters = { status = "pending" }
+
+[[operations]]
+include-path = "/console/v1/ops/reminders"
+parameters = { status = "pending" }
+
+[[operations]]
+include-path = "/console/v1/calendar/google/connect"
+max-redirects = 0
+
+[[operations]]
+include-path = "/console/v1/calendar/google/callback"
+max-redirects = 0
+
+[[operations]]
+include-path = "/console/v1/calendar/specialists"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/calendar/bookings"
+parameters = { follow_up_owner_id = "cccccccc-0000-0000-0000-000000000002" }
+
+[[operations]]
+include-path = "/console/v1/cases"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799", status = "open", queue_view = "needs_reply", assigned_to_me = "false", unassigned = "false", has_delivery_error = "false", has_pending_outbox = "false", has_human_lock = "false", sort_by = "last_activity", last_activity_since = "2026-03-16T00:00:00+00:00", q = "demo", phone = "+77001234567", resolved_from = "2026-03-16", resolved_to = "2026-03-17" }
+
+[[operations]]
+include-path = "/console/v1/cases/assignees"
+parameters = { branch_id = "b7f75692-951e-421a-aae6-f5db97394799" }
+
+[[operations]]
+include-path = "/console/v1/queue-state/current"
+parameters = { surface = "calendar" }
