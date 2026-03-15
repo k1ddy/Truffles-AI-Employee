@@ -47,9 +47,10 @@
 | `.github/workflows/platform-admin-control-loop.yml` | Scheduled/dispatch workflow: Platform Admin control-loop (`kpi + anti-drift + optional e2e`) | OPS/Brain/Architect |
 | `.github/workflows/session-gate.yml` | CI gate: session log + doc-only policy | Brain/Architect |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
-| `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
+| `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (`outbox`, `knowledge_activation`, `sentinel`) | OPS |
+| `scripts/restart_knowledge_activation_service.sh` | Shadow restart для Knowledge Activation Service (`/knowledge-activation/process`, port `8015`) с image verify + `/health` poll | OPS |
 | `scripts/restart_api.sh` | Канонический деплой API (migration gate + version verify) | OPS |
-| `scripts/restart_release.sh` | Канонический release API+workers (digest + parity + migration gate) | OPS |
+| `scripts/restart_release.sh` | Канонический release API+workers (+ optional activation service + canary artifact) | OPS |
 | `scripts/check_migration_governance.py` | Governance check для SQL миграций (naming/frozen ops migrations) | Backend/OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
@@ -79,12 +80,14 @@
 | `ops/platform_admin_remediation_assist.py` | Deterministic remediation-assist plan/brief generator from Platform Admin KPI snapshot | Brain/OPS/QA |
 | `ops/console_owner_admin_kpi_snapshot.py` | KPI snapshot для Owner/Admin (`T+0/T+24`, impact baseline/replay, fail-fast guard) | Brain/OPS/QA |
 | `ops/owner_admin_control_loop.py` | Orchestration wrapper Owner/Admin control-loop (`t0/t24`: snapshot + gate + brief + log) | Brain/OPS/QA |
+| `ops/knowledge_activation_closeout.py` | Tenant-level closeout artifact for Knowledge Activation (`release guard + branch preview/live invariants`) | Brain/OPS/QA |
 | `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
 | `ops/backfill_branch_rag.py` | Backfill Qdrant branch metadata from published knowledge | OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
 | `truffles-api/scripts/apply_sql_migrations.py` | SQL migration runner (`schema_migrations` + checksum guard) | Backend/OPS |
+| `truffles-api/scripts/knowledge_activation_release_guard.py` | Release/canary guard for Knowledge Activation (`go/no_go` JSON from health/process/admin metrics) | Backend/OPS |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/services/console_owner_admin.py` | Owner/Admin business helpers extracted from `console.py` | Backend |
@@ -112,7 +115,8 @@
 | `truffles-api/app/models/console_consultant_verification_finding.py` | DB model for owner/admin consultant verification findings and remediation state | Backend |
 | `truffles-api/app/models/console_consultant_verification_session.py` | DB model for owner/admin consultant verification sessions | Backend |
 | `truffles-api/app/models/console_consultant_verification_turn.py` | DB model for persisted owner/admin consultant verification transcript turns | Backend |
-| `truffles-api/app/models/knowledge_version.py` | DB model for draft/published knowledge versions plus sync-status metadata and safe publish recovery state | Backend |
+| `truffles-api/app/models/knowledge_version.py` | DB model for immutable draft/published knowledge artifacts; legacy `sync_*` fields remain as compatibility aliases for activation progress | Backend |
+| `truffles-api/app/models/knowledge_activation_job.py` | DB model for knowledge live-activation attempts (`queued/running/ready/failed/stuck`) and retry/error observability | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/models/marketing_campaign.py` | Marketing campaign model (status/approval/preflight fields) | Backend |
 | `truffles-api/app/models/marketing_campaign_recipient.py` | Materialized audience snapshot per campaign | Backend |
@@ -126,9 +130,12 @@
 | `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
 | `truffles-api/app/decision_core_app.py` | Отдельный app для Decision Core | Backend |
 | `truffles-api/app/outbox_service_app.py` | Отдельный app для Outbox Service | Backend |
+| `truffles-api/app/knowledge_activation_service_app.py` | Отдельный app для Knowledge Activation Service | Backend |
 | `truffles-api/app/routers/inbox_service.py` | Router для Inbox Service | Backend |
 | `truffles-api/app/routers/decision_core.py` | Router для Decision Core | Backend |
 | `truffles-api/app/routers/outbox_service.py` | Router для Outbox Service | Backend |
+| `truffles-api/app/routers/knowledge_activation_service.py` | Router для Knowledge Activation Service | Backend |
+| `truffles-api/app/workers/knowledge_activation.py` | Dedicated worker for direct `knowledge_activation_jobs` claiming / processing / stuck detection | Backend |
 | `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/migrations/017_add_console_macros.sql` | Migration: console_macros (Inbox быстрые ответы) | Backend/OPS |
@@ -188,6 +195,7 @@
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
+| `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md` | Deploy/canary/rollback runbook for dedicated Knowledge Activation transport | Brain/Architect/OPS |
 | `docs/runbooks/INBOX_CALENDAR_WAVE4_RELEASE.md` | Wave4 release runbook for Inbox/Calendar (`canary -> go/no-go -> rollback`) | Brain/Architect/OPS |
 | `docs/runbooks/INBOX_SEMANTIC_WAVE22_VALIDATION.md` | Wave22 semantic validation runbook for Inbox manager/admin/history/booking matrix | Brain/Architect/QA |
 | `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | Closeout Task Package for Inbox/Calendar wave4 release discipline (`flag rollback + live lane evidence + runbook`) | Brain/Architect |
@@ -253,6 +261,11 @@
 | `docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Stabilization-reset Task Package for async knowledge sync, bounded owner states, and owner-surface overload containment | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md` | RCA-backed Task Package for unifying owner-facing sync-state truth after async publish/retry/rollback mutations | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-console-owner-scope-gate-unification-a5.md` | Task Package for extracting one shared owner scope-gate across `Knowledge` and `Проверка консультанта` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-release-model-stoploss-a30.md` | P0 stop-loss Task Package for separating consultant-verification preview readiness from live activation status and pinning session truth snapshots | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-release-model-correction-p1-a30.md` | Follow-up P1 Task Package for `active_version_id` and dedicated activation-job release model correction | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-observability-p2-a30.md` | Follow-up P2 Task Package for activation-stage/heartbeat observability and owner/admin active-vs-candidate disclosure | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-transport-p3-a30.md` | Follow-up P3 Task Package for dedicated activation worker/service transport over direct `knowledge_activation_jobs` claims | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md` | Follow-up P4 Task Package for platform-admin/operator activation health, retry, and alert surfaces on top of the dedicated activation transport | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave2-a920.md` | Session log for Wave2 safe simulation kernel implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave3-a920.md` | Session log for Wave3 owner-readable chat workspace implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave4-a920.md` | Session log for Wave4 scenario library, replay, and session summary implementation | Brain/Architect |
@@ -263,6 +276,9 @@
 | `docs/SESSIONS/SESSION-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Session log for the async knowledge sync + owner-surface stabilization reset block | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-console-knowledge-sync-state-unification-a4.md` | Session log for the sync-state truth unification block after async knowledge mutations | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-console-owner-scope-gate-unification-a5.md` | Session log for the shared owner scope-gate extraction block | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-15-knowledge-release-model-stoploss-a30.md` | Session log for the knowledge release-model stop-loss program through P3 dedicated activation transport | Brain/Architect |
+| `truffles-api/migrations/060_add_knowledge_release_activation_jobs.sql` | Migration adding `branches.active_knowledge_version_id` and `knowledge_activation_jobs` for the corrected knowledge release model | Backend |
+| `truffles-api/migrations/061_add_knowledge_activation_job_stage_fields.sql` | Migration adding `knowledge_activation_jobs.current_stage` for activation progress disclosure (`queued -> syncing_branch_docs -> applying_client_config -> switching_active_pointer -> finalizing`) | Backend |
 | `console-web/src/lib/console-scope-gate.ts` | Shared scope-apply helper that writes Console context storage and keeps dependent queries coherent after branch changes | Frontend |
 | `console-web/src/lib/calendar-action-registry.ts` | Canonical Calendar action registry and role/status/action scenario matrix used by booking cards, action panel, and deterministic operator proof | Frontend |
 | `truffles-api/app/services/calendar_action_contract.py` | Server-owned Calendar booking action contract builder for `allowed_actions` / `blocked_actions` and machine-readable blocked reasons | Backend |
@@ -669,7 +685,7 @@
 | `dev` | webhook + services | `truffles-api/app/routers/webhook/`, `truffles-api/app/services/*` |
 | `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/EVAL_GOLDEN.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
 | `docs` | specs + состояния | `SPECS/*`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md` |
-| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/truffles-main/scripts/restart_release.sh`, infra compose (не в этом репо) |
+| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/truffles-main/scripts/restart_release.sh`, `/home/zhan/truffles-main/scripts/restart_knowledge_activation_service.sh`, `truffles-api/scripts/knowledge_activation_release_guard.py`, `ops/knowledge_activation_closeout.py`, infra compose (не в этом репо) |
 
 ---
 

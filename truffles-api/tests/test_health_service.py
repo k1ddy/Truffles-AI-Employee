@@ -201,3 +201,25 @@ def test_check_and_alert_health_critical_on_failed_24h_threshold():
 
     assert len(alerts) == 1
     assert "Outbox critical" in alerts[0]
+
+
+def test_check_and_alert_health_critical_on_knowledge_activation_threshold():
+    checks = {
+        "knowledge_activation": {
+            "status": "critical",
+            "counts": {
+                "queued": 2,
+                "running": 1,
+                "failed": 1,
+                "stuck": 1,
+            },
+            "failed_24h": 2,
+            "stale_running": 1,
+            "oldest_queued_age_seconds": 1200,
+        }
+    }
+
+    alerts = check_and_alert_health(checks)
+
+    assert len(alerts) == 1
+    assert "Knowledge activation critical" in alerts[0]

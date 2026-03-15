@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_registry_service import get_active_knowledge_version
 from app.services.pack_compiler_service import extract_compiled_artifacts
 
 
@@ -98,7 +98,7 @@ def build_runtime_truth(
         )
 
     try:
-        version = get_current_published(db, branch_id=branch_id)
+        version = get_active_knowledge_version(db, branch_id=branch_id)
     except Exception:
         return RuntimeTruth(
             truth={},
@@ -113,7 +113,7 @@ def build_runtime_truth(
             truth={},
             client_slug=normalized_slug,
             branch_id=branch_id,
-            source="knowledge_not_published",
+            source="knowledge_not_active",
             allow_fallback=allow_fallback,
         )
 
@@ -141,7 +141,7 @@ def build_runtime_truth(
         truth=effective_pack,
         client_slug=normalized_slug,
         branch_id=branch_id,
-        source="knowledge_versions",
+        source="knowledge_active_version",
         version_id=str(getattr(version, "id", None)) if getattr(version, "id", None) else None,
         compiled_hash=compiled.get("hash") if isinstance(compiled, dict) else None,
         allow_fallback=allow_fallback,

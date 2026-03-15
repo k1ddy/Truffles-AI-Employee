@@ -8,8 +8,10 @@ EXPECTED_IMAGE="${EXPECTED_IMAGE:-}"
 ENV_FILE="${ENV_FILE:-/home/zhan/truffles-main/truffles-api/.env}"
 NETWORK="${NETWORK:-truffles_internal-net}"
 OUTBOX_WORKER_ENABLED="${OUTBOX_WORKER_ENABLED:-1}"
+KNOWLEDGE_ACTIVATION_WORKER_ENABLED="${KNOWLEDGE_ACTIVATION_WORKER_ENABLED:-1}"
 SENTINEL_ENABLED="${SENTINEL_ENABLED:-1}"
 OUTBOX_OTEL_SERVICE_NAME="${OUTBOX_OTEL_SERVICE_NAME:-truffles-outbox}"
+KNOWLEDGE_ACTIVATION_OTEL_SERVICE_NAME="${KNOWLEDGE_ACTIVATION_OTEL_SERVICE_NAME:-truffles-knowledge-activation}"
 SENTINEL_OTEL_SERVICE_NAME="${SENTINEL_OTEL_SERVICE_NAME:-truffles-sentinel}"
 
 is_ghcr_image_ref() {
@@ -54,6 +56,9 @@ run_worker() {
 run_worker "truffles-outbox" "python -m app.workers.outbox" \
   -e OUTBOX_WORKER_ENABLED="$OUTBOX_WORKER_ENABLED" \
   -e OTEL_SERVICE_NAME="$OUTBOX_OTEL_SERVICE_NAME"
+run_worker "truffles-knowledge-activation" "python -m app.workers.knowledge_activation" \
+  -e KNOWLEDGE_ACTIVATION_WORKER_ENABLED="$KNOWLEDGE_ACTIVATION_WORKER_ENABLED" \
+  -e OTEL_SERVICE_NAME="$KNOWLEDGE_ACTIVATION_OTEL_SERVICE_NAME"
 run_worker "truffles-sentinel" "python -m app.workers.sentinel" \
   -e SENTINEL_ENABLED="$SENTINEL_ENABLED" \
   -e OTEL_SERVICE_NAME="$SENTINEL_OTEL_SERVICE_NAME"
@@ -65,7 +70,7 @@ if [ -z "$expected_image_id" ]; then
   exit 1
 fi
 
-for worker in truffles-outbox truffles-sentinel; do
+for worker in truffles-outbox truffles-knowledge-activation truffles-sentinel; do
   actual_image_id="$(docker inspect --format '{{.Image}}' "$worker" 2>/dev/null || true)"
   if [ -z "$actual_image_id" ]; then
     echo "ERROR: worker verify failed (cannot inspect container: $worker)." >&2
@@ -79,4 +84,4 @@ for worker in truffles-outbox truffles-sentinel; do
   fi
 done
 
-echo "Workers restarted: truffles-outbox, truffles-sentinel"
+echo "Workers restarted: truffles-outbox, truffles-knowledge-activation, truffles-sentinel"

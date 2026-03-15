@@ -1,0 +1,72 @@
+# SESSION 2026-03-15-knowledge-release-model-stoploss-a30 — Session 2026-03-15-knowledge-release-model-stoploss-a30
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-closeout-p6-a30.md
+- block_id: CONSOLE-KNOWLEDGE-ACTIVATION-CLOSEOUT-P6-A30
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
+- worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
+- base_ref: origin/main
+- scope: P0/P1/P2/P3/P4/P5 remain in place; this slice closes the remaining program gap with one tenant-level closeout artifact that combines release guard signals and branch-specific preview/live invariants without mutating runtime state.
+- done:
+  - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
+  - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
+  - P2 observability remains in place: activation jobs persist `current_stage`; `knowledge/current`, `knowledge/history`, `publish`, `retry-sync`, and `rollback` expose `activation_stage`, `activation_queued_at`, and `activation_heartbeat_at`; owner/admin `Knowledge` keeps the `Live версия` vs `Published candidate` disclosure.
+  - P3 dedicated transport is now implemented: publish/retry/rollback create activation jobs without enqueuing generic `knowledge.sync` outbox rows; the dedicated worker/service claims queued jobs directly, executes activation by `job_id`, and marks stale running jobs `stuck` from heartbeat timeout.
+  - P4 admin/operator observability is now implemented: `health_service.py` exposes latest-job-per-version activation health, `/console/v1/health` returns `knowledge_activation`, `/console/v1/ops/knowledge-activation` + `/retry` expose queue/retry controls, `/metrics` exports activation gauges, sentinel/admin health include activation alerts, and `OpsPage.tsx` renders the activation card.
+  - Legacy `knowledge.sync` handling remains only as compatibility fallback inside `webhook/outbox.py` for pre-existing rows.
+  - Deterministic backend/OpenAPI/frontend proof is green for the dedicated transport plus admin observability contract.
+  - P5 rollout safety is now implemented: `scripts/restart_release.sh` can restart `truffles-knowledge-activation-service`, parity-check it against API/workers, and emit a `go|no_go` artifact via `truffles-api/scripts/knowledge_activation_release_guard.py`; `scripts/restart_knowledge_activation_service.sh` now verifies image identity + `/health`, and `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md` captures the canonical deploy/canary/rollback SOP.
+  - P6 closeout automation is now implemented: `ops/knowledge_activation_closeout.py` reuses the P5 guard artifact, snapshots one tenant branch from Postgres, evaluates preview/live invariants, and emits a single closeout `go|no_go` verdict without mutating runtime state.
+- next:
+  - Final rollout step only: run `ops/knowledge_activation_closeout.py` on the rollout target and record the explicit closeout artifact before declaring the program done.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
+  - truffles-api/app/services/knowledge_registry_service.py
+  - truffles-api/app/services/health_service.py
+  - truffles-api/app/logging_config.py
+  - truffles-api/app/main.py
+  - truffles-api/app/workers/sentinel.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/routers/knowledge_activation_service.py
+  - truffles-api/app/knowledge_activation_service_app.py
+  - truffles-api/app/workers/knowledge_activation.py
+  - truffles-api/docker-compose.yml
+  - scripts/restart_workers.sh
+  - scripts/restart_knowledge_activation_service.sh
+  - console-web/src/components/OpsPage.tsx
+  - contracts/console_api/openapi.v1.yaml
+  - truffles-api/tests/test_knowledge_registry_sync_backfill.py
+  - truffles-api/tests/test_admin_health.py
+  - truffles-api/tests/test_console_outbox_ops.py
+  - truffles-api/tests/test_console_owner_business.py
+  - truffles-api/tests/test_knowledge_activation_service_app.py
+  - truffles-api/tests/test_outbox_service_app.py
+  - `pytest -q tests/test_admin_health.py tests/test_console_outbox_ops.py tests/test_health_service.py tests/test_knowledge_registry_sync_backfill.py tests/test_console_owner_business.py`
+  - `ruff check app/services/health_service.py app/logging_config.py app/main.py app/workers/sentinel.py app/services/knowledge_registry_service.py app/routers/console.py app/schemas/console.py tests/test_admin_health.py tests/test_console_outbox_ops.py tests/test_health_service.py tests/test_knowledge_registry_sync_backfill.py tests/test_console_owner_business.py`
+  - `python3 scripts/generate_openapi.py --check`
+  - scripts/restart_release.sh
+  - scripts/restart_knowledge_activation_service.sh
+  - truffles-api/scripts/knowledge_activation_release_guard.py
+  - docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md
+  - truffles-api/tests/test_knowledge_activation_release_guard.py
+  - truffles-api/tests/test_restart_release_scripts.py
+  - `pytest -q tests/test_knowledge_activation_release_guard.py tests/test_restart_release_scripts.py`
+  - `ruff check scripts/knowledge_activation_release_guard.py tests/test_knowledge_activation_release_guard.py tests/test_restart_release_scripts.py`
+  - `bash -n scripts/restart_release.sh scripts/restart_knowledge_activation_service.sh`
+  - `SESSION_AGENT=a30 bash scripts/session_check.sh`
+  - ops/knowledge_activation_closeout.py
+  - truffles-api/tests/test_knowledge_activation_closeout.py
+  - `pytest -q tests/test_knowledge_activation_closeout.py tests/test_knowledge_activation_release_guard.py tests/test_restart_release_scripts.py`
+  - `python3 -m py_compile ops/knowledge_activation_closeout.py`
+  - `ruff check ops/knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_closeout.py`
+  - `npm run generate:api`
+  - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
+  - `npm run build`
+  - `python3 scripts/generate_openapi.py --check`
+- last_updated: 2026-03-15T19:11:09+05:00

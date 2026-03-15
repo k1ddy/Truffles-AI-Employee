@@ -19,6 +19,7 @@ class Branch(Base):
     phone = Column(Text)
     telegram_chat_id = Column(Text)
     knowledge_tag = Column(Text)
+    active_knowledge_version_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_versions.id"))
     knowledge_safe_mode = Column(Boolean, default=False)
     knowledge_safe_mode_reason = Column(Text)
     knowledge_safe_mode_at = Column(TIMESTAMP(timezone=True))

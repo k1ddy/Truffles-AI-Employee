@@ -54,6 +54,7 @@ from app.models import (
     ConversationHumanLock,
     DomainCapabilityTemplate,
     Handover,
+    KnowledgeActivationJob,
     KnowledgeVersion,
     LearnedResponse,
     MarketingCampaign,
@@ -208,6 +209,14 @@ from app.schemas.console import (
     ConsoleIntegrationBranchActionRequest,
     ConsoleIntegrationBranchActionResponse,
     ConsoleIntegrationsListResponse,
+    ConsoleKnowledgeActivationCounts,
+    ConsoleKnowledgeActivationHealth,
+    ConsoleKnowledgeActivationHealthThresholds,
+    ConsoleKnowledgeActivationOpsCounts,
+    ConsoleKnowledgeActivationOpsItem,
+    ConsoleKnowledgeActivationOpsListResponse,
+    ConsoleKnowledgeActivationRetryRequest,
+    ConsoleKnowledgeActivationRetryResponse,
     ConsoleKnowledgeCurrentResponse,
     ConsoleKnowledgeHistoryItem,
     ConsoleKnowledgeHistoryResponse,
@@ -746,6 +755,7 @@ from app.services.console_saved_views import (
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.health_service import build_knowledge_activation_health_snapshot
 from app.services.human_lock_service import (
     HUMAN_LOCK_SCOPE_CONVERSATION,
     HUMAN_LOCK_SCOPE_REMOTE,
@@ -758,14 +768,22 @@ from app.services.human_lock_service import (
 from app.services.integration_guardrails_service import run_integration_watchdog_scoped
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
-    enqueue_knowledge_sync_event,
+    coarse_sync_status_from_activation_state,
+    create_knowledge_activation_job,
+    get_active_knowledge_version,
     get_current_published,
     get_latest_draft,
+    get_latest_knowledge_activation_job,
+    knowledge_activation_stage_label,
+    knowledge_activation_state_label,
     knowledge_sync_status_label,
     list_history,
+    list_latest_knowledge_activation_jobs,
     mark_knowledge_version_sync_pending,
     normalize_knowledge_sync_status,
     publish_version,
+    resolve_knowledge_activation_stage,
+    resolve_knowledge_activation_state,
     restore_version,
     sync_published_branch_docs,
     upsert_draft,
@@ -9647,6 +9665,20 @@ _REMINDER_RETRY_STATUS_MAP = {
     "all": ["PENDING", "FAILED"],
 }
 
+_ACTIVATION_STATUS_VALUES = {
+    "queued",
+    "running",
+    "ready",
+    "failed",
+    "stuck",
+}
+
+_ACTIVATION_RETRY_STATUS_MAP = {
+    "failed": ["failed"],
+    "stuck": ["stuck"],
+    "all": ["failed", "stuck"],
+}
+
 _OPS_JOB_DEFINITIONS = {
     "outbox_process": {
         "label": "Outbox Process",
@@ -9767,6 +9799,24 @@ def _parse_reminder_retry_status_param(status: str) -> list[str]:
     return _REMINDER_RETRY_STATUS_MAP[normalized]
 
 
+def _parse_knowledge_activation_status_param(status: Optional[str]) -> Optional[list[str]]:
+    if not status:
+        return ["failed"]
+    normalized = status.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _ACTIVATION_STATUS_VALUES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    return [normalized]
+
+
+def _parse_knowledge_activation_retry_status_param(status: str) -> list[str]:
+    normalized = (status or "").strip().lower()
+    if normalized not in _ACTIVATION_RETRY_STATUS_MAP:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid retry status")
+    return _ACTIVATION_RETRY_STATUS_MAP[normalized]
+
+
 def _truncate_preview(value: Optional[str], limit: int = 120) -> Optional[str]:
     if not value:
         return None
@@ -9845,6 +9895,71 @@ def _build_outbox_item(row: OutboxMessage) -> ConsoleOutboxItem:
         remote_jid=summary.get("remote_jid"),
         instance_id=summary.get("instance_id"),
         forwarded_to_telegram=summary.get("forwarded_to_telegram"),
+    )
+
+
+def _build_knowledge_activation_health_payload(snapshot: dict) -> ConsoleKnowledgeActivationHealth:
+    thresholds = snapshot.get("thresholds", {})
+    if not isinstance(thresholds, dict):
+        thresholds = {}
+    counts = snapshot.get("counts", {})
+    if not isinstance(counts, dict):
+        counts = {}
+    return ConsoleKnowledgeActivationHealth(
+        status=str(snapshot.get("status") or "healthy"),
+        metric_basis=str(snapshot.get("metric_basis") or "latest_activation_job_per_version"),
+        counts=ConsoleKnowledgeActivationCounts(
+            queued=int(counts.get("queued") or 0),
+            running=int(counts.get("running") or 0),
+            ready=int(counts.get("ready") or 0),
+            failed=int(counts.get("failed") or 0),
+            stuck=int(counts.get("stuck") or 0),
+        ),
+        failed_24h=int(snapshot.get("failed_24h") or 0),
+        stale_running=int(snapshot.get("stale_running") or 0),
+        oldest_queued_age_seconds=(
+            int(snapshot["oldest_queued_age_seconds"])
+            if isinstance(snapshot.get("oldest_queued_age_seconds"), (int, float))
+            else None
+        ),
+        oldest_running_heartbeat_age_seconds=(
+            int(snapshot["oldest_running_heartbeat_age_seconds"])
+            if isinstance(snapshot.get("oldest_running_heartbeat_age_seconds"), (int, float))
+            else None
+        ),
+        thresholds=ConsoleKnowledgeActivationHealthThresholds(
+            queued_warning=int(thresholds.get("queued_warning") or 0),
+            queued_critical=int(thresholds.get("queued_critical") or 0),
+            failed_24h_warning=int(thresholds.get("failed_24h_warning") or 0),
+            failed_24h_critical=int(thresholds.get("failed_24h_critical") or 0),
+            stuck_warning=int(thresholds.get("stuck_warning") or 0),
+            stuck_critical=int(thresholds.get("stuck_critical") or 0),
+            oldest_queued_warning_seconds=int(thresholds.get("oldest_queued_warning_seconds") or 0),
+            oldest_queued_critical_seconds=int(thresholds.get("oldest_queued_critical_seconds") or 0),
+            stale_running_critical=int(thresholds.get("stale_running_critical") or 1),
+        ),
+    )
+
+
+def _build_knowledge_activation_ops_item(row: KnowledgeActivationJob) -> ConsoleKnowledgeActivationOpsItem:
+    state = resolve_knowledge_activation_state(row)
+    stage = resolve_knowledge_activation_stage(row)
+    return ConsoleKnowledgeActivationOpsItem(
+        id=row.id,
+        branch_id=row.branch_id,
+        version_id=row.version_id,
+        state=state,
+        state_label=knowledge_activation_state_label(state),
+        stage=stage,
+        stage_label=knowledge_activation_stage_label(stage),
+        source=str(row.source or ""),
+        attempt_count=int(row.attempt_count or 0),
+        queued_at=row.queued_at.isoformat() if row.queued_at else None,
+        started_at=row.started_at.isoformat() if row.started_at else None,
+        heartbeat_at=row.heartbeat_at.isoformat() if row.heartbeat_at else None,
+        finished_at=row.finished_at.isoformat() if row.finished_at else None,
+        last_error=row.last_error,
+        error_code=row.error_code,
     )
 
 
@@ -17745,13 +17860,202 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     else:
         overall_status = "ok"
 
+    try:
+        activation_snapshot = build_knowledge_activation_health_snapshot(db)
+    except Exception:
+        activation_snapshot = None
+    if overall_status == "ok" and isinstance(activation_snapshot, dict) and activation_snapshot.get("status") in {"warning", "critical"}:
+        overall_status = "degraded"
+
     return ConsoleHealthResponse(
         status=overall_status,
         version=os.getenv("APP_VERSION", "dev"),
         database=db_status,
         redis=redis_status,
         outbox_backlog=backlog,
+        knowledge_activation=(
+            _build_knowledge_activation_health_payload(activation_snapshot)
+            if isinstance(activation_snapshot, dict)
+            else None
+        ),
     )
+
+
+@router.get(
+    "/ops/knowledge-activation",
+    response_model=ConsoleKnowledgeActivationOpsListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_knowledge_activation_jobs(
+    request: Request,
+    status: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeActivationOpsListResponse:
+    """List latest knowledge activation jobs for ops."""
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="read")
+
+    _reject_unknown_query_params(request, {"status", "cursor", "limit"})
+    _validate_limit(limit)
+
+    status_filters = _parse_knowledge_activation_status_param(status)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    branch_scope = set(allowed_branch_ids) if allowed_branch_ids is not None else None
+    activation_health = build_knowledge_activation_health_snapshot(
+        db,
+        client_id=context.client.id,
+        branch_ids=branch_scope,
+    )
+    if allowed_branch_ids is not None and not allowed_branch_ids:
+        counts = activation_health.get("counts", {}) if isinstance(activation_health, dict) else {}
+        return ConsoleKnowledgeActivationOpsListResponse(
+            items=[],
+            cursor=None,
+            has_more=False,
+            counts=ConsoleKnowledgeActivationOpsCounts(
+                queued=int(counts.get("queued") or 0),
+                running=int(counts.get("running") or 0),
+                ready=int(counts.get("ready") or 0),
+                failed=int(counts.get("failed") or 0),
+                stuck=int(counts.get("stuck") or 0),
+                total=sum(int(counts.get(key) or 0) for key in ("queued", "running", "ready", "failed", "stuck")),
+            ),
+        )
+
+    cursor_date = _parse_cursor_param(cursor)
+    rows = list_latest_knowledge_activation_jobs(
+        db,
+        client_id=context.client.id,
+        branch_ids=branch_scope,
+        before=cursor_date,
+    )
+    if status_filters:
+        rows = [
+            row
+            for row in rows
+            if resolve_knowledge_activation_state(row) in status_filters
+        ]
+
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+    counts = activation_health.get("counts", {}) if isinstance(activation_health, dict) else {}
+
+    return ConsoleKnowledgeActivationOpsListResponse(
+        items=[_build_knowledge_activation_ops_item(row) for row in items_rows],
+        cursor=next_cursor,
+        has_more=has_more,
+        counts=ConsoleKnowledgeActivationOpsCounts(
+            queued=int(counts.get("queued") or 0),
+            running=int(counts.get("running") or 0),
+            ready=int(counts.get("ready") or 0),
+            failed=int(counts.get("failed") or 0),
+            stuck=int(counts.get("stuck") or 0),
+            total=sum(int(counts.get(key) or 0) for key in ("queued", "running", "ready", "failed", "stuck")),
+        ),
+    )
+
+
+@router.post(
+    "/ops/knowledge-activation/retry",
+    response_model=ConsoleKnowledgeActivationRetryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def retry_knowledge_activation_jobs(
+    body: ConsoleKnowledgeActivationRetryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeActivationRetryResponse:
+    """Create new queued activation attempts for failed or stuck jobs."""
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="write")
+
+    ids = [entry for entry in (body.ids or []) if entry]
+    if not ids:
+        _validate_limit(body.limit or 100)
+
+    retry_states = set(_parse_knowledge_activation_retry_status_param(body.status))
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None and not allowed_branch_ids:
+        return ConsoleKnowledgeActivationRetryResponse(success=True, retried=0, skipped=len(ids))
+
+    latest_rows = list_latest_knowledge_activation_jobs(
+        db,
+        client_id=context.client.id,
+        branch_ids=set(allowed_branch_ids) if allowed_branch_ids is not None else None,
+    )
+    eligible_rows = [
+        row
+        for row in latest_rows
+        if resolve_knowledge_activation_state(row) in retry_states
+    ]
+    if ids:
+        requested_ids = set(ids)
+        rows = [row for row in eligible_rows if row.id in requested_ids]
+        if not rows:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Knowledge activation jobs not found")
+        skipped = max(0, len(requested_ids) - len(rows))
+    else:
+        rows = eligible_rows[: body.limit or 100]
+        skipped = 0
+
+    branch_ids = {row.branch_id for row in rows}
+    version_ids = {row.version_id for row in rows}
+    branch_map = {
+        row.id: row
+        for row in (
+            db.query(Branch)
+            .filter(Branch.client_id == context.client.id, Branch.id.in_(branch_ids))
+            .all()
+            if branch_ids
+            else []
+        )
+    }
+    version_map = {
+        row.id: row
+        for row in (
+            db.query(KnowledgeVersion)
+            .filter(KnowledgeVersion.client_id == context.client.id, KnowledgeVersion.id.in_(version_ids))
+            .all()
+            if version_ids
+            else []
+        )
+    }
+
+    retried = 0
+    for row in rows:
+        branch = branch_map.get(row.branch_id)
+        version = version_map.get(row.version_id)
+        if branch is None or version is None:
+            skipped += 1
+            continue
+        create_knowledge_activation_job(
+            db,
+            branch=branch,
+            version=version,
+            actor_id=context.agent.id,
+            source="console_ops_retry",
+        )
+        retried += 1
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="knowledge_activation_retry",
+        entity_type="knowledge_activation",
+        payload={
+            "retried": retried,
+            "skipped": skipped,
+            "ids": [str(entry) for entry in ids] if ids else None,
+            "status": body.status,
+        },
+        client_id=context.client.id,
+    )
+    db.commit()
+
+    return ConsoleKnowledgeActivationRetryResponse(success=True, retried=retried, skipped=skipped)
 
 
 @router.get(
@@ -19305,20 +19609,119 @@ async def create_console_confirmation(
         expires_at=confirmation.expires_at.isoformat(),
     )
 
+def _fallback_activation_state_from_version(
+    version: KnowledgeVersion | None,
+    *,
+    active_version: KnowledgeVersion | None = None,
+) -> str:
+    if active_version is not None:
+        if version is None or getattr(active_version, "id", None) == getattr(version, "id", None):
+            return "ready"
+    if version is None:
+        return "not_started"
+    sync_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
+    if sync_status == "ready":
+        return "ready"
+    if sync_status == "failed":
+        return "failed"
+    return "queued"
+
+
+def _fallback_activation_stage_from_version(
+    version: KnowledgeVersion | None,
+    *,
+    active_version: KnowledgeVersion | None = None,
+) -> str | None:
+    if active_version is not None and version is None:
+        return "ready"
+    if version is None:
+        return None
+    if active_version is not None and getattr(active_version, "id", None) == getattr(version, "id", None):
+        return "ready"
+    sync_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
+    if sync_status == "ready":
+        return "ready"
+    if sync_status == "failed":
+        return "failed"
+    return "queued"
+
+
 def _serialize_knowledge_sync_state(
     version: KnowledgeVersion | None,
     *,
     branch: Branch | None = None,
+    active_version: KnowledgeVersion | None = None,
+    job: KnowledgeActivationJob | None = None,
 ) -> dict[str, Any]:
-    status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
-    completed_at = getattr(version, "sync_completed_at", None)
-    if status == "pending" and version is None:
-        status = "pending"
+    activation_status = (
+        resolve_knowledge_activation_state(job)
+        if job is not None
+        else _fallback_activation_state_from_version(version, active_version=active_version)
+    )
+    activation_stage = (
+        resolve_knowledge_activation_stage(job)
+        if job is not None
+        else _fallback_activation_stage_from_version(version, active_version=active_version)
+    )
+    sync_status = coarse_sync_status_from_activation_state(activation_status)
+    activation_finished_at = (
+        getattr(job, "finished_at", None)
+        if job is not None
+        else getattr(version, "sync_completed_at", None)
+    )
+    activation_error_message = (
+        getattr(job, "last_error", None)
+        if job is not None and getattr(job, "last_error", None)
+        else getattr(version, "sync_error", None) if version is not None else None
+    )
+    active_updated_at = None
+    if active_version is not None:
+        active_timestamp = getattr(active_version, "published_at", None) or getattr(active_version, "created_at", None)
+        if isinstance(active_timestamp, datetime):
+            active_updated_at = active_timestamp.isoformat()
     return {
-        "sync_status": status if version is not None else None,
-        "sync_status_label": knowledge_sync_status_label(status) if version is not None else None,
-        "sync_error": getattr(version, "sync_error", None) if version is not None else None,
-        "sync_completed_at": completed_at.isoformat() if isinstance(completed_at, datetime) else None,
+        "active_version_id": getattr(active_version, "id", None) if active_version is not None else getattr(branch, "active_knowledge_version_id", None),
+        "active_updated_at": active_updated_at,
+        "activation_status": activation_status if version is not None or active_version is not None else None,
+        "activation_status_label": knowledge_activation_state_label(activation_status)
+        if version is not None or active_version is not None or job is not None
+        else None,
+        "activation_job_id": getattr(job, "id", None) if job is not None else None,
+        "activation_stage": activation_stage,
+        "activation_stage_label": knowledge_activation_stage_label(activation_stage)
+        if activation_stage is not None
+        else None,
+        "activation_error_code": getattr(job, "error_code", None) if job is not None else None,
+        "activation_error_message": activation_error_message,
+        "activation_queued_at": (
+            job.queued_at.isoformat()
+            if job is not None and isinstance(getattr(job, "queued_at", None), datetime)
+            else None
+        ),
+        "activation_started_at": (
+            job.started_at.isoformat()
+            if job is not None and isinstance(getattr(job, "started_at", None), datetime)
+            else None
+        ),
+        "activation_heartbeat_at": (
+            job.heartbeat_at.isoformat()
+            if job is not None and isinstance(getattr(job, "heartbeat_at", None), datetime)
+            else None
+        ),
+        "activation_finished_at": (
+            activation_finished_at.isoformat()
+            if isinstance(activation_finished_at, datetime)
+            else None
+        ),
+        "activation_attempt_count": int(getattr(job, "attempt_count", 0) or 0) if job is not None else None,
+        "sync_status": sync_status,
+        "sync_status_label": knowledge_sync_status_label(sync_status) if sync_status else None,
+        "sync_error": activation_error_message,
+        "sync_completed_at": (
+            activation_finished_at.isoformat()
+            if isinstance(activation_finished_at, datetime)
+            else None
+        ),
         "knowledge_safe_mode": bool(getattr(branch, "knowledge_safe_mode", False)) if branch is not None else False,
         "knowledge_safe_mode_reason": getattr(branch, "knowledge_safe_mode_reason", None) if branch is not None else None,
         "knowledge_safe_mode_at": (
@@ -19344,35 +19747,32 @@ def _queue_knowledge_version_sync(
     event_type: str,
     audit_payload: dict[str, Any],
     source: str,
-) -> None:
+) -> KnowledgeActivationJob:
     now = datetime.now(timezone.utc)
     mark_knowledge_version_sync_pending(version)
-    branch.knowledge_safe_mode = False
-    branch.knowledge_safe_mode_reason = None
-    branch.knowledge_safe_mode_at = now
-    queued = enqueue_knowledge_sync_event(
+    job = create_knowledge_activation_job(
         db,
-        client=context.client,
         branch=branch,
         version=version,
         actor_id=context.agent.id,
-        actor_name=context.agent.name,
         source=source,
     )
-    if not queued:
-        raise RuntimeError("knowledge_sync_enqueue_failed")
+    branch.knowledge_safe_mode = False
+    branch.knowledge_safe_mode_reason = None
+    branch.knowledge_safe_mode_at = now
     record_audit_event(
         db,
         actor=context.agent,
         event_type=event_type,
         entity_type="branch",
         entity_id=branch.id,
-        payload={**audit_payload, "sync_status": "pending"},
+        payload={**audit_payload, "sync_status": "pending", "activation_job_id": str(job.id)},
         client_id=context.client.id,
         branch_id=branch.id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    return job
 
 
 @router.get(
@@ -19388,7 +19788,13 @@ async def get_knowledge_current(
     require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     version = get_current_published(db, branch_id=branch.id)
+    active_version = get_active_knowledge_version(db, branch_id=branch.id)
     draft = get_latest_draft(db, branch_id=branch.id)
+    activation_job = get_latest_knowledge_activation_job(
+        db,
+        branch_id=branch.id,
+        version_id=version.id if version is not None else None,
+    )
 
     def _version_content(row: KnowledgeVersion | None) -> str | None:
         if not row or not isinstance(row.payload_json, dict):
@@ -19407,9 +19813,19 @@ async def get_knowledge_current(
             version_id=None,
             payload=None,
             content=None,
-            **_serialize_knowledge_sync_state(None, branch=branch),
+            **_serialize_knowledge_sync_state(
+                None,
+                branch=branch,
+                active_version=active_version,
+                job=activation_job,
+            ),
         )
-    sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+    sync_state = _serialize_knowledge_sync_state(
+        version,
+        branch=branch,
+        active_version=active_version,
+        job=activation_job,
+    )
     return ConsoleKnowledgeCurrentResponse(
         version_id=version.id if version else None,
         payload=version.payload_json if version else None,
@@ -19530,6 +19946,7 @@ async def publish_knowledge(
         else None
     )
     current = get_current_published(db, branch_id=branch.id)
+    active_version = get_active_knowledge_version(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
     payload, errors, warnings, _diff = validate_draft(
         body.draft_text,
@@ -19560,7 +19977,7 @@ async def publish_knowledge(
                     "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
                 },
             )
-        compare_required = bool(current) and _resolve_consultant_verification_enabled(context)
+        compare_required = bool(active_version) and _resolve_consultant_verification_enabled(context)
         if compare_required:
             has_compare = has_recent_knowledge_compare_preflight(
                 db=db,
@@ -19596,7 +20013,7 @@ async def publish_knowledge(
             actor_id=context.agent.id,
             source_version_id=current.id if current else None,
         )
-        _queue_knowledge_version_sync(
+        activation_job = _queue_knowledge_version_sync(
             db=db,
             context=context,
             branch=branch,
@@ -19621,19 +20038,26 @@ async def publish_knowledge(
         ) from exc
     except RuntimeError as exc:
         _rollback_if_possible(db)
-        if str(exc) == "knowledge_sync_enqueue_failed":
-            raise ConsoleAPIError(
-                503,
-                "KNOWLEDGE_SYNC_QUEUE_FAILED",
-                "Knowledge published, but sync queue is unavailable",
-            ) from exc
         raise
 
     return ConsoleKnowledgePublishResponse(
         success=True,
         version_id=version.id,
         published_at=version.published_at.isoformat() if version.published_at else None,
-        message="Версия опубликована. Синхронизация выполняется.",
+        message="Версия опубликована. Обновление для клиентов выполняется отдельно.",
+        active_version_id=getattr(branch, "active_knowledge_version_id", None),
+        activation_status="queued",
+        activation_status_label=knowledge_activation_state_label("queued"),
+        activation_job_id=activation_job.id,
+        activation_stage="queued",
+        activation_stage_label=knowledge_activation_stage_label("queued"),
+        activation_error_code=None,
+        activation_error_message=None,
+        activation_queued_at=activation_job.queued_at.isoformat() if activation_job.queued_at else None,
+        activation_started_at=None,
+        activation_heartbeat_at=activation_job.heartbeat_at.isoformat() if activation_job.heartbeat_at else None,
+        activation_finished_at=None,
+        activation_attempt_count=activation_job.attempt_count,
         sync_status="pending",
         sync_status_label=knowledge_sync_status_label("pending"),
         sync_error=None,
@@ -19657,6 +20081,15 @@ async def list_knowledge_history(
     require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     items = list_history(db, branch_id=branch.id)
+    activation_jobs_by_version = {
+        item.id: get_latest_knowledge_activation_job(
+            db,
+            branch_id=branch.id,
+            version_id=item.id,
+        )
+        for item in items
+        if item.id is not None
+    }
     return ConsoleKnowledgeHistoryResponse(
         items=[
             ConsoleKnowledgeHistoryItem(
@@ -19665,6 +20098,73 @@ async def list_knowledge_history(
                 created_at=item.created_at.isoformat() if item.created_at else None,
                 published_at=item.published_at.isoformat() if item.published_at else None,
                 summary=item.summary,
+                is_active=item.id == getattr(branch, "active_knowledge_version_id", None),
+                activation_status=(
+                    resolve_knowledge_activation_state(activation_jobs_by_version.get(item.id))
+                    if item.id and activation_jobs_by_version.get(item.id) is not None
+                    else _fallback_activation_state_from_version(
+                        item,
+                        active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                    )
+                ),
+                activation_status_label=(
+                    knowledge_activation_state_label(resolve_knowledge_activation_state(activation_jobs_by_version.get(item.id)))
+                    if item.id and activation_jobs_by_version.get(item.id) is not None
+                    else knowledge_activation_state_label(
+                        _fallback_activation_state_from_version(
+                            item,
+                            active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                        )
+                    )
+                ),
+                activation_job_id=(
+                    getattr(activation_jobs_by_version.get(item.id), "id", None)
+                    if item.id
+                    else None
+                ),
+                activation_stage=(
+                    resolve_knowledge_activation_stage(activation_jobs_by_version.get(item.id))
+                    if item.id and activation_jobs_by_version.get(item.id) is not None
+                    else _fallback_activation_stage_from_version(
+                        item,
+                        active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                    )
+                ),
+                activation_stage_label=(
+                    knowledge_activation_stage_label(resolve_knowledge_activation_stage(activation_jobs_by_version.get(item.id)))
+                    if item.id and resolve_knowledge_activation_stage(activation_jobs_by_version.get(item.id)) is not None
+                    else knowledge_activation_stage_label(
+                        _fallback_activation_stage_from_version(
+                            item,
+                            active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                        )
+                    )
+                ),
+                activation_error_code=(
+                    getattr(activation_jobs_by_version.get(item.id), "error_code", None)
+                    if item.id
+                    else None
+                ),
+                activation_error_message=(
+                    getattr(activation_jobs_by_version.get(item.id), "last_error", None)
+                    if item.id
+                    else getattr(item, "sync_error", None)
+                ),
+                activation_queued_at=(
+                    activation_jobs_by_version.get(item.id).queued_at.isoformat()
+                    if item.id and isinstance(getattr(activation_jobs_by_version.get(item.id), "queued_at", None), datetime)
+                    else None
+                ),
+                activation_heartbeat_at=(
+                    activation_jobs_by_version.get(item.id).heartbeat_at.isoformat()
+                    if item.id and isinstance(getattr(activation_jobs_by_version.get(item.id), "heartbeat_at", None), datetime)
+                    else None
+                ),
+                activation_attempt_count=(
+                    getattr(activation_jobs_by_version.get(item.id), "attempt_count", None)
+                    if item.id
+                    else None
+                ),
                 sync_status=normalize_knowledge_sync_status(getattr(item, "sync_status", None)),
                 sync_status_label=knowledge_sync_status_label(getattr(item, "sync_status", None)),
                 sync_error=getattr(item, "sync_error", None),
@@ -19713,25 +20213,48 @@ async def retry_knowledge_version_sync(
     if not version:
         raise ConsoleAPIError(404, "NOT_FOUND", "Published knowledge version not found")
 
-    current_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
-    if current_status == "ready" and not branch.knowledge_safe_mode:
-        sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+    activation_job = get_latest_knowledge_activation_job(
+        db,
+        branch_id=branch.id,
+        version_id=version.id,
+    )
+    activation_status = (
+        resolve_knowledge_activation_state(activation_job)
+        if activation_job is not None
+        else _fallback_activation_state_from_version(
+            version,
+            active_version=get_active_knowledge_version(db, branch_id=branch.id),
+        )
+    )
+    if (
+        activation_status == "ready"
+        and getattr(branch, "active_knowledge_version_id", None) == version.id
+        and not branch.knowledge_safe_mode
+    ):
+        sync_state = _serialize_knowledge_sync_state(version, branch=branch, active_version=version, job=activation_job)
         return ConsoleKnowledgeSyncRetryResponse(
             success=True,
             version_id=version.id,
+            active_version_id=getattr(branch, "active_knowledge_version_id", None),
             message="Синхронизация уже актуальна.",
             **sync_state,
         )
-    if current_status == "pending" and not branch.knowledge_safe_mode:
-        sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+    if activation_status in {"queued", "running"} and not branch.knowledge_safe_mode:
+        sync_state = _serialize_knowledge_sync_state(
+            version,
+            branch=branch,
+            active_version=get_active_knowledge_version(db, branch_id=branch.id),
+            job=activation_job,
+        )
         return ConsoleKnowledgeSyncRetryResponse(
             success=True,
             version_id=version.id,
+            active_version_id=getattr(branch, "active_knowledge_version_id", None),
             message="Синхронизация уже выполняется.",
             **sync_state,
         )
     try:
-        _queue_knowledge_version_sync(
+        activation_job = _queue_knowledge_version_sync(
             db=db,
             context=context,
             branch=branch,
@@ -19743,16 +20266,23 @@ async def retry_knowledge_version_sync(
         db.commit()
     except RuntimeError as exc:
         _rollback_if_possible(db)
-        if str(exc) == "knowledge_sync_enqueue_failed":
-            raise ConsoleAPIError(
-                503,
-                "KNOWLEDGE_SYNC_QUEUE_FAILED",
-                "Knowledge sync queue is unavailable",
-            ) from exc
         raise
     return ConsoleKnowledgeSyncRetryResponse(
         success=True,
         version_id=version.id,
+        active_version_id=getattr(branch, "active_knowledge_version_id", None),
+        activation_status="queued",
+        activation_status_label=knowledge_activation_state_label("queued"),
+        activation_job_id=activation_job.id,
+        activation_stage="queued",
+        activation_stage_label=knowledge_activation_stage_label("queued"),
+        activation_error_code=None,
+        activation_error_message=None,
+        activation_queued_at=activation_job.queued_at.isoformat() if activation_job.queued_at else None,
+        activation_started_at=None,
+        activation_heartbeat_at=activation_job.heartbeat_at.isoformat() if activation_job.heartbeat_at else None,
+        activation_finished_at=None,
+        activation_attempt_count=activation_job.attempt_count,
         sync_status="pending",
         sync_status_label=knowledge_sync_status_label("pending"),
         sync_error=None,
@@ -19816,7 +20346,7 @@ async def rollback_knowledge(
             source_version=version,
             actor_id=context.agent.id,
         )
-        _queue_knowledge_version_sync(
+        activation_job = _queue_knowledge_version_sync(
             db=db,
             context=context,
             branch=branch,
@@ -19839,12 +20369,6 @@ async def rollback_knowledge(
         ) from exc
     except RuntimeError as exc:
         _rollback_if_possible(db)
-        if str(exc) == "knowledge_sync_enqueue_failed":
-            raise ConsoleAPIError(
-                503,
-                "KNOWLEDGE_SYNC_QUEUE_FAILED",
-                "Knowledge rollback published, but sync queue is unavailable",
-            ) from exc
         raise
     mark_confirmation_used(
         db,
@@ -19860,7 +20384,20 @@ async def rollback_knowledge(
     return ConsoleKnowledgeRollbackResponse(
         success=True,
         version_id=restored.id,
-        message="Версия восстановлена. Синхронизация выполняется.",
+        message="Версия восстановлена. Обновление для клиентов выполняется отдельно.",
+        active_version_id=getattr(branch, "active_knowledge_version_id", None),
+        activation_status="queued",
+        activation_status_label=knowledge_activation_state_label("queued"),
+        activation_job_id=activation_job.id,
+        activation_stage="queued",
+        activation_stage_label=knowledge_activation_stage_label("queued"),
+        activation_error_code=None,
+        activation_error_message=None,
+        activation_queued_at=activation_job.queued_at.isoformat() if activation_job.queued_at else None,
+        activation_started_at=None,
+        activation_heartbeat_at=activation_job.heartbeat_at.isoformat() if activation_job.heartbeat_at else None,
+        activation_finished_at=None,
+        activation_attempt_count=activation_job.attempt_count,
         sync_status="pending",
         sync_status_label=knowledge_sync_status_label("pending"),
         sync_error=None,

@@ -8,9 +8,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
+from sqlalchemy import and_, func
 
 from app.logging_config import get_logger
-from app.models import Branch, Client, KnowledgeVersion
+from app.models import Branch, Client, KnowledgeActivationJob, KnowledgeVersion
 from app.services.audit_service import record_audit_event
 from app.services.knowledge_service import QDRANT_API_KEY, QDRANT_COLLECTION, QDRANT_HOST, get_embedding
 from app.services.knowledge_validation import (
@@ -41,6 +42,22 @@ PACK_INDEX_SCHEMA_VERSION = "pack_index.v1"
 KNOWLEDGE_SYNC_STATUS_PENDING = "pending"
 KNOWLEDGE_SYNC_STATUS_READY = "ready"
 KNOWLEDGE_SYNC_STATUS_FAILED = "failed"
+KNOWLEDGE_ACTIVATION_STATE_NOT_STARTED = "not_started"
+KNOWLEDGE_ACTIVATION_STATE_QUEUED = "queued"
+KNOWLEDGE_ACTIVATION_STATE_RUNNING = "running"
+KNOWLEDGE_ACTIVATION_STATE_READY = "ready"
+KNOWLEDGE_ACTIVATION_STATE_FAILED = "failed"
+KNOWLEDGE_ACTIVATION_STATE_STUCK = "stuck"
+KNOWLEDGE_ACTIVATION_STAGE_QUEUED = "queued"
+KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS = "syncing_branch_docs"
+KNOWLEDGE_ACTIVATION_STAGE_APPLYING_CLIENT_CONFIG = "applying_client_config"
+KNOWLEDGE_ACTIVATION_STAGE_SWITCHING_ACTIVE_POINTER = "switching_active_pointer"
+KNOWLEDGE_ACTIVATION_STAGE_FINALIZING = "finalizing"
+KNOWLEDGE_ACTIVATION_STAGE_READY = "ready"
+KNOWLEDGE_ACTIVATION_STAGE_FAILED = "failed"
+KNOWLEDGE_ACTIVATION_STUCK_AFTER_SECONDS = 15 * 60
+KNOWLEDGE_ACTIVATION_STUCK_ERROR_CODE = "activation_stuck"
+KNOWLEDGE_ACTIVATION_STUCK_MESSAGE = "Activation worker heartbeat expired"
 OUTBOX_EVENT_KNOWLEDGE_SYNC = "knowledge.sync"
 
 
@@ -234,6 +251,46 @@ def get_current_published(
     )
 
 
+def _looks_like_knowledge_version(row: Any) -> bool:
+    return (
+        row is not None
+        and isinstance(getattr(row, "id", None), UUID)
+        and isinstance(getattr(row, "branch_id", None), UUID)
+    )
+
+
+def _looks_like_knowledge_activation_job(row: Any) -> bool:
+    return (
+        row is not None
+        and isinstance(getattr(row, "id", None), UUID)
+        and isinstance(getattr(row, "branch_id", None), UUID)
+        and isinstance(getattr(row, "version_id", None), UUID)
+    )
+
+
+def get_active_knowledge_version(
+    db,
+    *,
+    branch_id: UUID,
+) -> KnowledgeVersion | None:
+    query = getattr(db, "query", None)
+    if not callable(query):
+        return None
+    branch = query(Branch).filter(Branch.id == branch_id).first()
+    active_version_id = getattr(branch, "active_knowledge_version_id", None) if branch is not None else None
+    if not isinstance(active_version_id, UUID):
+        return None
+    version = (
+        query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.id == active_version_id,
+            KnowledgeVersion.branch_id == branch_id,
+        )
+        .first()
+    )
+    return version if _looks_like_knowledge_version(version) else None
+
+
 def get_latest_draft(
     db,
     *,
@@ -341,7 +398,8 @@ def publish_version(
     pack_yaml = dump_pack_yaml(payload_json)
     checksum = build_payload_checksum(payload_json)
 
-    if current:
+    active_version_id = getattr(branch, "active_knowledge_version_id", None)
+    if current and active_version_id and current.id != active_version_id:
         current.status = "archived"
 
     version = KnowledgeVersion(
@@ -410,12 +468,773 @@ def knowledge_sync_status_label(value: Any) -> str:
     return "Синхронизация выполняется"
 
 
+def get_latest_knowledge_activation_job(
+    db,
+    *,
+    branch_id: UUID,
+    version_id: UUID | None = None,
+) -> KnowledgeActivationJob | None:
+    query_fn = getattr(db, "query", None)
+    if not callable(query_fn):
+        return None
+    query = query_fn(KnowledgeActivationJob).filter(KnowledgeActivationJob.branch_id == branch_id)
+    if version_id is not None:
+        query = query.filter(KnowledgeActivationJob.version_id == version_id)
+    job = query.order_by(
+        KnowledgeActivationJob.queued_at.desc().nullslast(),
+        KnowledgeActivationJob.created_at.desc().nullslast(),
+    ).first()
+    return job if _looks_like_knowledge_activation_job(job) else None
+
+
+def list_latest_knowledge_activation_jobs(
+    db,
+    *,
+    client_id: UUID | None = None,
+    branch_ids: set[UUID] | None = None,
+    before: datetime | None = None,
+    limit: int | None = None,
+) -> list[KnowledgeActivationJob]:
+    query_fn = getattr(db, "query", None)
+    if not callable(query_fn):
+        return []
+    if branch_ids is not None and not branch_ids:
+        return []
+
+    scope_query = query_fn(
+        KnowledgeActivationJob.version_id.label("version_id"),
+        func.max(KnowledgeActivationJob.created_at).label("latest_created_at"),
+    )
+    if client_id is not None:
+        scope_query = scope_query.filter(KnowledgeActivationJob.client_id == client_id)
+    if branch_ids:
+        scope_query = scope_query.filter(KnowledgeActivationJob.branch_id.in_(branch_ids))
+    if before is not None:
+        scope_query = scope_query.filter(KnowledgeActivationJob.created_at < before)
+
+    latest_jobs = scope_query.group_by(KnowledgeActivationJob.version_id).subquery()
+
+    jobs_query = query_fn(KnowledgeActivationJob).join(
+        latest_jobs,
+        and_(
+            KnowledgeActivationJob.version_id == latest_jobs.c.version_id,
+            KnowledgeActivationJob.created_at == latest_jobs.c.latest_created_at,
+        ),
+    )
+    if client_id is not None:
+        jobs_query = jobs_query.filter(KnowledgeActivationJob.client_id == client_id)
+    if branch_ids:
+        jobs_query = jobs_query.filter(KnowledgeActivationJob.branch_id.in_(branch_ids))
+    if before is not None:
+        jobs_query = jobs_query.filter(KnowledgeActivationJob.created_at < before)
+
+    jobs_query = jobs_query.order_by(
+        KnowledgeActivationJob.created_at.desc().nullslast(),
+        KnowledgeActivationJob.queued_at.desc().nullslast(),
+    )
+    if isinstance(limit, int) and limit > 0:
+        jobs_query = jobs_query.limit(limit)
+
+    rows = jobs_query.all()
+    return [row for row in rows if _looks_like_knowledge_activation_job(row)]
+
+
+def get_knowledge_activation_job(
+    db,
+    *,
+    job_id: UUID,
+) -> KnowledgeActivationJob | None:
+    query_fn = getattr(db, "query", None)
+    if not callable(query_fn):
+        return None
+    job = query_fn(KnowledgeActivationJob).filter(KnowledgeActivationJob.id == job_id).first()
+    return job if _looks_like_knowledge_activation_job(job) else None
+
+
+def normalize_knowledge_activation_state(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_RUNNING:
+        return KNOWLEDGE_ACTIVATION_STATE_RUNNING
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_READY:
+        return KNOWLEDGE_ACTIVATION_STATE_READY
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_FAILED:
+        return KNOWLEDGE_ACTIVATION_STATE_FAILED
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_STUCK:
+        return KNOWLEDGE_ACTIVATION_STATE_STUCK
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_NOT_STARTED:
+        return KNOWLEDGE_ACTIVATION_STATE_NOT_STARTED
+    return KNOWLEDGE_ACTIVATION_STATE_QUEUED
+
+
+def normalize_knowledge_activation_stage(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS:
+        return KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_APPLYING_CLIENT_CONFIG:
+        return KNOWLEDGE_ACTIVATION_STAGE_APPLYING_CLIENT_CONFIG
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_SWITCHING_ACTIVE_POINTER:
+        return KNOWLEDGE_ACTIVATION_STAGE_SWITCHING_ACTIVE_POINTER
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_FINALIZING:
+        return KNOWLEDGE_ACTIVATION_STAGE_FINALIZING
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_READY:
+        return KNOWLEDGE_ACTIVATION_STAGE_READY
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_FAILED:
+        return KNOWLEDGE_ACTIVATION_STAGE_FAILED
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_QUEUED:
+        return KNOWLEDGE_ACTIVATION_STAGE_QUEUED
+    return None
+
+
+def resolve_knowledge_activation_state(
+    job: KnowledgeActivationJob | None,
+    *,
+    now: datetime | None = None,
+) -> str:
+    if job is None:
+        return KNOWLEDGE_ACTIVATION_STATE_NOT_STARTED
+    state = normalize_knowledge_activation_state(getattr(job, "state", None))
+    if state != KNOWLEDGE_ACTIVATION_STATE_RUNNING:
+        return state
+    heartbeat_at = getattr(job, "heartbeat_at", None) or getattr(job, "started_at", None) or getattr(job, "queued_at", None)
+    if isinstance(heartbeat_at, datetime):
+        reference_now = now or datetime.now(timezone.utc)
+        if (reference_now - heartbeat_at).total_seconds() > KNOWLEDGE_ACTIVATION_STUCK_AFTER_SECONDS:
+            return KNOWLEDGE_ACTIVATION_STATE_STUCK
+    return state
+
+
+def resolve_knowledge_activation_stage(job: KnowledgeActivationJob | None) -> str | None:
+    if job is None:
+        return None
+    stage = normalize_knowledge_activation_stage(getattr(job, "current_stage", None))
+    if stage is not None:
+        return stage
+    state = normalize_knowledge_activation_state(getattr(job, "state", None))
+    if state == KNOWLEDGE_ACTIVATION_STATE_READY:
+        return KNOWLEDGE_ACTIVATION_STAGE_READY
+    if state in {KNOWLEDGE_ACTIVATION_STATE_FAILED, KNOWLEDGE_ACTIVATION_STATE_STUCK}:
+        return KNOWLEDGE_ACTIVATION_STAGE_FAILED
+    if state == KNOWLEDGE_ACTIVATION_STATE_RUNNING:
+        return KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS
+    if state == KNOWLEDGE_ACTIVATION_STATE_QUEUED:
+        return KNOWLEDGE_ACTIVATION_STAGE_QUEUED
+    return None
+
+
+def knowledge_activation_state_label(value: Any) -> str:
+    normalized = normalize_knowledge_activation_state(value)
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_READY:
+        return "Обновление готово"
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_RUNNING:
+        return "Обновление выполняется"
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_FAILED:
+        return "Обновление требует внимания"
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_STUCK:
+        return "Обновление зависло"
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_NOT_STARTED:
+        return "Обновление ещё не запускалось"
+    return "Обновление в очереди"
+
+
+def knowledge_activation_stage_label(value: Any) -> str | None:
+    normalized = normalize_knowledge_activation_stage(value)
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS:
+        return "Собираем branch docs"
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_APPLYING_CLIENT_CONFIG:
+        return "Применяем pack index"
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_SWITCHING_ACTIVE_POINTER:
+        return "Переключаем live версию"
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_FINALIZING:
+        return "Финализируем activation"
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_READY:
+        return "Activation завершена"
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_FAILED:
+        return "Activation завершилась ошибкой"
+    if normalized == KNOWLEDGE_ACTIVATION_STAGE_QUEUED:
+        return "Ждёт запуска"
+    return None
+
+
+def coarse_sync_status_from_activation_state(value: Any) -> str | None:
+    normalized = normalize_knowledge_activation_state(value)
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_NOT_STARTED:
+        return None
+    if normalized == KNOWLEDGE_ACTIVATION_STATE_READY:
+        return KNOWLEDGE_SYNC_STATUS_READY
+    if normalized in {KNOWLEDGE_ACTIVATION_STATE_FAILED, KNOWLEDGE_ACTIVATION_STATE_STUCK}:
+        return KNOWLEDGE_SYNC_STATUS_FAILED
+    return KNOWLEDGE_SYNC_STATUS_PENDING
+
+
+def create_knowledge_activation_job(
+    db,
+    *,
+    branch: Branch,
+    version: KnowledgeVersion,
+    actor_id: UUID | None,
+    source: str,
+) -> KnowledgeActivationJob:
+    previous_job = get_latest_knowledge_activation_job(
+        db,
+        branch_id=branch.id,
+        version_id=version.id,
+    )
+    attempt_count = int(getattr(previous_job, "attempt_count", 0) or 0) + 1
+    now = datetime.now(timezone.utc)
+    job = KnowledgeActivationJob(
+        client_id=branch.client_id,
+        branch_id=branch.id,
+        version_id=version.id,
+        state=KNOWLEDGE_ACTIVATION_STATE_QUEUED,
+        current_stage=KNOWLEDGE_ACTIVATION_STAGE_QUEUED,
+        source=source,
+        attempt_count=attempt_count,
+        queued_at=now,
+        triggered_by=actor_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(job)
+    return job
+
+
+def mark_knowledge_activation_job_running(
+    job: KnowledgeActivationJob,
+    *,
+    started_at: datetime,
+    stage: str = KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS,
+) -> None:
+    job.state = KNOWLEDGE_ACTIVATION_STATE_RUNNING
+    job.current_stage = normalize_knowledge_activation_stage(stage) or KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS
+    if getattr(job, "started_at", None) is None:
+        job.started_at = started_at
+    job.heartbeat_at = started_at
+    job.finished_at = None
+    job.last_error = None
+    job.error_code = None
+    job.updated_at = started_at
+
+
+def touch_knowledge_activation_job_heartbeat(
+    job: KnowledgeActivationJob,
+    *,
+    heartbeat_at: datetime,
+    stage: str | None = None,
+) -> None:
+    normalized_stage = normalize_knowledge_activation_stage(stage)
+    if normalized_stage is not None:
+        job.current_stage = normalized_stage
+    job.heartbeat_at = heartbeat_at
+    job.updated_at = heartbeat_at
+
+
+def mark_knowledge_activation_job_ready(
+    job: KnowledgeActivationJob,
+    *,
+    finished_at: datetime,
+) -> None:
+    job.state = KNOWLEDGE_ACTIVATION_STATE_READY
+    job.current_stage = KNOWLEDGE_ACTIVATION_STAGE_READY
+    if getattr(job, "started_at", None) is None:
+        job.started_at = finished_at
+    job.heartbeat_at = finished_at
+    job.finished_at = finished_at
+    job.last_error = None
+    job.error_code = None
+    job.updated_at = finished_at
+
+
+def mark_knowledge_activation_job_failed(
+    job: KnowledgeActivationJob,
+    *,
+    error_message: str,
+    error_code: str,
+    finished_at: datetime,
+) -> None:
+    job.state = KNOWLEDGE_ACTIVATION_STATE_FAILED
+    job.current_stage = KNOWLEDGE_ACTIVATION_STAGE_FAILED
+    if getattr(job, "started_at", None) is None:
+        job.started_at = finished_at
+    job.heartbeat_at = finished_at
+    job.finished_at = finished_at
+    job.last_error = error_message
+    job.error_code = error_code
+    job.updated_at = finished_at
+
+
+def mark_knowledge_activation_job_stuck(
+    job: KnowledgeActivationJob,
+    *,
+    error_message: str,
+    finished_at: datetime,
+) -> None:
+    job.state = KNOWLEDGE_ACTIVATION_STATE_STUCK
+    job.current_stage = KNOWLEDGE_ACTIVATION_STAGE_FAILED
+    if getattr(job, "started_at", None) is None:
+        job.started_at = finished_at
+    job.heartbeat_at = finished_at
+    job.finished_at = finished_at
+    job.last_error = error_message
+    job.error_code = KNOWLEDGE_ACTIVATION_STUCK_ERROR_CODE
+    job.updated_at = finished_at
+
+
+def _finalize_terminal_knowledge_activation_job_error(
+    db,
+    *,
+    job: KnowledgeActivationJob,
+    branch: Branch | None,
+    version: KnowledgeVersion | None,
+    error_code: str,
+    error_message: str,
+    finished_at: datetime,
+    source: str,
+    actor_id: UUID | None,
+    actor_name: str | None,
+) -> None:
+    if version is not None:
+        mark_knowledge_version_sync_failed(
+            version,
+            error_message=error_message,
+            completed_at=finished_at,
+        )
+    mark_knowledge_activation_job_failed(
+        job,
+        error_message=error_message,
+        error_code=error_code,
+        finished_at=finished_at,
+    )
+    record_audit_event(
+        db,
+        actor=None,
+        event_type="knowledge_sync_failed",
+        entity_type="branch",
+        entity_id=job.branch_id,
+        payload={
+            "version_id": str(job.version_id),
+            "job_id": str(job.id),
+            "source": source,
+            "error": error_message,
+            "error_code": error_code,
+        },
+        client_id=job.client_id,
+        branch_id=job.branch_id,
+        actor_id=actor_id or getattr(job, "triggered_by", None),
+        actor_name=actor_name,
+    )
+    if branch is not None:
+        branch.knowledge_safe_mode = False
+        branch.knowledge_safe_mode_reason = None
+        branch.knowledge_safe_mode_at = finished_at
+    db.commit()
+
+
+def claim_queued_knowledge_activation_jobs(
+    db,
+    *,
+    limit: int = 10,
+) -> list[KnowledgeActivationJob]:
+    jobs = (
+        db.query(KnowledgeActivationJob)
+        .filter(KnowledgeActivationJob.state == KNOWLEDGE_ACTIVATION_STATE_QUEUED)
+        .order_by(
+            KnowledgeActivationJob.queued_at.asc().nullslast(),
+            KnowledgeActivationJob.created_at.asc().nullslast(),
+        )
+        .with_for_update(skip_locked=True)
+        .limit(limit)
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    claimed: list[KnowledgeActivationJob] = []
+    for job in jobs:
+        if job is None:
+            continue
+        mark_knowledge_activation_job_running(
+            job,
+            started_at=now,
+            stage=KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS,
+        )
+        claimed.append(job)
+    if claimed:
+        db.commit()
+    return claimed
+
+
+def mark_stale_knowledge_activation_jobs_stuck(
+    db,
+    *,
+    now: datetime | None = None,
+    stuck_after_seconds: int = KNOWLEDGE_ACTIVATION_STUCK_AFTER_SECONDS,
+) -> dict[str, int]:
+    reference_now = now or datetime.now(timezone.utc)
+    jobs = (
+        db.query(KnowledgeActivationJob)
+        .filter(KnowledgeActivationJob.state == KNOWLEDGE_ACTIVATION_STATE_RUNNING)
+        .all()
+    )
+    scanned = 0
+    stuck = 0
+    for job in jobs:
+        if job is None:
+            continue
+        scanned += 1
+        heartbeat_at = getattr(job, "heartbeat_at", None) or getattr(job, "started_at", None) or getattr(job, "queued_at", None)
+        if not isinstance(heartbeat_at, datetime):
+            continue
+        if (reference_now - heartbeat_at).total_seconds() <= stuck_after_seconds:
+            continue
+        version = (
+            db.query(KnowledgeVersion)
+            .filter(
+                KnowledgeVersion.id == job.version_id,
+                KnowledgeVersion.branch_id == job.branch_id,
+            )
+            .first()
+        )
+        mark_knowledge_activation_job_stuck(
+            job,
+            error_message=KNOWLEDGE_ACTIVATION_STUCK_MESSAGE,
+            finished_at=reference_now,
+        )
+        if version is not None:
+            mark_knowledge_version_sync_failed(
+                version,
+                error_message=KNOWLEDGE_ACTIVATION_STUCK_MESSAGE,
+                completed_at=reference_now,
+            )
+        record_audit_event(
+            db,
+            actor=None,
+            event_type="knowledge_activation_stuck",
+            entity_type="branch",
+            entity_id=job.branch_id,
+            payload={
+                "version_id": str(job.version_id),
+                "job_id": str(job.id),
+                "error": KNOWLEDGE_ACTIVATION_STUCK_MESSAGE,
+            },
+            client_id=job.client_id,
+            branch_id=job.branch_id,
+            actor_id=getattr(job, "triggered_by", None),
+            actor_name=None,
+        )
+        stuck += 1
+    if stuck:
+        db.commit()
+    return {"scanned": scanned, "stuck": stuck}
+
+
+def process_knowledge_activation_job(
+    db,
+    *,
+    job_id: UUID,
+    source: str | None = None,
+    actor_id: UUID | None = None,
+    actor_name: str | None = None,
+) -> tuple[bool, str | None]:
+    job = get_knowledge_activation_job(db, job_id=job_id)
+    if job is None:
+        return False, "job_not_found"
+    now = datetime.now(timezone.utc)
+    client = db.query(Client).filter(Client.id == job.client_id).first()
+    if client is None:
+        _finalize_terminal_knowledge_activation_job_error(
+            db,
+            job=job,
+            branch=None,
+            version=None,
+            error_code="client_not_found",
+            error_message="client_not_found",
+            finished_at=now,
+            source=source or str(getattr(job, "source", None) or "knowledge_activation"),
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        return False, "client_not_found"
+    branch = (
+        db.query(Branch)
+        .filter(
+            Branch.id == job.branch_id,
+            Branch.client_id == job.client_id,
+        )
+        .first()
+    )
+    if branch is None:
+        _finalize_terminal_knowledge_activation_job_error(
+            db,
+            job=job,
+            branch=None,
+            version=None,
+            error_code="branch_not_found",
+            error_message="branch_not_found",
+            finished_at=now,
+            source=source or str(getattr(job, "source", None) or "knowledge_activation"),
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        return False, "branch_not_found"
+    version = (
+        db.query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.id == job.version_id,
+            KnowledgeVersion.client_id == job.client_id,
+        )
+        .first()
+    )
+    if version is None:
+        _finalize_terminal_knowledge_activation_job_error(
+            db,
+            job=job,
+            branch=branch,
+            version=None,
+            error_code="version_not_found",
+            error_message="version_not_found",
+            finished_at=now,
+            source=source or str(getattr(job, "source", None) or "knowledge_activation"),
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        return False, "version_not_found"
+    if version.branch_id != branch.id:
+        _finalize_terminal_knowledge_activation_job_error(
+            db,
+            job=job,
+            branch=branch,
+            version=version,
+            error_code="branch_mismatch",
+            error_message="branch_mismatch",
+            finished_at=now,
+            source=source or str(getattr(job, "source", None) or "knowledge_activation"),
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        return False, "branch_mismatch"
+    if version.status != "published":
+        _finalize_terminal_knowledge_activation_job_error(
+            db,
+            job=job,
+            branch=branch,
+            version=version,
+            error_code="version_not_published",
+            error_message="version_not_published",
+            finished_at=now,
+            source=source or str(getattr(job, "source", None) or "knowledge_activation"),
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        return False, "version_not_published"
+
+    resolved_source = source or str(getattr(job, "source", None) or "knowledge_activation")
+    activation_state = resolve_knowledge_activation_state(job)
+    if (
+        getattr(branch, "active_knowledge_version_id", None) == version.id
+        and normalize_knowledge_sync_status(version.sync_status) == KNOWLEDGE_SYNC_STATUS_READY
+        and activation_state == KNOWLEDGE_ACTIVATION_STATE_READY
+    ):
+        return True, None
+    if activation_state in {KNOWLEDGE_ACTIVATION_STATE_FAILED, KNOWLEDGE_ACTIVATION_STATE_STUCK}:
+        return False, "job_not_runnable"
+
+    try:
+        if activation_state == KNOWLEDGE_ACTIVATION_STATE_QUEUED:
+            mark_knowledge_activation_job_running(
+                job,
+                started_at=now,
+                stage=KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS,
+            )
+        else:
+            touch_knowledge_activation_job_heartbeat(
+                job,
+                heartbeat_at=now,
+                stage=KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS,
+            )
+        sync_published_branch_docs(
+            db,
+            client_slug=client.name,
+            branch=branch,
+            version=version,
+            backfill_other_branches=False,
+        )
+        touch_knowledge_activation_job_heartbeat(
+            job,
+            heartbeat_at=datetime.now(timezone.utc),
+            stage=KNOWLEDGE_ACTIVATION_STAGE_APPLYING_CLIENT_CONFIG,
+        )
+        compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
+        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
+        if pack_index:
+            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
+            apply_pack_index_to_client_config(
+                client,
+                pack_index=pack_index,
+                version_id=version.id,
+                compiled_at=compiled_at or now,
+                source=resolved_source,
+                compiled_meta=build_compiled_pack_meta(
+                    compiled,
+                    version_id=version.id,
+                    source=resolved_source,
+                )
+                if isinstance(compiled, dict)
+                else None,
+            )
+        touch_knowledge_activation_job_heartbeat(
+            job,
+            heartbeat_at=datetime.now(timezone.utc),
+            stage=KNOWLEDGE_ACTIVATION_STAGE_SWITCHING_ACTIVE_POINTER,
+        )
+        previous_active_version_id = getattr(branch, "active_knowledge_version_id", None)
+        if previous_active_version_id and previous_active_version_id != version.id:
+            previous_active_version = (
+                db.query(KnowledgeVersion)
+                .filter(
+                    KnowledgeVersion.id == previous_active_version_id,
+                    KnowledgeVersion.branch_id == branch.id,
+                )
+                .first()
+            )
+            if previous_active_version is not None:
+                previous_active_version.status = "archived"
+        branch.active_knowledge_version_id = version.id
+        finalization_at = datetime.now(timezone.utc)
+        touch_knowledge_activation_job_heartbeat(
+            job,
+            heartbeat_at=finalization_at,
+            stage=KNOWLEDGE_ACTIVATION_STAGE_FINALIZING,
+        )
+        mark_knowledge_version_sync_ready(version, completed_at=finalization_at)
+        mark_knowledge_activation_job_ready(job, finished_at=finalization_at)
+        branch.knowledge_safe_mode = False
+        branch.knowledge_safe_mode_reason = None
+        branch.knowledge_safe_mode_at = finalization_at
+        record_audit_event(
+            db,
+            actor=None,
+            event_type="knowledge_sync_completed",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "version_id": str(version.id),
+                "job_id": str(job.id),
+                "source": resolved_source,
+            },
+            client_id=client.id,
+            branch_id=branch.id,
+            actor_id=actor_id or getattr(job, "triggered_by", None),
+            actor_name=actor_name,
+        )
+        db.commit()
+        return True, None
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "Knowledge activation job failed",
+            extra={
+                "context": {
+                    "client_id": str(job.client_id),
+                    "branch_id": str(job.branch_id),
+                    "version_id": str(job.version_id),
+                    "job_id": str(job.id),
+                    "source": resolved_source,
+                    "error": str(exc),
+                }
+            },
+        )
+        job = get_knowledge_activation_job(db, job_id=job_id)
+        branch = (
+            db.query(Branch)
+            .filter(
+                Branch.id == job.branch_id if job is not None else None,
+                Branch.client_id == job.client_id if job is not None else None,
+            )
+            .first()
+            if job is not None
+            else None
+        )
+        version = (
+            db.query(KnowledgeVersion)
+            .filter(
+                KnowledgeVersion.id == job.version_id if job is not None else None,
+                KnowledgeVersion.client_id == job.client_id if job is not None else None,
+            )
+            .first()
+            if job is not None
+            else None
+        )
+        if job is not None:
+            error_message = str(exc)
+            if branch is None and job is not None:
+                branch = (
+                    db.query(Branch)
+                    .filter(
+                        Branch.id == job.branch_id,
+                        Branch.client_id == job.client_id,
+                    )
+                    .first()
+                )
+            if version is None and job is not None:
+                version = (
+                    db.query(KnowledgeVersion)
+                    .filter(
+                        KnowledgeVersion.id == job.version_id,
+                        KnowledgeVersion.client_id == job.client_id,
+                    )
+                    .first()
+                )
+            _finalize_terminal_knowledge_activation_job_error(
+                db,
+                job=job,
+                branch=branch,
+                version=version,
+                error_code="activation_failed",
+                error_message=error_message,
+                finished_at=now,
+                source=resolved_source,
+                actor_id=actor_id,
+                actor_name=actor_name,
+            )
+        return False, str(exc)
+
+
+def process_queued_knowledge_activation_jobs(
+    db,
+    *,
+    limit: int = 10,
+    now: datetime | None = None,
+    stuck_after_seconds: int = KNOWLEDGE_ACTIVATION_STUCK_AFTER_SECONDS,
+) -> dict[str, int]:
+    stale = mark_stale_knowledge_activation_jobs_stuck(
+        db,
+        now=now,
+        stuck_after_seconds=stuck_after_seconds,
+    )
+    claimed_jobs = claim_queued_knowledge_activation_jobs(db, limit=limit)
+    succeeded = 0
+    failed = 0
+    for job in claimed_jobs:
+        ok, _error = process_knowledge_activation_job(db, job_id=job.id)
+        if ok:
+            succeeded += 1
+        else:
+            failed += 1
+    return {
+        "claimed": len(claimed_jobs),
+        "succeeded": succeeded,
+        "failed": failed,
+        "stuck": stale.get("stuck", 0),
+    }
+
+
 def enqueue_knowledge_sync_event(
     db,
     *,
     client: Client,
     branch: Branch,
     version: KnowledgeVersion,
+    job: KnowledgeActivationJob | None,
     actor_id: UUID | None,
     actor_name: str | None,
     source: str,
@@ -431,6 +1250,7 @@ def enqueue_knowledge_sync_event(
             "client_id": str(client.id),
             "branch_id": str(branch.id),
             "version_id": str(version.id),
+            "job_id": str(job.id) if job is not None else None,
             "source": source,
             "actor_id": str(actor_id) if actor_id else None,
             "actor_name": actor_name,
@@ -469,6 +1289,7 @@ def process_knowledge_sync_event(
     client_id = _parse_event_uuid(payload.get("client_id"))
     branch_id = _parse_event_uuid(payload.get("branch_id"))
     version_id = _parse_event_uuid(payload.get("version_id"))
+    job_id = _parse_event_uuid(payload.get("job_id"))
     source = str(payload.get("source") or "knowledge_sync")
     actor_id = _parse_event_uuid(payload.get("actor_id"))
     actor_name = payload.get("actor_name") if isinstance(payload.get("actor_name"), str) else None
@@ -502,14 +1323,44 @@ def process_knowledge_sync_event(
         return False, "branch_mismatch"
     if version.status != "published":
         return False, "version_not_published"
+    job: KnowledgeActivationJob | None = None
+    if job_id is not None:
+        job = (
+            db.query(KnowledgeActivationJob)
+            .filter(
+                KnowledgeActivationJob.id == job_id,
+                KnowledgeActivationJob.client_id == client_id,
+                KnowledgeActivationJob.branch_id == branch_id,
+            )
+            .first()
+        )
+        if job is None:
+            return False, "job_not_found"
+        if job.version_id != version.id:
+            return False, "job_mismatch"
+        return process_knowledge_activation_job(
+            db,
+            job_id=job.id,
+            source=source,
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
 
-    if normalize_knowledge_sync_status(version.sync_status) == KNOWLEDGE_SYNC_STATUS_READY and not bool(
-        getattr(branch, "knowledge_safe_mode", False)
+    if (
+        getattr(branch, "active_knowledge_version_id", None) == version.id
+        and normalize_knowledge_sync_status(version.sync_status) == KNOWLEDGE_SYNC_STATUS_READY
+        and (job is None or resolve_knowledge_activation_state(job) == KNOWLEDGE_ACTIVATION_STATE_READY)
     ):
         return True, None
 
     now = datetime.now(timezone.utc)
     try:
+        if job is not None:
+            mark_knowledge_activation_job_running(
+                job,
+                started_at=now,
+                stage=KNOWLEDGE_ACTIVATION_STAGE_SYNCING_BRANCH_DOCS,
+            )
         sync_published_branch_docs(
             db,
             client_slug=client.name,
@@ -517,6 +1368,12 @@ def process_knowledge_sync_event(
             version=version,
             backfill_other_branches=False,
         )
+        if job is not None:
+            touch_knowledge_activation_job_heartbeat(
+                job,
+                heartbeat_at=datetime.now(timezone.utc),
+                stage=KNOWLEDGE_ACTIVATION_STAGE_APPLYING_CLIENT_CONFIG,
+            )
         compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
         pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
         if pack_index:
@@ -535,10 +1392,38 @@ def process_knowledge_sync_event(
                 if isinstance(compiled, dict)
                 else None,
             )
-        mark_knowledge_version_sync_ready(version, completed_at=now)
+        if job is not None:
+            touch_knowledge_activation_job_heartbeat(
+                job,
+                heartbeat_at=datetime.now(timezone.utc),
+                stage=KNOWLEDGE_ACTIVATION_STAGE_SWITCHING_ACTIVE_POINTER,
+            )
+        previous_active_version_id = getattr(branch, "active_knowledge_version_id", None)
+        if previous_active_version_id and previous_active_version_id != version.id:
+            previous_active_version = (
+                db.query(KnowledgeVersion)
+                .filter(
+                    KnowledgeVersion.id == previous_active_version_id,
+                    KnowledgeVersion.branch_id == branch.id,
+                )
+                .first()
+            )
+            if previous_active_version is not None:
+                previous_active_version.status = "archived"
+        branch.active_knowledge_version_id = version.id
+        finalization_at = datetime.now(timezone.utc)
+        if job is not None:
+            touch_knowledge_activation_job_heartbeat(
+                job,
+                heartbeat_at=finalization_at,
+                stage=KNOWLEDGE_ACTIVATION_STAGE_FINALIZING,
+            )
+        mark_knowledge_version_sync_ready(version, completed_at=finalization_at)
+        if job is not None:
+            mark_knowledge_activation_job_ready(job, finished_at=finalization_at)
         branch.knowledge_safe_mode = False
         branch.knowledge_safe_mode_reason = None
-        branch.knowledge_safe_mode_at = now
+        branch.knowledge_safe_mode_at = finalization_at
         record_audit_event(
             db,
             actor=None,
@@ -547,6 +1432,7 @@ def process_knowledge_sync_event(
             entity_id=branch.id,
             payload={
                 "version_id": str(version.id),
+                "job_id": str(job.id) if job is not None else None,
                 "source": source,
             },
             client_id=client.id,
@@ -593,9 +1479,23 @@ def process_knowledge_sync_event(
                 error_message=error_message,
                 completed_at=now,
             )
-            branch.knowledge_safe_mode = True
-            branch.knowledge_safe_mode_reason = error_message
-            branch.knowledge_safe_mode_at = now
+            if job_id is not None:
+                job = (
+                    db.query(KnowledgeActivationJob)
+                    .filter(
+                        KnowledgeActivationJob.id == job_id,
+                        KnowledgeActivationJob.client_id == client_id,
+                        KnowledgeActivationJob.branch_id == branch_id,
+                    )
+                    .first()
+                )
+                if job is not None:
+                    mark_knowledge_activation_job_failed(
+                        job,
+                        error_message=error_message,
+                        error_code="activation_failed",
+                        finished_at=now,
+                    )
             record_audit_event(
                 db,
                 actor=None,
@@ -604,6 +1504,7 @@ def process_knowledge_sync_event(
                 entity_id=branch.id,
                 payload={
                     "version_id": str(version.id),
+                    "job_id": str(job.id) if job is not None else None,
                     "source": source,
                     "error": error_message,
                 },

@@ -121,8 +121,15 @@ export default function BusinessConsultantVerificationPage() {
     }, [branchOptions, data?.selected_branch_id, meData?.selected_branch_id]);
     const branchSelectionRequired = Boolean(meData) && Boolean(data?.branch_selection_required);
     const canApplyBranchContext = Boolean(branchDraftId && selectedClientId);
-    const syncBlocked = Boolean(data?.knowledge_safe_mode) || (data?.knowledge_sync_status ?? "pending") !== "ready";
-    const workspaceReady = data?.feature_enabled && !branchSelectionRequired && data?.status === "ready" && !syncBlocked;
+    const previewStatus = data?.preview_status ?? data?.status ?? "needs_attention";
+    const previewStatusLabel = data?.preview_status_label ?? data?.status_label ?? "Нужно внимание";
+    const previewSummary = data?.preview_summary ?? data?.summary ?? "";
+    const liveActivationStatus = data?.live_activation_status ?? data?.knowledge_sync_status ?? "not_started";
+    const liveActivationLabel = data?.live_activation_status_label ?? data?.knowledge_sync_status_label ?? "Обновление не запускалось";
+    const liveActivationSummary = data?.live_activation_summary ?? null;
+    const previewTruthSource = data?.preview_truth_source ?? null;
+    const blockers = data?.blockers ?? [];
+    const workspaceReady = Boolean(data?.feature_enabled) && !branchSelectionRequired && Boolean(data?.can_verify_now ?? (previewStatus === "ready"));
     const readinessCards = data?.readiness_cards ?? [];
     const stressTestExamples = data?.stress_test_examples ?? [];
     const actions = data?.actions ?? [];
@@ -229,14 +236,16 @@ export default function BusinessConsultantVerificationPage() {
                         <p className="mt-1 text-base font-semibold text-foreground">
                             {meData?.client?.name ?? "Клиент не выбран"} · {data.selected_branch_name ?? selectedBranchContext?.name ?? "Филиал не выбран"}
                         </p>
-                        <p className="mt-2 text-sm text-muted-foreground">Проверка использует только знания выбранного филиала.</p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                            Preview использует только знания выбранного филиала и pinned snapshot выбранного источника.
+                        </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className={`rounded-full px-3 py-1 font-semibold ${syncChipClass(data.knowledge_sync_status)}`}>
-                            {data.knowledge_sync_status_label ?? "Контекст нужен"}
+                        <span className={`rounded-full px-3 py-1 font-semibold ${statusChipClass(previewStatus)}`}>
+                            {previewStatusLabel}
                         </span>
-                        <span className={`rounded-full px-3 py-1 font-semibold ${statusChipClass(data.status)}`}>
-                            {data.status_label}
+                        <span className={`rounded-full px-3 py-1 font-semibold ${syncChipClass(liveActivationStatus)}`}>
+                            {liveActivationLabel}
                         </span>
                     </div>
                 </div>
@@ -248,21 +257,35 @@ export default function BusinessConsultantVerificationPage() {
                         Branch: {data.selected_branch_name ?? selectedBranchContext?.name ?? "не выбран"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        Последняя публикация: {data.knowledge_last_published_at ? new Date(data.knowledge_last_published_at).toLocaleString("ru-RU") : "—"}
+                        Preview:{" "}
+                        {previewTruthSource === "draft"
+                            ? "черновик"
+                            : previewTruthSource === "published"
+                              ? "опубликованный кандидат"
+                              : previewTruthSource === "live"
+                                ? "live версия"
+                                : "не готов"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        Статус синхронизации: {data.knowledge_sync_status_label ?? "—"}
+                        Обновление для клиентов: {liveActivationLabel ?? "—"}
                     </div>
                 </div>
-                {syncBlocked && !branchSelectionRequired ? (
+                {liveActivationSummary && !branchSelectionRequired ? (
                     <p
-                        className={`mt-3 rounded-lg px-3 py-2 text-sm ${data.knowledge_sync_status === "failed" || data.knowledge_safe_mode ? "border border-red-200 bg-red-50 text-red-800" : "border border-slate-300/70 bg-slate-50 text-slate-800"}`}
-                        data-testid="consultant-verification-sync-warning"
+                        className={`mt-3 rounded-lg px-3 py-2 text-sm ${liveActivationStatus === "failed" ? "border border-red-200 bg-red-50 text-red-800" : "border border-slate-300/70 bg-slate-50 text-slate-800"}`}
+                        data-testid="consultant-verification-live-activation"
                     >
-                        {data.knowledge_sync_status === "failed" || data.knowledge_safe_mode
-                            ? "Сначала восстановите синхронизацию знаний в разделе `Знания`, затем возвращайтесь к проверке консультанта."
-                            : "Синхронизация знаний еще выполняется. Проверка консультанта откроется после завершения."}
+                        {liveActivationSummary}
                     </p>
+                ) : null}
+                {blockers.length > 0 ? (
+                    <ul className="mt-3 space-y-2" data-testid="consultant-verification-blockers">
+                        {blockers.map((blocker) => (
+                            <li key={blocker} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                {blocker}
+                            </li>
+                        ))}
+                    </ul>
                 ) : null}
             </section>
 
@@ -297,16 +320,16 @@ export default function BusinessConsultantVerificationPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <p className="text-sm text-muted-foreground">Статус контура проверки</p>
-                        <p className="mt-1 text-base font-semibold text-foreground">{data.status_label}</p>
+                        <p className="mt-1 text-base font-semibold text-foreground">{previewStatusLabel}</p>
                         <p className="mt-2 text-sm text-muted-foreground" data-testid="consultant-verification-summary">
-                            {data.summary}
+                            {previewSummary}
                         </p>
                     </div>
                     <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(data.status)}`}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(previewStatus)}`}
                         data-testid="consultant-verification-status-chip"
                     >
-                        {data.status}
+                        {previewStatus}
                     </span>
                 </div>
                 <div className="mt-4 rounded-lg border border-border/60 bg-muted/20 p-3">
@@ -325,6 +348,13 @@ export default function BusinessConsultantVerificationPage() {
                     >
                         Для этого клиента пока включен только обзор готовности. Интерактивная проверка откроется после
                         следующей волны rollout.
+                    </p>
+                ) : !(data?.can_verify_now ?? (previewStatus === "ready")) ? (
+                    <p
+                        className="mt-4 rounded-lg border border-slate-300/60 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+                        data-testid="consultant-verification-preview-gate"
+                    >
+                        Preview пока не готов. Подготовьте источник данных выше и затем запускайте проверку.
                     </p>
                 ) : null}
             </section>

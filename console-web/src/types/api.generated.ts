@@ -5577,7 +5577,7 @@ export interface components {
              * Source Mode
              * @enum {string}
              */
-            source_mode: "live" | "draft";
+            source_mode: "live" | "published" | "draft";
             /**
              * Challenge Mode
              * @enum {string}
@@ -5674,6 +5674,59 @@ export interface components {
             status_label: string;
             /** Summary */
             summary: string;
+            /**
+             * Verification Ready
+             * @default false
+             */
+            verification_ready: boolean;
+            /**
+             * Can Verify Now
+             * @default false
+             */
+            can_verify_now: boolean;
+            /**
+             * Preview Status
+             * @default needs_attention
+             * @enum {string}
+             */
+            preview_status: "ready" | "needs_attention" | "not_enabled";
+            /**
+             * Preview Status Label
+             * @default Нужно внимание
+             */
+            preview_status_label: string;
+            /** Preview Summary */
+            preview_summary?: string | null;
+            /** Preview Truth Source */
+            preview_truth_source?: ("live" | "published" | "draft") | null;
+            /** Preview Truth Version Id */
+            preview_truth_version_id?: string | null;
+            /** Live Truth Version Id */
+            live_truth_version_id?: string | null;
+            /** Published Candidate Version Id */
+            published_candidate_version_id?: string | null;
+            /**
+             * Available Source Modes
+             * @default []
+             */
+            available_source_modes: ("live" | "published" | "draft")[];
+            /** Default Source Mode */
+            default_source_mode?: ("live" | "published" | "draft") | null;
+            /** Live Activation Status */
+            live_activation_status?: ("ready" | "pending" | "failed" | "not_started") | null;
+            /** Live Activation Status Label */
+            live_activation_status_label?: string | null;
+            /** Live Activation Summary */
+            live_activation_summary?: string | null;
+            /** Live Activation Error */
+            live_activation_error?: string | null;
+            /** Live Activation Job Id */
+            live_activation_job_id?: string | null;
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: string[];
             /** Next Wave Summary */
             next_wave_summary: string;
             /**
@@ -5788,7 +5841,7 @@ export interface components {
              * @default live
              * @enum {string}
              */
-            source_mode: "live" | "draft";
+            source_mode: "live" | "published" | "draft";
             /**
              * Challenge Mode
              * @default as_client
@@ -5834,7 +5887,7 @@ export interface components {
              * Source Mode
              * @enum {string}
              */
-            source_mode: "live" | "draft";
+            source_mode: "live" | "published" | "draft";
             /**
              * Challenge Mode
              * @enum {string}
@@ -6538,6 +6591,34 @@ export interface components {
             content?: string | null;
             /** Updated At */
             updated_at?: string | null;
+            /** Active Version Id */
+            active_version_id?: string | null;
+            /** Active Updated At */
+            active_updated_at?: string | null;
+            /** Activation Status */
+            activation_status?: ("not_started" | "queued" | "running" | "ready" | "failed" | "stuck") | null;
+            /** Activation Status Label */
+            activation_status_label?: string | null;
+            /** Activation Job Id */
+            activation_job_id?: string | null;
+            /** Activation Stage */
+            activation_stage?: ("queued" | "syncing_branch_docs" | "applying_client_config" | "switching_active_pointer" | "finalizing" | "ready" | "failed") | null;
+            /** Activation Stage Label */
+            activation_stage_label?: string | null;
+            /** Activation Error Code */
+            activation_error_code?: string | null;
+            /** Activation Error Message */
+            activation_error_message?: string | null;
+            /** Activation Queued At */
+            activation_queued_at?: string | null;
+            /** Activation Started At */
+            activation_started_at?: string | null;
+            /** Activation Heartbeat At */
+            activation_heartbeat_at?: string | null;
+            /** Activation Finished At */
+            activation_finished_at?: string | null;
+            /** Activation Attempt Count */
+            activation_attempt_count?: number | null;
             /** Sync Status */
             sync_status?: string | null;
             /** Sync Status Label */
@@ -6593,6 +6674,31 @@ export interface components {
             published_at?: string | null;
             /** Summary */
             summary?: string | null;
+            /**
+             * Is Active
+             * @default false
+             */
+            is_active: boolean;
+            /** Activation Status */
+            activation_status?: ("not_started" | "queued" | "running" | "ready" | "failed" | "stuck") | null;
+            /** Activation Status Label */
+            activation_status_label?: string | null;
+            /** Activation Job Id */
+            activation_job_id?: string | null;
+            /** Activation Stage */
+            activation_stage?: ("queued" | "syncing_branch_docs" | "applying_client_config" | "switching_active_pointer" | "finalizing" | "ready" | "failed") | null;
+            /** Activation Stage Label */
+            activation_stage_label?: string | null;
+            /** Activation Error Code */
+            activation_error_code?: string | null;
+            /** Activation Error Message */
+            activation_error_message?: string | null;
+            /** Activation Queued At */
+            activation_queued_at?: string | null;
+            /** Activation Heartbeat At */
+            activation_heartbeat_at?: string | null;
+            /** Activation Attempt Count */
+            activation_attempt_count?: number | null;
             /** Sync Status */
             sync_status?: string | null;
             /** Sync Status Label */
@@ -6627,6 +6733,32 @@ export interface components {
             published_at?: string | null;
             /** Message */
             message?: string | null;
+            /** Active Version Id */
+            active_version_id?: string | null;
+            /** Activation Status */
+            activation_status?: ("not_started" | "queued" | "running" | "ready" | "failed" | "stuck") | null;
+            /** Activation Status Label */
+            activation_status_label?: string | null;
+            /** Activation Job Id */
+            activation_job_id?: string | null;
+            /** Activation Stage */
+            activation_stage?: ("queued" | "syncing_branch_docs" | "applying_client_config" | "switching_active_pointer" | "finalizing" | "ready" | "failed") | null;
+            /** Activation Stage Label */
+            activation_stage_label?: string | null;
+            /** Activation Error Code */
+            activation_error_code?: string | null;
+            /** Activation Error Message */
+            activation_error_message?: string | null;
+            /** Activation Queued At */
+            activation_queued_at?: string | null;
+            /** Activation Started At */
+            activation_started_at?: string | null;
+            /** Activation Heartbeat At */
+            activation_heartbeat_at?: string | null;
+            /** Activation Finished At */
+            activation_finished_at?: string | null;
+            /** Activation Attempt Count */
+            activation_attempt_count?: number | null;
             /**
              * Sync Status
              * @default pending
@@ -6669,6 +6801,32 @@ export interface components {
             version_id?: string | null;
             /** Message */
             message?: string | null;
+            /** Active Version Id */
+            active_version_id?: string | null;
+            /** Activation Status */
+            activation_status?: ("not_started" | "queued" | "running" | "ready" | "failed" | "stuck") | null;
+            /** Activation Status Label */
+            activation_status_label?: string | null;
+            /** Activation Job Id */
+            activation_job_id?: string | null;
+            /** Activation Stage */
+            activation_stage?: ("queued" | "syncing_branch_docs" | "applying_client_config" | "switching_active_pointer" | "finalizing" | "ready" | "failed") | null;
+            /** Activation Stage Label */
+            activation_stage_label?: string | null;
+            /** Activation Error Code */
+            activation_error_code?: string | null;
+            /** Activation Error Message */
+            activation_error_message?: string | null;
+            /** Activation Queued At */
+            activation_queued_at?: string | null;
+            /** Activation Started At */
+            activation_started_at?: string | null;
+            /** Activation Heartbeat At */
+            activation_heartbeat_at?: string | null;
+            /** Activation Finished At */
+            activation_finished_at?: string | null;
+            /** Activation Attempt Count */
+            activation_attempt_count?: number | null;
             /**
              * Sync Status
              * @default pending
@@ -6702,6 +6860,32 @@ export interface components {
              * Format: uuid
              */
             version_id: string;
+            /** Active Version Id */
+            active_version_id?: string | null;
+            /** Activation Status */
+            activation_status?: ("not_started" | "queued" | "running" | "ready" | "failed" | "stuck") | null;
+            /** Activation Status Label */
+            activation_status_label?: string | null;
+            /** Activation Job Id */
+            activation_job_id?: string | null;
+            /** Activation Stage */
+            activation_stage?: ("queued" | "syncing_branch_docs" | "applying_client_config" | "switching_active_pointer" | "finalizing" | "ready" | "failed") | null;
+            /** Activation Stage Label */
+            activation_stage_label?: string | null;
+            /** Activation Error Code */
+            activation_error_code?: string | null;
+            /** Activation Error Message */
+            activation_error_message?: string | null;
+            /** Activation Queued At */
+            activation_queued_at?: string | null;
+            /** Activation Started At */
+            activation_started_at?: string | null;
+            /** Activation Heartbeat At */
+            activation_heartbeat_at?: string | null;
+            /** Activation Finished At */
+            activation_finished_at?: string | null;
+            /** Activation Attempt Count */
+            activation_attempt_count?: number | null;
             /** Sync Status */
             sync_status: string;
             /** Sync Status Label */

@@ -3,6 +3,7 @@ __all__ = [
     "calendar",
     "console",
     "decision_core",
+    "knowledge_activation_service",
     "knowledge_gateway",
     "inbox_service",
     "outbox_service",

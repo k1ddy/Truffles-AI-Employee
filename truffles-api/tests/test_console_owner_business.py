@@ -316,57 +316,67 @@ def test_resolve_consultant_verification_enabled_prefers_nested_flag() -> None:
 
 
 def test_derive_consultant_verification_status_thresholds() -> None:
-    disabled_status, disabled_label, disabled_summary = console_router._derive_consultant_verification_status(
+    disabled_status, disabled_label, disabled_summary, disabled_can_verify = console_router._derive_consultant_verification_status(
         feature_enabled=False,
         branch_selected=True,
-        has_published_knowledge=True,
+        preview_available=True,
+        default_source_mode="live",
         knowledge_stale_hours=4,
-        knowledge_sync_blocking=False,
+        blockers=[],
     )
-    missing_status, missing_label, missing_summary = console_router._derive_consultant_verification_status(
+    missing_status, missing_label, missing_summary, missing_can_verify = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
-        has_published_knowledge=False,
+        preview_available=False,
+        default_source_mode=None,
         knowledge_stale_hours=None,
-        knowledge_sync_blocking=False,
+        blockers=["preview_missing"],
     )
-    branch_status, branch_label, branch_summary = console_router._derive_consultant_verification_status(
+    branch_status, branch_label, branch_summary, branch_can_verify = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=False,
-        has_published_knowledge=True,
+        preview_available=True,
+        default_source_mode="live",
         knowledge_stale_hours=None,
-        knowledge_sync_blocking=False,
+        blockers=["branch_required"],
     )
-    sync_status, sync_label, sync_summary = console_router._derive_consultant_verification_status(
+    stale_status, stale_label, stale_summary, stale_can_verify = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
-        has_published_knowledge=True,
-        knowledge_stale_hours=None,
-        knowledge_sync_blocking=True,
+        preview_available=True,
+        default_source_mode="draft",
+        knowledge_stale_hours=24 * 8,
+        blockers=[],
     )
-    ready_status, ready_label, ready_summary = console_router._derive_consultant_verification_status(
+    ready_status, ready_label, ready_summary, ready_can_verify = console_router._derive_consultant_verification_status(
         feature_enabled=True,
         branch_selected=True,
-        has_published_knowledge=True,
+        preview_available=True,
+        default_source_mode="live",
         knowledge_stale_hours=12,
-        knowledge_sync_blocking=False,
+        blockers=[],
     )
 
     assert disabled_status == "not_enabled"
     assert "не включен" in disabled_label.lower()
     assert "обзор" in disabled_summary.lower()
+    assert disabled_can_verify is False
     assert missing_status == "needs_attention"
-    assert "знания" in missing_label.lower()
-    assert "знаний" in missing_summary.lower()
+    assert "preview" in missing_label.lower()
+    assert "draft" in missing_summary.lower()
+    assert missing_can_verify is False
     assert branch_status == "needs_attention"
     assert "филиал" in branch_label.lower()
     assert "branch" in branch_summary.lower()
-    assert sync_status == "needs_attention"
-    assert "синхронизац" in sync_label.lower()
-    assert "синхрониз" in sync_summary.lower()
+    assert branch_can_verify is False
+    assert stale_status == "needs_attention"
+    assert "доступна" in stale_label.lower()
+    assert "черновик" in stale_summary.lower()
+    assert stale_can_verify is True
     assert ready_status == "ready"
-    assert "основа" in ready_label.lower()
-    assert "без реальных действий" in ready_summary.lower()
+    assert "доступна" in ready_label.lower()
+    assert "pinned snapshot" in ready_summary.lower()
+    assert ready_can_verify is True
 
 
 def test_derive_data_trust_status_thresholds() -> None:
@@ -748,6 +758,9 @@ async def test_get_knowledge_current_returns_published_and_saved_draft(monkeypat
         id=uuid4(),
         payload_json={"client_pack": {"salon": {"name": "Published"}}},
         pack_yaml=None,
+        sync_status="ready",
+        sync_error=None,
+        sync_completed_at=datetime.now(timezone.utc),
         published_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
     )
@@ -769,7 +782,9 @@ async def test_get_knowledge_current_returns_published_and_saved_draft(monkeypat
     monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
     monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: published)
+    monkeypatch.setattr(console_router, "get_active_knowledge_version", lambda *_args, **_kwargs: published)
     monkeypatch.setattr(console_router, "get_latest_draft", lambda *_args, **_kwargs: draft)
+    monkeypatch.setattr(console_router, "get_latest_knowledge_activation_job", lambda *_args, **_kwargs: None)
 
     response = await console_router.get_knowledge_current(
         request=SimpleNamespace(),
@@ -777,9 +792,79 @@ async def test_get_knowledge_current_returns_published_and_saved_draft(monkeypat
     )
 
     assert response.version_id == published.id
+    assert response.active_version_id == published.id
+    assert response.activation_status == "ready"
+    assert response.activation_stage == "ready"
     assert response.draft_version_id == draft.id
     assert response.edit_base_source == "draft"
     assert response.edit_base_version_id == draft.id
+
+
+@pytest.mark.asyncio
+async def test_list_knowledge_history_exposes_active_live_and_candidate_activation_metadata(monkeypatch):
+    branch = SimpleNamespace(id=uuid4(), active_knowledge_version_id=uuid4())
+    active_version = SimpleNamespace(
+        id=branch.active_knowledge_version_id,
+        status="published",
+        created_at=datetime.now(timezone.utc),
+        published_at=datetime.now(timezone.utc),
+        summary="Live version",
+        sync_status="ready",
+        sync_error=None,
+        sync_completed_at=datetime.now(timezone.utc),
+    )
+    candidate_version = SimpleNamespace(
+        id=uuid4(),
+        status="published",
+        created_at=datetime.now(timezone.utc),
+        published_at=datetime.now(timezone.utc),
+        summary="Candidate version",
+        sync_status="pending",
+        sync_error=None,
+        sync_completed_at=None,
+    )
+    activation_job = SimpleNamespace(
+        id=uuid4(),
+        state="running",
+        current_stage="applying_client_config",
+        error_code=None,
+        last_error=None,
+        queued_at=datetime.now(timezone.utc),
+        heartbeat_at=datetime.now(timezone.utc),
+        attempt_count=2,
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "list_history", lambda *_args, **_kwargs: [candidate_version, active_version])
+    monkeypatch.setattr(
+        console_router,
+        "get_latest_knowledge_activation_job",
+        lambda _db, *, branch_id, version_id=None: activation_job if version_id == candidate_version.id else None,
+    )
+
+    response = await console_router.list_knowledge_history(
+        request=SimpleNamespace(),
+        db=Mock(),
+    )
+
+    assert len(response.items) == 2
+    assert response.items[0].id == candidate_version.id
+    assert response.items[0].is_active is False
+    assert response.items[0].activation_status == "running"
+    assert response.items[0].activation_stage == "applying_client_config"
+    assert response.items[0].activation_attempt_count == 2
+    assert response.items[1].id == active_version.id
+    assert response.items[1].is_active is True
+    assert response.items[1].activation_status == "ready"
+    assert response.items[1].activation_stage == "ready"
 
 
 @pytest.mark.asyncio
@@ -960,6 +1045,7 @@ async def test_publish_knowledge_requires_compare_for_existing_live_when_rollout
         ),
     )
     monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: current)
+    monkeypatch.setattr(console_router, "get_active_knowledge_version", lambda *_args, **_kwargs: current)
     monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
     monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(console_router, "has_recent_knowledge_compare_preflight", lambda *_args, **_kwargs: False)
@@ -977,19 +1063,21 @@ async def test_publish_knowledge_requires_compare_for_existing_live_when_rollout
 
 @pytest.mark.asyncio
 async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatch):
+    client_id = uuid4()
     branch = SimpleNamespace(
         id=uuid4(),
+        client_id=client_id,
         knowledge_safe_mode=True,
         knowledge_safe_mode_reason="old",
         knowledge_safe_mode_at=None,
     )
     context = SimpleNamespace(
-        role="owner",
-        client=SimpleNamespace(
-            id=uuid4(),
-            company_id=uuid4(),
-            name="demo_salon",
-            config={"consultant_verification_enabled": True},
+            role="owner",
+            client=SimpleNamespace(
+                id=client_id,
+                company_id=uuid4(),
+                name="demo_salon",
+                config={"consultant_verification_enabled": True},
         ),
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
         companies=[],
@@ -1026,7 +1114,12 @@ async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatc
             published_at=datetime.now(timezone.utc),
         ),
     )
-    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "enqueue_knowledge_sync_event",
+        lambda *_args, **_kwargs: pytest.fail("publish must not enqueue generic outbox activation"),
+        raising=False,
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.publish_knowledge(
@@ -1037,6 +1130,8 @@ async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatc
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.activation_status == "queued"
+    assert response.activation_stage == "queued"
     assert response.sync_status == "pending"
     assert response.partial_success is False
     assert "выполня" in (response.message or "").lower()
@@ -1044,20 +1139,22 @@ async def test_publish_knowledge_allows_first_publish_without_compare(monkeypatc
 
 @pytest.mark.asyncio
 async def test_publish_knowledge_allows_live_update_without_compare_when_rollout_disabled(monkeypatch):
+    client_id = uuid4()
     branch = SimpleNamespace(
         id=uuid4(),
+        client_id=client_id,
         knowledge_safe_mode=True,
         knowledge_safe_mode_reason="old",
         knowledge_safe_mode_at=None,
     )
     current = SimpleNamespace(id=uuid4(), payload_json={"client_pack": {"salon": {"name": "Demo"}}})
     context = SimpleNamespace(
-        role="owner",
-        client=SimpleNamespace(
-            id=uuid4(),
-            company_id=uuid4(),
-            name="demo_salon",
-            config={"consultant_verification_enabled": False},
+            role="owner",
+            client=SimpleNamespace(
+                id=client_id,
+                company_id=uuid4(),
+                name="demo_salon",
+                config={"consultant_verification_enabled": False},
         ),
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
         companies=[],
@@ -1094,7 +1191,12 @@ async def test_publish_knowledge_allows_live_update_without_compare_when_rollout
             published_at=datetime.now(timezone.utc),
         ),
     )
-    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "enqueue_knowledge_sync_event",
+        lambda *_args, **_kwargs: pytest.fail("publish must not enqueue generic outbox activation"),
+        raising=False,
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.publish_knowledge(
@@ -1105,21 +1207,25 @@ async def test_publish_knowledge_allows_live_update_without_compare_when_rollout
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.activation_status == "queued"
+    assert response.activation_stage == "queued"
     assert response.sync_status == "pending"
     assert response.partial_success is False
 
 
 @pytest.mark.asyncio
 async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
+    client_id = uuid4()
     branch = SimpleNamespace(
         id=uuid4(),
+        client_id=client_id,
         knowledge_safe_mode=True,
         knowledge_safe_mode_reason="old",
         knowledge_safe_mode_at=None,
     )
     context = SimpleNamespace(
         role="owner",
-        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        client=SimpleNamespace(id=client_id, company_id=uuid4(), name="demo_salon", config={}),
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
         companies=[],
     )
@@ -1154,7 +1260,12 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
             published_at=datetime.now(timezone.utc),
         ),
     )
-    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "enqueue_knowledge_sync_event",
+        lambda *_args, **_kwargs: pytest.fail("publish must not enqueue generic outbox activation"),
+        raising=False,
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
 
     response = await console_router.publish_knowledge(
@@ -1168,6 +1279,8 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.activation_status == "queued"
+    assert response.activation_stage == "queued"
     assert response.sync_status == "pending"
     assert response.partial_success is False
     assert branch.knowledge_safe_mode is False
@@ -1177,15 +1290,17 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_publish_knowledge_queues_sync_without_running_it_inline(monkeypatch):
+    client_id = uuid4()
     branch = SimpleNamespace(
         id=uuid4(),
+        client_id=client_id,
         knowledge_safe_mode=False,
         knowledge_safe_mode_reason=None,
         knowledge_safe_mode_at=None,
     )
     context = SimpleNamespace(
         role="owner",
-        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        client=SimpleNamespace(id=client_id, company_id=uuid4(), name="demo_salon", config={}),
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
         companies=[],
     )
@@ -1219,7 +1334,12 @@ async def test_publish_knowledge_queues_sync_without_running_it_inline(monkeypat
             sync_completed_at=None,
         ),
     )
-    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "enqueue_knowledge_sync_event",
+        lambda *_args, **_kwargs: pytest.fail("retry must not enqueue generic outbox activation"),
+        raising=False,
+    )
     monkeypatch.setattr(
         console_router,
         "sync_published_branch_docs",
@@ -1235,6 +1355,8 @@ async def test_publish_knowledge_queues_sync_without_running_it_inline(monkeypat
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.activation_status == "queued"
+    assert response.activation_stage == "queued"
     assert response.sync_status == "pending"
     assert response.partial_success is False
     assert response.sync_error is None
@@ -1244,8 +1366,10 @@ async def test_publish_knowledge_queues_sync_without_running_it_inline(monkeypat
 
 @pytest.mark.asyncio
 async def test_retry_knowledge_sync_requeues_failed_published_version(monkeypatch):
+    client_id = uuid4()
     branch = SimpleNamespace(
         id=uuid4(),
+        client_id=client_id,
         knowledge_safe_mode=True,
         knowledge_safe_mode_reason="timed out",
         knowledge_safe_mode_at=None,
@@ -1262,7 +1386,7 @@ async def test_retry_knowledge_sync_requeues_failed_published_version(monkeypatc
     )
     context = SimpleNamespace(
         role="owner",
-        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        client=SimpleNamespace(id=client_id, company_id=uuid4(), name="demo_salon", config={}),
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
         companies=[],
     )
@@ -1276,7 +1400,12 @@ async def test_retry_knowledge_sync_requeues_failed_published_version(monkeypatc
     monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
     monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
-    monkeypatch.setattr(console_router, "enqueue_knowledge_sync_event", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "enqueue_knowledge_sync_event",
+        lambda *_args, **_kwargs: pytest.fail("rollback must not enqueue generic outbox activation"),
+        raising=False,
+    )
     monkeypatch.setattr(
         console_router,
         "sync_published_branch_docs",
@@ -1292,6 +1421,8 @@ async def test_retry_knowledge_sync_requeues_failed_published_version(monkeypatc
 
     assert response.success is True
     assert response.version_id == version_id
+    assert response.activation_status == "queued"
+    assert response.activation_stage == "queued"
     assert response.sync_status == "pending"
     assert response.sync_error is None
     assert branch.knowledge_safe_mode is False

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -22,6 +24,7 @@ from app.models import (
     ConsoleConsultantVerificationTurn,
     Conversation,
     Handover,
+    KnowledgeActivationJob,
     KnowledgeVersion,
     LearnedResponse,
     Message,
@@ -66,10 +69,16 @@ from app.services.console_knowledge_preflight import (
     build_knowledge_draft_hash_from_payload,
     get_recent_knowledge_compare_preflight,
 )
-from app.services.knowledge_registry_service import knowledge_sync_status_label, normalize_knowledge_sync_status
+from app.services.knowledge_registry_service import (
+    get_active_knowledge_version,
+    get_latest_knowledge_activation_job,
+    knowledge_activation_state_label,
+    knowledge_sync_status_label,
+    normalize_knowledge_sync_status,
+    resolve_knowledge_activation_state,
+)
 from app.services.knowledge_runtime import (
     RuntimeTruth,
-    build_runtime_truth,
     build_runtime_truth_from_payload,
     set_runtime_truth_override,
 )
@@ -91,6 +100,16 @@ _FINDING_STATUS_LABELS = {
     "needs_data": "Нужны данные",
     "fixed": "Исправлено",
     "retested": "Перепроверено",
+}
+_SOURCE_MODE_LABELS = {
+    "live": "live версия",
+    "published": "опубликованная версия",
+    "draft": "черновик",
+}
+_SOURCE_MODE_OBJECT_LABELS = {
+    "live": "live версии",
+    "published": "опубликованной версии",
+    "draft": "черновику",
 }
 _FINDING_ALLOWED_TRANSITIONS = {
     "new": {"in_review", "needs_data", "fixed"},
@@ -115,6 +134,13 @@ _VERDICT_SCORES = {
     "needs_clarification": 2,
     "handoff": 2,
     "gap_detected": 0,
+}
+
+_LIVE_ACTIVATION_LABELS = {
+    "ready": "Готово",
+    "pending": "Выполняется",
+    "failed": "Требует внимания",
+    "not_started": "Ещё не запускалось",
 }
 _SCENARIO_CODE_TEMPLATE_MAP = {
     "client_pack.services_catalog.services": {
@@ -239,6 +265,14 @@ def _parse_optional_bool(value: object) -> Optional[bool]:
         if value == 0:
             return False
     return None
+
+
+def _source_mode_label(source_mode: str | None) -> str:
+    return _SOURCE_MODE_LABELS.get(str(source_mode or "").strip().lower(), "версия данных")
+
+
+def _source_mode_object_label(source_mode: str | None) -> str:
+    return _SOURCE_MODE_OBJECT_LABELS.get(str(source_mode or "").strip().lower(), "версии данных")
 
 
 def _normalize_domain_slug(value: object) -> str | None:
@@ -581,44 +615,46 @@ def derive_consultant_verification_status(
     *,
     feature_enabled: bool,
     branch_selected: bool,
-    has_published_knowledge: bool,
+    preview_available: bool,
+    default_source_mode: str | None,
     knowledge_stale_hours: Optional[int],
-    knowledge_sync_blocking: bool,
-) -> tuple[str, str, str]:
+    blockers: list[str],
+) -> tuple[str, str, str, bool]:
     if not feature_enabled:
         return (
             "not_enabled",
             "Контур проверки еще не включен",
             "Сейчас доступен обзор готовности. Интерактивный тестовый чат включается по пилотному rollout.",
+            False,
         )
     if not branch_selected:
         return (
             "needs_attention",
             "Сначала выберите филиал",
             "Проверка консультанта и знания оцениваются в рамках конкретного филиала. Сначала выберите branch в контексте Console.",
+            False,
         )
-    if not has_published_knowledge:
+    if not preview_available:
         return (
             "needs_attention",
-            "Сначала опубликуйте знания бизнеса",
-            "Без опубликованных знаний владелец увидит только ограничения, а не качество ответов консультанта.",
+            "Сначала подготовьте знания для preview",
+            "Сохраните draft в `Knowledge` или опубликуйте live версию, чтобы проверить консультанта на реальных фактах бизнеса.",
+            False,
         )
-    if knowledge_sync_blocking:
-        return (
-            "needs_attention",
-            "Сначала завершите синхронизацию знаний",
-            "Пока опубликованная версия еще не синхронизирована, проверка консультанта не будет честной. Сначала дождитесь завершения синхронизации или повторите ее.",
-        )
+
+    source_label = _source_mode_object_label(default_source_mode)
     if knowledge_stale_hours is not None and knowledge_stale_hours > _KNOWLEDGE_STALE_HOURS_WARN:
         return (
             "needs_attention",
-            "Перед проверкой обновите знания",
-            "Последняя публикация устарела. Сначала обновите услуги, правила и ключевые ответы бизнеса.",
+            "Проверка доступна, но знания устарели",
+            f"Preview уже доступен по {source_label}, но последняя live публикация давно не обновлялась. Перепроверьте актуальность фактов.",
+            True,
         )
     return (
         "ready",
-        "Основа для проверки подготовлена",
-        "Права доступа и базовые данные готовы. Следующий блок подключит безопасный тестовый диалог без реальных действий.",
+        "Проверка консультанта доступна",
+        f"Можно запускать preview-проверку по pinned snapshot из {source_label}. Live activation отображается отдельно и не блокирует этот preview.",
+        True,
     )
 
 
@@ -634,50 +670,53 @@ def _build_readiness_cards(
     *,
     branch_selected: bool,
     has_published_knowledge: bool,
+    has_draft_knowledge: bool,
+    preview_available: bool,
+    default_source_mode: str | None,
     knowledge_last_published_at: Optional[str],
     knowledge_stale_hours: Optional[int],
-    knowledge_sync_status: Optional[str],
-    knowledge_sync_error: Optional[str],
+    live_activation_status: str | None,
+    live_activation_label: str | None,
+    live_activation_summary: str | None,
     feature_enabled: bool,
     scenario_library_enabled: bool,
     branch_scope_limited: bool,
 ) -> list[ConsoleConsultantVerificationReadinessCard]:
+    preview_source_label = _source_mode_label(default_source_mode)
     if not branch_selected:
         knowledge_state = "needs_attention"
         knowledge_summary = (
             "Сначала выберите филиал в Console. Только после этого можно честно проверить знания и ответы именно этого branch."
         )
         evidence_label = "Филиал не выбран"
-    elif not has_published_knowledge:
+    elif not preview_available:
         knowledge_state = "needs_attention"
         knowledge_summary = (
-            "Опубликуйте актуальные знания бизнеса, чтобы будущий тест отражал реальные услуги, цены и правила."
+            "Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку консультанта на фактах этого бизнеса."
         )
-        evidence_label = "Публикация не найдена"
-    elif normalize_knowledge_sync_status(knowledge_sync_status) == "pending":
-        knowledge_state = "needs_attention"
-        knowledge_summary = (
-            "Версия уже опубликована, но синхронизация еще выполняется. Дождитесь завершения перед проверкой консультанта."
-        )
-        evidence_label = "Синхронизация выполняется"
-    elif normalize_knowledge_sync_status(knowledge_sync_status) == "failed":
-        knowledge_state = "needs_attention"
-        knowledge_summary = (
-            "Синхронизация требует внимания. Повторите ее перед проверкой консультанта, иначе owner увидит неполный контур."
-        )
-        evidence_label = "Синхронизация требует внимания"
+        evidence_label = "Preview-источник не найден"
     elif knowledge_stale_hours is not None and knowledge_stale_hours > _KNOWLEDGE_STALE_HOURS_WARN:
         knowledge_state = "needs_attention"
         knowledge_summary = (
-            "Знания опубликованы, но уже устарели для доверительной проверки. Обновите факты перед запуском тестов."
+            f"Preview уже доступен по `{preview_source_label}`, но live знания устарели. Обновите факты, если хотите проверять актуальное состояние бизнеса."
         )
         evidence_label = f"Последняя публикация: {knowledge_last_published_at}"
     else:
         knowledge_state = "ready"
         knowledge_summary = (
-            "Проверка будет опираться на уже опубликованные знания бизнеса, а не на вручную придуманные ответы."
+            f"Проверка будет опираться на pinned snapshot из `{preview_source_label}`, а не на плавающий latest state."
         )
-        evidence_label = f"Последняя публикация: {knowledge_last_published_at}"
+        evidence_label = (
+            "Доступны draft и live"
+            if has_draft_knowledge and has_published_knowledge
+            else ("Доступен draft" if has_draft_knowledge else "Доступна live версия")
+        )
+
+    activation_state = "planned"
+    if live_activation_status == "ready":
+        activation_state = "ready"
+    elif live_activation_status in {"pending", "failed"}:
+        activation_state = "needs_attention"
 
     access_summary = (
         "Страница уже ограничена owner/admin и текущим филиалом, поэтому будущие проверки останутся в безопасном scope."
@@ -698,6 +737,15 @@ def _build_readiness_cards(
             state=knowledge_state,
             state_label=_card_state_label(knowledge_state),
             evidence_label=evidence_label,
+            href="/knowledge",
+        ),
+        ConsoleConsultantVerificationReadinessCard(
+            id="live_activation",
+            title="Обновление для клиентов",
+            summary=live_activation_summary or "Статус live activation будет показан после первой публикации.",
+            state=activation_state,
+            state_label=live_activation_label or _card_state_label(activation_state),
+            evidence_label=live_activation_label,
             href="/knowledge",
         ),
         ConsoleConsultantVerificationReadinessCard(
@@ -761,13 +809,13 @@ def _build_consultant_verification_actions(
     *,
     feature_enabled: bool,
     branch_selected: bool,
+    preview_available: bool,
+    has_draft_knowledge: bool,
     has_published_knowledge: bool,
     knowledge_stale_hours: Optional[int],
-    knowledge_sync_status: Optional[str],
-    knowledge_safe_mode: bool,
+    live_activation_status: str | None,
 ) -> list[ConsoleBusinessActionItem]:
     actions: list[ConsoleBusinessActionItem] = []
-    sync_status = normalize_knowledge_sync_status(knowledge_sync_status)
     if not branch_selected:
         actions.append(
             ConsoleBusinessActionItem(
@@ -778,33 +826,35 @@ def _build_consultant_verification_actions(
                 href="/business",
             )
         )
-    elif not has_published_knowledge:
+    elif not preview_available:
         actions.append(
             ConsoleBusinessActionItem(
-                id="publish_knowledge_before_verification",
+                id="prepare_preview_truth_before_verification",
                 severity="critical",
-                title="Опубликуйте знания перед проверкой",
-                description="Без опубликованных знаний будущий тест не сможет доказать качество ответов по вашему бизнесу.",
+                title="Подготовьте данные для preview",
+                description=(
+                    "Сохраните draft или опубликуйте live знания. Без этого проверка консультанта не сможет опереться на реальные факты бизнеса."
+                ),
                 href="/knowledge",
             )
         )
-    elif knowledge_safe_mode or sync_status == "failed":
+    elif live_activation_status == "failed":
         actions.append(
             ConsoleBusinessActionItem(
-                id="retry_knowledge_sync_before_verification",
-                severity="critical",
-                title="Повторите синхронизацию перед проверкой",
-                description="Пока синхронизация не завершена успешно, проверка консультанта будет заблокирована для этого филиала.",
-                href="/knowledge",
-            )
-        )
-    elif sync_status == "pending":
-        actions.append(
-            ConsoleBusinessActionItem(
-                id="wait_for_knowledge_sync_before_verification",
+                id="review_live_activation_failure",
                 severity="warn",
-                title="Дождитесь завершения синхронизации",
-                description="Версия уже опубликована. Как только синхронизация завершится, можно возвращаться к проверке консультанта.",
+                title="Обновление для клиентов требует внимания",
+                description="Preview-проверка уже доступна, но live activation не завершился корректно. Разберите это в `Знания`.",
+                href="/knowledge",
+            )
+        )
+    elif live_activation_status == "pending":
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_live_activation_progress",
+                severity="info",
+                title="Обновление для клиентов ещё выполняется",
+                description="Preview-проверка уже доступна, а live channels обновятся отдельно после завершения activation.",
                 href="/knowledge",
             )
         )
@@ -837,6 +887,16 @@ def _build_consultant_verification_actions(
                 title="Подготовьте rollout проверки консультанта",
                 description="Wave1 уже показывает готовность и границы. Следующим блоком включаем безопасный test chat без реальных side effects.",
                 href="/business",
+            )
+        )
+    elif has_draft_knowledge and not has_published_knowledge:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="preview_uses_draft_only",
+                severity="info",
+                title="Preview сейчас идёт по черновику",
+                description="Это полезно для проверки до первого publish. Когда будете готовы, отдельно запустите live обновление для клиентов.",
+                href="/knowledge",
             )
         )
 
@@ -882,6 +942,162 @@ def _load_published_knowledge_for_branch(
     ).first()
 
 
+def _load_active_knowledge_for_branch(
+    *,
+    db: Session,
+    client_id: UUID,
+    branch_id: UUID | None,
+) -> Optional[KnowledgeVersion]:
+    if branch_id is None:
+        return None
+    version = get_active_knowledge_version(db, branch_id=branch_id)
+    if version is None or getattr(version, "client_id", None) != client_id:
+        return None
+    return version
+
+
+def _build_truth_payload_hash(payload_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload_json, dict):
+        return None
+    normalized = json.dumps(
+        jsonable_encoder(payload_json),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _clone_truth_payload(payload_json: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload_json, dict):
+        return {}
+    return deepcopy(jsonable_encoder(payload_json))
+
+
+def _build_pinned_truth_snapshot(
+    *,
+    runtime_truth: RuntimeTruth,
+    payload_json: dict[str, Any],
+    branch_id: UUID,
+    source_mode: str,
+    draft_hash: str | None = None,
+    live_activation_status: str | None = None,
+    live_activation_error: str | None = None,
+    live_activation_safe_mode: bool = False,
+) -> dict[str, Any]:
+    snapshot_payload = _clone_truth_payload(payload_json)
+    snapshot = {
+        "truth_source": runtime_truth.source,
+        "truth_source_mode": source_mode,
+        "truth_version_id": runtime_truth.version_id,
+        "truth_compiled_hash": runtime_truth.compiled_hash,
+        "truth_payload_hash": _build_truth_payload_hash(snapshot_payload),
+        "truth_payload": snapshot_payload,
+        "branch_id": str(branch_id),
+        "live_activation_status_at_start": live_activation_status,
+        "live_activation_error_at_start": live_activation_error,
+        "live_activation_safe_mode_at_start": live_activation_safe_mode,
+    }
+    if draft_hash:
+        snapshot["draft_hash"] = draft_hash
+    return snapshot
+
+
+def _load_pinned_truth_from_runtime_snapshot(
+    *,
+    context: ConsoleAuthContext,
+    session_row: ConsoleConsultantVerificationSession,
+) -> tuple[RuntimeTruth, dict[str, Any]] | None:
+    snapshot = _as_json_dict(session_row.runtime_snapshot)
+    payload_json = snapshot.get("truth_payload")
+    truth_source = _strip_text(snapshot.get("truth_source"))
+    if not isinstance(payload_json, dict) or not truth_source:
+        return None
+
+    runtime_truth = build_runtime_truth_from_payload(
+        payload_json=payload_json,
+        client_slug=_resolve_client_slug(context.client),
+        branch_id=session_row.branch_id,
+        source=truth_source,
+        version_id=_strip_text(snapshot.get("truth_version_id")),
+        allow_fallback=False,
+    )
+    if not isinstance(runtime_truth.truth, dict) or not runtime_truth.truth:
+        raise ConsoleAPIError(
+            409,
+            "VERIFICATION_TRUTH_SNAPSHOT_INVALID",
+            "Pinned verification snapshot is invalid",
+        )
+
+    pinned_snapshot = {
+        "truth_source": runtime_truth.source,
+        "truth_version_id": runtime_truth.version_id,
+        "truth_compiled_hash": runtime_truth.compiled_hash,
+        "truth_payload_hash": _strip_text(snapshot.get("truth_payload_hash")),
+        "branch_id": str(session_row.branch_id) if session_row.branch_id else None,
+    }
+    draft_hash = _strip_text(snapshot.get("draft_hash"))
+    if draft_hash:
+        pinned_snapshot["draft_hash"] = draft_hash
+    return runtime_truth, pinned_snapshot
+
+
+def _resolve_live_activation_state(
+    *,
+    active_version: KnowledgeVersion | None,
+    published_version: KnowledgeVersion | None,
+    branch: Branch | None,
+    activation_job: KnowledgeActivationJob | None,
+) -> tuple[str, str, str, str | None, UUID | None]:
+    if published_version is None and active_version is None:
+        return (
+            "not_started",
+            _LIVE_ACTIVATION_LABELS["not_started"],
+            "Клиентские каналы ещё не обновлялись этой версией. Сначала нужен хотя бы один live publish.",
+            None,
+            None,
+        )
+    if (
+        active_version is not None
+        and published_version is not None
+        and getattr(active_version, "id", None) == getattr(published_version, "id", None)
+    ):
+        return (
+            "ready",
+            _LIVE_ACTIVATION_LABELS["ready"],
+            "Клиентские каналы обновлены до текущей live версии.",
+            None,
+            getattr(activation_job, "id", None),
+        )
+    activation_state = resolve_knowledge_activation_state(activation_job)
+    if activation_state in {"queued", "running"}:
+        return (
+            "pending",
+            _LIVE_ACTIVATION_LABELS["pending"],
+            "Обновление для клиентов ещё выполняется. Preview-проверка уже доступна на pinned snapshot.",
+            None,
+            getattr(activation_job, "id", None),
+        )
+    if activation_state in {"failed", "stuck"}:
+        safe_mode_reason = getattr(branch, "knowledge_safe_mode_reason", None) if branch is not None else None
+        published_error = getattr(published_version, "sync_error", None) if published_version is not None else None
+        error_message = getattr(activation_job, "last_error", None) or published_error or safe_mode_reason
+        return (
+            "failed",
+            _LIVE_ACTIVATION_LABELS["failed"],
+            "Обновление для клиентов требует внимания команды. Preview-проверка всё равно доступна отдельно.",
+            error_message,
+            getattr(activation_job, "id", None),
+        )
+    return (
+        "ready",
+        _LIVE_ACTIVATION_LABELS["ready"],
+        "Клиентские каналы обновлены до текущей live версии.",
+        None,
+        getattr(activation_job, "id", None),
+    )
+
+
 def build_consultant_verification_overview(
     *,
     db: Session,
@@ -904,7 +1120,17 @@ def build_consultant_verification_overview(
         capabilities=effective_capabilities,
         reference_pack=reference_pack,
     )
-    latest_knowledge = _load_published_knowledge_for_branch(
+    latest_published = _load_published_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    active_knowledge = _load_active_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    latest_draft = _load_latest_draft_version(
         db=db,
         client_id=context.client.id,
         branch_id=branch_id,
@@ -919,26 +1145,80 @@ def build_consultant_verification_overview(
     knowledge_stale_hours = None
     knowledge_sync_status = None
     knowledge_sync_error = None
-    if latest_knowledge and latest_knowledge.published_at is not None:
-        knowledge_last_published_at = latest_knowledge.published_at.isoformat()
+    activation_job = None
+    if branch_id is not None and latest_published is not None:
+        activation_job = get_latest_knowledge_activation_job(
+            db,
+            branch_id=branch_id,
+            version_id=latest_published.id,
+        )
+    if latest_published and latest_published.published_at is not None:
+        knowledge_last_published_at = latest_published.published_at.isoformat()
         knowledge_stale_hours = max(
             0,
-            int((now - latest_knowledge.published_at).total_seconds() // 3600),
+            int((now - latest_published.published_at).total_seconds() // 3600),
         )
-        knowledge_sync_status = normalize_knowledge_sync_status(getattr(latest_knowledge, "sync_status", None))
-        knowledge_sync_error = getattr(latest_knowledge, "sync_error", None)
+        knowledge_sync_status = normalize_knowledge_sync_status(getattr(latest_published, "sync_status", None))
+        knowledge_sync_error = getattr(latest_published, "sync_error", None)
 
-    has_published_knowledge = knowledge_last_published_at is not None
-    status, status_label, summary = derive_consultant_verification_status(
+    has_live_knowledge = isinstance(getattr(active_knowledge, "payload_json", None), dict)
+    has_published_knowledge = isinstance(getattr(latest_published, "payload_json", None), dict)
+    has_draft_knowledge = isinstance(getattr(latest_draft, "payload_json", None), dict)
+    available_source_modes: list[str] = []
+    has_published_candidate = bool(
+        has_published_knowledge
+        and (
+            active_knowledge is None
+            or getattr(latest_published, "id", None) != getattr(active_knowledge, "id", None)
+        )
+    )
+    if has_live_knowledge:
+        available_source_modes.append("live")
+    if has_published_candidate:
+        available_source_modes.append("published")
+    if has_draft_knowledge:
+        available_source_modes.append("draft")
+    default_source_mode = (
+        "draft"
+        if has_draft_knowledge
+        else ("published" if has_published_candidate else ("live" if has_live_knowledge else None))
+    )
+    preview_version_id = (
+        latest_draft.id
+        if default_source_mode == "draft" and latest_draft
+        else (
+            latest_published.id
+            if default_source_mode == "published" and latest_published
+            else (active_knowledge.id if active_knowledge else None)
+        )
+    )
+    blockers: list[str] = []
+    if not feature_enabled:
+        blockers.append("Rollout интерактивной проверки ещё не включён для этого клиента.")
+    if branch_id is None:
+        blockers.append("Выберите филиал, чтобы привязать preview к конкретному business scope.")
+    if feature_enabled and branch_id is not None and not available_source_modes:
+        blockers.append("Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.")
+
+    status, status_label, summary, can_verify_now = derive_consultant_verification_status(
         feature_enabled=feature_enabled,
         branch_selected=branch_id is not None,
-        has_published_knowledge=has_published_knowledge,
+        preview_available=bool(available_source_modes),
+        default_source_mode=default_source_mode,
         knowledge_stale_hours=knowledge_stale_hours,
-        knowledge_sync_blocking=has_published_knowledge
-        and (
-            knowledge_sync_status != "ready"
-            or bool(getattr(selected_branch, "knowledge_safe_mode", False))
-        ),
+        blockers=blockers,
+    )
+    (
+        live_activation_status,
+        live_activation_label,
+        live_activation_summary,
+        live_activation_error,
+        live_activation_job_id,
+    ) = _resolve_live_activation_state(
+        active_version=active_knowledge,
+        published_version=latest_published,
+        branch=selected_branch,
+        activation_job=activation_job,
     )
     return ConsoleConsultantVerificationOverviewResponse(
         generated_at=now.isoformat(),
@@ -946,8 +1226,25 @@ def build_consultant_verification_overview(
         status=status,
         status_label=status_label,
         summary=summary,
+        verification_ready=can_verify_now,
+        can_verify_now=can_verify_now,
+        preview_status=status,
+        preview_status_label=status_label,
+        preview_summary=summary,
+        preview_truth_source=default_source_mode,
+        preview_truth_version_id=preview_version_id,
+        live_truth_version_id=active_knowledge.id if active_knowledge else None,
+        published_candidate_version_id=latest_published.id if latest_published else None,
+        available_source_modes=available_source_modes,
+        default_source_mode=default_source_mode,
+        live_activation_status=live_activation_status,
+        live_activation_status_label=live_activation_label,
+        live_activation_summary=live_activation_summary,
+        live_activation_error=live_activation_error,
+        live_activation_job_id=live_activation_job_id,
+        blockers=blockers,
         next_wave_summary=(
-            "Контур проверки уже включает safe simulation, owner chat, scenario replay, finding remediation и live vs draft compare перед Publish."
+            "Следующий архитектурный блок разводит artifact publish и live activation окончательно: `active_version_id` плюс dedicated activation job lifecycle."
         ),
         branch_selection_required=branch_id is None,
         selected_branch_id=branch_id,
@@ -961,11 +1258,15 @@ def build_consultant_verification_overview(
         knowledge_safe_mode_reason=getattr(selected_branch, "knowledge_safe_mode_reason", None),
         readiness_cards=_build_readiness_cards(
             branch_selected=branch_id is not None,
-            has_published_knowledge=has_published_knowledge,
+            has_published_knowledge=has_live_knowledge or has_published_knowledge,
+            has_draft_knowledge=has_draft_knowledge,
+            preview_available=bool(available_source_modes),
+            default_source_mode=default_source_mode,
             knowledge_last_published_at=knowledge_last_published_at,
             knowledge_stale_hours=knowledge_stale_hours,
-            knowledge_sync_status=knowledge_sync_status,
-            knowledge_sync_error=knowledge_sync_error or getattr(selected_branch, "knowledge_safe_mode_reason", None),
+            live_activation_status=live_activation_status,
+            live_activation_label=live_activation_label,
+            live_activation_summary=live_activation_summary,
             feature_enabled=feature_enabled,
             scenario_library_enabled=feature_enabled,
             branch_scope_limited=allowed_branch_ids is not None,
@@ -980,10 +1281,11 @@ def build_consultant_verification_overview(
         actions=_build_consultant_verification_actions(
             feature_enabled=feature_enabled,
             branch_selected=branch_id is not None,
-            has_published_knowledge=has_published_knowledge,
+            preview_available=bool(available_source_modes),
+            has_draft_knowledge=has_draft_knowledge,
+            has_published_knowledge=has_live_knowledge or has_published_knowledge,
             knowledge_stale_hours=knowledge_stale_hours,
-            knowledge_sync_status=knowledge_sync_status,
-            knowledge_safe_mode=bool(getattr(selected_branch, "knowledge_safe_mode", False)),
+            live_activation_status=live_activation_status,
         ),
     )
 
@@ -1943,12 +2245,12 @@ def _load_latest_draft_version(
     )
 
 
-def _resolve_compare_draft_truth(
+def _resolve_draft_runtime_truth_data(
     *,
     db: Session,
     context: ConsoleAuthContext,
     branch_id: UUID,
-) -> tuple[RuntimeTruth, str]:
+) -> tuple[KnowledgeVersion, RuntimeTruth, str]:
     draft_version = _load_latest_draft_version(
         db=db,
         client_id=context.client.id,
@@ -1969,7 +2271,95 @@ def _resolve_compare_draft_truth(
         version_id=str(draft_version.id),
         allow_fallback=False,
     )
+    if not isinstance(runtime_truth.truth, dict) or not runtime_truth.truth:
+        raise ConsoleAPIError(
+            409,
+            "DRAFT_KNOWLEDGE_INVALID",
+            "Draft knowledge cannot be used for consultant verification preview",
+        )
+    return draft_version, runtime_truth, draft_hash
+
+
+def _resolve_compare_draft_truth(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+) -> tuple[RuntimeTruth, str]:
+    _draft_version, runtime_truth, draft_hash = _resolve_draft_runtime_truth_data(
+        db=db,
+        context=context,
+        branch_id=branch_id,
+    )
     return runtime_truth, draft_hash
+
+
+def _resolve_live_runtime_truth_data(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+) -> tuple[KnowledgeVersion, RuntimeTruth]:
+    live_version = _load_active_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    if not isinstance(live_version, KnowledgeVersion) or not isinstance(live_version.payload_json, dict):
+        raise ConsoleAPIError(
+            409,
+            "LIVE_KNOWLEDGE_REQUIRED",
+            "Publish at least one live knowledge version before compare",
+        )
+    runtime_truth = build_runtime_truth_from_payload(
+        payload_json=live_version.payload_json,
+        client_slug=_resolve_client_slug(context.client),
+        branch_id=branch_id,
+        source="knowledge_active_version",
+        version_id=str(live_version.id),
+        allow_fallback=False,
+    )
+    if not isinstance(runtime_truth.truth, dict) or not runtime_truth.truth:
+        raise ConsoleAPIError(
+            409,
+            "LIVE_KNOWLEDGE_REQUIRED",
+            "Publish at least one live knowledge version before compare",
+        )
+    return live_version, runtime_truth
+
+
+def _resolve_published_runtime_truth_data(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+) -> tuple[KnowledgeVersion, RuntimeTruth]:
+    published_version = _load_published_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    if not isinstance(published_version, KnowledgeVersion) or not isinstance(published_version.payload_json, dict):
+        raise ConsoleAPIError(
+            409,
+            "PUBLISHED_KNOWLEDGE_REQUIRED",
+            "Publish at least one knowledge version before previewing the published candidate",
+        )
+    runtime_truth = build_runtime_truth_from_payload(
+        payload_json=published_version.payload_json,
+        client_slug=_resolve_client_slug(context.client),
+        branch_id=branch_id,
+        source="knowledge_published_candidate",
+        version_id=str(published_version.id),
+        allow_fallback=False,
+    )
+    if not isinstance(runtime_truth.truth, dict) or not runtime_truth.truth:
+        raise ConsoleAPIError(
+            409,
+            "PUBLISHED_KNOWLEDGE_REQUIRED",
+            "Published knowledge cannot be used for consultant verification preview",
+        )
+    return published_version, runtime_truth
 
 
 def _resolve_live_runtime_truth(
@@ -1978,20 +2368,88 @@ def _resolve_live_runtime_truth(
     context: ConsoleAuthContext,
     branch_id: UUID,
 ) -> RuntimeTruth:
-    live_truth = build_runtime_truth(
-        db,
-        client_slug=_resolve_client_slug(context.client),
-        client_id=context.client.id,
+    _live_version, live_truth = _resolve_live_runtime_truth_data(
+        db=db,
+        context=context,
         branch_id=branch_id,
-        allow_fallback=False,
     )
-    if not isinstance(live_truth.truth, dict) or not live_truth.truth:
-        raise ConsoleAPIError(
-            409,
-            "LIVE_KNOWLEDGE_REQUIRED",
-            "Publish at least one live knowledge version before compare",
-        )
     return live_truth
+
+
+def _resolve_preview_truth_snapshot(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    branch_id: UUID,
+    source_mode: str,
+    branch: Branch | None,
+    live_version: KnowledgeVersion | None,
+    published_version: KnowledgeVersion | None,
+) -> tuple[RuntimeTruth, dict[str, Any]]:
+    activation_job = (
+        get_latest_knowledge_activation_job(
+            db,
+            branch_id=branch_id,
+            version_id=published_version.id,
+        )
+        if published_version is not None
+        else None
+    )
+    live_activation_status, _, _, live_activation_error, _live_activation_job_id = (
+        _resolve_live_activation_state(
+            active_version=live_version,
+            published_version=published_version,
+            branch=branch,
+            activation_job=activation_job,
+        )
+    )
+    live_activation_safe_mode = bool(getattr(branch, "knowledge_safe_mode", False))
+    if source_mode == "draft":
+        draft_version, runtime_truth, draft_hash = _resolve_draft_runtime_truth_data(
+            db=db,
+            context=context,
+            branch_id=branch_id,
+        )
+        return runtime_truth, _build_pinned_truth_snapshot(
+            runtime_truth=runtime_truth,
+            payload_json=draft_version.payload_json,
+            branch_id=branch_id,
+            source_mode=source_mode,
+            draft_hash=draft_hash,
+            live_activation_status=live_activation_status,
+            live_activation_error=live_activation_error,
+            live_activation_safe_mode=live_activation_safe_mode,
+        )
+    if source_mode == "published":
+        resolved_published_version, runtime_truth = _resolve_published_runtime_truth_data(
+            db=db,
+            context=context,
+            branch_id=branch_id,
+        )
+        return runtime_truth, _build_pinned_truth_snapshot(
+            runtime_truth=runtime_truth,
+            payload_json=resolved_published_version.payload_json,
+            branch_id=branch_id,
+            source_mode=source_mode,
+            live_activation_status=live_activation_status,
+            live_activation_error=live_activation_error,
+            live_activation_safe_mode=live_activation_safe_mode,
+        )
+
+    resolved_live_version, runtime_truth = _resolve_live_runtime_truth_data(
+        db=db,
+        context=context,
+        branch_id=branch_id,
+    )
+    return runtime_truth, _build_pinned_truth_snapshot(
+        runtime_truth=runtime_truth,
+        payload_json=resolved_live_version.payload_json,
+        branch_id=branch_id,
+        source_mode=source_mode,
+        live_activation_status=live_activation_status,
+        live_activation_error=live_activation_error,
+        live_activation_safe_mode=live_activation_safe_mode,
+    )
 
 
 def _resolve_verification_session_runtime_truth(
@@ -2003,30 +2461,37 @@ def _resolve_verification_session_runtime_truth(
     branch_id = session_row.branch_id
     if branch_id is None:
         raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Select a branch before consultant verification")
-    if session_row.source_mode == "draft":
-        runtime_truth, draft_hash = _resolve_compare_draft_truth(
-            db=db,
-            context=context,
-            branch_id=branch_id,
-        )
-        return runtime_truth, {
-            "truth_source": runtime_truth.source,
-            "truth_version_id": runtime_truth.version_id,
-            "truth_compiled_hash": runtime_truth.compiled_hash,
-            "draft_hash": draft_hash,
-            "branch_id": str(branch_id),
-        }
-    runtime_truth = _resolve_live_runtime_truth(
+    pinned_truth = _load_pinned_truth_from_runtime_snapshot(
+        context=context,
+        session_row=session_row,
+    )
+    if pinned_truth is not None:
+        return pinned_truth
+
+    branch = None
+    for candidate_branch in getattr(context, "branches", None) or []:
+        if getattr(candidate_branch, "id", None) == branch_id:
+            branch = candidate_branch
+            break
+    live_version = _load_active_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    published_version = _load_published_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    return _resolve_preview_truth_snapshot(
         db=db,
         context=context,
         branch_id=branch_id,
+        source_mode=session_row.source_mode,
+        branch=branch,
+        live_version=live_version,
+        published_version=published_version,
     )
-    return runtime_truth, {
-        "truth_source": runtime_truth.source,
-        "truth_version_id": runtime_truth.version_id,
-        "truth_compiled_hash": runtime_truth.compiled_hash,
-        "branch_id": str(branch_id),
-    }
 
 
 def _resolve_compare_readiness(
@@ -2426,6 +2891,30 @@ def create_consultant_verification_session(
         allowed_branch_ids=normalized_branch_ids,
         required=True,
     )
+    selected_branch = None
+    for candidate_branch in getattr(context, "branches", None) or []:
+        if getattr(candidate_branch, "id", None) == branch_id:
+            selected_branch = candidate_branch
+            break
+    live_version = _load_active_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    published_version = _load_published_knowledge_for_branch(
+        db=db,
+        client_id=context.client.id,
+        branch_id=branch_id,
+    )
+    _, source_snapshot = _resolve_preview_truth_snapshot(
+        db=db,
+        context=context,
+        branch_id=branch_id,
+        source_mode=request.source_mode,
+        branch=selected_branch,
+        live_version=live_version,
+        published_version=published_version,
+    )
     session_id = uuid4()
     session_row = ConsoleConsultantVerificationSession(
         id=session_id,
@@ -2443,6 +2932,7 @@ def create_consultant_verification_session(
             "source_mode": request.source_mode,
             "challenge_mode": request.challenge_mode,
             "branch_id": str(branch_id),
+            **source_snapshot,
         },
         latest_preview={"simulation_mode": True, "simulation_id": str(session_id)},
         turns_total=0,
@@ -2757,7 +3247,7 @@ def get_consultant_verification_readiness(
         )
 
     draft_hash = build_knowledge_draft_hash_from_payload(draft_version.payload_json)
-    live_version = _load_published_knowledge_for_branch(
+    live_version = _load_active_knowledge_for_branch(
         db=db,
         client_id=context.client.id,
         branch_id=branch_id,

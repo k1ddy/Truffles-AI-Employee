@@ -13,8 +13,16 @@ EXPECTED_GIT_COMMIT="${EXPECTED_GIT_COMMIT:-}"
 EXPECTED_VERSION="${EXPECTED_VERSION:-}"
 API_SCRIPT="${API_SCRIPT:-${SCRIPT_DIR}/restart_api.sh}"
 WORKERS_SCRIPT="${WORKERS_SCRIPT:-${SCRIPT_DIR}/restart_workers.sh}"
+KNOWLEDGE_ACTIVATION_SERVICE_SCRIPT="${KNOWLEDGE_ACTIVATION_SERVICE_SCRIPT:-${SCRIPT_DIR}/restart_knowledge_activation_service.sh}"
+RESTART_KNOWLEDGE_ACTIVATION_SERVICE="${RESTART_KNOWLEDGE_ACTIVATION_SERVICE:-0}"
+KNOWLEDGE_ACTIVATION_SERVICE_ENABLED="${KNOWLEDGE_ACTIVATION_SERVICE_ENABLED:-1}"
+RUN_KNOWLEDGE_ACTIVATION_CANARY="${RUN_KNOWLEDGE_ACTIVATION_CANARY:-0}"
+KNOWLEDGE_ACTIVATION_CANARY_SCRIPT="${KNOWLEDGE_ACTIVATION_CANARY_SCRIPT:-${SCRIPT_DIR}/../truffles-api/scripts/knowledge_activation_release_guard.py}"
+KNOWLEDGE_ACTIVATION_CANARY_OUTPUT="${KNOWLEDGE_ACTIVATION_CANARY_OUTPUT:-/tmp/knowledge_activation_release_guard.json}"
+ACTIVATION_GUARD_PYTHON="${ACTIVATION_GUARD_PYTHON:-python3}"
 API_CONTAINER="${API_CONTAINER:-truffles-api}"
 WORKER_CONTAINERS="${WORKER_CONTAINERS:-truffles-outbox truffles-sentinel}"
+KNOWLEDGE_ACTIVATION_SERVICE_CONTAINER="${KNOWLEDGE_ACTIVATION_SERVICE_CONTAINER:-truffles-knowledge-activation-service}"
 
 is_ghcr_image_ref() {
   local image_ref="$1"
@@ -60,6 +68,16 @@ if [ ! -f "$WORKERS_SCRIPT" ]; then
   exit 1
 fi
 
+if [ "$RESTART_KNOWLEDGE_ACTIVATION_SERVICE" = "1" ] && [ ! -f "$KNOWLEDGE_ACTIVATION_SERVICE_SCRIPT" ]; then
+  echo "ERROR: knowledge activation service restart script not found: $KNOWLEDGE_ACTIVATION_SERVICE_SCRIPT" >&2
+  exit 1
+fi
+
+if [ "$RUN_KNOWLEDGE_ACTIVATION_CANARY" = "1" ] && [ ! -f "$KNOWLEDGE_ACTIVATION_CANARY_SCRIPT" ]; then
+  echo "ERROR: knowledge activation canary script not found: $KNOWLEDGE_ACTIVATION_CANARY_SCRIPT" >&2
+  exit 1
+fi
+
 if [ "$REQUIRE_GHCR" = "1" ] && ! is_ghcr_image_ref "$IMAGE_NAME"; then
   echo "ERROR: REQUIRE_GHCR=1 but IMAGE_NAME='$IMAGE_NAME' is not a GHCR image ref." >&2
   exit 1
@@ -89,6 +107,16 @@ REQUIRE_GHCR="$REQUIRE_GHCR" \
 EXPECTED_IMAGE="$IMAGE_REF" \
 bash "$WORKERS_SCRIPT"
 
+if [ "$RESTART_KNOWLEDGE_ACTIVATION_SERVICE" = "1" ]; then
+  IMAGE_NAME="$IMAGE_REF" \
+  PULL_IMAGE=0 \
+  REQUIRE_GHCR="$REQUIRE_GHCR" \
+  EXPECTED_IMAGE="$IMAGE_REF" \
+  KNOWLEDGE_ACTIVATION_SERVICE_ENABLED="$KNOWLEDGE_ACTIVATION_SERVICE_ENABLED" \
+  VERIFY_HEALTH=1 \
+  bash "$KNOWLEDGE_ACTIVATION_SERVICE_SCRIPT"
+fi
+
 api_image_id="$(docker inspect --format '{{.Image}}' "$API_CONTAINER" 2>/dev/null || true)"
 if [ -z "$api_image_id" ]; then
   echo "ERROR: release parity check failed (cannot inspect $API_CONTAINER)." >&2
@@ -109,4 +137,29 @@ for worker in $WORKER_CONTAINERS; do
   fi
 done
 
-echo "Release parity OK: API and workers share image id $api_image_id"
+if [ "$RESTART_KNOWLEDGE_ACTIVATION_SERVICE" = "1" ]; then
+  activation_image_id="$(docker inspect --format '{{.Image}}' "$KNOWLEDGE_ACTIVATION_SERVICE_CONTAINER" 2>/dev/null || true)"
+  if [ -z "$activation_image_id" ]; then
+    echo "ERROR: release parity check failed (cannot inspect $KNOWLEDGE_ACTIVATION_SERVICE_CONTAINER)." >&2
+    exit 1
+  fi
+  if [ "$activation_image_id" != "$api_image_id" ]; then
+    echo "ERROR: release parity check failed ($KNOWLEDGE_ACTIVATION_SERVICE_CONTAINER image differs from $API_CONTAINER)." >&2
+    echo "$API_CONTAINER=$api_image_id" >&2
+    echo "$KNOWLEDGE_ACTIVATION_SERVICE_CONTAINER=$activation_image_id" >&2
+    exit 1
+  fi
+fi
+
+if [ "$RESTART_KNOWLEDGE_ACTIVATION_SERVICE" = "1" ]; then
+  echo "Release parity OK: API, workers, and knowledge activation service share image id $api_image_id"
+else
+  echo "Release parity OK: API and workers share image id $api_image_id"
+fi
+
+if [ "$RUN_KNOWLEDGE_ACTIVATION_CANARY" = "1" ]; then
+  "$ACTIVATION_GUARD_PYTHON" "$KNOWLEDGE_ACTIVATION_CANARY_SCRIPT" \
+    --output "$KNOWLEDGE_ACTIVATION_CANARY_OUTPUT" \
+    --pretty
+  echo "Knowledge activation canary artifact: $KNOWLEDGE_ACTIVATION_CANARY_OUTPUT"
+fi
