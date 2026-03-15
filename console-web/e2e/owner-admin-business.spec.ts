@@ -151,7 +151,9 @@ function isMockedKnowledgeWorkspaceTest(title: string) {
         || title.includes('knowledge sync contradiction')
         || title.includes('consultant verification branch gate')
         || title.includes('consultant verification owner surface')
+        || title.includes('consultant verification decomposed lanes')
         || title.includes('knowledge support tools disclosure')
+        || title.includes('knowledge owner flow decomposition')
         || title.includes('consultant verification readiness')
         || title.includes('knowledge publish sync failure');
 }
@@ -578,7 +580,7 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('knowledge-draft-textarea')).toHaveValue(/Draft Salon/);
     });
 
-    test('should hide support tools behind disclosure on knowledge for owner knowledge support tools disclosure', async ({ page }) => {
+    test('should keep owner flow focused while support tools stay reachable knowledge owner flow decomposition knowledge support tools disclosure', async ({ page }) => {
         await mockKnowledgeWorkspace(page, {
             current: {
                 version_id: '55555555-5555-4555-8555-555555555555',
@@ -907,7 +909,7 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-status-chip')).toContainText('ready');
     });
 
-    test('should keep owner consultant verification focused until team tools are opened consultant verification owner surface', async ({ page }) => {
+    test('should keep consultant verification split into focused lanes consultant verification decomposed lanes consultant verification owner surface', async ({ page }) => {
         const companyId = '11111111-1111-4111-8111-111111111111';
         const clientId = '22222222-2222-4222-8222-222222222222';
         const branchId = '33333333-3333-4333-8333-333333333333';

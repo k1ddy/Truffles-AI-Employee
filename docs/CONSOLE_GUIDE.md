@@ -256,6 +256,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   - Wave5 adds owner-detected findings: weak answers can be flagged from the explainer panel, clustered into failure families, linked to `knowledge_backlog` / `learning_candidates`, and tracked via statuses (`new / in_review / needs_data / fixed / retested`).
   - Wave6 adds `live vs draft` compare and publish readiness: the same prompt or finding can be rerun against published knowledge and the latest saved draft; the result records a compare audit event, surfaces regressions in owner language, supports finding retest, and becomes a required gate before `Knowledge -> Publish`.
   - UX-52 slice A6 reduces default owner density: recent sessions, compare, and findings now live inside the shared `Инструменты команды` disclosure instead of competing with the primary owner scan path.
+  - UX-52 slice A7 extracts the remaining consultant-verification lane JSX into dedicated owner/review components (`OwnerSetupLane`, `TranscriptLane`, `ReviewLane`) so future owner/admin tweaks stay local to one lane instead of editing the whole workspace.
   - Readiness is sync-aware: if the latest published knowledge is still `pending` or `failed`, or the branch is in `knowledge_safe_mode`, the page shows `needs_attention` and keeps the interactive workspace hidden until sync is actually ready.
   - Closeout status on this branch: local deterministic proof, owner/admin compare lane, and screenshot audit are green; one-client canary and post-merge monitoring remain release-only steps after merge/deploy.
   - Simulation turns must never leak real outbound, booking, or handoff side effects into production flows.
@@ -280,6 +281,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - After `publish`, `retry-sync`, or `rollback`, the frontend must refetch dependent server-state (`console-me`, `knowledge/current`, `knowledge/history`, consultant-verification readiness) so owner UI cannot show stale `safe_mode/timed out` together with fresh `pending`.
 - History, current state, rollback, and consultant-verification readiness all treat `sync_status=pending|failed` as blocking for owner verification until sync is actually `ready`.
 - UX-52 slice A6 reduces default owner density: `Client Pack Inspector` and `Кандидаты обучения` are now support disclosures instead of always-inline blocks in the main authoring path.
+- UX-52 slice A7 extracts the main `Knowledge` step flow into `KnowledgeStudioFlow` and moves rollback confirmation into `KnowledgeRollbackConfirmDialog`, so `page.tsx` remains orchestration-first instead of holding most of the stage JSX inline.
 
 **Team (Команда)**
 - UI: `console-web/src/app/team/page.tsx`

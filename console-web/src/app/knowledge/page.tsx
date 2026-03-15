@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import axios from "axios";
@@ -27,7 +26,8 @@ import api from "@/lib/api";
 import { applyConsoleScopeContext } from "@/lib/console-scope-gate";
 import type { components } from "@/types/api.generated";
 import KnowledgeLearningCandidatesPanel from "./_components/KnowledgeLearningCandidatesPanel";
-import KnowledgePackInspectorPanel from "./_components/KnowledgePackInspectorPanel";
+import KnowledgeStudioFlow from "./_components/KnowledgeStudioFlow";
+import KnowledgeRollbackConfirmDialog from "./_components/KnowledgeRollbackConfirmDialog";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type FleetAttentionItem = components["schemas"]["ConsoleFleetAttentionItem"];
@@ -2252,6 +2252,133 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         );
     }
 
+
+    const flowSidebarProps = {
+        steps: KNOWLEDGE_STEPS,
+        stepIndex,
+        stepStatus,
+        onSelectStep: setStepIndex,
+    };
+
+    const draftStageProps = {
+        canEdit,
+        draftText,
+        onDraftTextChange: (value: string) => {
+            setDraftText(value);
+            setValidation((prev) => prev.ran ? { ...prev, ran: false } : prev);
+        },
+        currentText,
+        editBaseText,
+        hasSavedDraft,
+        editBaseSource,
+        editBaseSourceLabel,
+        editBaseUpdatedAt,
+        draftUpdatedAt,
+        formatTimestamp,
+        structuredGuidedFields,
+        supportToolsDefaultOpen,
+        inspectorSummary,
+        packInspectorQuery,
+        onPackInspectorQueryChange: setPackInspectorQuery,
+        filteredPackPaths,
+        applyStructuredDraft,
+        guidedHours,
+        onGuidedHoursChange: setGuidedHours,
+        guidedSalonProfile,
+        onGuidedSalonProfileChange: setGuidedSalonProfile,
+        guidedBooking,
+        onGuidedBookingChange: setGuidedBooking,
+        guidedPolicy,
+        onGuidedPolicyChange: setGuidedPolicy,
+        guidedServices,
+        onAddGuidedService: addGuidedService,
+        onUpdateGuidedService: updateGuidedService,
+        onRemoveGuidedService: removeGuidedService,
+        specialistsLoading: specialistsQuery.isLoading,
+        allSpecialistsLoading: allSpecialistsQuery.isLoading,
+        specialists,
+        allSpecialists,
+        missingBranchSpecialistsButClientHasSome,
+        specialistsInOtherBranchesCount: specialistsInOtherBranches.length,
+        specialistsByBranch,
+        onOpenTeam: () => void openRouteWithFleetContext(
+            "/team",
+            selectedClientId || fleetClientId,
+            selectedCompanyId || fleetCompanyId,
+            selectedBranchId || null,
+        ),
+        teamButtonDisabled: isFleetBusy,
+        onLoadEditBase: () => setDraftText(editBaseText || currentText),
+        onLoadPublished: () => setDraftText(currentText),
+        onLoadSavedDraft: () => setDraftText(draftServerText),
+    };
+
+    const validateStageProps = {
+        canEdit,
+        apiUnavailable,
+        draftText,
+        validation,
+        hasErrors,
+        isDraftDirty,
+        onValidate: () => validateMutation.mutate(),
+        isValidating: validateMutation.isPending,
+        formatKnowledgeValidationIssue,
+    };
+
+    const previewStageProps = {
+        validation,
+        currentText,
+        draftText,
+    };
+
+    const publishStageProps = {
+        validation,
+        hasErrors,
+        hasWarnings,
+        isDraftDirty,
+        compareReady,
+        compareRequired,
+        compareStatusLabel,
+        consultantVerificationReadinessSummary: consultantVerificationReadiness?.summary ?? null,
+        consultantVerificationReadinessErrorMessage,
+        lastValidatedDraftHash,
+        currentVersionId: currentQuery.data?.version_id ?? null,
+        currentSyncStatus,
+        currentSyncStatusLabel,
+        currentSyncError,
+        knowledgeSyncStatusClass,
+        resolveKnowledgeSyncMessage,
+        resolveKnowledgeSyncDetails,
+        ackWarnings,
+        onAckWarningsChange: setAckWarnings,
+        canEdit,
+        canPublish,
+        isPublishing: publishMutation.isPending,
+        onPublish: () => publishMutation.mutate(),
+    };
+
+    const historyStageProps = {
+        items: historyItems,
+        selectedVersionId,
+        onSelectVersion: setSelectedVersionId,
+        knowledgeSyncStatusClass,
+    };
+
+    const rollbackStageProps = {
+        selectedVersionId,
+        lastRollbackAt,
+        canEdit,
+        apiUnavailable,
+        isRollbackPending: rollbackMutation.isPending,
+        onOpenRollbackConfirm: () => {
+            if (!selectedVersionId) {
+                toast.error("Выберите версию для rollback");
+                return;
+            }
+            setShowRollbackConfirm(true);
+        },
+    };
+
     return (
         <div className="space-y-6" data-testid="knowledge-studio">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -2326,747 +2453,20 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <div className="card-surface p-4">
-                    <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-4">
-                        Flow
-                    </h2>
-                    <div className="flex flex-col gap-2">
-                        {KNOWLEDGE_STEPS.map((step, index) => {
-                            const active = index === stepIndex;
-                            const done = stepStatus[step.id];
-                            return (
-                                <button
-                                    key={step.id}
-                                    type="button"
-                                    onClick={() => setStepIndex(index)}
-                                    className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition ${
-                                        active ? "border-primary bg-primary/10" : "border-border/60 hover:bg-muted"
-                                    }`}
-                                    data-testid={`knowledge-step-${step.id}`}
-                                >
-                                    <div>
-                                        <div className="font-medium">{step.label}</div>
-                                        <div className="text-xs text-muted-foreground">{step.hint}</div>
-                                    </div>
-                                    {done && <span className="text-xs text-green-600">✓</span>}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                <div className="card-surface p-6 lg:col-span-2">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold">{currentStep.label}</h2>
-                        <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                            {currentStep.hint}
-                        </span>
-                    </div>
-
-                    {currentStep.id === "draft" && (
-                        <div className="mt-4 space-y-4">
-                            <div className="flex flex-wrap items-center gap-3">
-                                <button
-                                    type="button"
-                                    className="btn-ghost"
-                                    onClick={() => setDraftText(editBaseText || currentText)}
-                                    disabled={!(editBaseText || currentText) || !canEdit}
-                                    data-testid="knowledge-load-edit-base"
-                                >
-                                    Загрузить базу редактирования
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn-ghost"
-                                    onClick={() => setDraftText(currentText)}
-                                    disabled={!currentText || !canEdit}
-                                    data-testid="knowledge-load-published"
-                                >
-                                    Загрузить опубликованную версию
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn-ghost"
-                                    onClick={() => setDraftText(draftServerText)}
-                                    disabled={!hasSavedDraft || !canEdit}
-                                    data-testid="knowledge-load-saved-draft"
-                                >
-                                    Загрузить сохраненный draft
-                                </button>
-                                <span className="text-xs text-muted-foreground">
-                                    Draft сохраняется на сервере после Validate и автоматически восстанавливается для текущего филиала.
-                                </span>
-                            </div>
-                            <div
-                                className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
-                                data-testid="knowledge-edit-base-card"
-                            >
-                                <p className="font-medium text-foreground">
-                                    Сейчас редактируете на базе: {editBaseSourceLabel}
-                                </p>
-                                <p className="mt-1 text-muted-foreground">
-                                    {editBaseSource === "draft"
-                                        ? "Console поднимает последний сохраненный draft этого филиала. Это безопаснее, чем собирать черновик с нуля."
-                                        : editBaseSource === "published"
-                                            ? "Сохраненного draft пока нет, поэтому редактор стартует от опубликованной версии."
-                                            : "Для этого филиала еще нет опубликованной версии и сохраненного draft. Начните с минимального черновика и Validate."}
-                                </p>
-                                <p className="mt-2 text-xs text-muted-foreground">
-                                    База обновлена: {formatTimestamp(editBaseUpdatedAt)}
-                                    {hasSavedDraft ? ` · saved draft: ${formatTimestamp(draftUpdatedAt)}` : ""}
-                                </p>
-                            </div>
-                            {structuredGuidedFields.length > 0 && (
-                                <div
-                                    className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900"
-                                    data-testid="knowledge-structured-warning"
-                                >
-                                    <p className="font-medium">Важное ограничение structured builder</p>
-                                    <p className="mt-1">
-                                        В этом филиале часть policy-полей хранится как структурные объекты:
-                                        {" "}
-                                        {structuredGuidedFields.join(", ")}.
-                                        {" "}
-                                        Если оставить эти поля пустыми, builder сохранит серверные значения как есть и не сотрет их.
-                                    </p>
-                                </div>
-                            )}
-                            <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
-                                <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <div>
-                                        <p className="text-sm font-medium">Structured Draft Builder</p>
-                                        <p className="text-xs text-muted-foreground">
-                                            Обновите часы и каталог услуг без ручного редактирования JSON.
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        className="btn-primary"
-                                        onClick={applyStructuredDraft}
-                                        disabled={!canEdit}
-                                        data-testid="knowledge-build-structured-draft"
-                                    >
-                                        Собрать structured draft
-                                    </button>
-                                </div>
-
-                                <ConsoleSupportDisclosure
-                                    rootTestId="knowledge-support-tools-disclosure"
-                                    title="Инструменты команды"
-                                    description="Инспектор Client Pack нужен для точечной диагностики, а не для первого прохода владельца бизнеса."
-                                    defaultOpen={supportToolsDefaultOpen}
-                                    className="mt-4"
-                                >
-                                    <KnowledgePackInspectorPanel
-                                        summary={inspectorSummary}
-                                        query={packInspectorQuery}
-                                        onQueryChange={setPackInspectorQuery}
-                                        items={filteredPackPaths}
-                                    />
-                                </ConsoleSupportDisclosure>
-
-                                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                                    <label className="text-xs text-muted-foreground">
-                                        Дни работы
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedHours.days}
-                                            onChange={(event) =>
-                                                setGuidedHours((prev) => ({ ...prev, days: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Пн-Вс"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Открытие
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedHours.open}
-                                            onChange={(event) =>
-                                                setGuidedHours((prev) => ({ ...prev, open: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="10:00"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Закрытие
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedHours.close}
-                                            onChange={(event) =>
-                                                setGuidedHours((prev) => ({ ...prev, close: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="21:00"
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                    <label className="text-xs text-muted-foreground">
-                                        Название салона
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedSalonProfile.salonName}
-                                            onChange={(event) =>
-                                                setGuidedSalonProfile((prev) => ({ ...prev, salonName: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Например: Truffles Beauty"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Город
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedSalonProfile.city}
-                                            onChange={(event) =>
-                                                setGuidedSalonProfile((prev) => ({ ...prev, city: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Алматы"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground sm:col-span-2">
-                                        Полный адрес
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedSalonProfile.addressFull}
-                                            onChange={(event) =>
-                                                setGuidedSalonProfile((prev) => ({ ...prev, addressFull: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="ул. Пример, 10"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Языки общения (через запятую)
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedSalonProfile.languages}
-                                            onChange={(event) =>
-                                                setGuidedSalonProfile((prev) => ({ ...prev, languages: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="ru, kk"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Guest policy
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedSalonProfile.guestPolicy}
-                                            onChange={(event) =>
-                                                setGuidedSalonProfile((prev) => ({ ...prev, guestPolicy: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="например: работаем только по записи"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground sm:col-span-2">
-                                        Кратко об услугах
-                                        <textarea
-                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedSalonProfile.servicesSummary}
-                                            onChange={(event) =>
-                                                setGuidedSalonProfile((prev) => ({ ...prev, servicesSummary: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Короткое описание специализации салона"
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                    <label className="text-xs text-muted-foreground">
-                                        Booking: collect_fields (через запятую)
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedBooking.collectFields}
-                                            onChange={(event) =>
-                                                setGuidedBooking((prev) => ({ ...prev, collectFields: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="service, date, time, name, phone"
-                                        />
-                                    </label>
-                                    <label className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
-                                        <input
-                                            type="checkbox"
-                                            checked={guidedBooking.botCanConfirm}
-                                            onChange={(event) =>
-                                                setGuidedBooking((prev) => ({ ...prev, botCanConfirm: event.target.checked }))
-                                            }
-                                            disabled={!canEdit}
-                                        />
-                                        Booking: bot_can_confirm
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Policy: payment_info
-                                        <textarea
-                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedPolicy.paymentInfo}
-                                            onChange={(event) =>
-                                                setGuidedPolicy((prev) => ({ ...prev, paymentInfo: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Как проходит оплата"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Policy: reschedule
-                                        <textarea
-                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedPolicy.reschedule}
-                                            onChange={(event) =>
-                                                setGuidedPolicy((prev) => ({ ...prev, reschedule: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Правила переноса"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Policy: cancel
-                                        <textarea
-                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedPolicy.cancel}
-                                            onChange={(event) =>
-                                                setGuidedPolicy((prev) => ({ ...prev, cancel: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Правила отмены"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        Policy: discounts
-                                        <textarea
-                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={guidedPolicy.discounts}
-                                            onChange={(event) =>
-                                                setGuidedPolicy((prev) => ({ ...prev, discounts: event.target.value }))
-                                            }
-                                            disabled={!canEdit}
-                                            placeholder="Скидки и акции"
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="mt-4 space-y-2">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="text-sm font-medium">Услуги</p>
-                                        <button
-                                            type="button"
-                                            className="btn-ghost"
-                                            onClick={addGuidedService}
-                                            disabled={!canEdit}
-                                        >
-                                            Добавить услугу
-                                        </button>
-                                    </div>
-                                    {guidedServices.map((service) => (
-                                        <div key={service.id} className="flex items-center gap-2">
-                                            <input
-                                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                value={service.name}
-                                                onChange={(event) => updateGuidedService(service.id, event.target.value)}
-                                                disabled={!canEdit}
-                                                placeholder="Название услуги"
-                                            />
-                                            <button
-                                                type="button"
-                                                className="btn-ghost"
-                                                onClick={() => removeGuidedService(service.id)}
-                                                disabled={!canEdit || guidedServices.length <= 1}
-                                            >
-                                                Удалить
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="mt-4 rounded-lg border border-border/60 bg-background p-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="text-sm font-medium">Мастера филиала</p>
-                                        <button
-                                            type="button"
-                                            className="btn-ghost"
-                                            onClick={() => void openRouteWithFleetContext(
-                                                "/team",
-                                                selectedClientId || fleetClientId,
-                                                selectedCompanyId || fleetCompanyId,
-                                                selectedBranchId || null,
-                                            )}
-                                            disabled={isFleetBusy}
-                                        >
-                                            Управлять в Team
-                                        </button>
-                                    </div>
-                                    <div className="mt-2 text-xs text-muted-foreground">
-                                        {specialistsQuery.isLoading && "Загрузка мастеров..."}
-                                        {!specialistsQuery.isLoading && specialists.length === 0 && !missingBranchSpecialistsButClientHasSome && "В выбранном филиале пока нет мастеров в Calendar."}
-                                        {!allSpecialistsQuery.isLoading && allSpecialists.length > 0 && (
-                                            <div className="mt-1">
-                                                Всего по клиенту: {allSpecialists.length}
-                                            </div>
-                                        )}
-                                    </div>
-                                    {!specialistsQuery.isLoading && missingBranchSpecialistsButClientHasSome && (
-                                        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
-                                            В этом филиале мастеров нет. В других филиалах клиента найдено {specialistsInOtherBranches.length}.
-                                            {specialistsByBranch.length > 0 && (
-                                                <div className="mt-1">
-                                                    {specialistsByBranch
-                                                        .slice(0, 3)
-                                                        .map((item) => `${item.label}: ${item.count}`)
-                                                        .join(" · ")}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                    {!specialistsQuery.isLoading && specialists.length > 0 && (
-                                        <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
-                                            {specialists.slice(0, 6).map((specialist) => (
-                                                <div key={specialist.id}>
-                                                    {specialist.name} · услуг {specialist.services?.length ?? 0}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            <textarea
-                                className="min-h-[240px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono"
-                                placeholder="Вставьте YAML/JSON draft знаний..."
-                                value={draftText}
-                                onChange={(event) => {
-                                    setDraftText(event.target.value);
-                                    setValidation((prev) => prev.ran ? { ...prev, ran: false } : prev);
-                                }}
-                                disabled={!canEdit}
-                                data-testid="knowledge-draft-textarea"
-                            />
-                            <div className="text-xs text-muted-foreground">
-                                {draftText.trim().length} символов
-                            </div>
-                        </div>
-                    )}
-
-                    {currentStep.id === "validate" && (
-                        <div className="mt-4 space-y-4">
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => validateMutation.mutate()}
-                                disabled={!canEdit || apiUnavailable || !draftText.trim() || validateMutation.isPending}
-                                data-testid="knowledge-validate-button"
-                            >
-                                {validateMutation.isPending ? "Проверка..." : "Запустить валидацию"}
-                            </button>
-                            {validation.ran && (
-                                <div className="space-y-3" data-testid="knowledge-validation-results">
-                                    <div className={`rounded-lg border p-3 text-sm ${hasErrors ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border/60 bg-muted/30"}`}>
-                                        {hasErrors ? "Ошибки найдены" : "Ошибок нет"}
-                                    </div>
-                                    {validation.errors.length > 0 && (
-                                        <ul
-                                            className="list-disc space-y-1 pl-5 text-sm text-destructive"
-                                            data-testid="knowledge-validation-errors"
-                                        >
-                                            {validation.errors.map((error, idx) => (
-                                                <li key={`${error}-${idx}`}>
-                                                    <div>{formatKnowledgeValidationIssue(error).title}</div>
-                                                    {formatKnowledgeValidationIssue(error).detail ? (
-                                                        <div className="text-xs text-destructive/80">
-                                                            {formatKnowledgeValidationIssue(error).detail}
-                                                        </div>
-                                                    ) : null}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    )}
-                                    {validation.warnings.length > 0 && (
-                                        <div>
-                                            <p className="text-sm font-medium text-muted-foreground">Warnings</p>
-                                            <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                                                {validation.warnings.map((warning, idx) => (
-                                                    <li key={`${warning}-${idx}`}>{warning}</li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    )}
-                                    {!validation.draftSaved && (
-                                        <div
-                                            className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900"
-                                            data-testid="knowledge-validation-draft-save-blocked"
-                                        >
-                                            Черновик не сохранён на сервере: обнаружена потеря structured данных. Исправьте типы полей и повторите Validate.
-                                        </div>
-                                    )}
-                                    {isDraftDirty && (
-                                        <div className="text-xs text-muted-foreground">
-                                            Draft изменён после валидации — повторите Validate перед Publish.
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {currentStep.id === "preview" && (
-                        <div className="mt-4 space-y-4">
-                            {validation.diff ? (
-                                <pre className="max-h-[340px] overflow-auto rounded-lg border border-border bg-muted/40 p-4 text-xs font-mono">
-                                    {validation.diff}
-                                </pre>
-                            ) : (
-                                <div className="grid gap-4 lg:grid-cols-2">
-                                    <div>
-                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Current</p>
-                                        <pre className="max-h-[300px] overflow-auto rounded-lg border border-border bg-muted/40 p-4 text-xs font-mono">
-                                            {currentText || "Нет данных"}
-                                        </pre>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Draft</p>
-                                        <pre className="max-h-[300px] overflow-auto rounded-lg border border-border bg-muted/40 p-4 text-xs font-mono">
-                                            {draftText || "Draft пуст"}
-                                        </pre>
-                                    </div>
-                                </div>
-                            )}
-                            {!validation.ran && (
-                                <p className="text-sm text-muted-foreground">
-                                    Запустите Validate, чтобы получить diff.
-                                </p>
-                            )}
-                        </div>
-                    )}
-
-                    {currentStep.id === "publish" && (
-                        <div className="mt-4 space-y-4">
-                            <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm">
-                                <div className="flex items-center justify-between">
-                                    <span>Validation</span>
-                                    <span className={validation.ran && !hasErrors ? "text-green-600" : "text-muted-foreground"}>
-                                        {validation.ran ? (hasErrors ? "errors" : "ok") : "not run"}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between mt-2">
-                                    <span>Warnings</span>
-                                    <span className={hasWarnings ? "text-amber-600" : "text-muted-foreground"}>
-                                        {hasWarnings ? validation.warnings.length : "0"}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between mt-2">
-                                    <span>Draft dirty</span>
-                                    <span className={isDraftDirty ? "text-amber-600" : "text-muted-foreground"}>
-                                        {isDraftDirty ? "yes" : "no"}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between mt-2">
-                                    <span>Consultant compare</span>
-                                    <span
-                                        className={
-                                            consultantVerificationReadinessQuery.isError
-                                                ? "text-destructive"
-                                                : compareReady
-                                                    ? "text-green-600"
-                                                    : "text-amber-600"
-                                        }
-                                    >
-                                        {compareStatusLabel}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="rounded-lg border border-border/60 bg-muted/20 p-4 text-sm">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div>
-                                        <p className="font-medium text-foreground">Проверка live vs draft</p>
-                                        <p className="mt-1 text-muted-foreground">
-                                            {consultantVerificationReadinessErrorMessage
-                                                ?? consultantVerificationReadiness?.summary
-                                                ?? "После Validate откройте проверку консультанта и прогоните хотя бы один compare-кейс."}
-                                        </p>
-                                    </div>
-                                    <Link
-                                        href="/business/consultant-verification"
-                                        className="text-sm font-medium text-foreground underline underline-offset-4"
-                                    >
-                                        Открыть compare
-                                    </Link>
-                                </div>
-                                {lastValidatedDraftHash ? (
-                                    <p className="mt-3 text-xs text-muted-foreground">
-                                        Draft hash: {lastValidatedDraftHash}
-                                    </p>
-                                ) : null}
-                            </div>
-
-                            {hasWarnings && (
-                                <label className="flex items-start gap-2 text-sm text-muted-foreground">
-                                    <input
-                                        type="checkbox"
-                                        className="mt-1"
-                                        checked={ackWarnings}
-                                        onChange={(event) => setAckWarnings(event.target.checked)}
-                                        disabled={!canEdit}
-                                    />
-                                    Я подтверждаю предупреждения и понимаю риски изменений.
-                                </label>
-                            )}
-
-                            {currentQuery.data?.version_id ? (
-                                <div
-                                    className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
-                                    data-testid="knowledge-publish-sync-status"
-                                >
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="font-medium text-foreground">Статус текущей публикации</p>
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${knowledgeSyncStatusClass(currentSyncStatus)}`}>
-                                            {currentSyncStatusLabel}
-                                        </span>
-                                    </div>
-                                    <p className="mt-2 text-muted-foreground">
-                                        {resolveKnowledgeSyncMessage(currentSyncStatus)}
-                                    </p>
-                                    {resolveKnowledgeSyncDetails(currentSyncError) ? (
-                                        <p className="mt-2 text-xs text-muted-foreground">
-                                            {resolveKnowledgeSyncDetails(currentSyncError)}
-                                        </p>
-                                    ) : null}
-                                </div>
-                            ) : null}
-
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => publishMutation.mutate()}
-                                disabled={!canPublish || publishMutation.isPending}
-                            >
-                                {publishMutation.isPending ? "Публикация..." : "Опубликовать"}
-                            </button>
-                            {!canPublish && (
-                                <p className="text-xs text-muted-foreground">
-                                    {compareRequired
-                                        ? "Publish доступен только после Validate без ошибок, подтверждения warnings и green compare для текущего draft."
-                                        : "Publish доступен после Validate без ошибок и подтверждения warnings. Для первого publish или branch без rollout compare сейчас не требуется."}
-                                </p>
-                            )}
-                        </div>
-                    )}
-
-                    {currentStep.id === "history" && (
-                        <div className="mt-4 space-y-4">
-                            {historyItems.length === 0 && (
-                                <p className="text-sm text-muted-foreground">История пока пуста.</p>
-                            )}
-                            {historyItems.length > 0 && (
-                                <div className="space-y-3">
-                                    {historyItems.map((item, index) => (
-                                        <label
-                                            key={item.id ?? `history-${index}`}
-                                            className={`flex cursor-pointer items-start justify-between rounded-lg border p-3 text-sm ${
-                                                selectedVersionId === item.id ? "border-primary bg-primary/10" : "border-border/60"
-                                            }`}
-                                        >
-                                            <div>
-                                                <div className="font-medium">
-                                                    {item.summary || item.id || "unknown-version"}
-                                                </div>
-                                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                                    <span>{item.status ?? "status неизвестен"}</span>
-                                                    {item.sync_status_label ? (
-                                                        <span className={`rounded-full px-2 py-0.5 ${knowledgeSyncStatusClass(item.sync_status)}`}>
-                                                            {item.sync_status_label}
-                                                        </span>
-                                                    ) : null}
-                                                </div>
-                                                {item.published_at && (
-                                                    <div className="text-xs text-muted-foreground">
-                                                        Published: {new Date(item.published_at).toLocaleString("ru-RU")}
-                                                    </div>
-                                                )}
-                                                {item.sync_status === "failed" ? (
-                                                    <div className="text-xs text-red-700">
-                                                        Синхронизация требует внимания.
-                                                    </div>
-                                                ) : null}
-                                            </div>
-                                            <input
-                                                type="radio"
-                                                name="knowledge-version"
-                                                className="mt-1"
-                                                value={item.id ?? ""}
-                                                checked={selectedVersionId === item.id}
-                                                onChange={() => setSelectedVersionId(item.id ?? "")}
-                                                disabled={!item.id}
-                                            />
-                                        </label>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {currentStep.id === "rollback" && (
-                        <div className="mt-4 space-y-4">
-                            <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm">
-                                <div className="flex items-center justify-between">
-                                    <span>Выбранная версия</span>
-                                    <span className="font-mono text-xs">{selectedVersionId || "не выбрана"}</span>
-                                </div>
-                                {lastRollbackAt && (
-                                    <div className="mt-2 text-xs text-muted-foreground">
-                                        Last rollback: {new Date(lastRollbackAt).toLocaleString("ru-RU")}
-                                    </div>
-                                )}
-                            </div>
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => {
-                                    if (!selectedVersionId) {
-                                        toast.error("Выберите версию для rollback");
-                                        return;
-                                    }
-                                    setShowRollbackConfirm(true);
-                                }}
-                                disabled={!canEdit || apiUnavailable || !selectedVersionId || rollbackMutation.isPending}
-                            >
-                                {rollbackMutation.isPending ? "Откат..." : "Выполнить rollback"}
-                            </button>
-                            <p className="text-xs text-muted-foreground">
-                                Rollback возвращает выбранную версию и фиксируется в audit.
-                            </p>
-                        </div>
-                    )}
-
-                    <div className="mt-8 flex items-center justify-between border-t border-border/60 pt-4">
-                        <button
-                            type="button"
-                            className="btn-ghost"
-                            onClick={() => setStepIndex((prev) => Math.max(prev - 1, 0))}
-                            disabled={stepIndex === 0}
-                            data-testid="knowledge-step-prev"
-                        >
-                            Назад
-                        </button>
-                        <button
-                            type="button"
-                            className="btn-primary"
-                            onClick={() => setStepIndex((prev) => Math.min(prev + 1, KNOWLEDGE_STEPS.length - 1))}
-                            disabled={stepIndex === KNOWLEDGE_STEPS.length - 1}
-                            data-testid="knowledge-step-next"
-                        >
-                            Далее
-                        </button>
-                    </div>
-                </div>
-            </div>
+            <KnowledgeStudioFlow
+                sidebar={flowSidebarProps}
+                currentStep={currentStep}
+                draftStage={draftStageProps}
+                validateStage={validateStageProps}
+                previewStage={previewStageProps}
+                publishStage={publishStageProps}
+                historyStage={historyStageProps}
+                rollbackStage={rollbackStageProps}
+                onPrevStep={() => setStepIndex((prev) => Math.max(prev - 1, 0))}
+                onNextStep={() => setStepIndex((prev) => Math.min(prev + 1, KNOWLEDGE_STEPS.length - 1))}
+                isFirstStep={stepIndex === 0}
+                isLastStep={stepIndex === KNOWLEDGE_STEPS.length - 1}
+            />
 
             <div className="card-surface mt-6 p-5">
                 <ConsoleSupportDisclosure
@@ -3092,55 +2492,25 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 </ConsoleSupportDisclosure>
             </div>
 
-            {showRollbackConfirm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                    <div className="card-surface w-full max-w-lg space-y-4 p-6">
-                        <div>
-                            <h3 className="text-lg font-semibold">Подтвердите rollback</h3>
-                            <p className="text-sm text-muted-foreground">
-                                Версия: {selectedVersionId || "—"}. Откат изменит активные знания и требует причины.
-                            </p>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">Причина</label>
-                            <textarea
-                                className="min-h-[90px] w-full rounded-lg border border-border/60 bg-background p-3 text-sm"
-                                value={rollbackReason}
-                                onChange={(event) => setRollbackReason(event.target.value)}
-                                placeholder="Например: ошибка в опубликованном pack, откат до стабильной версии"
-                            />
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                            <button
-                                type="button"
-                                className="btn-ghost"
-                                onClick={() => {
-                                    setShowRollbackConfirm(false);
-                                    setRollbackReason("");
-                                }}
-                                disabled={rollbackMutation.isPending}
-                            >
-                                Отмена
-                            </button>
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => {
-                                    const reason = rollbackReason.trim();
-                                    if (!reason) {
-                                        toast.error("Укажите причину");
-                                        return;
-                                    }
-                                    rollbackMutation.mutate(reason);
-                                }}
-                                disabled={rollbackMutation.isPending}
-                            >
-                                {rollbackMutation.isPending ? "Подтверждение..." : "Подтвердить rollback"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <KnowledgeRollbackConfirmDialog
+                open={showRollbackConfirm}
+                selectedVersionId={selectedVersionId}
+                rollbackReason={rollbackReason}
+                onRollbackReasonChange={setRollbackReason}
+                onCancel={() => {
+                    setShowRollbackConfirm(false);
+                    setRollbackReason("");
+                }}
+                onConfirm={() => {
+                    const reason = rollbackReason.trim();
+                    if (!reason) {
+                        toast.error("Укажите причину");
+                        return;
+                    }
+                    rollbackMutation.mutate(reason);
+                }}
+                isPending={rollbackMutation.isPending}
+            />
         </div>
     );
 }

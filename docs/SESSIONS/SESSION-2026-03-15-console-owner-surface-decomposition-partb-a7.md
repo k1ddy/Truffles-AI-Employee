@@ -1,0 +1,33 @@
+# SESSION 2026-03-15-console-owner-surface-decomposition-partb-a7 — Session 2026-03-15-console-owner-surface-decomposition-partb-a7
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-partb-a7.md
+- block_id: UX-52
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-console-owner-surface-decomposition-partb-a7
+- worktree: /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-partb-a7
+- base_ref: origin/main
+- scope: Extract remaining page-level owner/admin JSX from `Knowledge` and `ConsultantVerificationWorkspace` into lane-specific components without backend changes.
+- done:
+  - Synced local `main` to include merged `PR #971` and cleaned the previous A6 worktree/branch before starting A7.
+  - Extracted `Knowledge` owner flow JSX into `KnowledgeStudioFlow` and `KnowledgeRollbackConfirmDialog`, keeping `page.tsx` orchestration-first.
+  - Extracted consultant verification setup/transcript/review lanes into dedicated components and kept team tools reachable inside the review lane.
+  - Updated canon/docs/backlog for `UX-52` progress and recorded deterministic proof.
+- next:
+  - Open PR for A7, then monitor CI and merge before starting the deferred state-hook extraction follow-up.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-partb-a7.md
+  - console-web/src/app/knowledge/_components/KnowledgeStudioFlow.tsx
+  - console-web/src/app/knowledge/_components/KnowledgeRollbackConfirmDialog.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationOwnerSetupLane.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationTranscriptLane.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationReviewLane.tsx
+  - cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-partb-a7/console-web && npm run lint -- --file src/app/knowledge/page.tsx --file src/app/knowledge/_components/KnowledgePackInspectorPanel.tsx --file src/app/knowledge/_components/KnowledgeStudioFlow.tsx --file src/app/knowledge/_components/KnowledgeRollbackConfirmDialog.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationOwnerSetupLane.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationTranscriptLane.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationReviewLane.tsx --file e2e/owner-admin-business.spec.ts (`pass`)
+  - cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-partb-a7/console-web && npm run build (`pass`)
+  - cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-partb-a7/console-web && npm run dev -- --hostname 127.0.0.1 --port 3000 + PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep "knowledge owner flow decomposition|consultant verification decomposed lanes" (`2 passed`)
+- last_updated: 2026-03-15T12:00:00+05:00
