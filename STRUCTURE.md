@@ -237,6 +237,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md` | Remediation program Task Package for safe Knowledge authoring, truthful draft/live verification, and owner-safe validation/publish messaging | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-consultant-verification-branch-publish-flow-a3.md` | Task Package for inline branch repair on consultant verification and truthful publish/sync semantics with retry-sync | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Stabilization-reset Task Package for async knowledge sync, bounded owner states, and owner-surface overload containment | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md` | RCA-backed Task Package for unifying owner-facing sync-state truth after async publish/retry/rollback mutations | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave2-a920.md` | Session log for Wave2 safe simulation kernel implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave3-a920.md` | Session log for Wave3 owner-readable chat workspace implementation | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-wave4-a920.md` | Session log for Wave4 scenario library, replay, and session summary implementation | Brain/Architect |
@@ -245,6 +246,7 @@
 | `docs/SESSIONS/SESSION-2026-03-14-owner-consultant-verification-knowledge-safety-program-a921.md` | Session log for the Knowledge safety remediation program behind owner consultant verification | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-consultant-verification-branch-publish-flow-a3.md` | Session log for inline branch repair and truthful publish/sync semantics on owner surfaces | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Session log for the async knowledge sync + owner-surface stabilization reset block | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-15-console-knowledge-sync-state-unification-a4.md` | Session log for the sync-state truth unification block after async knowledge mutations | Brain/Architect |
 | `console-web/src/lib/calendar-action-registry.ts` | Canonical Calendar action registry and role/status/action scenario matrix used by booking cards, action panel, and deterministic operator proof | Frontend |
 | `truffles-api/app/services/calendar_action_contract.py` | Server-owned Calendar booking action contract builder for `allowed_actions` / `blocked_actions` and machine-readable blocked reasons | Backend |
 | `truffles-api/app/logging_config.py` | Shared Prometheus counters/helpers, now including Calendar action-family observability for denied/version-conflict/double-submit/filter/follow-up events | Backend |
