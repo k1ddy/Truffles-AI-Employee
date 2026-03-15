@@ -26,6 +26,7 @@ export default function ConsultantVerificationFindingsPanel({
     onRetestFinding,
 }: FindingsPanelProps) {
     const [draftStatuses, setDraftStatuses] = useState<Record<string, ConsultantVerificationFindingRecord["status"]>>({});
+    const findingItems = findings ?? [];
 
     const emptyState = useMemo(
         () => (
@@ -49,14 +50,14 @@ export default function ConsultantVerificationFindingsPanel({
                     </p>
                 </div>
                 <span className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
-                    {findings.length}
+                    {findingItems.length}
                 </span>
             </div>
 
-            {findings.length === 0 ? emptyState : null}
+            {findingItems.length === 0 ? emptyState : null}
 
             <div className="mt-3 space-y-3">
-                {findings.map((finding) => {
+                {findingItems.map((finding) => {
                     const status = draftStatuses[finding.id] ?? finding.status;
                     const statusPresentation = getFindingStatusPresentation(finding.status);
                     return (

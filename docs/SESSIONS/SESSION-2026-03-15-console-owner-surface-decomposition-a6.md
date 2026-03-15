@@ -1,0 +1,36 @@
+# SESSION 2026-03-15-console-owner-surface-decomposition-a6 — Session 2026-03-15-console-owner-surface-decomposition-a6
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-a6.md
+- block_id: CONSOLE-OWNER-SURFACE-DECOMPOSITION-A6
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-console-owner-surface-decomposition-a6
+- worktree: /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-a6
+- base_ref: origin/main
+- scope: UX-52 slice A6 — progressive disclosure + role-aware owner/admin surface split for `Knowledge` and `Проверка консультанта`
+- done:
+  - Wrote the canonical Task Package `docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-a6.md` with RCA, one mandatory web search, residual debt, and next-block contract.
+  - Added shared `ConsoleSupportDisclosure` and used it to demote support-only tools in `Knowledge` (`Client Pack Inspector`, `Кандидаты обучения`) behind secondary disclosures instead of keeping them inline in the main owner path.
+  - Added `ConsultantVerificationTeamToolsPanel` and moved recent sessions, compare, and findings into an explicit `Инструменты команды` disclosure so the primary consultant-verification lane stays focused on mode/scenario/chat/explainer/summary.
+  - Hardened consultant-verification presentation helpers against missing array fields so partial payloads no longer crash the page while owner/admin tools load.
+  - Added deterministic Playwright proof for the reduced owner path and preserved access to the advanced/team tools.
+- next:
+  - Open PR after commit, then continue with the remaining page-level extraction follow-up (`part B`).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-console-owner-surface-decomposition-a6.md
+  - console-web/src/components/ConsoleSupportDisclosure.tsx
+  - console-web/src/app/knowledge/_components/KnowledgePackInspectorPanel.tsx
+  - console-web/src/app/knowledge/_components/KnowledgeLearningCandidatesPanel.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationTeamToolsPanel.tsx
+  - console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx
+  - console-web/src/app/business/consultant-verification/_lib/presentation.ts
+  - console-web/e2e/owner-admin-business.spec.ts
+  - `cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-a6/console-web && npm run lint -- --file src/app/knowledge/page.tsx --file src/app/knowledge/_components/KnowledgePackInspectorPanel.tsx --file src/app/knowledge/_components/KnowledgeLearningCandidatesPanel.tsx --file src/app/business/consultant-verification/page.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx --file src/app/business/consultant-verification/_components/ConsultantVerificationTeamToolsPanel.tsx --file src/app/business/consultant-verification/_lib/presentation.ts --file src/components/ConsoleSupportDisclosure.tsx --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-a6/console-web && npm run build` (`pass`)
+  - `cd /home/zhan/worktrees/2026-03-15-console-owner-surface-decomposition-a6/console-web && npm run dev -- --hostname 127.0.0.1 --port 3000` + `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 PLAYWRIGHT_WEB_SERVER=0 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep 'consultant verification owner surface|knowledge support tools disclosure'` (`2 passed`)
+- last_updated: 2026-03-15

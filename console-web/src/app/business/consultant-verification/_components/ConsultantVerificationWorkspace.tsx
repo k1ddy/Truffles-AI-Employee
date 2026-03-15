@@ -20,17 +20,15 @@ import {
 import { QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
 import ConsultantVerificationScenarioLibrary from "./ConsultantVerificationScenarioLibrary";
-import ConsultantVerificationComparePanel from "./ConsultantVerificationComparePanel";
-import ConsultantVerificationFindingsPanel from "./ConsultantVerificationFindingsPanel";
 import ConsultantVerificationSessionSummaryPanel from "./ConsultantVerificationSessionSummaryPanel";
+import ConsultantVerificationTeamToolsPanel from "./ConsultantVerificationTeamToolsPanel";
 import {
     buildExplanationBlocks,
     buildReplayTitle,
     buildSessionTitle,
     buildTurnSignals,
-    describeSessionLatest,
-    formatSessionTitle,
     formatTimestamp,
+    formatSessionTitle,
     getChallengeModeLabel,
     getOutcomeLabel,
     getSourceModeLabel,
@@ -101,9 +99,14 @@ function mergeSessionIntoList(
 
 type WorkspaceProps = {
     overview: ConsultantVerificationOverviewResponse;
+    role: string;
 };
 
-export default function ConsultantVerificationWorkspace({ overview }: WorkspaceProps) {
+function shouldOpenTeamToolsByDefault(role: string): boolean {
+    return role === "admin" || role === "platform_admin";
+}
+
+export default function ConsultantVerificationWorkspace({ overview, role }: WorkspaceProps) {
     const queryClient = useQueryClient();
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
@@ -378,6 +381,8 @@ export default function ConsultantVerificationWorkspace({ overview }: WorkspaceP
     const sourceRefs = inspectedTurn?.source_refs ?? [];
     const technicalMeta = inspectedTurn?.decision_meta as Record<string, unknown> | undefined;
     const technicalTrace = inspectedTurn?.decision_trace as unknown[] | undefined;
+    const scenarioCatalog = overview.scenario_catalog ?? [];
+    const stressTestExamples = overview.stress_test_examples ?? [];
     const selectedSourceModeLabel = getSourceModeLabel(selectedSessionSummary?.source_mode ?? selectedSourceMode);
     const selectedChallengeModeLabel = getChallengeModeLabel(selectedSessionSummary?.challenge_mode ?? selectedChallengeMode);
     const isBusy = createSessionMutation.isPending
@@ -520,9 +525,10 @@ export default function ConsultantVerificationWorkspace({ overview }: WorkspaceP
         selectedChallengeMode === "stress"
             ? "Попробуйте каверзный вопрос, смешанный сценарий или проверку на эскалацию."
             : "Напишите так, как написал бы реальный клиент вашего бизнеса.";
-    const quickPrompts = overview.scenario_catalog.length > 0
-        ? overview.scenario_catalog.slice(0, 4).map((item) => item.prompt)
-        : overview.stress_test_examples.slice(0, 4);
+    const quickPrompts = scenarioCatalog.length > 0
+        ? scenarioCatalog.slice(0, 4).map((item) => item.prompt)
+        : stressTestExamples.slice(0, 4);
+    const teamToolsDefaultOpen = shouldOpenTeamToolsByDefault(role);
 
     return (
         <section className="mt-6" data-testid="consultant-verification-workspace">
@@ -641,7 +647,7 @@ export default function ConsultantVerificationWorkspace({ overview }: WorkspaceP
                     </article>
 
                     <ConsultantVerificationScenarioLibrary
-                        scenarios={overview.scenario_catalog}
+                        scenarios={scenarioCatalog}
                         isBusy={isBusy}
                         onFillPrompt={(prompt) => {
                             setDraft(prompt);
@@ -651,69 +657,6 @@ export default function ConsultantVerificationWorkspace({ overview }: WorkspaceP
                         }}
                     />
 
-                    <article
-                        className="rounded-xl border border-border/60 bg-card p-4"
-                        data-testid="consultant-verification-session-list"
-                    >
-                        <div className="flex items-center justify-between gap-2">
-                            <h3 className="text-sm font-semibold">Последние сессии</h3>
-                            <span className="text-xs text-muted-foreground">{sessionsQuery.data?.items.length ?? 0}</span>
-                        </div>
-
-                        {sessionsQuery.isLoading ? (
-                            <p className="mt-3 text-sm text-muted-foreground">Загружаю сохраненные проверки...</p>
-                        ) : null}
-
-                        {sessionsQuery.error ? (
-                            <p className="mt-3 text-sm text-rose-700">Не удалось загрузить список сессий. Обновите страницу.</p>
-                        ) : null}
-
-                        {!sessionsQuery.isLoading && (sessionsQuery.data?.items.length ?? 0) === 0 ? (
-                            <p className="mt-3 text-sm text-muted-foreground">
-                                Сессий пока нет. Можно сразу написать свой вопрос в центре — новая сессия создастся автоматически.
-                            </p>
-                        ) : null}
-
-                        <div className="mt-3 space-y-2">
-                            {(sessionsQuery.data?.items ?? []).map((session, index) => {
-                                const verdict = getVerdictPresentation(session.latest_business_verdict);
-                                const isSelected = selectedSessionId === session.id;
-                                return (
-                                    <button
-                                        key={session.id}
-                                        type="button"
-                                        onClick={() => {
-                                            setSelectedSessionId(session.id);
-                                            setErrorMessage(null);
-                                        }}
-                                        className={`w-full rounded-xl border p-3 text-left transition ${
-                                            isSelected
-                                                ? "border-foreground bg-muted/40"
-                                                : "border-border/60 bg-muted/10 hover:bg-muted/20"
-                                        }`}
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div>
-                                                <p className="text-sm font-semibold text-foreground">
-                                                    {formatSessionTitle(session, index)}
-                                                </p>
-                                                <p className="mt-1 text-xs text-muted-foreground">
-                                                    {getChallengeModeLabel(session.challenge_mode)} • {getSourceModeLabel(session.source_mode)}
-                                                </p>
-                                            </div>
-                                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${verdict.chipClass}`}>
-                                                {verdict.label}
-                                            </span>
-                                        </div>
-                                        <p className="mt-2 text-xs text-muted-foreground">{describeSessionLatest(session)}</p>
-                                        <p className="mt-1 text-[11px] text-muted-foreground">
-                                            Обновлено: {formatTimestamp(session.updated_at)}
-                                        </p>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </article>
                 </aside>
 
                 <article className="rounded-xl border border-border/60 bg-card p-4" data-testid="consultant-verification-transcript">
@@ -1051,20 +994,26 @@ export default function ConsultantVerificationWorkspace({ overview }: WorkspaceP
                         }}
                     />
 
-                    <ConsultantVerificationComparePanel
-                        readiness={compareReadiness}
-                        cases={compareCases}
+                    <ConsultantVerificationTeamToolsPanel
+                        defaultOpen={teamToolsDefaultOpen}
+                        sessions={sessionsQuery.data?.items ?? []}
+                        sessionsLoading={sessionsQuery.isLoading}
+                        sessionsError={Boolean(sessionsQuery.error)}
+                        selectedSessionId={selectedSessionId}
+                        selectedSessionIndex={selectedSessionIndex >= 0 ? selectedSessionIndex : 0}
+                        onSelectSession={(sessionId) => {
+                            setSelectedSessionId(sessionId);
+                            setErrorMessage(null);
+                        }}
+                        compareReadiness={compareReadiness}
+                        compareCases={compareCases}
                         isBusy={isBusy}
                         canCompareLastPrompt={Boolean(lastOwnerPrompt)}
                         onCompareLastPrompt={() => {
                             void handleCompareLastPrompt();
                         }}
-                    />
-
-                    <ConsultantVerificationFindingsPanel
                         findings={findings}
-                        isBusy={isBusy}
-                        onUpdateStatus={(findingId, status) => {
+                        onUpdateFindingStatus={(findingId, status) => {
                             void updateFindingMutation.mutateAsync({ findingId, status });
                         }}
                         onRetestFinding={(findingId) => {
