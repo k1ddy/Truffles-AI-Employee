@@ -1,0 +1,37 @@
+# SESSION 2026-03-15-console-owner-scope-gate-unification-a5 — Session 2026-03-15-console-owner-scope-gate-unification-a5
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-15-console-owner-scope-gate-unification-a5.md
+- block_id: CONSOLE-OWNER-SCOPE-GATE-UNIFICATION-A5
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-15-console-owner-scope-gate-unification-a5
+- worktree: /home/zhan/worktrees/2026-03-15-console-owner-scope-gate-unification-a5
+- base_ref: origin/main
+- scope: Extract one shared owner branch scope gate and one shared context-apply helper so `Knowledge` and `Проверка консультанта` stop drifting on branch repair behavior, copy, and invalidation semantics.
+- done:
+  - Session created.
+  - Wrote the canonical Task Package `docs/TASK_PACKAGES/TP-2026-03-15-console-owner-scope-gate-unification-a5.md` with RCA, one mandatory web search, residual debt, and next-block contract.
+  - Added `console-web/src/components/ConsoleOwnerScopeGate.tsx` as the shared owner branch-selection gate used by both `Knowledge` and `Проверка консультанта`.
+  - Added `console-web/src/lib/console-scope-gate.ts` so both pages apply branch context through the same storage + `console-me`/dependent-query invalidation contract.
+  - Replaced the duplicated non-platform-admin branch gates on `Knowledge` and `Проверка консультанта` with the shared component/helper while keeping the platform-admin-specific Knowledge fallback intact by design.
+  - Added deterministic mocked Playwright coverage for the new shared gate on `Knowledge` and confirmed the existing consultant-verification branch-gate proof still passes through the shared primitive.
+- next:
+  - Follow `UX-52` and split owner vs admin responsibilities on `Knowledge` / `Проверка консультанта` so primary owner paths stay narrow.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-15-console-owner-scope-gate-unification-a5.md
+  - console-web/src/components/ConsoleOwnerScopeGate.tsx
+  - console-web/src/lib/console-scope-gate.ts
+  - console-web/src/app/knowledge/page.tsx
+  - console-web/src/app/business/consultant-verification/page.tsx
+  - console-web/e2e/owner-admin-business.spec.ts
+  - Checks:
+    - `cd /home/zhan/worktrees/2026-03-15-console-owner-scope-gate-unification-a5/console-web && npm run lint -- --file src/app/knowledge/page.tsx --file src/app/business/consultant-verification/page.tsx --file src/components/ConsoleOwnerScopeGate.tsx --file src/lib/console-scope-gate.ts --file e2e/owner-admin-business.spec.ts` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-console-owner-scope-gate-unification-a5/console-web && npm run build` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-15-console-owner-scope-gate-unification-a5/console-web && PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npx playwright test e2e/owner-admin-business.spec.ts --project chromium --workers 1 --grep 'consultant verification branch gate|knowledge scope gate'` (`2 passed`)
+    - `cd /home/zhan/worktrees/2026-03-15-console-owner-scope-gate-unification-a5 && SESSION_AGENT=a5 scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-15T11:10:00+05:00

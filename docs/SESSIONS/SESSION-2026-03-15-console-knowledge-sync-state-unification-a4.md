@@ -1,6 +1,6 @@
 # SESSION 2026-03-15-console-knowledge-sync-state-unification-a4 — Session 2026-03-15-console-knowledge-sync-state-unification-a4
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md
 - block_id: CONSOLE-KNOWLEDGE-SYNC-STATE-UNIFICATION-A4
@@ -20,8 +20,9 @@
   - Unified owner-facing sync-state rendering on `Knowledge` around `knowledge/current` (`sync_status`, `sync_error`, `knowledge_safe_mode`, `knowledge_safe_mode_reason`) and stopped showing stale failure detail while sync is `pending`.
   - Added a shared mutation refresh path so `publish`, `retry-sync`, and `rollback` refetch `console-me`, `knowledge/current`, `knowledge/history`, and consultant-verification readiness together.
   - Extended mocked Playwright coverage so a stale `console-me` branch context can no longer force `Safe mode: включен` / `timed out` after the page has already moved to `pending`.
+  - Merged via #969 (`b676406e`) on 2026-03-15T10:32:20+05:00; local worktree/branch cleanup completed.
 - next:
-  - Run `SESSION_AGENT=a4 scripts/session_check.sh`, then sync `STATE.md` with proof and open the implementation PR.
+  - Follow `UX-51` with a shared owner scope-gate extraction so branch-context repair no longer drifts between pages.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md
   - console-web/src/app/knowledge/page.tsx

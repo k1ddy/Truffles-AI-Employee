@@ -248,6 +248,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   - First screen still shows readiness/gaps/next-wave promise as the default owner entrypoint.
   - Interactive session/findings/compare endpoints fail closed behind the per-client rollout flag; when rollout is disabled the page remains on the overview/readiness surface.
   - If Console branch context is missing, the page now renders an inline branch gate; owner/admin can choose and apply the branch in place instead of being sent to another page.
+  - The inline branch gate now reuses the same owner scope-gate primitive as `Knowledge`, so branch apply semantics and query invalidation stay aligned across both pages.
   - The top scope card shows the selected client/branch plus current knowledge freshness and sync state so the owner can see exactly which branch is being tested.
   - Wave2 adds safe simulation sessions on the real consultant runtime with rollback-only execution, persisted owner/admin transcripts, and explicit preview flags (`would_handoff`, `would_book`, `gap_detected`).
   - Wave3 adds the owner-readable workspace: `как клиент` / `найти слабые места` mode selection, recent sessions, transcript bubbles, verdict chips, source refs, preview-only impact badges, and an optional advanced-details disclosure.
@@ -267,6 +268,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Требует branch selection (`X-Branch-Id`).
 - Rollback требует подтверждения: `POST /console/v1/confirmations` (action=`knowledge_rollback`) → `confirmation_id`.
 - `GET /console/v1/knowledge/current` now returns both knowledge provenance (`published`, saved draft, edit base) and branch sync health (`sync_status`, `sync_error`, `knowledge_safe_mode`).
+- `Knowledge` now reuses the same owner scope-gate primitive as `Проверка консультанта`; both pages apply branch context through the same storage + query invalidation contract.
 - Owner sync-state must be derived from `GET /console/v1/knowledge/current`; `console-me` remains scope/context only and must not be treated as the source of truth for sync-safe-mode rendering after publish/retry/rollback.
 - `Publish` is now an async owner contract:
   - phase 1: create/publish the knowledge version,
