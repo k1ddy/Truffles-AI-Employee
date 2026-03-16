@@ -82,14 +82,20 @@ def reject_unknown_query_params(
 
 
 def validate_limit(
-    limit: int,
+    limit: int | object,
     *,
     error_factory: Callable[[str], Exception],
     min_value: int = 1,
     max_value: int = 100,
-) -> None:
-    if min_value <= limit <= max_value:
-        return
+) -> int:
+    raw_limit = getattr(limit, "default", limit)
+    try:
+        normalized_limit = int(raw_limit)
+    except (TypeError, ValueError) as exc:
+        raise error_factory(f"limit must be between {min_value} and {max_value}") from exc
+
+    if min_value <= normalized_limit <= max_value:
+        return normalized_limit
     raise error_factory(f"limit must be between {min_value} and {max_value}")
 
 

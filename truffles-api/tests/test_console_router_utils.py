@@ -1,4 +1,4 @@
-from fastapi import Request
+from fastapi import Query, Request
 
 from app.services.console_router_utils import (
     dedupe_list,
@@ -111,6 +111,10 @@ def test_validate_limit_uses_configurable_bounds() -> None:
         assert str(exc) == "limit must be between 1 and 10"
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_validate_limit_accepts_fastapi_query_defaults() -> None:
+    assert validate_limit(Query(20), min_value=1, max_value=100, error_factory=ValueError) == 20
 
 
 def test_parse_uuid_param_handles_none_and_invalid() -> None:

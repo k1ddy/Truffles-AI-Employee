@@ -14,9 +14,9 @@
 - CA_ID: none
 
 ## One web search (mandatory before implementation)
-- Query: `Schemathesis TOML parameter generation examples override official docs`
-- Date/time: `2026-03-15 22:xx Asia/Almaty`
-- Sources opened:
+- **Query (exact):** `Schemathesis TOML parameter generation examples override official docs`
+- **Date/time (local):** `2026-03-15 22:30 Asia/Almaty`
+- **Sources opened (from this query):**
   - Schemathesis configuration docs: `https://schemathesis.readthedocs.io/en/stable/configuration/`
   - Schemathesis configuration reference: `https://schemathesis.readthedocs.io/en/stable/reference/configuration/`
 - High-signal source: official Schemathesis documentation
@@ -25,10 +25,27 @@
   - global / operation-specific parameter overrides are the intended way to inject realistic path/query seeds without weakening checks
 - Decision: `integrate`
 - Reason: contract-live failures are from schema-compliant but operationally unrealistic random values; official per-operation overrides let us keep live Schemathesis enabled while forcing deterministic live-safe seeds where the spec currently underconstrains runtime expectations
-- Rejected variants:
+- Rejected options:
   - disabling failing endpoints in live contract lane
   - lowering Schemathesis phases/checks
   - replacing contract-live with ad-hoc curl smoke
+
+## Reuse-first plan (mandatory)
+- Internal reuse:
+  - existing `validate_limit` boundary helper in `truffles-api/app/services/console_router_utils.py`
+  - current console router `_validate_limit(...)` wrapper and existing session/doc structure for the active block
+- External reuse:
+  - official Schemathesis configuration overrides documented in the sources above
+- Why not reinvent the wheel:
+  - the failure is a mismatch between FastAPI `Query` defaults and direct route invocation plus already-documented Schemathesis behavior; normalizing the shared helper and aligning the TP with the canonical template is lower-risk than introducing a new custom validation path
+
+## Execution profile (mandatory for non-doc blocks)
+- TP mode: `implementation`
+- Doc touch budget (files): `3`
+- Code dominance: `backend router boundary + session docs`
+- Override token: `none`
+- Why this profile fits:
+  - the block is a narrow regression fix on top of already-landed P8 work, with one shared validation helper change and the required canon/session doc updates
 
 ## Root cause (mandatory)
 - Symptom:
@@ -108,6 +125,16 @@
 - `gh run rerun 23113240314` or rerun affected failed jobs / new workflow run
 - `SESSION_AGENT=a30 bash scripts/session_check.sh`
 
+## Token / run budget (mandatory for expensive suites)
+- Hypothesis:
+  - if the shared `limit` validator returns normalized ints for both FastAPI runtime params and direct unit-test invocation, the red `unit-tests` family will clear without changing runtime behavior, and the session/doc updates will clear `session-gate`
+- Expected measurable effect:
+  - the previously failing targeted console suites pass locally and `SESSION_AGENT=a30 bash scripts/session_check.sh` returns green
+- Max full runs: `1`
+- Max targeted reruns per failure family: `2`
+- Stop condition:
+  - stop after targeted pytest, lint, and session-gate checks are green locally; use the next PR run as confirmation evidence
+
 ## Evidence
 - GitHub Actions run URL(s)
 - prod env/health command outputs
@@ -119,6 +146,18 @@
 - Revert repo commit(s)
 - Restore previous prod `.env` if livecheck restoration causes an unexpected regression
 - Re-run canonical restart script to return to last good image/env
+
+## Release safety (mandatory for non-doc changes)
+- Strategy:
+  - PR-only regression fix; no direct runtime rollout beyond normal merge pipeline behavior
+- Go/no-go signals:
+  - `session-gate` green
+  - `unit-tests` green
+  - no new failures in targeted backend lint/checks
+- Rollback:
+  - revert the regression-fix commit if the next PR run introduces new route validation failures
+- Post-release monitoring window:
+  - watch the next PR run and the first resulting `main` run through completion, specifically `session-gate`, `unit-tests`, `console-contract-live`, and `ci-livecheck`
 
 ## No-go
 - No disabling `console-contract-live` or `ci-livecheck`
@@ -143,7 +182,7 @@
 - Future prod data/env drift can still break live lanes even when code is correct.
 
 ### Linked follow-up Task Package(s)
-- TBD follow-up for tenant-safe live contract fixture strategy / dedicated livecheck env
+- Follow-up block to define tenant-safe live contract fixtures and a dedicated livecheck environment once `main` is green again.
 
 ### Expiry/trigger to stop deferral
 - If live contract/livecheck red recur from tenant/env drift after this fix, the follow-up becomes blocking.
@@ -153,7 +192,7 @@
 - Convert remaining live tenant/env assumptions into explicit, versioned CI fixtures or dedicated env controls so green main does not rely on hidden prod drift.
 
 ### First deterministic check command
-- `gh run view <next-main-run-id> --json jobs,conclusion,url`
+- `gh run list --workflow CI --branch main --limit 1 --json databaseId,conclusion,url`
 
 ### Blocked-by conditions
 - Current red `main` workflow must be green first.

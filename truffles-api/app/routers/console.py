@@ -3358,8 +3358,8 @@ def _reject_unknown_query_params(request: Request, allowed: set[str]) -> None:
     )
 
 
-def _validate_limit(limit: int) -> None:
-    _validate_limit_util(
+def _validate_limit(limit: int | object) -> int:
+    return _validate_limit_util(
         limit,
         min_value=1,
         max_value=100,
@@ -11966,7 +11966,7 @@ async def list_cases(
             "limit",
         },
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     assigned_to_me = _parse_bool_param(
         "assigned_to_me",
         request.query_params.get("assigned_to_me"),
@@ -13632,7 +13632,7 @@ async def get_case_messages(
     context = get_console_context(request, db)
     require_console_permission(context, "inbox", "read")
     _reject_unknown_query_params(request, {"cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     
     case = db.query(Handover).filter(Handover.id == case_id, Handover.client_id == context.client.id).first()
     if not case:
@@ -17898,7 +17898,7 @@ async def list_knowledge_activation_jobs(
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"status", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     status_filters = _parse_knowledge_activation_status_param(status)
     allowed_branch_ids = _resolve_branch_scope(context)
@@ -18075,7 +18075,7 @@ async def list_outbox(
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"status", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     status_filters = _parse_outbox_status_param(status)
 
@@ -18217,7 +18217,7 @@ async def list_reminders(
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"status", "template", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     status_filters = _parse_reminder_status_param(status)
     template_filter = template.strip() if template and template.strip() else None
@@ -18457,7 +18457,7 @@ async def list_ops_jobs(
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = db.query(ConsoleOpsJob).filter(ConsoleOpsJob.client_id == context.client.id)
     allowed_branch_ids = _resolve_branch_scope(context)
@@ -18674,7 +18674,7 @@ async def list_audit_events(
     require_console_permission(context, "audit", "read")
     
     _reject_unknown_query_params(request, {"entity_type", "entity_id", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = db.query(AuditEvent).filter(AuditEvent.client_id == context.client.id)
 
@@ -20641,7 +20641,7 @@ async def list_companies(
     context = get_console_context(request, db, require_selection=False)
     _require_platform_admin(context)
     _reject_unknown_query_params(request, {"cursor", "limit", "q"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = db.query(Company)
     query_value = _normalize_search_query("q", q) if q else None
@@ -20732,7 +20732,7 @@ async def list_clients(
             "service_state",
         },
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     accessible_client_ids = _accessible_client_ids(context)
     accessible_clients_hash = _hash_uuid_values(accessible_client_ids)
@@ -20945,7 +20945,7 @@ async def list_branches(
     )
     _require_platform_admin(context)
     _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "client_id", "branch_id", "lifecycle"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
@@ -21075,8 +21075,8 @@ async def get_tenants_portfolio(
                 "include_low",
             },
         )
-        _validate_limit(limit)
-        _validate_limit(attention_limit)
+        limit = _validate_limit(limit)
+        attention_limit = _validate_limit(attention_limit)
         lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
 
         clients_request = _request_with_query_params(
@@ -21164,8 +21164,8 @@ async def get_tenants_company_cockpit(
                 "branch_q",
             },
         )
-        _validate_limit(client_limit)
-        _validate_limit(branch_limit)
+        client_limit = _validate_limit(client_limit)
+        branch_limit = _validate_limit(branch_limit)
         lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
         include_branches_mode = _parse_bool_param("include_branches", include_branches, default=True)
 
@@ -21248,7 +21248,7 @@ async def list_tenants_weekly_snapshots(
     context = get_console_context(request, db, require_selection=False)
     _require_platform_admin(context)
     _reject_unknown_query_params(request, {"client_id", "week_key", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     client_uuid = _parse_uuid_param("client_id", client_id)
     if client_uuid is None:
@@ -22228,7 +22228,7 @@ async def list_provider_lifecycle(
         request,
         {"stale_after_minutes", "cursor", "limit", "only_problematic", "company_id", "client_id", "branch_id"},
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     only_problematic_mode = _parse_bool_param("only_problematic", only_problematic, default=False)
     cursor_date = _parse_cursor_param(cursor)
@@ -22430,7 +22430,7 @@ async def list_integrations(
         request,
         {"stale_after_minutes", "cursor", "limit", "company_id", "client_id", "branch_id"},
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
@@ -22912,7 +22912,7 @@ async def list_fleet_attention(
     db: Session = Depends(get_db),
 ) -> ConsoleFleetAttentionResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_low"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
     normalized_include_low = include_low
@@ -22961,7 +22961,7 @@ async def list_admin_incidents(
     db: Session = Depends(get_db),
 ) -> ConsoleIncidentListResponse:
     _reject_unknown_query_params(request, {"limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     context = get_console_context(
         request,
@@ -23014,9 +23014,9 @@ async def get_admin_control_tower_overview(
             "include_low",
         },
     )
-    _validate_limit(attention_limit)
-    _validate_limit(incident_limit)
-    _validate_limit(ops_jobs_limit)
+    attention_limit = _validate_limit(attention_limit)
+    incident_limit = _validate_limit(incident_limit)
+    ops_jobs_limit = _validate_limit(ops_jobs_limit)
 
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -23125,7 +23125,7 @@ async def get_admin_control_tower_readiness_board(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerReadinessBoardResponse:
     _reject_unknown_query_params(request, {"limit", "include_ready"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_ready_mode = _parse_bool_param("include_ready", include_ready, default=False)
 
     context = get_console_context(
@@ -23168,7 +23168,7 @@ async def get_admin_control_tower_drift_board(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerDriftBoardResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "only_problematic"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     only_problematic_mode = _parse_bool_param(
         "only_problematic",
         only_problematic,
@@ -23218,7 +23218,7 @@ async def get_admin_control_tower_action_center(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerActionCenterResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -23264,7 +23264,7 @@ async def get_admin_control_tower_migration_program(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerMigrationProgramResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -23311,7 +23311,7 @@ async def get_admin_control_tower_migration_wave_detail(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerMigrationWaveDetailResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -24177,7 +24177,7 @@ async def list_branch_changes(
         message="Only owner/admin can access provisioning",
     )
     _reject_unknown_query_params(request, {"branch_id", "status", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = _query_branch_changes_for_context(
         db=db,
