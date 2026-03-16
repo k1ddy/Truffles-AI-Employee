@@ -51,6 +51,7 @@
 | `scripts/restart_knowledge_activation_service.sh` | Shadow restart для Knowledge Activation Service (`/knowledge-activation/process`, port `8015`) с image verify + `/health` poll | OPS |
 | `scripts/restart_api.sh` | Канонический деплой API (migration gate + version verify) | OPS |
 | `scripts/restart_release.sh` | Канонический release API+workers (+ optional activation service + canary artifact) | OPS |
+| `scripts/knowledge_activation_postdeploy.sh` | Post-deploy wrapper: reuse `release_guard`, optionally run tenant closeout, and emit machine-readable proof manifest/summary | OPS/Brain |
 | `scripts/check_migration_governance.py` | Governance check для SQL миграций (naming/frozen ops migrations) | Backend/OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |

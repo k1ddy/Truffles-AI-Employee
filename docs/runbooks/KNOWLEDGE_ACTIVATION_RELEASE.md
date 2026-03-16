@@ -8,6 +8,7 @@
 - `truffles-knowledge-activation-service`
 - activation health in `/admin/health/check`
 - activation gauges in `/metrics`
+- CI post-deploy proof artifacts (`release_guard` + optional tenant closeout)
 
 ## Preconditions
 - P3/P4 code already deployed in target image.
@@ -30,6 +31,11 @@ RUN_KNOWLEDGE_ACTIVATION_CANARY=1 \
 KNOWLEDGE_ACTIVATION_CANARY_OUTPUT=/tmp/knowledge_activation_release_guard.json \
 bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
+
+On merged `main`, `.github/workflows/ci.yml` now automates the same proof path:
+1. deploy restarts API + workers + `truffles-knowledge-activation-service`
+2. `scripts/knowledge_activation_postdeploy.sh` runs the P5 `release_guard`, optionally runs tenant closeout when explicit closeout target config is present, and emits `manifest.json` + `summary.md`
+4. GitHub Actions uploads `knowledge-activation-proof` artifacts
 
 ## What The Release Command Must Prove
 1. `restart_release.sh` restarts API + workers and, when `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1`, also restarts `truffles-knowledge-activation-service`.
@@ -70,6 +76,21 @@ The closeout artifact adds:
 `GO` for final closeout requires both:
 1. P5 guard artifact `decision=go`
 2. closeout artifact `decision=go`
+
+## CI Closeout Configuration
+`main` deploy automation resolves the tenant closeout target from explicit CI config:
+- workflow-dispatch inputs:
+  - `knowledge_activation_closeout_client_slug`
+  - `knowledge_activation_closeout_branch_slug`
+- or repository variables:
+  - `KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG`
+  - `KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG`
+
+If neither source is configured, CI still runs the guard and uploads a truthful proof artifact with:
+- `closeout.status = skipped`
+- `closeout.reason = closeout_target_not_configured`
+
+This is intentional until a dedicated consultant-verification canary tenant/env is provisioned.
 
 Expected top-level fields:
 - `captured_at`
