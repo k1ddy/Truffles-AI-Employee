@@ -588,6 +588,27 @@ def _family_label_for_finding(kind: str) -> str:
     return _FINDING_FAMILY_LABELS.get(kind, "Требует разбора")
 
 
+def resolve_consultant_verification_workspace_enabled(context: ConsoleAuthContext) -> bool:
+    client_config = context.client.config if isinstance(context.client.config, dict) else {}
+    candidates: list[object] = []
+
+    console_features = client_config.get("console_features")
+    if isinstance(console_features, dict):
+        consultant_verification = console_features.get("consultant_verification")
+        if isinstance(consultant_verification, dict):
+            candidates.append(consultant_verification.get("workspace_enabled"))
+
+    owner_surface = client_config.get("owner_consultant_verification")
+    if isinstance(owner_surface, dict):
+        candidates.append(owner_surface.get("workspace_enabled"))
+
+    for candidate in candidates:
+        parsed = _parse_optional_bool(candidate)
+        if parsed is not None:
+            return parsed
+    return True
+
+
 def resolve_consultant_verification_enabled(context: ConsoleAuthContext) -> bool:
     client_config = context.client.config if isinstance(context.client.config, dict) else {}
     candidates: list[object] = []
@@ -596,10 +617,12 @@ def resolve_consultant_verification_enabled(context: ConsoleAuthContext) -> bool
     if isinstance(console_features, dict):
         consultant_verification = console_features.get("consultant_verification")
         if isinstance(consultant_verification, dict):
+            candidates.append(consultant_verification.get("team_tools_enabled"))
             candidates.append(consultant_verification.get("enabled"))
 
     owner_surface = client_config.get("owner_consultant_verification")
     if isinstance(owner_surface, dict):
+        candidates.append(owner_surface.get("team_tools_enabled"))
         candidates.append(owner_surface.get("enabled"))
 
     candidates.append(client_config.get("consultant_verification_enabled"))
@@ -680,6 +703,7 @@ def _build_readiness_cards(
     live_activation_summary: str | None,
     feature_enabled: bool,
     scenario_library_enabled: bool,
+    team_tools_enabled: bool,
     branch_scope_limited: bool,
 ) -> list[ConsoleConsultantVerificationReadinessCard]:
     preview_source_label = _source_mode_label(default_source_mode)
@@ -724,9 +748,9 @@ def _build_readiness_cards(
         else "Страница уже ограничена owner/admin и текущим клиентом, поэтому тестовый доступ не смешивается с другими бизнесами."
     )
     rollout_summary = (
-        "Пилот проверки уже использует production runtime в simulation mode, поэтому owner/admin проверяют реальный продуктовый путь."
+        "Preview уже использует production runtime в simulation mode, поэтому owner/admin проверяют реальный продуктовый путь без реальных side effects."
         if feature_enabled
-        else "Пилотный rollout еще не включен. Пока владелец видит только готовность и ожидания до активации."
+        else "Интерактивный preview временно выключен для этого клиента."
     )
 
     return [
@@ -758,8 +782,8 @@ def _build_readiness_cards(
             href="/business",
         ),
         ConsoleConsultantVerificationReadinessCard(
-            id="pilot_rollout",
-            title="Rollout проверки консультанта",
+            id="interactive_preview",
+            title="Интерактивный preview",
             summary=rollout_summary,
             state="ready" if feature_enabled else "planned",
             state_label=_card_state_label("ready" if feature_enabled else "planned"),
@@ -782,11 +806,11 @@ def _build_readiness_cards(
             title="Фиксация слабых мест",
             summary=(
                 "Каждый плохой ответ теперь сохраняется как finding со статусом, repeat count и связью с remediation."
-                if feature_enabled
-                else "Каждый плохой ответ должен превращаться в управляемый кейс на исправление, а не теряться в переписке."
+                if team_tools_enabled
+                else "Командные finding/remediation инструменты включаются отдельно и не блокируют owner preview."
             ),
-            state="ready" if feature_enabled else "planned",
-            state_label=_card_state_label("ready" if feature_enabled else "planned"),
+            state="ready" if team_tools_enabled else "planned",
+            state_label=_card_state_label("ready" if team_tools_enabled else "planned"),
             evidence_label="Wave5: remediation loop",
         ),
         ConsoleConsultantVerificationReadinessCard(
@@ -794,13 +818,13 @@ def _build_readiness_cards(
             title="Сравнение live и draft",
             summary=(
                 "Один и тот же сценарий можно сравнить между опубликованной версией и сохраненным draft перед Publish."
-                if feature_enabled
-                else "Перед Publish нужен owner-facing compare текущей версии и draft, а не слепая вера в Validate."
+                if team_tools_enabled
+                else "Compare перед Publish управляется отдельно и не должен блокировать owner preview-chat."
             ),
-            state="ready" if feature_enabled else "planned",
-            state_label=_card_state_label("ready" if feature_enabled else "planned"),
+            state="ready" if team_tools_enabled else "planned",
+            state_label=_card_state_label("ready" if team_tools_enabled else "planned"),
             evidence_label="Wave6: compare readiness",
-            href="/knowledge" if feature_enabled else None,
+            href="/knowledge" if team_tools_enabled else None,
         ),
     ]
 
@@ -808,6 +832,7 @@ def _build_readiness_cards(
 def _build_consultant_verification_actions(
     *,
     feature_enabled: bool,
+    team_tools_enabled: bool,
     branch_selected: bool,
     preview_available: bool,
     has_draft_knowledge: bool,
@@ -872,7 +897,7 @@ def _build_consultant_verification_actions(
     actions.append(
         ConsoleBusinessActionItem(
             id="review_data_trust_before_verification",
-            severity="warn" if not feature_enabled else "info",
+            severity="info" if feature_enabled else "warn",
             title="Проверьте качество данных",
             description="Проверьте пробелы quality-метрик и свежесть знаний, чтобы тест опирался на надежную базу.",
             href="/business/data-trust",
@@ -882,11 +907,21 @@ def _build_consultant_verification_actions(
     if not feature_enabled:
         actions.append(
             ConsoleBusinessActionItem(
-                id="prepare_rollout_for_verification",
-                severity="info",
-                title="Подготовьте rollout проверки консультанта",
-                description="Wave1 уже показывает готовность и границы. Следующим блоком включаем безопасный test chat без реальных side effects.",
+                id="consultant_verification_workspace_disabled",
+                severity="warn",
+                title="Интерактивный preview временно выключен",
+                description="Для этого клиента owner preview недоступен. Это отдельный explicit gate, а не отсутствие знаний или activation.",
                 href="/business",
+            )
+        )
+    elif not team_tools_enabled:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="team_tools_rollout_separate",
+                severity="info",
+                title="Compare и findings подключаются отдельно",
+                description="Owner preview-chat уже доступен. Командные инструменты сравнения и remediation включаются отдельным governance gate.",
+                href="/knowledge",
             )
         )
     elif has_draft_knowledge and not has_published_knowledge:
@@ -1105,7 +1140,8 @@ def build_consultant_verification_overview(
     now: datetime,
     allowed_branch_ids: Optional[list[UUID]],
 ) -> ConsoleConsultantVerificationOverviewResponse:
-    feature_enabled = resolve_consultant_verification_enabled(context)
+    feature_enabled = resolve_consultant_verification_workspace_enabled(context)
+    team_tools_enabled = resolve_consultant_verification_enabled(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     branch_id = _resolve_verification_branch_id(
         context=context,
@@ -1194,10 +1230,10 @@ def build_consultant_verification_overview(
     )
     blockers: list[str] = []
     if not feature_enabled:
-        blockers.append("Rollout интерактивной проверки ещё не включён для этого клиента.")
+        blockers.append("Интерактивный preview временно выключен для этого клиента.")
     if branch_id is None:
         blockers.append("Выберите филиал, чтобы привязать preview к конкретному business scope.")
-    if feature_enabled and branch_id is not None and not available_source_modes:
+    if branch_id is not None and not available_source_modes:
         blockers.append("Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.")
 
     status, status_label, summary, can_verify_now = derive_consultant_verification_status(
@@ -1223,6 +1259,8 @@ def build_consultant_verification_overview(
     return ConsoleConsultantVerificationOverviewResponse(
         generated_at=now.isoformat(),
         feature_enabled=feature_enabled,
+        workspace_enabled=feature_enabled,
+        team_tools_enabled=team_tools_enabled,
         status=status,
         status_label=status_label,
         summary=summary,
@@ -1269,6 +1307,7 @@ def build_consultant_verification_overview(
             live_activation_summary=live_activation_summary,
             feature_enabled=feature_enabled,
             scenario_library_enabled=feature_enabled,
+            team_tools_enabled=team_tools_enabled,
             branch_scope_limited=allowed_branch_ids is not None,
         ),
         stress_test_examples=[item.prompt for item in scenario_catalog[:4]] or [
@@ -1280,6 +1319,7 @@ def build_consultant_verification_overview(
         scenario_catalog=scenario_catalog,
         actions=_build_consultant_verification_actions(
             feature_enabled=feature_enabled,
+            team_tools_enabled=team_tools_enabled,
             branch_selected=branch_id is not None,
             preview_available=bool(available_source_modes),
             has_draft_knowledge=has_draft_knowledge,
@@ -1301,12 +1341,21 @@ def _normalize_allowed_branch_ids(allowed_branch_ids: Optional[list[UUID]]) -> O
     return {branch_id for branch_id in allowed_branch_ids}
 
 
-def _require_verification_rollout(context: ConsoleAuthContext) -> None:
+def _require_verification_workspace_access(context: ConsoleAuthContext) -> None:
+    if not resolve_consultant_verification_workspace_enabled(context):
+        raise ConsoleAPIError(
+            409,
+            "ACCESS_DENIED",
+            "Consultant verification preview is not enabled for this client",
+        )
+
+
+def _require_verification_team_tools(context: ConsoleAuthContext) -> None:
     if not resolve_consultant_verification_enabled(context):
         raise ConsoleAPIError(
             409,
             "ACCESS_DENIED",
-            "Consultant verification pilot is not enabled for this client",
+            "Consultant verification team tools are not enabled for this client",
         )
 
 
@@ -2884,7 +2933,7 @@ def create_consultant_verification_session(
     allowed_branch_ids: Optional[list[UUID]],
     now: datetime,
 ) -> ConsoleConsultantVerificationSessionResponse:
-    _require_verification_rollout(context)
+    _require_verification_workspace_access(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     branch_id = _resolve_verification_branch_id(
         context=context,
@@ -2952,7 +3001,7 @@ def list_consultant_verification_sessions(
     allowed_branch_ids: Optional[list[UUID]],
     limit: int = 20,
 ) -> ConsoleConsultantVerificationSessionListResponse:
-    _require_verification_rollout(context)
+    _require_verification_workspace_access(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     branch_id = _resolve_verification_branch_id(
         context=context,
@@ -2983,7 +3032,7 @@ def get_consultant_verification_session(
     session_id: UUID,
     allowed_branch_ids: Optional[list[UUID]],
 ) -> ConsoleConsultantVerificationSessionResponse:
-    _require_verification_rollout(context)
+    _require_verification_workspace_access(context)
     session_row = _get_session_for_context(
         db=db,
         session_id=session_id,
@@ -3002,7 +3051,7 @@ def list_consultant_verification_findings(
     status: str | None = None,
     limit: int = 20,
 ) -> ConsoleConsultantVerificationFindingListResponse:
-    _require_verification_rollout(context)
+    _require_verification_team_tools(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     branch_id = _resolve_verification_branch_id(
         context=context,
@@ -3047,7 +3096,7 @@ def create_consultant_verification_finding(
     allowed_branch_ids: Optional[list[UUID]],
     now: datetime,
 ) -> ConsoleConsultantVerificationFindingRecord:
-    _require_verification_rollout(context)
+    _require_verification_team_tools(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     session_row, assistant_turn, owner_turn = _resolve_turn_pair_for_finding(
         db=db,
@@ -3177,7 +3226,7 @@ def update_consultant_verification_finding(
     allowed_branch_ids: Optional[list[UUID]],
     now: datetime,
 ) -> ConsoleConsultantVerificationFindingRecord:
-    _require_verification_rollout(context)
+    _require_verification_team_tools(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     finding = _get_finding_for_context(
         db=db,
@@ -3257,7 +3306,7 @@ def get_consultant_verification_readiness(
             readiness=ConsoleConsultantVerificationCompareReadiness(
                 status="ready",
                 status_label="Сравнение пока не требуется",
-                summary="Для этого клиента pilot compare еще не включен. Publish опирается на Validate и сохраненный draft.",
+                summary="Для этого клиента compare/remediation governance еще не включен. Owner preview-chat уже доступен отдельно, а Publish опирается на Validate и сохраненный draft.",
                 draft_hash=draft_hash,
                 compare_required=False,
             )
@@ -3292,7 +3341,7 @@ async def run_consultant_verification_compare(
     allowed_branch_ids: Optional[list[UUID]],
     now: datetime,
 ) -> ConsoleConsultantVerificationCompareResponse:
-    _require_verification_rollout(context)
+    _require_verification_team_tools(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     branch_id = _resolve_compare_branch_id(
         context=context,
@@ -3450,7 +3499,7 @@ async def append_consultant_verification_message(
     allowed_branch_ids: Optional[list[UUID]],
     now: datetime,
 ) -> ConsoleConsultantVerificationSessionResponse:
-    _require_verification_rollout(context)
+    _require_verification_workspace_access(context)
     normalized_content = _strip_text(content)
     if not normalized_content:
         raise ConsoleAPIError(400, "VALIDATION_ERROR", "Message content is required")

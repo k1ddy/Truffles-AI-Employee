@@ -246,7 +246,8 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Consultant verification Wave1/Wave2/Wave3 contract:
   - Route is business-facing, not a dev playground.
   - First screen still shows readiness/gaps/next-wave promise as the default owner entrypoint.
-  - Interactive session/findings/compare endpoints fail closed behind the per-client rollout flag; when rollout is disabled the page remains on the overview/readiness surface.
+  - Owner preview/workspace access is no longer hidden behind the old per-client rollout flag: if the selected branch has previewable truth, owner/admin can open the workspace, create sessions, and send preview messages.
+  - Compare, findings, and publish-compare governance now use a separate team-tools gate, so advanced remediation tooling can stay staged without blocking the owner preview chat.
   - If Console branch context is missing, the page now renders an inline branch gate; owner/admin can choose and apply the branch in place instead of being sent to another page.
   - The inline branch gate now reuses the same owner scope-gate primitive as `Knowledge`, so branch apply semantics and query invalidation stay aligned across both pages.
   - The top scope card shows the selected client/branch plus separate `Проверка консультанта` and `Обновление для клиентов` statuses so the owner can see what is being previewed versus what is still activating for live traffic.
@@ -259,9 +260,10 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   - UX-52 slice A7 extracts the remaining consultant-verification lane JSX into dedicated owner/review components (`OwnerSetupLane`, `TranscriptLane`, `ReviewLane`) so future owner/admin tweaks stay local to one lane instead of editing the whole workspace.
   - UX-52 slice A8 moves consultant-verification queries, mutations, and derived labels into `useConsultantVerificationWorkspaceState`, leaving `ConsultantVerificationWorkspace.tsx` as a thin composition shell over the extracted owner/review lanes.
   - Consultant verification is preview-first: if the selected branch has previewable truth (`live` or latest validated `draft`), the interactive workspace remains available even while live activation is `pending` or `failed`.
+  - When team tools are disabled for a client, the page still keeps preview-chat open and shows a bounded note that compare/findings/remediation are staged separately instead of surfacing a fake product blocker.
   - Each consultant-verification session pins an immutable truth snapshot inside `runtime_snapshot`; later `Validate` or `Publish` edits do not change the truth used by existing session turns.
   - Operational `sync` / `knowledge_safe_mode` detail is still available as secondary disclosure, but the primary owner language is `Проверка консультанта` versus `Обновление для клиентов`.
-  - Closeout status on this branch: local deterministic proof, owner/admin compare lane, and screenshot audit are green; one-client canary and post-merge monitoring remain release-only steps after merge/deploy.
+  - Closeout status on this branch: owner preview access is now open by default (`owner_surface_enabled=true`, `team_tools_enabled=false` on `demo_salon/main`), and closeout proof now shows `can_verify_now=true` while keeping team-tools governance separate.
   - Simulation turns must never leak real outbound, booking, or handoff side effects into production flows.
 
 **Knowledge (Знания)**

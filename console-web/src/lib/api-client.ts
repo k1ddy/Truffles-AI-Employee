@@ -591,6 +591,8 @@ export type ConsultantVerificationReadinessCard = {
 export type ConsultantVerificationOverviewResponse = {
     generated_at: string;
     feature_enabled: boolean;
+    workspace_enabled: boolean;
+    team_tools_enabled: boolean;
     status: "ready" | "needs_attention" | "not_enabled";
     status_label: string;
     summary: string;

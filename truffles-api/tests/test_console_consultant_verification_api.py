@@ -35,11 +35,16 @@ def _build_context(
     *,
     branch_id=None,
     branch_restricted: bool = False,
+    client_config: dict | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         role=role,
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
-        client=SimpleNamespace(id=uuid4(), slug="demo-salon", config={"consultant_verification_enabled": True}),
+        client=SimpleNamespace(
+            id=uuid4(),
+            slug="demo-salon",
+            config=client_config if client_config is not None else {"consultant_verification_enabled": True},
+        ),
         selected_branch_id=branch_id,
         effective_branch_id=branch_id,
         branch_restricted=branch_restricted,
@@ -841,6 +846,28 @@ async def test_run_consultant_verification_compare_marks_finding_retested(monkey
     db.commit.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_run_consultant_verification_compare_stays_gated_when_team_tools_disabled() -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={"consultant_verification_enabled": False},
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await verification_service.run_consultant_verification_compare(
+            db=Mock(),
+            context=context,
+            request=ConsoleConsultantVerificationCompareRequest(prompt="Сколько стоит?"),
+            allowed_branch_ids=[branch_id],
+            now=datetime.now(timezone.utc),
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+    assert "team tools" in exc_info.value.message.lower()
+
+
 def test_create_consultant_verification_session_requires_branch_selection() -> None:
     with pytest.raises(ConsoleAPIError) as exc_info:
         verification_service.create_consultant_verification_session(
@@ -856,7 +883,11 @@ def test_create_consultant_verification_session_requires_branch_selection() -> N
 
 def test_create_consultant_verification_session_pins_truth_snapshot(monkeypatch) -> None:
     branch_id = uuid4()
-    context = _build_context(role="owner", branch_id=branch_id)
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={"consultant_verification_enabled": False},
+    )
     now = datetime.now(timezone.utc)
     db = Mock()
 
@@ -1207,6 +1238,65 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
     assert response.live_activation_status == "ready"
     assert response.preview_truth_source == "live"
     assert response.available_source_modes == ["live"]
+
+
+def test_build_consultant_verification_overview_unblocks_workspace_when_team_tools_rollout_is_off(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={"consultant_verification_enabled": False},
+    )
+    version = KnowledgeVersion(
+        id=uuid4(),
+        client_id=context.client.id,
+        branch_id=branch_id,
+        status="published",
+        payload_json={"client_pack": {"salon": {"name": "Demo"}}},
+        published_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+        sync_status="ready",
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_effective_capabilities",
+        lambda *_args, **_kwargs: CapabilitiesPayload(),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_reference_pack",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_build_scenario_catalog",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
+
+    response = verification_service.build_consultant_verification_overview(
+        db=Mock(),
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=[branch_id],
+    )
+
+    assert response.feature_enabled is True
+    assert response.workspace_enabled is True
+    assert response.team_tools_enabled is False
+    assert response.status == "ready"
+    assert response.can_verify_now is True
+    assert not any("rollout" in blocker.lower() for blocker in response.blockers)
 
 
 def test_build_consultant_verification_overview_keeps_preview_available_while_activation_pending(monkeypatch) -> None:

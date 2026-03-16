@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-16-activation-service-ghcr-digest-fix-p11-a30.md
-- block_id: ACTIVATION-SERVICE-GHCR-DIGEST-FIX-P11-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-owner-access-closure-p12-a30.md
+- block_id: CONSULTANT-VERIFICATION-OWNER-ACCESS-CLOSURE-P12-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P10 remain merged; this slice fixes the merged-main deploy failure by aligning `restart_knowledge_activation_service.sh` with the digest-aware GHCR contract already used by `restart_release.sh`.
+- scope: P0-P11 remain merged; this slice closes the remaining owner-facing gap in `Business -> Проверка консультанта` by removing the hidden rollout gate from preview/workspace access while preserving compare/publish governance as a separate contract.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -25,11 +25,13 @@
   - P6 closeout automation is now implemented: `ops/knowledge_activation_closeout.py` reuses the P5 guard artifact, snapshots one tenant branch from Postgres, evaluates preview/live invariants, and emits a single closeout `go|no_go` verdict without mutating runtime state.
   - Deploy auth is restored and P8 stabilized the post-merge CI lane; `session-gate`, `unit-tests`, `console-contract-live`, and `ci-livecheck` are no longer the active blocker for this branch.
   - P9 automation is merged and P10 hardened the closeout contract: `main` deploy proof no longer permits `closeout.status=skipped`, and `demo_salon/main` is the canonical release canary.
-  - Merge run `23127522792` exposed a narrower infra defect: `restart_release.sh` passed the correct GHCR digest ref into `restart_knowledge_activation_service.sh`, but that child script still allowed only tag refs and failed deploy with `REQUIRE_GHCR=1`.
-  - The digest-gate fix is now implemented locally: `restart_knowledge_activation_service.sh` accepts GHCR digest refs, and targeted regression coverage proves the script no longer rejects `ghcr.io/k1ddy/truffles-ai-employee@sha256:...`.
+  - Merge run `23127522792` exposed a narrower infra defect: `restart_release.sh` passed the correct GHCR digest ref into `restart_knowledge_activation_service.sh`, but that child script still allowed only tag refs and failed deploy with `REQUIRE_GHCR=1`. That fix is already merged in P11.
+  - The owner-access closure is now implemented: backend splits `workspace_enabled` from `team_tools_enabled`, session/message endpoints use the workspace gate, and compare/findings/publish governance stays on the separate team-tools gate.
+  - Frontend now renders the workspace from `workspace_enabled`, disables team-tools queries when the separate gate is off, and shows a bounded note instead of a fake product blocker.
+  - Updated closeout truth now matches the product path: `demo_salon/main` reports `owner_surface_enabled=true`, `team_tools_enabled=false`, and `can_verify_now=true`, which means the tab can open without forcing compare/findings rollout.
 - next:
-  - Push the digest-gate fix on the same branch and monitor the rerun until `deploy` is green.
-  - If the rerun still fails, capture the next failed step/error family before broadening scope.
+  - Open the PR on the same branch and monitor CI.
+  - After merge, run one real owner canary on `Business -> Проверка консультанта` to confirm the tab is usable outside mocked proof.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
   - truffles-api/app/services/knowledge_registry_service.py
@@ -97,8 +99,23 @@
   - `pytest -q truffles-api/tests/test_restart_release_scripts.py`
   - `ruff check truffles-api/tests/test_restart_release_scripts.py`
   - `bash -n scripts/restart_knowledge_activation_service.sh`
+  - `python3 ops/knowledge_activation_closeout.py --client-slug demo_salon --branch-slug main --guard-json <go-json> --pretty`
+  - `docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-owner-access-closure-p12-a30.md`
+  - `console-web/src/app/business/consultant-verification/page.tsx`
+  - `console-web/src/app/business/consultant-verification/_hooks/useConsultantVerificationWorkspaceState.ts`
+  - `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationWorkspace.tsx`
+  - `console-web/src/app/business/consultant-verification/_components/ConsultantVerificationReviewLane.tsx`
+  - `console-web/e2e/owner-admin-business.spec.ts`
+  - `truffles-api/app/services/console_consultant_verification.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/tests/test_console_consultant_verification_api.py`
+  - `truffles-api/tests/test_console_owner_business.py`
+  - `truffles-api/tests/test_knowledge_activation_closeout.py`
+  - `pytest -q truffles-api/tests/test_console_consultant_verification_api.py truffles-api/tests/test_console_owner_business.py truffles-api/tests/test_knowledge_activation_closeout.py -k 'consultant_verification or knowledge_publish or closeout'`
+  - `ruff check truffles-api/app/services/console_consultant_verification.py truffles-api/app/schemas/console.py truffles-api/app/routers/console.py truffles-api/tests/test_console_consultant_verification_api.py truffles-api/tests/test_console_owner_business.py truffles-api/tests/test_knowledge_activation_closeout.py ops/knowledge_activation_closeout.py`
+  - `cd console-web && npx playwright test e2e/owner-admin-business.spec.ts --workers 1 --grep 'consultant verification owner access|consultant verification readiness'`
 - `npm run generate:api`
 - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
 - `npm run build`
 - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T09:23:15+05:00
+- last_updated: 2026-03-16T15:30:00+05:00

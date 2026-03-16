@@ -63,9 +63,10 @@ function shouldOpenTeamToolsByDefault(role: string): boolean {
 type UseConsultantVerificationWorkspaceStateParams = {
     overview: ConsultantVerificationOverviewResponse;
     role: string;
+    teamToolsEnabled: boolean;
 };
 
-export function useConsultantVerificationWorkspaceState({ overview, role }: UseConsultantVerificationWorkspaceStateParams) {
+export function useConsultantVerificationWorkspaceState({ overview, role, teamToolsEnabled }: UseConsultantVerificationWorkspaceStateParams) {
     const queryClient = useQueryClient();
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
@@ -108,6 +109,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
             const response = await businessApi.listConsultantVerificationFindings({ limit: 12 });
             return response.data;
         },
+        enabled: teamToolsEnabled,
         refetchInterval: 30000,
         placeholderData: keepPreviousData,
         ...QUERY_PROFILE_DASHBOARD,
@@ -119,6 +121,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
             const response = await businessApi.getConsultantVerificationReadiness();
             return response.data;
         },
+        enabled: teamToolsEnabled,
         refetchInterval: 30000,
         placeholderData: keepPreviousData,
         ...QUERY_PROFILE_DASHBOARD,
@@ -350,7 +353,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
     const findings = findingsQuery.data?.items ?? [];
     const compareCases: ConsultantVerificationCompareCaseRecord[] = compareMutation.data?.cases ?? [];
     const compareReadiness: ConsultantVerificationCompareReadiness | null =
-        compareMutation.data?.readiness ?? readinessQuery.data?.readiness ?? null;
+        teamToolsEnabled ? (compareMutation.data?.readiness ?? readinessQuery.data?.readiness ?? null) : null;
     const lastOwnerPrompt = ownerTurns[ownerTurns.length - 1]?.content ?? null;
     const scenarioCatalog = overview.scenario_catalog ?? [];
     const stressTestExamples = overview.stress_test_examples ?? [];
@@ -454,7 +457,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
     };
 
     const handleCreateFinding = async () => {
-        if (!inspectedTurn?.id) {
+        if (!teamToolsEnabled || !inspectedTurn?.id) {
             return;
         }
         setErrorMessage(null);
@@ -469,7 +472,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
     };
 
     const handleCompareLastPrompt = async () => {
-        if (!lastOwnerPrompt) {
+        if (!teamToolsEnabled || !lastOwnerPrompt) {
             return;
         }
         setErrorMessage(null);
@@ -481,6 +484,9 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
     };
 
     const handleRetestFinding = async (findingId: string) => {
+        if (!teamToolsEnabled) {
+            return;
+        }
         setErrorMessage(null);
         try {
             await compareMutation.mutateAsync({
@@ -591,6 +597,7 @@ export function useConsultantVerificationWorkspaceState({ overview, role }: UseC
             },
             findingNote,
             onFindingNoteChange: setFindingNote,
+            teamToolsEnabled,
             onCreateFinding: () => {
                 void handleCreateFinding();
             },

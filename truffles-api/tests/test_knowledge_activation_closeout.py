@@ -20,12 +20,16 @@ def _guard(decision: str = "go", reasons: list[str] | None = None) -> dict:
 def _tenant(
     *,
     owner_surface_enabled: bool = True,
+    team_tools_enabled: bool = True,
     active_version_id: str | None = "v1",
     latest_published_id: str | None = "v1",
     latest_draft_id: str | None = None,
     latest_job_state: str | None = None,
 ) -> dict:
-    config = {"consultant_verification_enabled": owner_surface_enabled}
+    config = {
+        "owner_consultant_verification": {"workspace_enabled": owner_surface_enabled},
+        "consultant_verification_enabled": team_tools_enabled,
+    }
     payload: dict[str, object] = {
         "client_id": "client-1",
         "branch_id": "branch-1",
@@ -132,7 +136,7 @@ def test_build_closeout_snapshot_blocks_when_release_guard_fails():
 def test_build_closeout_snapshot_keeps_rollout_disabled_as_evidence_not_blocker():
     snapshot = _closeout.build_closeout_snapshot(
         guard_snapshot=_guard(),
-        tenant_snapshot=_tenant(owner_surface_enabled=False, latest_job_state="ready"),
+        tenant_snapshot=_tenant(owner_surface_enabled=False, team_tools_enabled=False, latest_job_state="ready"),
         client_slug="demo_salon",
         branch_slug="branch-a",
     )
@@ -140,6 +144,7 @@ def test_build_closeout_snapshot_keeps_rollout_disabled_as_evidence_not_blocker(
     assert snapshot["decision"] == "go"
     assert snapshot["reasons"] == []
     assert snapshot["tenant"]["owner_surface_enabled"] is False
+    assert snapshot["tenant"]["team_tools_enabled"] is False
     assert snapshot["tenant"]["release_preview_ready"] is True
     assert snapshot["tenant"]["can_verify_now"] is False
     assert snapshot["invariants"]["owner_surface_enabled"] is False
