@@ -5706,6 +5706,16 @@ export interface components {
              */
             feature_enabled: boolean;
             /**
+             * Workspace Enabled
+             * @default false
+             */
+            workspace_enabled: boolean;
+            /**
+             * Team Tools Enabled
+             * @default false
+             */
+            team_tools_enabled: boolean;
+            /**
              * Status
              * @enum {string}
              */

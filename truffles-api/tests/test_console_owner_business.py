@@ -17,6 +17,7 @@ from app.schemas.console import (
     ConsoleOwnerOperationRollbackRequest,
     ConsoleSettingsUpdateRequest,
 )
+from app.services import console_consultant_verification as verification_service
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -313,6 +314,7 @@ def test_resolve_consultant_verification_enabled_prefers_nested_flag() -> None:
 
     assert console_router._resolve_consultant_verification_enabled(context_enabled) is True
     assert console_router._resolve_consultant_verification_enabled(context_disabled) is False
+    assert verification_service.resolve_consultant_verification_workspace_enabled(context_disabled) is True
 
 
 def test_derive_consultant_verification_status_thresholds() -> None:

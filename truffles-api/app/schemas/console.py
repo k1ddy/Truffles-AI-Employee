@@ -1551,6 +1551,8 @@ class ConsoleConsultantVerificationReadinessCard(BaseModel):
 class ConsoleConsultantVerificationOverviewResponse(BaseModel):
     generated_at: str
     feature_enabled: bool = False
+    workspace_enabled: bool = False
+    team_tools_enabled: bool = False
     status: ConsoleConsultantVerificationStatus
     status_label: str
     summary: str

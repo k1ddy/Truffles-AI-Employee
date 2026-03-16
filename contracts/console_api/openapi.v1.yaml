@@ -13101,6 +13101,14 @@ components:
           type: boolean
           title: Feature Enabled
           default: false
+        workspace_enabled:
+          type: boolean
+          title: Workspace Enabled
+          default: false
+        team_tools_enabled:
+          type: boolean
+          title: Team Tools Enabled
+          default: false
         status:
           type: string
           enum:

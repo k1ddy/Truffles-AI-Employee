@@ -129,7 +129,9 @@ export default function BusinessConsultantVerificationPage() {
     const liveActivationSummary = data?.live_activation_summary ?? null;
     const previewTruthSource = data?.preview_truth_source ?? null;
     const blockers = data?.blockers ?? [];
-    const workspaceReady = Boolean(data?.feature_enabled) && !branchSelectionRequired && Boolean(data?.can_verify_now ?? (previewStatus === "ready"));
+    const workspaceEnabled = Boolean(data?.workspace_enabled ?? data?.feature_enabled);
+    const teamToolsEnabled = Boolean(data?.team_tools_enabled);
+    const workspaceReady = workspaceEnabled && !branchSelectionRequired && Boolean(data?.can_verify_now ?? (previewStatus === "ready"));
     const readinessCards = data?.readiness_cards ?? [];
     const stressTestExamples = data?.stress_test_examples ?? [];
     const actions = data?.actions ?? [];
@@ -341,13 +343,13 @@ export default function BusinessConsultantVerificationPage() {
                         {data.next_wave_summary}
                     </p>
                 </div>
-                {!data.feature_enabled ? (
+                {!workspaceEnabled ? (
                     <p
                         className="mt-4 rounded-lg border border-slate-300/60 bg-slate-50 px-3 py-2 text-xs text-slate-700"
                         data-testid="consultant-verification-feature-gate"
                     >
-                        Для этого клиента пока включен только обзор готовности. Интерактивная проверка откроется после
-                        следующей волны rollout.
+                        Для этого клиента интерактивный preview временно выключен. Это отдельный explicit gate, а не
+                        проблема знаний или live activation.
                     </p>
                 ) : !(data?.can_verify_now ?? (previewStatus === "ready")) ? (
                     <p
@@ -355,6 +357,15 @@ export default function BusinessConsultantVerificationPage() {
                         data-testid="consultant-verification-preview-gate"
                     >
                         Preview пока не готов. Подготовьте источник данных выше и затем запускайте проверку.
+                    </p>
+                ) : null}
+                {workspaceReady && !teamToolsEnabled ? (
+                    <p
+                        className="mt-4 rounded-lg border border-slate-300/60 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+                        data-testid="consultant-verification-team-tools-gate"
+                    >
+                        Preview-chat уже доступен. Compare, findings и remediation-инструменты команды подключаются
+                        отдельно и не блокируют эту проверку.
                     </p>
                 ) : null}
             </section>
@@ -397,7 +408,7 @@ export default function BusinessConsultantVerificationPage() {
                 ))}
             </section>
 
-            {workspaceReady ? <ConsultantVerificationWorkspace overview={data} role={role} /> : null}
+            {workspaceReady ? <ConsultantVerificationWorkspace overview={data} role={role} teamToolsEnabled={teamToolsEnabled} /> : null}
 
             <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
                 <article

@@ -269,10 +269,33 @@ def resolve_owner_surface_enabled(client_config: Any) -> bool:
     if isinstance(console_features, dict):
         consultant_verification = console_features.get("consultant_verification")
         if isinstance(consultant_verification, dict):
+            candidates.append(consultant_verification.get("workspace_enabled"))
+
+    owner_surface = config.get("owner_consultant_verification")
+    if isinstance(owner_surface, dict):
+        candidates.append(owner_surface.get("workspace_enabled"))
+
+    for candidate in candidates:
+        parsed = _parse_optional_bool(candidate)
+        if parsed is not None:
+            return parsed
+    return True
+
+
+def resolve_team_tools_enabled(client_config: Any) -> bool:
+    config = client_config if isinstance(client_config, dict) else {}
+    candidates: list[Any] = []
+
+    console_features = config.get("console_features")
+    if isinstance(console_features, dict):
+        consultant_verification = console_features.get("consultant_verification")
+        if isinstance(consultant_verification, dict):
+            candidates.append(consultant_verification.get("team_tools_enabled"))
             candidates.append(consultant_verification.get("enabled"))
 
     owner_surface = config.get("owner_consultant_verification")
     if isinstance(owner_surface, dict):
+        candidates.append(owner_surface.get("team_tools_enabled"))
         candidates.append(owner_surface.get("enabled"))
 
     candidates.append(config.get("consultant_verification_enabled"))
@@ -355,6 +378,7 @@ def build_closeout_snapshot(
     latest_job = tenant_snapshot.get("latest_job") if isinstance(tenant_snapshot.get("latest_job"), dict) else None
 
     owner_surface_enabled = resolve_owner_surface_enabled(tenant_snapshot.get("client_config"))
+    team_tools_enabled = resolve_team_tools_enabled(tenant_snapshot.get("client_config"))
     has_live_knowledge = active_version is not None
     has_published_knowledge = latest_published is not None
     has_draft_knowledge = latest_draft is not None
@@ -433,6 +457,7 @@ def build_closeout_snapshot(
     invariants = {
         "release_guard_go": release_guard_go,
         "owner_surface_enabled": owner_surface_enabled,
+        "team_tools_enabled": team_tools_enabled,
         "preview_available": preview_available,
         "release_preview_ready": release_preview_ready,
         "can_verify_now": can_verify_now,
@@ -466,6 +491,7 @@ def build_closeout_snapshot(
         "tenant": {
             **tenant_snapshot,
             "owner_surface_enabled": owner_surface_enabled,
+            "team_tools_enabled": team_tools_enabled,
             "available_source_modes": available_source_modes,
             "default_source_mode": default_source_mode,
             "preview_available": preview_available,

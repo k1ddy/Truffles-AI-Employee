@@ -11,9 +11,10 @@ import { useConsultantVerificationWorkspaceState } from "../_hooks/useConsultant
 type WorkspaceProps = {
     overview: ConsultantVerificationOverviewResponse;
     role: string;
+    teamToolsEnabled: boolean;
 };
 
-export default function ConsultantVerificationWorkspace({ overview, role }: WorkspaceProps) {
+export default function ConsultantVerificationWorkspace({ overview, role, teamToolsEnabled }: WorkspaceProps) {
     const {
         selectedSessionSummary,
         selectedSourceModeLabel,
@@ -21,7 +22,7 @@ export default function ConsultantVerificationWorkspace({ overview, role }: Work
         ownerSetupLaneProps,
         transcriptLaneProps,
         reviewLaneProps,
-    } = useConsultantVerificationWorkspaceState({ overview, role });
+    } = useConsultantVerificationWorkspaceState({ overview, role, teamToolsEnabled });
 
     return (
         <section className="mt-6" data-testid="consultant-verification-workspace">
