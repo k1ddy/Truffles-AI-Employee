@@ -317,9 +317,34 @@ def test_resolve_consultant_verification_enabled_prefers_nested_flag() -> None:
     assert verification_service.resolve_consultant_verification_workspace_enabled(context_disabled) is True
 
 
+def test_build_workspace_blockers_returns_stable_codes() -> None:
+    blockers, blocker_codes = verification_service._build_workspace_blockers(
+        workspace_enabled=False,
+        branch_selected=False,
+        preview_available=False,
+    )
+
+    assert blocker_codes == ["workspace_disabled", "branch_required"]
+    assert blockers == [
+        "Интерактивный preview временно выключен для этого клиента.",
+        "Выберите филиал, чтобы привязать preview к конкретному business scope.",
+    ]
+
+    blockers, blocker_codes = verification_service._build_workspace_blockers(
+        workspace_enabled=True,
+        branch_selected=True,
+        preview_available=False,
+    )
+
+    assert blocker_codes == ["preview_source_missing"]
+    assert blockers == [
+        "Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.",
+    ]
+
+
 def test_derive_consultant_verification_status_thresholds() -> None:
     disabled_status, disabled_label, disabled_summary, disabled_can_verify = console_router._derive_consultant_verification_status(
-        feature_enabled=False,
+        workspace_enabled=False,
         branch_selected=True,
         preview_available=True,
         default_source_mode="live",
@@ -327,7 +352,7 @@ def test_derive_consultant_verification_status_thresholds() -> None:
         blockers=[],
     )
     missing_status, missing_label, missing_summary, missing_can_verify = console_router._derive_consultant_verification_status(
-        feature_enabled=True,
+        workspace_enabled=True,
         branch_selected=True,
         preview_available=False,
         default_source_mode=None,
@@ -335,7 +360,7 @@ def test_derive_consultant_verification_status_thresholds() -> None:
         blockers=["preview_missing"],
     )
     branch_status, branch_label, branch_summary, branch_can_verify = console_router._derive_consultant_verification_status(
-        feature_enabled=True,
+        workspace_enabled=True,
         branch_selected=False,
         preview_available=True,
         default_source_mode="live",
@@ -343,7 +368,7 @@ def test_derive_consultant_verification_status_thresholds() -> None:
         blockers=["branch_required"],
     )
     stale_status, stale_label, stale_summary, stale_can_verify = console_router._derive_consultant_verification_status(
-        feature_enabled=True,
+        workspace_enabled=True,
         branch_selected=True,
         preview_available=True,
         default_source_mode="draft",
@@ -351,7 +376,7 @@ def test_derive_consultant_verification_status_thresholds() -> None:
         blockers=[],
     )
     ready_status, ready_label, ready_summary, ready_can_verify = console_router._derive_consultant_verification_status(
-        feature_enabled=True,
+        workspace_enabled=True,
         branch_selected=True,
         preview_available=True,
         default_source_mode="live",

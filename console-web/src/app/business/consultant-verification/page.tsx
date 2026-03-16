@@ -129,9 +129,12 @@ export default function BusinessConsultantVerificationPage() {
     const liveActivationSummary = data?.live_activation_summary ?? null;
     const previewTruthSource = data?.preview_truth_source ?? null;
     const blockers = data?.blockers ?? [];
+    const blockerCodes = new Set(data?.blocker_codes ?? []);
     const workspaceEnabled = Boolean(data?.workspace_enabled ?? data?.feature_enabled);
     const teamToolsEnabled = Boolean(data?.team_tools_enabled);
-    const workspaceReady = workspaceEnabled && !branchSelectionRequired && Boolean(data?.can_verify_now ?? (previewStatus === "ready"));
+    const workspaceDisabled = blockerCodes.has("workspace_disabled") || !workspaceEnabled;
+    const branchRequired = blockerCodes.has("branch_required") || branchSelectionRequired;
+    const workspaceReady = workspaceEnabled && !branchRequired && Boolean(data?.can_verify_now ?? (previewStatus === "ready"));
     const readinessCards = data?.readiness_cards ?? [];
     const stressTestExamples = data?.stress_test_examples ?? [];
     const actions = data?.actions ?? [];
@@ -343,7 +346,7 @@ export default function BusinessConsultantVerificationPage() {
                         {data.next_wave_summary}
                     </p>
                 </div>
-                {!workspaceEnabled ? (
+                {workspaceDisabled ? (
                     <p
                         className="mt-4 rounded-lg border border-slate-300/60 bg-slate-50 px-3 py-2 text-xs text-slate-700"
                         data-testid="consultant-verification-feature-gate"

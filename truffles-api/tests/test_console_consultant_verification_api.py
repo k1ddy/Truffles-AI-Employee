@@ -1238,6 +1238,7 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
     assert response.live_activation_status == "ready"
     assert response.preview_truth_source == "live"
     assert response.available_source_modes == ["live"]
+    assert response.blocker_codes == []
 
 
 def test_build_consultant_verification_overview_unblocks_workspace_when_team_tools_rollout_is_off(monkeypatch) -> None:
@@ -1296,7 +1297,63 @@ def test_build_consultant_verification_overview_unblocks_workspace_when_team_too
     assert response.team_tools_enabled is False
     assert response.status == "ready"
     assert response.can_verify_now is True
+    assert response.blocker_codes == []
     assert not any("rollout" in blocker.lower() for blocker in response.blockers)
+
+
+def test_build_consultant_verification_overview_returns_stable_blocker_codes(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={
+            "owner_consultant_verification": {
+                "workspace_enabled": False,
+            }
+        },
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_effective_capabilities",
+        lambda *_args, **_kwargs: CapabilitiesPayload(),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_reference_pack",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_build_scenario_catalog",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+
+    response = verification_service.build_consultant_verification_overview(
+        db=Mock(),
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=[branch_id],
+    )
+
+    assert response.feature_enabled is False
+    assert response.workspace_enabled is False
+    assert response.can_verify_now is False
+    assert response.blocker_codes == ["workspace_disabled", "preview_source_missing"]
+    assert response.blockers == [
+        "Интерактивный preview временно выключен для этого клиента.",
+        "Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.",
+    ]
 
 
 def test_build_consultant_verification_overview_keeps_preview_available_while_activation_pending(monkeypatch) -> None:
@@ -1357,6 +1414,7 @@ def test_build_consultant_verification_overview_keeps_preview_available_while_ac
     assert response.live_activation_status == "pending"
     assert response.preview_truth_source == "published"
     assert response.available_source_modes == ["published"]
+    assert response.blocker_codes == []
     assert "preview" in response.live_activation_summary.lower()
 
 
@@ -1423,5 +1481,6 @@ def test_build_consultant_verification_overview_surfaces_activation_failure_with
     assert response.live_activation_status == "failed"
     assert response.live_activation_error == "timed out"
     assert response.preview_truth_source == "published"
+    assert response.blocker_codes == []
     assert response.available_source_modes == ["published"]
     assert "preview" in response.live_activation_summary.lower()
