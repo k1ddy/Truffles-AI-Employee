@@ -7,6 +7,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RESTART_RELEASE = _REPO_ROOT / "scripts" / "restart_release.sh"
+_RESTART_ACTIVATION_SERVICE = _REPO_ROOT / "scripts" / "restart_knowledge_activation_service.sh"
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -143,3 +144,42 @@ output_path.write_text(json.dumps({'decision': 'go'}), encoding='utf-8')
     assert workers_marker.read_text().strip() == "workers"
     assert guard_output.exists()
     assert "Knowledge activation canary artifact" in result.stdout
+
+
+def test_restart_activation_service_accepts_ghcr_digest_ref(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    _write_executable(bin_dir / "docker", _fake_docker_script(docker_log))
+
+    env_file = tmp_path / "activation.env"
+    env_file.write_text("ENV=1\n", encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "ENV_FILE": str(env_file),
+            "REQUIRE_GHCR": "1",
+            "PULL_IMAGE": "0",
+            "VERIFY_HEALTH": "0",
+            "KNOWLEDGE_ACTIVATION_SERVICE_ENABLED": "1",
+            "IMAGE_NAME": "ghcr.io/k1ddy/truffles-ai-employee@sha256:abc123",
+            "EXPECTED_IMAGE": "ghcr.io/k1ddy/truffles-ai-employee@sha256:abc123",
+        }
+    )
+
+    result = subprocess.run(
+        [str(_RESTART_ACTIVATION_SERVICE)],
+        cwd=str(_REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    docker_calls = docker_log.read_text()
+    assert "run -d --name truffles-knowledge-activation-service" in docker_calls
+    assert "ghcr.io/k1ddy/truffles-ai-employee@sha256:abc123" in docker_calls
+    assert "Knowledge Activation Service restarted: truffles-knowledge-activation-service" in result.stdout

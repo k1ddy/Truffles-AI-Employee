@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-16-knowledge-activation-closeout-hardening-p10-a30.md
-- block_id: KNOWLEDGE-ACTIVATION-CLOSEOUT-HARDENING-P10-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-activation-service-ghcr-digest-fix-p11-a30.md
+- block_id: ACTIVATION-SERVICE-GHCR-DIGEST-FIX-P11-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P9 remain merged; this slice hardens closeout from optional to required by promoting a canonical canary target and removing the incorrect dependency between release closeout and owner-surface rollout flags.
+- scope: P0-P10 remain merged; this slice fixes the merged-main deploy failure by aligning `restart_knowledge_activation_service.sh` with the digest-aware GHCR contract already used by `restart_release.sh`.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -24,12 +24,12 @@
   - P5 rollout safety is now implemented: `scripts/restart_release.sh` can restart `truffles-knowledge-activation-service`, parity-check it against API/workers, and emit a `go|no_go` artifact via `truffles-api/scripts/knowledge_activation_release_guard.py`; `scripts/restart_knowledge_activation_service.sh` now verifies image identity + `/health`, and `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md` captures the canonical deploy/canary/rollback SOP.
   - P6 closeout automation is now implemented: `ops/knowledge_activation_closeout.py` reuses the P5 guard artifact, snapshots one tenant branch from Postgres, evaluates preview/live invariants, and emits a single closeout `go|no_go` verdict without mutating runtime state.
   - Deploy auth is restored and P8 stabilized the post-merge CI lane; `session-gate`, `unit-tests`, `console-contract-live`, and `ci-livecheck` are no longer the active blocker for this branch.
-  - P9 automation is merged and P10 now hardens it: `main` deploy proof no longer permits `closeout.status=skipped`.
-  - `knowledge_activation_closeout.py` now treats owner rollout as evidence-only (`owner_surface_enabled`) and gates final closeout on release invariants instead of consultant-verification rollout enablement.
-  - Local evidence on current runtime now shows `demo_salon/main` returns `decision=go` even with `owner_surface_enabled=false`, so the existing canary tenant is usable as the hard-required release target.
+  - P9 automation is merged and P10 hardened the closeout contract: `main` deploy proof no longer permits `closeout.status=skipped`, and `demo_salon/main` is the canonical release canary.
+  - Merge run `23127522792` exposed a narrower infra defect: `restart_release.sh` passed the correct GHCR digest ref into `restart_knowledge_activation_service.sh`, but that child script still allowed only tag refs and failed deploy with `REQUIRE_GHCR=1`.
+  - The digest-gate fix is now implemented locally: `restart_knowledge_activation_service.sh` accepts GHCR digest refs, and targeted regression coverage proves the script no longer rejects `ghcr.io/k1ddy/truffles-ai-employee@sha256:...`.
 - next:
-  - Run/monitor the next PR + first `main` deploy run to confirm the hard-required closeout artifact stays green in CI.
-  - If `demo_salon/main` ever loses preview/live invariants, stop `main` rollout until the canary tenant is repaired or replaced.
+  - Push the digest-gate fix on the same branch and monitor the rerun until `deploy` is green.
+  - If the rerun still fails, capture the next failed step/error family before broadening scope.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
   - truffles-api/app/services/knowledge_registry_service.py
@@ -93,8 +93,12 @@
   - `pytest -q truffles-api/tests/test_knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
   - `ruff check ops/knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
   - `bash -n scripts/knowledge_activation_postdeploy.sh`
-  - `npm run generate:api`
-  - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
-  - `npm run build`
-  - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T08:54:26+05:00
+  - `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/23127522792`
+  - `pytest -q truffles-api/tests/test_restart_release_scripts.py`
+  - `ruff check truffles-api/tests/test_restart_release_scripts.py`
+  - `bash -n scripts/restart_knowledge_activation_service.sh`
+- `npm run generate:api`
+- `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
+- `npm run build`
+- `python3 scripts/generate_openapi.py --check`
+- last_updated: 2026-03-16T09:23:15+05:00
