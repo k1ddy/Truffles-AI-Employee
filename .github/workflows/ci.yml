@@ -18,6 +18,14 @@ on:
         description: "Run k6 console load smoke"
         type: boolean
         default: false
+      knowledge_activation_closeout_client_slug:
+        description: "Optional knowledge activation closeout client slug override"
+        type: string
+        default: ""
+      knowledge_activation_closeout_branch_slug:
+        description: "Optional knowledge activation closeout branch slug override"
+        type: string
+        default: ""
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -106,6 +114,7 @@ jobs:
               - "scripts/restart_api.sh"
               - "scripts/restart_workers.sh"
               - "scripts/restart_release.sh"
+              - "scripts/knowledge_activation_postdeploy.sh"
               - "scripts/restart_console_web.sh"
               - "scripts/check_migration_governance.py"
               - "knowledge/**"
@@ -918,7 +927,7 @@ jobs:
     if: ${{ always() && needs.changes.outputs.deploy_required == 'true' }}
     needs: [build-push, changes]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       deployed: ${{ steps.deploy_gate.outputs.deployed }}
     concurrency:
@@ -1037,8 +1046,22 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.knowledge_activation_closeout_client_slug || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.knowledge_activation_closeout_branch_slug || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG || '' }}
         run: |
           set -euo pipefail
+          mkdir -p artifacts/knowledge-activation-proof
+          RUN_TOKEN="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CLOSEOUT_CLIENT_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_INPUT:-}"
+          if [ -z "${CLOSEOUT_CLIENT_SLUG}" ]; then
+            CLOSEOUT_CLIENT_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_VAR:-}"
+          fi
+          CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_INPUT:-}"
+          if [ -z "${CLOSEOUT_BRANCH_SLUG}" ]; then
+            CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_VAR:-}"
+          fi
           SSH=(ssh -i ~/.ssh/id_rsa -p "${SERVER_PORT}" -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 "${SERVER_USER}@${SERVER_HOST}")
           if ! timeout 30s "${SSH[@]}" "echo deploy-ready" >/dev/null 2>&1; then
             echo "ERROR: deploy ssh preflight failed (auth/connectivity)." >&2
@@ -1051,6 +1074,13 @@ jobs:
           trap cleanup_remote_script EXIT
           cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
+          RUN_TOKEN="${RUN_TOKEN:?}"
+          ACTIVATION_CLOSEOUT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_CLIENT_SLUG:-}"
+          ACTIVATION_CLOSEOUT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_BRANCH_SLUG:-}"
+          ACTIVATION_PROOF_DIR="/tmp/knowledge-activation-postdeploy-${RUN_TOKEN}"
+          ACTIVATION_PROOF_TAR="/tmp/knowledge-activation-postdeploy-${RUN_TOKEN}.tar.gz"
+          rm -rf "${ACTIVATION_PROOF_DIR}" "${ACTIVATION_PROOF_TAR}"
+          mkdir -p "${ACTIVATION_PROOF_DIR}"
           REPO_ROOT="/home/zhan/truffles-main"
           if [ ! -d "${REPO_ROOT}/.git" ]; then
             echo "ERROR: runtime repo not found on host: ${REPO_ROOT}" >&2
@@ -1073,7 +1103,16 @@ jobs:
               rm -rf "${DEPLOY_SOURCE_PARENT}"
             fi
           }
-          trap cleanup_deploy_source EXIT
+          package_activation_proof() {
+            if [ -d "${ACTIVATION_PROOF_DIR}" ]; then
+              tar -czf "${ACTIVATION_PROOF_TAR}" -C /tmp "$(basename "${ACTIVATION_PROOF_DIR}")" >/dev/null 2>&1 || true
+            fi
+          }
+          cleanup() {
+            package_activation_proof
+            cleanup_deploy_source
+          }
+          trap cleanup EXIT
           clone_attempt=1
           clone_max_attempts=3
           clone_ok=0
@@ -1180,9 +1219,11 @@ jobs:
           RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_api.sh"
           RELEASE_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_release.sh"
           CONSOLE_RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_console_web.sh"
+          POSTDEPLOY_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/knowledge_activation_postdeploy.sh"
           test -f "${RESTART_SCRIPT}"
           test -f "${RELEASE_SCRIPT}"
           test -f "${CONSOLE_RESTART_SCRIPT}"
+          test -f "${POSTDEPLOY_SCRIPT}"
           grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
           grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
           grep -n 'env-file' "${RESTART_SCRIPT}" || true
@@ -1205,6 +1246,9 @@ jobs:
           API_WORKDIR="${DEPLOY_SOURCE_ROOT}/truffles-api" \
           API_ENV_FILE="${DEPLOY_SOURCE_ROOT}/truffles-api/.env" \
           OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net \
+          RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 \
+          KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 \
+          RUN_KNOWLEDGE_ACTIVATION_CANARY=0 \
           REQUIRE_GHCR=1 VERIFY_VERSION=1 \
           EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
           bash "${RELEASE_SCRIPT}"
@@ -1227,8 +1271,109 @@ jobs:
             fi
           done
           docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
+          KNOWLEDGE_ACTIVATION_PROOF_OUTPUT_DIR="${ACTIVATION_PROOF_DIR}" \
+          KNOWLEDGE_ACTIVATION_PROOF_GUARD_JSON="${ACTIVATION_PROOF_DIR}/release_guard.json" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_CLIENT_SLUG}" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_BRANCH_SLUG}" \
+          bash "${POSTDEPLOY_SCRIPT}"
           REMOTE
-          timeout 20m "${SSH[@]}" "bash -s" < "${REMOTE_SCRIPT}"
+          remote_env=(
+            "RUN_TOKEN=${RUN_TOKEN}"
+            "ACTIVATION_CLOSEOUT_CLIENT_SLUG=${CLOSEOUT_CLIENT_SLUG}"
+            "ACTIVATION_CLOSEOUT_BRANCH_SLUG=${CLOSEOUT_BRANCH_SLUG}"
+          )
+          remote_cmd=""
+          for assignment in "${remote_env[@]}"; do
+            printf -v remote_cmd '%s %q' "${remote_cmd}" "${assignment}"
+          done
+          remote_cmd="${remote_cmd# } bash -s"
+          run_status=0
+          if timeout 25m "${SSH[@]}" "${remote_cmd}" < "${REMOTE_SCRIPT}"; then
+            run_status=0
+          else
+            run_status=$?
+          fi
+          REMOTE_TAR="/tmp/knowledge-activation-postdeploy-${RUN_TOKEN}.tar.gz"
+          LOCAL_TAR="artifacts/knowledge-activation-proof/knowledge-activation-postdeploy-${RUN_TOKEN}.tar.gz"
+          download_status=1
+          attempt=1
+          max_attempts=5
+          while [ "${attempt}" -le "${max_attempts}" ]; do
+            if "${SSH[@]}" "cat ${REMOTE_TAR}" > "${LOCAL_TAR}" 2>/dev/null; then
+              if tar -tzf "${LOCAL_TAR}" >/dev/null 2>&1; then
+                download_status=0
+                break
+              fi
+            fi
+            if [ "${attempt}" -lt "${max_attempts}" ]; then
+              sleep 5
+            fi
+            attempt=$((attempt + 1))
+          done
+          if [ "${download_status}" -eq 0 ]; then
+            tar -xzf "${LOCAL_TAR}" -C artifacts/knowledge-activation-proof
+            EXTRACTED_DIR="artifacts/knowledge-activation-proof/knowledge-activation-postdeploy-${RUN_TOKEN}"
+            if [ -d "${EXTRACTED_DIR}" ]; then
+              cp "${EXTRACTED_DIR}/manifest.json" artifacts/knowledge-activation-proof/manifest.json 2>/dev/null || true
+              cp "${EXTRACTED_DIR}/summary.md" artifacts/knowledge-activation-proof/summary.md 2>/dev/null || true
+            fi
+          else
+            echo "Failed to download knowledge activation proof artifacts from ${REMOTE_TAR}" \
+              > artifacts/knowledge-activation-proof/download-error.txt
+          fi
+          if [ "${download_status}" -ne 0 ]; then
+            exit 1
+          fi
+          if [ "${run_status}" -ne 0 ]; then
+            exit "${run_status}"
+          fi
+
+      - name: Summarize knowledge activation proof
+        if: ${{ always() && steps.deploy_gate.outputs.deployed == 'true' }}
+        run: |
+          set -euo pipefail
+          manifest_path="artifacts/knowledge-activation-proof/manifest.json"
+          if [ -f "${manifest_path}" ]; then
+            python3 - <<'PY'
+          import os
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("artifacts/knowledge-activation-proof/manifest.json").read_text(encoding="utf-8"))
+          lines = [
+              "## Knowledge Activation Post-Deploy Proof",
+              "",
+              f"- overall_decision: `{payload.get('decision', 'unknown')}`",
+              f"- proof_mode: `{payload.get('proof_mode', 'unknown')}`",
+              f"- release_guard: `{payload.get('release_guard', {}).get('decision', 'missing')}`",
+              f"- closeout_status: `{payload.get('closeout', {}).get('status', 'unknown')}`",
+          ]
+          closeout_decision = payload.get("closeout", {}).get("decision")
+          if closeout_decision:
+              lines.append(f"- closeout_decision: `{closeout_decision}`")
+          target = payload.get("target") or {}
+          if target.get("client_slug") and target.get("branch_slug"):
+              lines.append(f"- closeout_target: `{target['client_slug']}` / `{target['branch_slug']}`")
+          reasons = payload.get("reasons") or []
+          if reasons:
+              lines.append(f"- reasons: `{', '.join(reasons)}`")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
+          else
+            {
+              echo "## Knowledge Activation Post-Deploy Proof"
+              echo
+              echo "- manifest: `missing`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload knowledge activation proof artifacts
+        if: ${{ always() && steps.deploy_gate.outputs.deployed == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-activation-proof
+          path: artifacts/knowledge-activation-proof
 
   console-contract-live:
     if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.console_contracts == 'true' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}

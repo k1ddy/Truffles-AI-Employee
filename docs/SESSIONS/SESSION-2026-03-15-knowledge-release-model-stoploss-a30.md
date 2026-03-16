@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-15-ci-livecheck-console-contract-stabilization-p8-a30.md
-- block_id: CI-LIVECHECK-CONTRACT-STABILIZATION-P8-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-knowledge-activation-postdeploy-automation-p9-a30.md
+- block_id: KNOWLEDGE-ACTIVATION-POSTDEPLOY-AUTOMATION-P9-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P6 remain merged; this slice stabilizes the post-merge pipeline after deploy recovery by fixing live console contract drift, livecheck gate truth drift, and the PR regressions surfaced by `session-gate` / `unit-tests`.
+- scope: P0-P8 remain merged; this slice automates post-deploy knowledge activation release proof by wiring the existing P5/P6 guard + closeout contracts into CI artifacts without faking tenant closeout when no explicit canary target is configured.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -23,13 +23,14 @@
   - Deterministic backend/OpenAPI/frontend proof is green for the dedicated transport plus admin observability contract.
   - P5 rollout safety is now implemented: `scripts/restart_release.sh` can restart `truffles-knowledge-activation-service`, parity-check it against API/workers, and emit a `go|no_go` artifact via `truffles-api/scripts/knowledge_activation_release_guard.py`; `scripts/restart_knowledge_activation_service.sh` now verifies image identity + `/health`, and `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md` captures the canonical deploy/canary/rollback SOP.
   - P6 closeout automation is now implemented: `ops/knowledge_activation_closeout.py` reuses the P5 guard artifact, snapshots one tenant branch from Postgres, evaluates preview/live invariants, and emits a single closeout `go|no_go` verdict without mutating runtime state.
-  - Deploy auth was restored for `main`; the remaining red family moved to `console-contract-live` + `ci-livecheck`, rooted in underconstrained GET contract inputs and a livecheck gate that trusted raw env over `/admin/health`.
-  - PR `#976` surfaced two follow-up regressions before merge: `session-gate` required session log/index updates for the P8 block, and `unit-tests` failed because direct route invocation was receiving FastAPI `Query` defaults where `_validate_limit` expected a plain `int`.
-  - `_validate_limit` now normalizes FastAPI `Query` defaults into concrete ints and the affected routes rebind their `limit` values before downstream use, so direct unit-test invocation and runtime behavior stay aligned.
-  - `docs/TASK_PACKAGES/TP-2026-03-15-ci-livecheck-console-contract-stabilization-p8-a30.md` now matches the canonical session/task gate tokens (`Query (exact)`, `Rejected options`, release safety, budget, next-block contract), clearing the red `session-gate` family.
+  - Deploy auth is restored and P8 stabilized the post-merge CI lane; `session-gate`, `unit-tests`, `console-contract-live`, and `ci-livecheck` are no longer the active blocker for this branch.
+  - P5/P6 proof contracts remain manual-runbook commands today: deploy still stops after parity checks and does not automatically capture release-guard / closeout artifacts in GitHub Actions.
+  - Current prod runtime has no explicit consultant-verification closeout target configured, so P9 must preserve truthful `closeout skipped` semantics until a canary tenant/env is provisioned.
+  - P9 automation is now implemented in code: `scripts/knowledge_activation_postdeploy.sh` runs `release_guard`, optionally runs tenant closeout, and emits `manifest.json` + `summary.md`; deploy CI now restarts the activation service on `main`, runs the wrapper on the VPS after parity checks, downloads `knowledge-activation-proof` artifacts back to the runner, uploads them, and publishes a short workflow summary.
+  - Tenant closeout is intentionally config-driven rather than faked: CI resolves closeout target from workflow-dispatch inputs or repo variables, and otherwise records `closeout.status=skipped` with an explicit reason.
 - next:
-  - Land the P8 stabilization block and rerun PR/main CI to confirm `session-gate`, `unit-tests`, `console-contract-live`, and `ci-livecheck` all stay green.
-  - After the pipeline is stable again, wire the P5/P6 release guard + closeout into post-deploy automation.
+  - Push the P9 branch and validate one CI run that produces `knowledge-activation-proof` artifacts.
+  - After CI proof is green, update `STATE.md` and open the PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
   - truffles-api/app/services/knowledge_registry_service.py
@@ -73,12 +74,24 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/23112703782
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/23114941017
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/23114941008
+  - docs/TASK_PACKAGES/TP-2026-03-16-knowledge-activation-postdeploy-automation-p9-a30.md
   - `.github/workflows/ci.yml`
+  - `scripts/knowledge_activation_postdeploy.sh`
+  - `truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
+  - `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md`
+  - `STRUCTURE.md`
+  - `TECH.md`
+  - `SPECS/SYSTEM_REFERENCE.md`
   - `pytest -q truffles-api/tests/test_console_router_utils.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_outbox_ops.py truffles-api/tests/test_console_owner_business.py truffles-api/tests/test_console_tenants_list.py`
   - `ruff check truffles-api/app/services/console_router_utils.py truffles-api/app/routers/console.py truffles-api/tests/test_console_router_utils.py`
   - `SESSION_AGENT=a30 bash scripts/session_check.sh`
+  - `pytest -q truffles-api/tests/test_restart_release_scripts.py truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
+  - `ruff check truffles-api/tests/test_restart_release_scripts.py truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
+  - `bash -n scripts/restart_release.sh scripts/knowledge_activation_postdeploy.sh`
+  - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml') ...` (`YAML_PARSE_OK`)
+  - `python3 - <<'PY' ... bash -n extracted deploy workflow steps ...` (`BASH_PARSE_OK Deploy to VPS`, `BASH_PARSE_OK Summarize knowledge activation proof`)
   - `npm run generate:api`
   - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
   - `npm run build`
   - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T07:57:40+05:00
+- last_updated: 2026-03-16T08:28:13+05:00
