@@ -119,6 +119,42 @@ def test_postdeploy_fails_on_partial_closeout_configuration(tmp_path: Path) -> N
     assert manifest["closeout"]["reason"] == "closeout_target_incomplete"
 
 
+def test_postdeploy_keeps_partial_explicit_override_invalid_even_with_defaults(tmp_path: Path) -> None:
+    result = _run_postdeploy(
+        tmp_path,
+        extra_env={
+            "KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG": "demo_salon_override",
+            "KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG": "demo_salon",
+            "KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG": "main",
+        },
+    )
+
+    assert result.returncode != 0
+    manifest = _read_json(tmp_path / "proof" / "manifest.json")
+    assert manifest["decision"] == "no_go"
+    assert manifest["closeout"]["status"] == "invalid_configuration"
+    assert manifest["closeout"]["reason"] == "closeout_target_incomplete"
+
+
+def test_postdeploy_uses_default_target_when_closeout_is_required(tmp_path: Path) -> None:
+    result = _run_postdeploy(
+        tmp_path,
+        extra_env={
+            "KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG": "demo_salon",
+            "KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG": "main",
+            "KNOWLEDGE_ACTIVATION_PROOF_REQUIRE_CLOSEOUT": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    manifest = _read_json(tmp_path / "proof" / "manifest.json")
+    assert manifest["decision"] == "go"
+    assert manifest["closeout"]["status"] == "executed"
+    assert manifest["closeout"]["required"] is True
+    assert manifest["target"]["client_slug"] == "demo_salon"
+    assert manifest["target"]["branch_slug"] == "main"
+
+
 def test_postdeploy_fails_closed_when_guard_is_no_go(tmp_path: Path) -> None:
     result = _run_postdeploy(tmp_path, guard_decision="no_go")
 

@@ -1050,6 +1050,8 @@ jobs:
           KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.knowledge_activation_closeout_branch_slug || '' }}
           KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG || '' }}
           KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG || '' }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/knowledge-activation-proof
@@ -1062,6 +1064,8 @@ jobs:
           if [ -z "${CLOSEOUT_BRANCH_SLUG}" ]; then
             CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_VAR:-}"
           fi
+          DEFAULT_CLOSEOUT_CLIENT_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_VAR:-demo_salon}"
+          DEFAULT_CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_VAR:-main}"
           SSH=(ssh -i ~/.ssh/id_rsa -p "${SERVER_PORT}" -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 "${SERVER_USER}@${SERVER_HOST}")
           if ! timeout 30s "${SSH[@]}" "echo deploy-ready" >/dev/null 2>&1; then
             echo "ERROR: deploy ssh preflight failed (auth/connectivity)." >&2
@@ -1275,12 +1279,18 @@ jobs:
           KNOWLEDGE_ACTIVATION_PROOF_GUARD_JSON="${ACTIVATION_PROOF_DIR}/release_guard.json" \
           KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_CLIENT_SLUG}" \
           KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_BRANCH_SLUG}" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG}" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG}" \
+          KNOWLEDGE_ACTIVATION_PROOF_REQUIRE_CLOSEOUT="${ACTIVATION_REQUIRE_CLOSEOUT}" \
           bash "${POSTDEPLOY_SCRIPT}"
           REMOTE
           remote_env=(
             "RUN_TOKEN=${RUN_TOKEN}"
             "ACTIVATION_CLOSEOUT_CLIENT_SLUG=${CLOSEOUT_CLIENT_SLUG}"
             "ACTIVATION_CLOSEOUT_BRANCH_SLUG=${CLOSEOUT_BRANCH_SLUG}"
+            "ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG=${DEFAULT_CLOSEOUT_CLIENT_SLUG}"
+            "ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG=${DEFAULT_CLOSEOUT_BRANCH_SLUG}"
+            "ACTIVATION_REQUIRE_CLOSEOUT=1"
           )
           remote_cmd=""
           for assignment in "${remote_env[@]}"; do

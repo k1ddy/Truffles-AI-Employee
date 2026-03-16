@@ -261,7 +261,7 @@ def _parse_optional_bool(value: Any) -> bool | None:
     return None
 
 
-def resolve_feature_enabled(client_config: Any) -> bool:
+def resolve_owner_surface_enabled(client_config: Any) -> bool:
     config = client_config if isinstance(client_config, dict) else {}
     candidates: list[Any] = []
 
@@ -354,7 +354,7 @@ def build_closeout_snapshot(
     latest_draft = tenant_snapshot.get("latest_draft") if isinstance(tenant_snapshot.get("latest_draft"), dict) else None
     latest_job = tenant_snapshot.get("latest_job") if isinstance(tenant_snapshot.get("latest_job"), dict) else None
 
-    feature_enabled = resolve_feature_enabled(tenant_snapshot.get("client_config"))
+    owner_surface_enabled = resolve_owner_surface_enabled(tenant_snapshot.get("client_config"))
     has_live_knowledge = active_version is not None
     has_published_knowledge = latest_published is not None
     has_draft_knowledge = latest_draft is not None
@@ -378,7 +378,8 @@ def build_closeout_snapshot(
     )
     preview_available = bool(available_source_modes)
     branch_present = bool(tenant_snapshot.get("branch_id"))
-    can_verify_now = feature_enabled and branch_present and preview_available
+    release_preview_ready = branch_present and preview_available
+    can_verify_now = owner_surface_enabled and release_preview_ready
 
     live_activation_status = derive_live_activation_status(
         active_version=active_version,
@@ -398,8 +399,6 @@ def build_closeout_snapshot(
         reasons.append("tenant:client_not_found")
     if not branch_present:
         reasons.append("tenant:branch_not_found")
-    if not feature_enabled:
-        reasons.append("tenant:consultant_verification_disabled")
     if not preview_available:
         reasons.append("tenant:preview_unavailable")
     if has_published_candidate and latest_job is None:
@@ -420,7 +419,7 @@ def build_closeout_snapshot(
         and latest_published.get("id") != active_version.get("id")
     ):
         reasons.append("tenant:ready_candidate_not_active")
-    if live_activation_status in {"pending", "failed", "unknown", "not_ready"} and not can_verify_now and feature_enabled:
+    if live_activation_status in {"pending", "failed", "unknown", "not_ready"} and not release_preview_ready:
         reasons.append("tenant:preview_blocked_by_activation")
     if live_activation_status == "pending":
         reasons.append("tenant:activation_pending")
@@ -433,11 +432,12 @@ def build_closeout_snapshot(
 
     invariants = {
         "release_guard_go": release_guard_go,
-        "feature_enabled": feature_enabled,
+        "owner_surface_enabled": owner_surface_enabled,
         "preview_available": preview_available,
+        "release_preview_ready": release_preview_ready,
         "can_verify_now": can_verify_now,
         "preview_not_blocked_by_activation": not (
-            feature_enabled and live_activation_status in {"pending", "failed", "unknown", "not_ready"} and not can_verify_now
+            live_activation_status in {"pending", "failed", "unknown", "not_ready"} and not release_preview_ready
         ),
         "candidate_has_activation_job": (not has_published_candidate) or (latest_job is not None),
         "live_pointer_separated_from_pending_candidate": not (
@@ -465,10 +465,11 @@ def build_closeout_snapshot(
         "guard": guard_snapshot,
         "tenant": {
             **tenant_snapshot,
-            "feature_enabled": feature_enabled,
+            "owner_surface_enabled": owner_surface_enabled,
             "available_source_modes": available_source_modes,
             "default_source_mode": default_source_mode,
             "preview_available": preview_available,
+            "release_preview_ready": release_preview_ready,
             "can_verify_now": can_verify_now,
             "live_activation_status": live_activation_status,
         },

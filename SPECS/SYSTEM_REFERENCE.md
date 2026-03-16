@@ -201,7 +201,7 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 - порядок: `docker pull` (optional) → digest resolve → `restart_api.sh` → `restart_workers.sh` → optional `restart_knowledge_activation_service.sh` → parity check image id → optional `knowledge_activation_release_guard.py` JSON artifact
 - устраняет drift API vs workers, при включённом activation rollout ещё и drift activation service, и защищает от mutable tag ошибок.
 - финальный tenant closeout после deploy выполняется отдельным чтением `ops/knowledge_activation_closeout.py`, который объединяет guard artifact и branch-level invariants в один `go|no_go`.
-- CI post-deploy automation uses `scripts/knowledge_activation_postdeploy.sh` to turn the guard artifact into a machine-readable manifest and to run tenant closeout only when explicit closeout target config is present; otherwise artifact truth is `closeout.status=skipped`.
+- CI post-deploy automation uses `scripts/knowledge_activation_postdeploy.sh` to turn the guard artifact into a machine-readable manifest and to run hard-required tenant closeout on `main`; target precedence is `workflow_dispatch override -> repo vars -> repo-coded default demo_salon/main`, and owner-surface rollout remains evidence-only inside `ops/knowledge_activation_closeout.py`.
 
 **restart_api.sh:**
 - canonical path: `/home/zhan/truffles-main/scripts/restart_api.sh`
