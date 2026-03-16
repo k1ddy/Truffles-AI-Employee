@@ -16,19 +16,24 @@ VERIFY_URL="${VERIFY_URL:-http://127.0.0.1:${PORT}/health}"
 VERIFY_RETRIES="${VERIFY_RETRIES:-30}"
 VERIFY_SLEEP_SECONDS="${VERIFY_SLEEP_SECONDS:-1}"
 
+is_ghcr_image_ref() {
+  local image_ref="$1"
+  case "$image_ref" in
+    ghcr.io/k1ddy/truffles-ai-employee:*|ghcr.io/k1ddy/truffles-ai-employee@sha256:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: env file not found: $ENV_FILE" >&2
   exit 1
 fi
 
 if [ "$REQUIRE_GHCR" = "1" ]; then
-  case "$IMAGE_NAME" in
-    ghcr.io/k1ddy/truffles-ai-employee:*) ;;
-    *)
-      echo "ERROR: REQUIRE_GHCR=1 but IMAGE_NAME='$IMAGE_NAME' is not a GHCR image." >&2
-      exit 1
-      ;;
-  esac
+  if ! is_ghcr_image_ref "$IMAGE_NAME"; then
+    echo "ERROR: REQUIRE_GHCR=1 but IMAGE_NAME='$IMAGE_NAME' is not a GHCR image ref." >&2
+    exit 1
+  fi
 fi
 
 if [ "$PULL_IMAGE" = "1" ]; then
