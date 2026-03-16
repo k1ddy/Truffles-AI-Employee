@@ -613,6 +613,7 @@ export type ConsultantVerificationOverviewResponse = {
     live_activation_error?: string | null;
     live_activation_job_id?: string | null;
     blockers: string[];
+    blocker_codes: ConsultantVerificationBlockerCode[];
     next_wave_summary: string;
     branch_selection_required?: boolean;
     selected_branch_id?: string | null;
@@ -629,6 +630,10 @@ export type ConsultantVerificationOverviewResponse = {
     scenario_catalog: ConsultantVerificationScenarioItem[];
     actions: BusinessSummaryAction[];
 };
+export type ConsultantVerificationBlockerCode =
+    | "workspace_disabled"
+    | "branch_required"
+    | "preview_source_missing";
 export type ConsultantVerificationSourceMode = "live" | "published" | "draft";
 export type ConsultantVerificationChallengeMode = "as_client" | "stress";
 export type ConsultantVerificationOutcome = "fact" | "collect" | "handoff";

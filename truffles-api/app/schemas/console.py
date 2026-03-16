@@ -1548,6 +1548,13 @@ class ConsoleConsultantVerificationReadinessCard(BaseModel):
     href: Optional[str] = None
 
 
+ConsoleConsultantVerificationBlockerCode = Literal[
+    "workspace_disabled",
+    "branch_required",
+    "preview_source_missing",
+]
+
+
 class ConsoleConsultantVerificationOverviewResponse(BaseModel):
     generated_at: str
     feature_enabled: bool = False
@@ -1573,6 +1580,7 @@ class ConsoleConsultantVerificationOverviewResponse(BaseModel):
     live_activation_error: Optional[str] = None
     live_activation_job_id: Optional[UUID] = None
     blockers: list[str] = []
+    blocker_codes: list[ConsoleConsultantVerificationBlockerCode] = []
     next_wave_summary: str
     branch_selection_required: bool = False
     selected_branch_id: Optional[UUID] = None

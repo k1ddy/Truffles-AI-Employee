@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-16-ci-path-filter-hardening-p13-a30.md
-- block_id: CI-PATH-FILTER-HARDENING-P13-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-acceptance-diagnostics-p16-a30.md
+- block_id: CONSULTANT-VERIFICATION-ACCEPTANCE-DIAGNOSTICS-P16-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P12 remain merged; this slice closes the remaining CI governance gap so activation deploy/proof file changes automatically trigger deploy/livecheck proof on main.
+- scope: P0-P13 remain merged; this slice closes the remaining in-scope consultant-verification acceptance gap by making workspace availability deterministic for tenant diagnosis and preserving compatibility-safe API semantics.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -31,10 +31,41 @@
   - Updated closeout truth now matches the product path: `demo_salon/main` reports `owner_surface_enabled=true`, `team_tools_enabled=false`, and `can_verify_now=true`, which means the tab can open without forcing compare/findings rollout.
   - Path-filter RCA is confirmed: `.github/workflows/ci.yml` still omits `scripts/restart_knowledge_activation_service.sh` from `deploy_required` and `livecheck_required`, so activation deploy-path fixes can merge without real deploy/livecheck proof.
   - Path-filter hardening is now implemented: `.github/workflows/ci.yml` includes `scripts/restart_knowledge_activation_service.sh` in both `deploy_required` and `livecheck_required`, `ops/knowledge_activation_closeout.py` in `deploy_required`, and `scripts/knowledge_activation_postdeploy.sh` in `livecheck_required`; `truffles-api/tests/test_ci_workflow_path_filters.py` now parses the workflow and asserts the required membership deterministically.
+  - P14 runtime proof is complete: the live owner canary passed on `https://console.truffles.kz` for `demo_salon/main`, and merged-main `workflow_dispatch` run `23131531000` proved P13 path-filter hardening because `build-push`, `deploy`, `console-contract-live`, and `ci-livecheck` all executed instead of staying `skipped`.
+  - P14 also produced the new blocker family: `23131531000` still failed in live semantic-contract lanes (`ci-livecheck` pools a/c/d and `console-contract-live`). Direct localhost repros plus DB evidence proved this is repo-side runtime drift, not CI transport: conversation traces were saturated by repeated `booking_interrupt` entries at the 40-entry cap, CA04 timeout factual fallback answered correctly but kept stale `source/fact_source`, and CA05 preserved booking continuity without surfacing `booking_info_interrupt` on the tool-reply path.
+  - P16 acceptance diagnostics are now implemented for the in-scope consultant-verification closure: overview returns stable `blocker_codes` for workspace gating, backend internals now name the owner gate `workspace_enabled` explicitly, the legacy `feature_enabled` field remains only as a compatibility alias, and frontend owner gating can now consume structured diagnostics without changing owner-safe copy.
+  - Deterministic consultant-verification contract proof is green for P16: targeted backend tests, OpenAPI/types regeneration, frontend lint/build, targeted Playwright owner-access lanes, and `session_check` all pass.
+  - The local P15 webhook/livecheck edits remain out-of-scope for this consultant-verification block and are not closure evidence for this slice.
 - next:
-  - Open the PR on the same branch and monitor CI.
-  - After merge, confirm the first main run touching one of the protected activation files executes deploy/livecheck instead of skipping them.
+  - Run tenant-specific consultant-verification acceptance on the target client/branch using the overview payload and one real session-create/message flow only.
+  - After tenant acceptance, decide whether to keep or later deprecate the legacy `feature_enabled` alias in the public response.
 - evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-acceptance-diagnostics-p16-a30.md
+  - truffles-api/app/services/console_consultant_verification.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/tests/test_console_consultant_verification_api.py
+  - truffles-api/tests/test_console_owner_business.py
+  - console-web/src/app/business/consultant-verification/page.tsx
+  - console-web/src/lib/api-client.ts
+  - console-web/e2e/owner-admin-business.spec.ts
+  - docs/CONSOLE_GUIDE.md
+  - `pytest -q truffles-api/tests/test_console_consultant_verification_api.py truffles-api/tests/test_console_owner_business.py -k 'consultant_verification'` (`32 passed, 69 deselected`)
+  - `python3 truffles-api/scripts/generate_openapi.py --check` (`pass`)
+  - `npm --prefix console-web run generate:api` (`pass`)
+  - `npm --prefix console-web run lint -- --file src/app/business/consultant-verification/page.tsx --file src/lib/api-client.ts --file e2e/owner-admin-business.spec.ts` (`pass`)
+  - `npm --prefix console-web run build` (`pass`)
+  - `cd console-web && npx playwright test e2e/owner-admin-business.spec.ts --workers 1 --grep 'consultant verification owner access|consultant verification readiness'` (`2 passed`)
+  - docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-runtime-proof-p14-a30.md
+  - docs/TASK_PACKAGES/TP-2026-03-16-live-semantic-contract-hardening-p15-a30.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/23131531000
+  - `cd console-web && PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 E2E_USE_STORAGE_STATE=1 E2E_DETERMINISTIC_AUTH=0 E2E_CLIENT_ID=c839d5dd-65be-4733-a5d2-72c9f70707f0 E2E_BRANCH_ID=b7f75692-951e-421a-aae6-f5db97394799 npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --workers=1 --reporter=list --grep 'should render consultant verification chat workspace'` (`1 passed`)
+  - `docker exec -e PGPASSWORD='Iddqd777!' truffles_postgres_1 psql -U n8n -d chatbot -Atc \"select id, jsonb_array_length(coalesce(context->'decision_trace','[]'::jsonb)), (select string_agg(coalesce(x->>'stage','?'), ',') from jsonb_array_elements(coalesce(context->'decision_trace','[]'::jsonb)) x) from conversations where id in ('7c02e2dd-35c4-428b-8425-3167a9ba9c9e','286f75d1-fac1-4af9-b8cc-9dd1ca6200d1','10049e90-5805-425f-841b-c0c9419c9c30') order by id;\"`
+  - truffles-api/app/routers/webhook/trace.py
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/tests/test_webhook_trace.py
+  - truffles-api/tests/test_message_endpoint.py
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_webhook_trace.py -k 'CA03 or CA04 or CA05 or CA06 or booking_info_interrupt or build_timeout_factual_fallback_contract or retain_decision_trace'` (`13 passed, 433 deselected`)
+  - `ruff check truffles-api/app/routers/webhook/trace.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_webhook_trace.py truffles-api/tests/test_message_endpoint.py` (`pass`)
   - docs/TASK_PACKAGES/TP-2026-03-16-ci-path-filter-hardening-p13-a30.md
   - `.github/workflows/ci.yml`
   - `truffles-api/tests/test_ci_workflow_path_filters.py`
@@ -126,4 +157,4 @@
 - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
 - `npm run build`
 - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T16:20:00+05:00
+- last_updated: 2026-03-16T18:40:00+05:00

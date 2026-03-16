@@ -37,6 +37,7 @@ from app.routers.webhook.trace import DECISION_TRACE_KEY
 from app.schemas.capabilities import CapabilitiesPayload
 from app.schemas.console import (
     ConsoleBusinessActionItem,
+    ConsoleConsultantVerificationBlockerCode,
     ConsoleConsultantVerificationCompareCaseRecord,
     ConsoleConsultantVerificationCompareReadiness,
     ConsoleConsultantVerificationCompareRequest,
@@ -634,16 +635,39 @@ def resolve_consultant_verification_enabled(context: ConsoleAuthContext) -> bool
     return False
 
 
+def _build_workspace_blockers(
+    *,
+    workspace_enabled: bool,
+    branch_selected: bool,
+    preview_available: bool,
+) -> tuple[list[str], list[ConsoleConsultantVerificationBlockerCode]]:
+    blockers: list[str] = []
+    blocker_codes: list[ConsoleConsultantVerificationBlockerCode] = []
+    if not workspace_enabled:
+        blocker_codes.append("workspace_disabled")
+        blockers.append("Интерактивный preview временно выключен для этого клиента.")
+    if not branch_selected:
+        blocker_codes.append("branch_required")
+        blockers.append("Выберите филиал, чтобы привязать preview к конкретному business scope.")
+    if branch_selected and not preview_available:
+        blocker_codes.append("preview_source_missing")
+        blockers.append("Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.")
+    return blockers, blocker_codes
+
+
 def derive_consultant_verification_status(
     *,
-    feature_enabled: bool,
+    workspace_enabled: bool | None = None,
+    feature_enabled: bool | None = None,
     branch_selected: bool,
     preview_available: bool,
     default_source_mode: str | None,
     knowledge_stale_hours: Optional[int],
     blockers: list[str],
 ) -> tuple[str, str, str, bool]:
-    if not feature_enabled:
+    if workspace_enabled is None:
+        workspace_enabled = bool(feature_enabled)
+    if not workspace_enabled:
         return (
             "not_enabled",
             "Контур проверки еще не включен",
@@ -701,7 +725,7 @@ def _build_readiness_cards(
     live_activation_status: str | None,
     live_activation_label: str | None,
     live_activation_summary: str | None,
-    feature_enabled: bool,
+    workspace_enabled: bool,
     scenario_library_enabled: bool,
     team_tools_enabled: bool,
     branch_scope_limited: bool,
@@ -749,7 +773,7 @@ def _build_readiness_cards(
     )
     rollout_summary = (
         "Preview уже использует production runtime в simulation mode, поэтому owner/admin проверяют реальный продуктовый путь без реальных side effects."
-        if feature_enabled
+        if workspace_enabled
         else "Интерактивный preview временно выключен для этого клиента."
     )
 
@@ -785,9 +809,9 @@ def _build_readiness_cards(
             id="interactive_preview",
             title="Интерактивный preview",
             summary=rollout_summary,
-            state="ready" if feature_enabled else "planned",
-            state_label=_card_state_label("ready" if feature_enabled else "planned"),
-            evidence_label="Wave2: safe simulation runtime" if feature_enabled else "Wave2: safe simulation runtime",
+            state="ready" if workspace_enabled else "planned",
+            state_label=_card_state_label("ready" if workspace_enabled else "planned"),
+            evidence_label="Wave2: safe simulation runtime" if workspace_enabled else "Wave2: safe simulation runtime",
         ),
         ConsoleConsultantVerificationReadinessCard(
             id="stress_scenarios",
@@ -831,7 +855,7 @@ def _build_readiness_cards(
 
 def _build_consultant_verification_actions(
     *,
-    feature_enabled: bool,
+    workspace_enabled: bool,
     team_tools_enabled: bool,
     branch_selected: bool,
     preview_available: bool,
@@ -897,14 +921,14 @@ def _build_consultant_verification_actions(
     actions.append(
         ConsoleBusinessActionItem(
             id="review_data_trust_before_verification",
-            severity="info" if feature_enabled else "warn",
+            severity="info" if workspace_enabled else "warn",
             title="Проверьте качество данных",
             description="Проверьте пробелы quality-метрик и свежесть знаний, чтобы тест опирался на надежную базу.",
             href="/business/data-trust",
         )
     )
 
-    if not feature_enabled:
+    if not workspace_enabled:
         actions.append(
             ConsoleBusinessActionItem(
                 id="consultant_verification_workspace_disabled",
@@ -1140,7 +1164,7 @@ def build_consultant_verification_overview(
     now: datetime,
     allowed_branch_ids: Optional[list[UUID]],
 ) -> ConsoleConsultantVerificationOverviewResponse:
-    feature_enabled = resolve_consultant_verification_workspace_enabled(context)
+    workspace_enabled = resolve_consultant_verification_workspace_enabled(context)
     team_tools_enabled = resolve_consultant_verification_enabled(context)
     normalized_branch_ids = _normalize_allowed_branch_ids(allowed_branch_ids)
     branch_id = _resolve_verification_branch_id(
@@ -1228,16 +1252,14 @@ def build_consultant_verification_overview(
             else (active_knowledge.id if active_knowledge else None)
         )
     )
-    blockers: list[str] = []
-    if not feature_enabled:
-        blockers.append("Интерактивный preview временно выключен для этого клиента.")
-    if branch_id is None:
-        blockers.append("Выберите филиал, чтобы привязать preview к конкретному business scope.")
-    if branch_id is not None and not available_source_modes:
-        blockers.append("Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.")
+    blockers, blocker_codes = _build_workspace_blockers(
+        workspace_enabled=workspace_enabled,
+        branch_selected=branch_id is not None,
+        preview_available=bool(available_source_modes),
+    )
 
     status, status_label, summary, can_verify_now = derive_consultant_verification_status(
-        feature_enabled=feature_enabled,
+        workspace_enabled=workspace_enabled,
         branch_selected=branch_id is not None,
         preview_available=bool(available_source_modes),
         default_source_mode=default_source_mode,
@@ -1258,8 +1280,8 @@ def build_consultant_verification_overview(
     )
     return ConsoleConsultantVerificationOverviewResponse(
         generated_at=now.isoformat(),
-        feature_enabled=feature_enabled,
-        workspace_enabled=feature_enabled,
+        feature_enabled=workspace_enabled,
+        workspace_enabled=workspace_enabled,
         team_tools_enabled=team_tools_enabled,
         status=status,
         status_label=status_label,
@@ -1281,6 +1303,7 @@ def build_consultant_verification_overview(
         live_activation_error=live_activation_error,
         live_activation_job_id=live_activation_job_id,
         blockers=blockers,
+        blocker_codes=blocker_codes,
         next_wave_summary=(
             "Следующий архитектурный блок разводит artifact publish и live activation окончательно: `active_version_id` плюс dedicated activation job lifecycle."
         ),
@@ -1305,8 +1328,8 @@ def build_consultant_verification_overview(
             live_activation_status=live_activation_status,
             live_activation_label=live_activation_label,
             live_activation_summary=live_activation_summary,
-            feature_enabled=feature_enabled,
-            scenario_library_enabled=feature_enabled,
+            workspace_enabled=workspace_enabled,
+            scenario_library_enabled=workspace_enabled,
             team_tools_enabled=team_tools_enabled,
             branch_scope_limited=allowed_branch_ids is not None,
         ),
@@ -1318,7 +1341,7 @@ def build_consultant_verification_overview(
         ],
         scenario_catalog=scenario_catalog,
         actions=_build_consultant_verification_actions(
-            feature_enabled=feature_enabled,
+            workspace_enabled=workspace_enabled,
             team_tools_enabled=team_tools_enabled,
             branch_selected=branch_id is not None,
             preview_available=bool(available_source_modes),
