@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-16-knowledge-activation-postdeploy-automation-p9-a30.md
-- block_id: KNOWLEDGE-ACTIVATION-POSTDEPLOY-AUTOMATION-P9-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-knowledge-activation-closeout-hardening-p10-a30.md
+- block_id: KNOWLEDGE-ACTIVATION-CLOSEOUT-HARDENING-P10-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P8 remain merged; this slice automates post-deploy knowledge activation release proof by wiring the existing P5/P6 guard + closeout contracts into CI artifacts without faking tenant closeout when no explicit canary target is configured.
+- scope: P0-P9 remain merged; this slice hardens closeout from optional to required by promoting a canonical canary target and removing the incorrect dependency between release closeout and owner-surface rollout flags.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -24,13 +24,12 @@
   - P5 rollout safety is now implemented: `scripts/restart_release.sh` can restart `truffles-knowledge-activation-service`, parity-check it against API/workers, and emit a `go|no_go` artifact via `truffles-api/scripts/knowledge_activation_release_guard.py`; `scripts/restart_knowledge_activation_service.sh` now verifies image identity + `/health`, and `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md` captures the canonical deploy/canary/rollback SOP.
   - P6 closeout automation is now implemented: `ops/knowledge_activation_closeout.py` reuses the P5 guard artifact, snapshots one tenant branch from Postgres, evaluates preview/live invariants, and emits a single closeout `go|no_go` verdict without mutating runtime state.
   - Deploy auth is restored and P8 stabilized the post-merge CI lane; `session-gate`, `unit-tests`, `console-contract-live`, and `ci-livecheck` are no longer the active blocker for this branch.
-  - P5/P6 proof contracts remain manual-runbook commands today: deploy still stops after parity checks and does not automatically capture release-guard / closeout artifacts in GitHub Actions.
-  - Current prod runtime has no explicit consultant-verification closeout target configured, so P9 must preserve truthful `closeout skipped` semantics until a canary tenant/env is provisioned.
-  - P9 automation is now implemented in code: `scripts/knowledge_activation_postdeploy.sh` runs `release_guard`, optionally runs tenant closeout, and emits `manifest.json` + `summary.md`; deploy CI now restarts the activation service on `main`, runs the wrapper on the VPS after parity checks, downloads `knowledge-activation-proof` artifacts back to the runner, uploads them, and publishes a short workflow summary.
-  - Tenant closeout is intentionally config-driven rather than faked: CI resolves closeout target from workflow-dispatch inputs or repo variables, and otherwise records `closeout.status=skipped` with an explicit reason.
+  - P9 automation is merged and P10 now hardens it: `main` deploy proof no longer permits `closeout.status=skipped`.
+  - `knowledge_activation_closeout.py` now treats owner rollout as evidence-only (`owner_surface_enabled`) and gates final closeout on release invariants instead of consultant-verification rollout enablement.
+  - Local evidence on current runtime now shows `demo_salon/main` returns `decision=go` even with `owner_surface_enabled=false`, so the existing canary tenant is usable as the hard-required release target.
 - next:
-  - Push the P9 branch and validate one CI run that produces `knowledge-activation-proof` artifacts.
-  - After CI proof is green, update `STATE.md` and open the PR.
+  - Run/monitor the next PR + first `main` deploy run to confirm the hard-required closeout artifact stays green in CI.
+  - If `demo_salon/main` ever loses preview/live invariants, stop `main` rollout until the canary tenant is repaired or replaced.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
   - truffles-api/app/services/knowledge_registry_service.py
@@ -90,8 +89,12 @@
   - `bash -n scripts/restart_release.sh scripts/knowledge_activation_postdeploy.sh`
   - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml') ...` (`YAML_PARSE_OK`)
   - `python3 - <<'PY' ... bash -n extracted deploy workflow steps ...` (`BASH_PARSE_OK Deploy to VPS`, `BASH_PARSE_OK Summarize knowledge activation proof`)
+  - `python3 ops/knowledge_activation_closeout.py --client-slug demo_salon --branch-slug main --guard-json <go-json> --pretty` (`decision=go`, `owner_surface_enabled=false`, `release_preview_ready=true`)
+  - `pytest -q truffles-api/tests/test_knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
+  - `ruff check ops/knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_closeout.py truffles-api/tests/test_knowledge_activation_postdeploy_script.py`
+  - `bash -n scripts/knowledge_activation_postdeploy.sh`
   - `npm run generate:api`
   - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
   - `npm run build`
   - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T08:28:13+05:00
+- last_updated: 2026-03-16T08:54:26+05:00

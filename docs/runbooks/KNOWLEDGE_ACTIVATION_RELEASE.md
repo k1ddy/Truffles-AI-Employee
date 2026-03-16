@@ -8,7 +8,7 @@
 - `truffles-knowledge-activation-service`
 - activation health in `/admin/health/check`
 - activation gauges in `/metrics`
-- CI post-deploy proof artifacts (`release_guard` + optional tenant closeout)
+- CI post-deploy proof artifacts (`release_guard` + hard-required tenant closeout on `main`)
 
 ## Preconditions
 - P3/P4 code already deployed in target image.
@@ -34,8 +34,8 @@ bash /home/zhan/truffles-main/scripts/restart_release.sh"
 
 On merged `main`, `.github/workflows/ci.yml` now automates the same proof path:
 1. deploy restarts API + workers + `truffles-knowledge-activation-service`
-2. `scripts/knowledge_activation_postdeploy.sh` runs the P5 `release_guard`, optionally runs tenant closeout when explicit closeout target config is present, and emits `manifest.json` + `summary.md`
-4. GitHub Actions uploads `knowledge-activation-proof` artifacts
+2. `scripts/knowledge_activation_postdeploy.sh` runs the P5 `release_guard`, then runs hard-required tenant closeout against canonical `demo_salon/main` unless explicit CI overrides are provided, and emits `manifest.json` + `summary.md`
+3. GitHub Actions uploads `knowledge-activation-proof` artifacts
 
 ## What The Release Command Must Prove
 1. `restart_release.sh` restarts API + workers and, when `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1`, also restarts `truffles-knowledge-activation-service`.
@@ -66,31 +66,36 @@ ssh -p 222 zhan@5.188.241.234 "python3 /home/zhan/truffles-main/ops/knowledge_ac
 ```
 
 The closeout artifact adds:
-- `tenant.feature_enabled`
+- `tenant.owner_surface_enabled`
 - `tenant.preview_available`
+- `tenant.release_preview_ready`
 - `tenant.can_verify_now`
 - `tenant.live_activation_status`
 - `invariants.live_pointer_separated_from_pending_candidate`
 - `invariants.ready_candidate_is_active`
+
+`tenant.owner_surface_enabled` is informational evidence only. Final release closeout is gated by release invariants, not by whether the owner-facing consultant-verification surface is rolled out for that tenant.
 
 `GO` for final closeout requires both:
 1. P5 guard artifact `decision=go`
 2. closeout artifact `decision=go`
 
 ## CI Closeout Configuration
-`main` deploy automation resolves the tenant closeout target from explicit CI config:
+`main` deploy automation resolves the tenant closeout target with this precedence:
 - workflow-dispatch inputs:
-  - `knowledge_activation_closeout_client_slug`
-  - `knowledge_activation_closeout_branch_slug`
-- or repository variables:
+   - `knowledge_activation_closeout_client_slug`
+   - `knowledge_activation_closeout_branch_slug`
+- repository variables:
   - `KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG`
   - `KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG`
+- repository variables for canonical default override:
+  - `KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG`
+  - `KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG`
+- repo-coded fallback:
+  - `demo_salon`
+  - `main`
 
-If neither source is configured, CI still runs the guard and uploads a truthful proof artifact with:
-- `closeout.status = skipped`
-- `closeout.reason = closeout_target_not_configured`
-
-This is intentional until a dedicated consultant-verification canary tenant/env is provisioned.
+`main` now sets `KNOWLEDGE_ACTIVATION_PROOF_REQUIRE_CLOSEOUT=1`, so `closeout.status=skipped` is no longer a valid deploy-proof outcome.
 
 Expected top-level fields:
 - `captured_at`
