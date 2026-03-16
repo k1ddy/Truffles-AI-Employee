@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-owner-access-closure-p12-a30.md
-- block_id: CONSULTANT-VERIFICATION-OWNER-ACCESS-CLOSURE-P12-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-ci-path-filter-hardening-p13-a30.md
+- block_id: CI-PATH-FILTER-HARDENING-P13-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P11 remain merged; this slice closes the remaining owner-facing gap in `Business -> Проверка консультанта` by removing the hidden rollout gate from preview/workspace access while preserving compare/publish governance as a separate contract.
+- scope: P0-P12 remain merged; this slice closes the remaining CI governance gap so activation deploy/proof file changes automatically trigger deploy/livecheck proof on main.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -29,10 +29,18 @@
   - The owner-access closure is now implemented: backend splits `workspace_enabled` from `team_tools_enabled`, session/message endpoints use the workspace gate, and compare/findings/publish governance stays on the separate team-tools gate.
   - Frontend now renders the workspace from `workspace_enabled`, disables team-tools queries when the separate gate is off, and shows a bounded note instead of a fake product blocker.
   - Updated closeout truth now matches the product path: `demo_salon/main` reports `owner_surface_enabled=true`, `team_tools_enabled=false`, and `can_verify_now=true`, which means the tab can open without forcing compare/findings rollout.
+  - Path-filter RCA is confirmed: `.github/workflows/ci.yml` still omits `scripts/restart_knowledge_activation_service.sh` from `deploy_required` and `livecheck_required`, so activation deploy-path fixes can merge without real deploy/livecheck proof.
+  - Path-filter hardening is now implemented: `.github/workflows/ci.yml` includes `scripts/restart_knowledge_activation_service.sh` in both `deploy_required` and `livecheck_required`, `ops/knowledge_activation_closeout.py` in `deploy_required`, and `scripts/knowledge_activation_postdeploy.sh` in `livecheck_required`; `truffles-api/tests/test_ci_workflow_path_filters.py` now parses the workflow and asserts the required membership deterministically.
 - next:
   - Open the PR on the same branch and monitor CI.
-  - After merge, run one real owner canary on `Business -> Проверка консультанта` to confirm the tab is usable outside mocked proof.
+  - After merge, confirm the first main run touching one of the protected activation files executes deploy/livecheck instead of skipping them.
 - evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-16-ci-path-filter-hardening-p13-a30.md
+  - `.github/workflows/ci.yml`
+  - `truffles-api/tests/test_ci_workflow_path_filters.py`
+  - `pytest -q truffles-api/tests/test_ci_workflow_path_filters.py`
+  - `ruff check truffles-api/tests/test_ci_workflow_path_filters.py`
+  - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml') ...` (`YAML_PARSE_OK`)
   - docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-admin-observability-p4-a30.md
   - truffles-api/app/services/knowledge_registry_service.py
   - truffles-api/app/services/health_service.py
@@ -118,4 +126,4 @@
 - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
 - `npm run build`
 - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T15:30:00+05:00
+- last_updated: 2026-03-16T16:20:00+05:00
