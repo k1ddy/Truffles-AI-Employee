@@ -10847,8 +10847,8 @@ export interface operations {
         parameters: {
             query: {
                 surface: string;
-                case_id?: string | null;
-                conversation_id?: string | null;
+                case_id?: string;
+                conversation_id?: string;
             };
             header?: never;
             path?: never;
@@ -11083,6 +11083,15 @@ export interface operations {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -11286,24 +11295,24 @@ export interface operations {
     list_cases_console_v1_cases_get: {
         parameters: {
             query?: {
-                status?: string | null;
-                queue_view?: string | null;
-                q?: string | null;
-                branch_id?: string | null;
+                status?: string;
+                queue_view?: string;
+                q?: string;
+                branch_id?: string;
                 assigned_to_me?: boolean;
-                assignee_id?: string | null;
+                assignee_id?: string;
                 unassigned?: boolean;
-                phone?: string | null;
+                phone?: string;
                 has_delivery_error?: boolean;
                 has_pending_outbox?: boolean;
                 has_human_lock?: boolean;
-                last_activity_since?: string | null;
-                sort_by?: string | null;
-                date_from?: string | null;
-                date_to?: string | null;
-                resolved_from?: string | null;
-                resolved_to?: string | null;
-                cursor?: string | null;
+                last_activity_since?: string;
+                sort_by?: string;
+                date_from?: string;
+                date_to?: string;
+                resolved_from?: string;
+                resolved_to?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -11377,7 +11386,7 @@ export interface operations {
     list_queue_case_assignees_console_v1_cases_assignees_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -11408,7 +11417,7 @@ export interface operations {
     list_case_assignees_console_v1_cases__case_id__assignees_get: {
         parameters: {
             query?: {
-                policy?: ("least_open_cases" | "follow_up_sla_balance") | null;
+                policy?: "least_open_cases" | "follow_up_sla_balance";
             };
             header?: never;
             path: {
@@ -11644,7 +11653,7 @@ export interface operations {
     get_case_messages_console_v1_cases__case_id__messages_get: {
         parameters: {
             query?: {
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -12301,6 +12310,15 @@ export interface operations {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
         };
     };
     list_business_consultant_verification_sessions_console_v1_business_consultant_verification_sessions_get: {
@@ -12332,6 +12350,15 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12439,6 +12466,15 @@ export interface operations {
                     "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -12515,7 +12551,7 @@ export interface operations {
     list_business_consultant_verification_findings_console_v1_business_consultant_verification_findings_get: {
         parameters: {
             query?: {
-                status?: string | null;
+                status?: string;
                 limit?: number;
             };
             header?: never;
@@ -12544,6 +12580,15 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12651,6 +12696,15 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13139,8 +13193,8 @@ export interface operations {
     list_knowledge_activation_jobs_console_v1_ops_knowledge_activation_get: {
         parameters: {
             query?: {
-                status?: string | null;
-                cursor?: string | null;
+                status?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -13250,8 +13304,8 @@ export interface operations {
     list_outbox_console_v1_ops_outbox_get: {
         parameters: {
             query?: {
-                status?: string | null;
-                cursor?: string | null;
+                status?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -13361,9 +13415,9 @@ export interface operations {
     list_reminders_console_v1_ops_reminders_get: {
         parameters: {
             query?: {
-                status?: string | null;
-                template?: string | null;
-                cursor?: string | null;
+                status?: string;
+                template?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -13520,7 +13574,7 @@ export interface operations {
     list_ops_jobs_console_v1_ops_jobs_get: {
         parameters: {
             query?: {
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -13679,9 +13733,9 @@ export interface operations {
     list_audit_events_console_v1_audit_get: {
         parameters: {
             query?: {
-                entity_type?: string | null;
-                entity_id?: string | null;
-                cursor?: string | null;
+                entity_type?: string;
+                entity_id?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -13775,8 +13829,8 @@ export interface operations {
     get_metrics_daily_console_v1_metrics_daily_get: {
         parameters: {
             query?: {
-                date?: string | null;
-                trend_days?: number | null;
+                date?: string;
+                trend_days?: number;
             };
             header?: never;
             path?: never;
@@ -13947,7 +14001,7 @@ export interface operations {
     get_onboarding_status_console_v1_onboarding_status_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -13996,7 +14050,7 @@ export interface operations {
     get_onboarding_scorecard_console_v1_onboarding_scorecard_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -14479,9 +14533,9 @@ export interface operations {
     list_learning_candidates_console_v1_learning_candidates_get: {
         parameters: {
             query?: {
-                status?: string | null;
+                status?: string;
                 limit?: number;
-                cursor?: string | null;
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -14646,9 +14700,9 @@ export interface operations {
     list_companies_console_v1_admin_companies_get: {
         parameters: {
             query?: {
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
-                q?: string | null;
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -14739,16 +14793,16 @@ export interface operations {
     list_clients_console_v1_admin_clients_get: {
         parameters: {
             query?: {
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
-                q?: string | null;
-                company_id?: string | null;
-                lifecycle?: string | null;
-                include_fleet?: string | null;
-                include_summary?: string | null;
-                fleet_lifecycle?: string | null;
-                payment_status?: string | null;
-                service_state?: string | null;
+                q?: string;
+                company_id?: string;
+                lifecycle?: string;
+                include_fleet?: string;
+                include_summary?: string;
+                fleet_lifecycle?: string;
+                payment_status?: string;
+                service_state?: string;
             };
             header?: never;
             path?: never;
@@ -14848,13 +14902,13 @@ export interface operations {
     list_branches_console_v1_admin_branches_get: {
         parameters: {
             query?: {
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
-                q?: string | null;
-                company_id?: string | null;
-                client_id?: string | null;
-                branch_id?: string | null;
-                lifecycle?: string | null;
+                q?: string;
+                company_id?: string;
+                client_id?: string;
+                branch_id?: string;
+                lifecycle?: string;
             };
             header?: never;
             path?: never;
@@ -14954,14 +15008,14 @@ export interface operations {
     get_tenants_portfolio_console_v1_admin_tenants_portfolio_get: {
         parameters: {
             query?: {
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
-                q?: string | null;
-                company_id?: string | null;
-                lifecycle?: string | null;
+                q?: string;
+                company_id?: string;
+                lifecycle?: string;
                 attention_limit?: number;
                 stale_after_minutes?: number;
-                include_low?: string | null;
+                include_low?: string;
             };
             header?: never;
             path?: never;
@@ -15011,15 +15065,15 @@ export interface operations {
         parameters: {
             query: {
                 company_id: string;
-                client_id?: string | null;
-                include_branches?: string | null;
-                lifecycle?: string | null;
+                client_id?: string;
+                include_branches?: string;
+                lifecycle?: string;
                 client_limit?: number;
                 branch_limit?: number;
-                client_cursor?: string | null;
-                branch_cursor?: string | null;
-                client_q?: string | null;
-                branch_q?: string | null;
+                client_cursor?: string;
+                branch_cursor?: string;
+                client_q?: string;
+                branch_q?: string;
             };
             header?: never;
             path?: never;
@@ -15069,8 +15123,8 @@ export interface operations {
         parameters: {
             query: {
                 client_id: string;
-                week_key?: string | null;
-                cursor?: string | null;
+                week_key?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -15260,8 +15314,8 @@ export interface operations {
     list_marketing_campaigns_console_v1_admin_marketing_campaigns_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
-                status?: string | null;
+                branch_id?: string;
+                status?: string;
             };
             header?: never;
             path?: never;
@@ -15833,7 +15887,7 @@ export interface operations {
     get_marketing_campaign_diagnostics_console_v1_admin_marketing_campaigns__campaign_id__diagnostics_get: {
         parameters: {
             query?: {
-                sample_limit?: number | null;
+                sample_limit?: number;
             };
             header?: never;
             path: {
@@ -15938,12 +15992,12 @@ export interface operations {
         parameters: {
             query?: {
                 stale_after_minutes?: number;
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
-                only_problematic?: string | null;
-                company_id?: string | null;
-                client_id?: string | null;
-                branch_id?: string | null;
+                only_problematic?: string;
+                company_id?: string;
+                client_id?: string;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -15993,11 +16047,11 @@ export interface operations {
         parameters: {
             query?: {
                 stale_after_minutes?: number;
-                cursor?: string | null;
+                cursor?: string;
                 limit?: number;
-                company_id?: string | null;
-                client_id?: string | null;
-                branch_id?: string | null;
+                company_id?: string;
+                client_id?: string;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -16119,7 +16173,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 stale_after_minutes?: number;
-                include_low?: string | null;
+                include_low?: string;
             };
             header?: never;
             path?: never;
@@ -16221,7 +16275,7 @@ export interface operations {
                 incident_limit?: number;
                 ops_jobs_limit?: number;
                 stale_after_minutes?: number;
-                include_low?: string | null;
+                include_low?: string;
             };
             header?: never;
             path?: never;
@@ -16271,7 +16325,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                include_ready?: string | null;
+                include_ready?: string;
             };
             header?: never;
             path?: never;
@@ -16322,7 +16376,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 stale_after_minutes?: number;
-                only_problematic?: string | null;
+                only_problematic?: string;
             };
             header?: never;
             path?: never;
@@ -16373,7 +16427,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 stale_after_minutes?: number;
-                include_p2?: string | null;
+                include_p2?: string;
             };
             header?: never;
             path?: never;
@@ -16424,7 +16478,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 stale_after_minutes?: number;
-                include_p2?: string | null;
+                include_p2?: string;
             };
             header?: never;
             path?: never;
@@ -16475,7 +16529,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 stale_after_minutes?: number;
-                include_p2?: string | null;
+                include_p2?: string;
             };
             header?: never;
             path: {
@@ -16818,9 +16872,9 @@ export interface operations {
     list_branch_changes_console_v1_admin_branch_changes_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
-                status?: string | null;
-                cursor?: string | null;
+                branch_id?: string;
+                status?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -17407,12 +17461,12 @@ export interface operations {
     list_memberships_console_v1_admin_memberships_get: {
         parameters: {
             query?: {
-                agent_id?: string | null;
-                scope?: string | null;
-                company_id?: string | null;
-                client_id?: string | null;
-                branch_id?: string | null;
-                include_inactive?: string | null;
+                agent_id?: string;
+                scope?: string;
+                company_id?: string;
+                client_id?: string;
+                branch_id?: string;
+                include_inactive?: string;
             };
             header?: never;
             path?: never;
@@ -17557,8 +17611,8 @@ export interface operations {
         parameters: {
             query: {
                 client_id: string;
-                agent_id?: string | null;
-                branch_id?: string | null;
+                agent_id?: string;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -17659,8 +17713,8 @@ export interface operations {
         parameters: {
             query: {
                 client_id: string;
-                branch_id?: string | null;
-                reason?: string | null;
+                branch_id?: string;
+                reason?: string;
             };
             header?: never;
             path: {
@@ -17870,7 +17924,7 @@ export interface operations {
     get_capabilities_console_v1_admin_capabilities_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -17953,7 +18007,7 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "client" | "branch";
-                branch_id?: string | null;
+                branch_id?: string;
                 limit?: number;
             };
             header?: never;
@@ -18098,8 +18152,8 @@ export interface operations {
             query: {
                 data_class: string;
                 scope?: "global" | "domain" | "client" | "branch";
-                domain_key?: string | null;
-                branch_id?: string | null;
+                domain_key?: string;
+                branch_id?: string;
                 limit?: number;
             };
             header?: never;
@@ -18243,9 +18297,9 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "client" | "branch";
-                branch_id?: string | null;
-                data_class?: string | null;
-                operation?: string | null;
+                branch_id?: string;
+                data_class?: string;
+                operation?: string;
                 limit?: number;
             };
             header?: never;
@@ -18329,7 +18383,7 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "client" | "branch";
-                branch_id?: string | null;
+                branch_id?: string;
                 records_limit?: number;
             };
             header?: never;
@@ -18382,7 +18436,7 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "client" | "branch";
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path: {
@@ -18434,8 +18488,8 @@ export interface operations {
         parameters: {
             query?: {
                 scope?: "global" | "domain" | "client" | "branch";
-                domain_key?: string | null;
-                branch_id?: string | null;
+                domain_key?: string;
+                branch_id?: string;
                 limit?: number;
             };
             header?: never;
@@ -18578,8 +18632,8 @@ export interface operations {
     list_tool_registry_console_v1_admin_tool_registry_get: {
         parameters: {
             query?: {
-                status?: string | null;
-                certification_status?: string | null;
+                status?: string;
+                certification_status?: string;
             };
             header?: never;
             path?: never;
@@ -18663,7 +18717,7 @@ export interface operations {
     get_onboarding_contract_console_v1_admin_onboarding_contract_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -18745,7 +18799,7 @@ export interface operations {
     get_webhook_secret_console_v1_admin_webhook_secret_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -18827,7 +18881,7 @@ export interface operations {
     list_domain_catalog_console_v1_admin_domain_catalog_get: {
         parameters: {
             query?: {
-                status?: string | null;
+                status?: string;
             };
             header?: never;
             path?: never;
@@ -18951,7 +19005,7 @@ export interface operations {
     list_onboarding_blueprints_api_console_v1_admin_onboarding_blueprints_get: {
         parameters: {
             query?: {
-                domain_slug?: string | null;
+                domain_slug?: string;
             };
             header?: never;
             path?: never;
@@ -18991,7 +19045,7 @@ export interface operations {
     list_reference_packs_console_v1_admin_reference_packs_get: {
         parameters: {
             query?: {
-                domain_slug?: string | null;
+                domain_slug?: string;
             };
             header?: never;
             path?: never;
@@ -19075,7 +19129,7 @@ export interface operations {
     list_specialists_console_v1_calendar_specialists_get: {
         parameters: {
             query?: {
-                branch_id?: string | null;
+                branch_id?: string;
                 include_inactive?: boolean;
             };
             header?: never;
@@ -19270,17 +19324,17 @@ export interface operations {
     list_bookings_console_v1_calendar_bookings_get: {
         parameters: {
             query?: {
-                specialist_id?: string | null;
-                conversation_id?: string | null;
-                case_id?: string | null;
+                specialist_id?: string;
+                conversation_id?: string;
+                case_id?: string;
                 lane?: "attention" | "all";
-                needs_action?: boolean | null;
-                follow_up_owner_id?: string | null;
-                follow_up_overdue?: boolean | null;
-                date_from?: string | null;
-                date_to?: string | null;
-                status?: string | null;
-                cursor?: string | null;
+                needs_action?: boolean;
+                follow_up_owner_id?: string;
+                follow_up_overdue?: boolean;
+                date_from?: string;
+                date_to?: string;
+                status?: string;
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -19559,14 +19613,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Temporary redirect to Google OAuth */
+            307: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
         };
     };
@@ -19582,14 +19634,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Temporary redirect back to Console settings */
+            307: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
