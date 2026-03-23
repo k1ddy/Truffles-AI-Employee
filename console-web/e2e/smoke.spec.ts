@@ -270,6 +270,42 @@ async function clearStoredContext(page: import('@playwright/test').Page) {
     });
 }
 
+type ConsoleClientEventEnvelope = {
+    event_id: string;
+    event_type: 'selection_gate_shown' | 'selection_gate_confirmed' | 'auth_session_expired_signout' | 'scope_cleared_explicit_logout';
+    surface: 'console_shell' | 'login_button';
+    gate_kind: 'company' | 'client' | 'branch' | 'none';
+    reason_code: string | null;
+    session_error: string | null;
+    api_error_code: string | null;
+    company_selection_required: boolean;
+    selection_required: boolean;
+    branch_selection_required: boolean;
+    path: string;
+    scope_presence: {
+        company_id_present: boolean;
+        client_id_present: boolean;
+        branch_id_present: boolean;
+    };
+};
+
+async function captureConsoleClientEvents(page: import('@playwright/test').Page) {
+    const events: ConsoleClientEventEnvelope[] = [];
+    await page.route(/.*\/api\/console-client-events(?:\?.*)?$/, async (route) => {
+        if (route.request().method() !== 'POST') {
+            await route.fallback();
+            return;
+        }
+        events.push(route.request().postDataJSON() as ConsoleClientEventEnvelope);
+        await route.fulfill({
+            status: 202,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+        });
+    });
+    return events;
+}
+
 async function retryProfileLoad(page: import('@playwright/test').Page) {
     const retry = page.getByTestId('me-retry');
     if (!(await retry.isVisible().catch(() => false))) {
@@ -872,6 +908,109 @@ test('multi-company selection gate stays interactive and explicit logout clears 
         clientId: null,
         branchId: null,
     });
+});
+
+test('selection gate telemetry emits shown, confirmed, and explicit logout events @smoke', async ({ page }) => {
+    const events = await captureConsoleClientEvents(page);
+
+    await ensureLoggedIn(page);
+    await clearStoredContext(page);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    const gateOverlay = page.getByTestId('selection-gate-overlay');
+    const companySelect = page.getByTestId('company-select');
+    const confirm = page.getByTestId('company-select-confirm');
+
+    await expect(gateOverlay).toBeVisible({ timeout: 20000 });
+    await companySelect.selectOption({ index: 1 });
+    await confirm.click();
+    await expect(gateOverlay).toBeHidden({ timeout: 20000 });
+
+    await expect
+        .poll(
+            () => events.find((event) => event.event_type === 'selection_gate_shown' && event.gate_kind === 'company') ?? null,
+            { timeout: 10000 },
+        )
+        .toMatchObject({
+            event_type: 'selection_gate_shown',
+            surface: 'console_shell',
+            gate_kind: 'company',
+            reason_code: 'company_selection_required',
+            company_selection_required: true,
+        });
+
+    await expect
+        .poll(
+            () => events.find((event) => event.event_type === 'selection_gate_confirmed' && event.gate_kind === 'company') ?? null,
+            { timeout: 10000 },
+        )
+        .toMatchObject({
+            event_type: 'selection_gate_confirmed',
+            surface: 'console_shell',
+            gate_kind: 'company',
+            reason_code: 'user_confirm',
+        });
+
+    await page.getByTestId('logout-button').click();
+    await expect(page.getByTestId('login-button')).toBeVisible({ timeout: 20000 });
+
+    await expect
+        .poll(
+            () => events.find((event) => event.event_type === 'scope_cleared_explicit_logout') ?? null,
+            { timeout: 10000 },
+        )
+        .toMatchObject({
+            event_type: 'scope_cleared_explicit_logout',
+            surface: 'login_button',
+            gate_kind: 'none',
+            reason_code: 'explicit_logout',
+            scope_presence: expect.objectContaining({
+                company_id_present: true,
+            }),
+        });
+});
+
+test('selection gate telemetry emits auth session expiry signout event @smoke', async ({ page }) => {
+    const events = await captureConsoleClientEvents(page);
+
+    await ensureLoggedIn(page);
+    await ensureTenantSelection(page);
+
+    let forceExpiredSession = false;
+    await page.route(/.*\/api\/auth\/session(?:\?.*)?$/, async (route) => {
+        if (route.request().method() !== 'GET' || !forceExpiredSession) {
+            await route.fallback();
+            return;
+        }
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                user: { name: 'Admin', email: 'admin@truffles.local' },
+                expires: '2099-01-01T00:00:00.000Z',
+                error: 'RefreshAccessTokenError',
+            }),
+        });
+    });
+
+    forceExpiredSession = true;
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByTestId('login-button')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('logout-button')).toBeHidden();
+
+    await expect
+        .poll(
+            () => events.find((event) => event.event_type === 'auth_session_expired_signout') ?? null,
+            { timeout: 10000 },
+        )
+        .toMatchObject({
+            event_type: 'auth_session_expired_signout',
+            surface: 'console_shell',
+            gate_kind: 'none',
+            reason_code: 'refresh_access_token_error',
+            session_error: 'RefreshAccessTokenError',
+        });
 });
 
 test.describe('Inbox Features', () => {
