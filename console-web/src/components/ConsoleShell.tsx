@@ -24,7 +24,6 @@ import {
     type IncidentListResponse,
 } from "@/lib/api-client";
 import {
-    clearConsoleContextScope,
     readConsoleContextScopeFromStorage,
     setConsoleBranchContext,
     setConsoleClientContext,
@@ -1102,24 +1101,32 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
 
-        if (sessionError || !accessToken) {
+        const signOutForExpiredSession = () => {
             signOutTriggered.current = true;
-            clearConsoleContextScope();
+            // Preserve the last valid scope so multi-company users can recover after re-login
+            // without being forced back into a stale gray gate.
+            void queryClient.cancelQueries({
+                predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            });
+            queryClient.removeQueries({
+                predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            });
             toast.error("Сессия истекла. Войдите снова.");
-            signOut({ callbackUrl: "/" });
+            void signOut({ callbackUrl: "/" });
+        };
+
+        if (sessionError || !accessToken) {
+            signOutForExpiredSession();
             return;
         }
 
         if (error) {
             const parsed = parseApiError(error);
             if (AUTH_ERROR_CODES.has(parsed.code)) {
-                signOutTriggered.current = true;
-                clearConsoleContextScope();
-                toast.error("Сессия истекла. Войдите снова.");
-                signOut({ callbackUrl: "/" });
+                signOutForExpiredSession();
             }
         }
-    }, [accessToken, error, sessionError, status]);
+    }, [accessToken, error, queryClient, sessionError, status]);
 
     const role = data?.agent?.role ?? "manager";
     const canReadOps = canAccessConsole(role, "ops", "read");
@@ -1843,7 +1850,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             )}
                             {!isLoading && !error && data && showGate && (
                                 <div
-                                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+                                    className="flex min-h-[60vh] items-center justify-center p-6"
                                     data-testid="selection-gate-overlay"
                                 >
                                     <div className="pointer-events-auto max-w-xl w-full">

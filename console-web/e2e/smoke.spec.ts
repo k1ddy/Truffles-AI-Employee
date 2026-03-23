@@ -811,6 +811,69 @@ async function supportsTeamSpecialistsMutations(
 // =========================================
 // INBOX FILTERS & NAVIGATION
 // =========================================
+test('multi-company selection gate stays interactive and explicit logout clears scope @smoke', async ({ page }) => {
+    await ensureLoggedIn(page);
+    await clearStoredContext(page);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    const gateOverlay = page.getByTestId('selection-gate-overlay');
+    const companySelect = page.getByTestId('company-select');
+    const confirm = page.getByTestId('company-select-confirm');
+
+    await expect(gateOverlay).toBeVisible({ timeout: 20000 });
+    await expect(companySelect).toBeVisible();
+    await expect(confirm).toBeDisabled();
+
+    await companySelect.selectOption({ index: 1 });
+    await expect(companySelect).not.toHaveValue('');
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+
+    await expect(gateOverlay).toBeHidden({ timeout: 20000 });
+    await expect
+        .poll(
+            async () => ({
+                companyId: await page.evaluate(() => window.localStorage.getItem('console:company_id')),
+                clientId: await page.evaluate(() => window.localStorage.getItem('console:client_id')),
+            }),
+            { timeout: 10000 },
+        )
+        .toEqual(
+            expect.objectContaining({
+                companyId: expect.any(String),
+                clientId: expect.any(String),
+            }),
+        );
+
+    const persistedScope = await page.evaluate(() => ({
+        companyId: window.localStorage.getItem('console:company_id'),
+        clientId: window.localStorage.getItem('console:client_id'),
+        branchId: window.localStorage.getItem('console:branch_id'),
+    }));
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(gateOverlay).toBeHidden({ timeout: 20000 });
+    await expect(page.getByTestId('console-header')).toBeVisible();
+    await expect(await page.evaluate(() => ({
+        companyId: window.localStorage.getItem('console:company_id'),
+        clientId: window.localStorage.getItem('console:client_id'),
+        branchId: window.localStorage.getItem('console:branch_id'),
+    }))).toEqual(persistedScope);
+
+    await page.getByTestId('logout-button').click();
+    await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 20000 });
+    await expect(page.getByTestId('login-button')).toBeVisible();
+    await expect(await page.evaluate(() => ({
+        companyId: window.localStorage.getItem('console:company_id'),
+        clientId: window.localStorage.getItem('console:client_id'),
+        branchId: window.localStorage.getItem('console:branch_id'),
+    }))).toEqual({
+        companyId: null,
+        clientId: null,
+        branchId: null,
+    });
+});
+
 test.describe('Inbox Features', () => {
     test.beforeEach(async ({ page }) => {
         await openInbox(page);

@@ -262,6 +262,7 @@
 | `docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Stabilization-reset Task Package for async knowledge sync, bounded owner states, and owner-surface overload containment | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-console-knowledge-sync-state-unification-a4.md` | RCA-backed Task Package for unifying owner-facing sync-state truth after async publish/retry/rollback mutations | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-console-owner-scope-gate-unification-a5.md` | Task Package for extracting one shared owner scope-gate across `Knowledge` and `Проверка консультанта` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-stabilization-a1.md` | Task Package for stabilizing multi-company selection gate after auth/session drift without regressing explicit logout cleanup | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-release-model-stoploss-a30.md` | P0 stop-loss Task Package for separating consultant-verification preview readiness from live activation status and pinning session truth snapshots | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-release-model-correction-p1-a30.md` | Follow-up P1 Task Package for `active_version_id` and dedicated activation-job release model correction | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-15-knowledge-activation-observability-p2-a30.md` | Follow-up P2 Task Package for activation-stage/heartbeat observability and owner/admin active-vs-candidate disclosure | Brain/Architect |
@@ -277,6 +278,7 @@
 | `docs/SESSIONS/SESSION-2026-03-15-owner-knowledge-stabilization-reset-a4.md` | Session log for the async knowledge sync + owner-surface stabilization reset block | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-console-knowledge-sync-state-unification-a4.md` | Session log for the sync-state truth unification block after async knowledge mutations | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-console-owner-scope-gate-unification-a5.md` | Session log for the shared owner scope-gate extraction block | Brain/Architect |
+| `docs/SESSIONS/SESSION-2026-03-23-console-selection-gate-stabilization-a1.md` | Session log for the selection-gate stabilization block after auth-refresh scope drift resurfaced on `console.truffles.kz` | Brain/Architect |
 | `docs/SESSIONS/SESSION-2026-03-15-knowledge-release-model-stoploss-a30.md` | Session log for the knowledge release-model stop-loss program through P3 dedicated activation transport | Brain/Architect |
 | `truffles-api/migrations/060_add_knowledge_release_activation_jobs.sql` | Migration adding `branches.active_knowledge_version_id` and `knowledge_activation_jobs` for the corrected knowledge release model | Backend |
 | `truffles-api/migrations/061_add_knowledge_activation_job_stage_fields.sql` | Migration adding `knowledge_activation_jobs.current_stage` for activation progress disclosure (`queued -> syncing_branch_docs -> applying_client_config -> switching_active_pointer -> finalizing`) | Backend |
