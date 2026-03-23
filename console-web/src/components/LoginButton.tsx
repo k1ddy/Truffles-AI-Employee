@@ -2,6 +2,8 @@
 
 import { signIn, signOut, useSession } from "next-auth/react"
 
+import { clearConsoleContextScope } from "@/lib/console-context-storage"
+
 export default function LoginButton() {
     const { data: session } = useSession()
 
@@ -12,9 +14,7 @@ export default function LoginButton() {
                 <button
                     onClick={() => {
                         if (typeof window !== "undefined") {
-                            window.localStorage.removeItem("console:company_id")
-                            window.localStorage.removeItem("console:client_id")
-                            window.localStorage.removeItem("console:branch_id")
+                            clearConsoleContextScope()
                             const inboxWorkspacePrefixes = [
                                 "console:inbox:case-list:v1:",
                                 "console:inbox:selected-case:v1:",
