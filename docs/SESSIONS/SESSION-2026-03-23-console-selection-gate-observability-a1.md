@@ -1,0 +1,38 @@
+# SESSION 2026-03-23-console-selection-gate-observability-a1 — Session 2026-03-23-console-selection-gate-observability-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-observability-a1.md
+- block_id: console-selection-gate-observability-a1
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-23-console-selection-gate-observability-a1
+- worktree: /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1
+- base_ref: origin/main
+- scope: Add bounded console-web telemetry and controlled verification so selection-gate/session-expiry incidents can be proved or excluded during the monitoring window.
+- done:
+  - Switched the existing single worktree to branch `feat/2026-03-23-console-selection-gate-observability-a1` from `origin/main`; no new worktree created.
+  - Reviewed the current selection-gate hotfix, existing auth/session failure path, and existing bounded calendar operator telemetry pattern to keep the new block small and reuse-first.
+  - Created the canonical Task Package `docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-observability-a1.md` with one mandatory web search, RCA, release safety, residual debt, and next-block contract.
+  - Added `console-web/src/app/api/console-client-events/route.ts` as a bounded console-web telemetry route that accepts only the selection-gate/session-expiry event family and writes structured `console_client_event` log lines.
+  - Added `console-web/src/lib/console-client-events.ts` with shared payload shaping, scope-presence capture, and `fetch keepalive` plus `sendBeacon` fallback for redirect-sensitive flows.
+  - Instrumented `console-web/src/components/ConsoleShell.tsx` for `selection_gate_shown`, `selection_gate_confirmed`, and `auth_session_expired_signout`, and instrumented `console-web/src/components/LoginButton.tsx` for `scope_cleared_explicit_logout`.
+  - Added controlled Playwright verification in `console-web/e2e/smoke.spec.ts` covering selection-gate telemetry emission, explicit logout emission, and forced `RefreshAccessTokenError` signout emission.
+  - Ran targeted local proof: lint, build, and focused Playwright telemetry smoke all green.
+- next:
+  - Commit the observability block, deploy `console-web`, and verify live `console_client_event` log lines on `console.truffles.kz`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-observability-a1.md
+  - console-web/src/app/api/console-client-events/route.ts
+  - console-web/src/lib/console-client-events.ts
+  - console-web/src/components/ConsoleShell.tsx
+  - console-web/src/components/LoginButton.tsx
+  - console-web/e2e/smoke.spec.ts
+  - Checks:
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && npm run lint -- --file src/components/ConsoleShell.tsx --file src/components/LoginButton.tsx --file src/lib/console-client-events.ts --file src/app/api/console-client-events/route.ts --file e2e/smoke.spec.ts` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && npm run build` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && PLAYWRIGHT_BASE_URL=http://localhost:3000 PLAYWRIGHT_WEB_SERVER=0 E2E_USERNAME=admin E2E_PASSWORD=admin npx playwright test e2e/smoke.spec.ts --project chromium --workers 1 --grep 'selection gate telemetry'` (`2 passed`)
+- last_updated: 2026-03-23T18:20:58+05:00

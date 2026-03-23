@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-03-23-console-selection-gate-observability-a1 | active | feat/2026-03-23-console-selection-gate-observability-a1 | /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1 | docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-observability-a1.md | 2026-03-23T18:20:58+05:00 |
 | 2026-03-23-console-selection-gate-stabilization-a1 | done | feat/2026-03-23-console-selection-gate-stabilization-a1 | /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1 | docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-stabilization-a1.md | 2026-03-23T17:00:00+05:00 |
 | 2026-03-15-owner-knowledge-stabilization-reset-a4 | done | feat/2026-03-15-owner-knowledge-stabilization-reset-a4 | /home/zhan/worktrees/2026-03-15-owner-knowledge-stabilization-reset-a4 | docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md | 2026-03-15T10:10:00+05:00 |
 | 2026-03-15-knowledge-release-model-stoploss-a30 | active | feat/2026-03-15-knowledge-release-model-stoploss-a30 | /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30 | docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-acceptance-diagnostics-p16-a30.md | 2026-03-16T18:40:00+05:00 |
