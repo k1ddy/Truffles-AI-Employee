@@ -82,6 +82,7 @@
 | `ops/console_owner_admin_kpi_snapshot.py` | KPI snapshot для Owner/Admin (`T+0/T+24`, impact baseline/replay, fail-fast guard) | Brain/OPS/QA |
 | `ops/owner_admin_control_loop.py` | Orchestration wrapper Owner/Admin control-loop (`t0/t24`: snapshot + gate + brief + log) | Brain/OPS/QA |
 | `ops/knowledge_activation_closeout.py` | Tenant-level closeout artifact for Knowledge Activation (`release guard + branch preview/live invariants`) | Brain/OPS/QA |
+| `ops/consultant_verification_acceptance.py` | Tenant-level consultant-verification acceptance artifact (`overview + session/message probe -> go/no_go`) | Brain/OPS/QA |
 | `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
 | `ops/backfill_branch_rag.py` | Backfill Qdrant branch metadata from published knowledge | OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |

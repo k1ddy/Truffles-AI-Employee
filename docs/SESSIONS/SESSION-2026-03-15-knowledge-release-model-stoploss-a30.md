@@ -2,8 +2,8 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-acceptance-diagnostics-p16-a30.md
-- block_id: CONSULTANT-VERIFICATION-ACCEPTANCE-DIAGNOSTICS-P16-A30
+- task_package: docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-tenant-acceptance-p17-a30.md
+- block_id: CONSULTANT-VERIFICATION-TENANT-ACCEPTANCE-P17-A30
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,7 +12,7 @@
 - branch: feat/2026-03-15-knowledge-release-model-stoploss-a30
 - worktree: /home/zhan/worktrees/2026-03-15-knowledge-release-model-stoploss-a30
 - base_ref: origin/main
-- scope: P0-P13 remain merged; this slice closes the remaining in-scope consultant-verification acceptance gap by making workspace availability deterministic for tenant diagnosis and preserving compatibility-safe API semantics.
+- scope: P0-P16 remain merged; this slice adds one deterministic tenant-level consultant-verification acceptance artifact and runs it on the canary tenant through the real overview/session/message path.
 - done:
   - P0 stop-loss remains in place: consultant verification preview stays available from pinned immutable truth snapshots even when client update is pending/failed.
   - P1 release model remains in place: `branches.active_knowledge_version_id` controls live runtime, `knowledge_activation_jobs` tracks activation attempts, and live pointer switches only after successful activation.
@@ -36,10 +36,21 @@
   - P16 acceptance diagnostics are now implemented for the in-scope consultant-verification closure: overview returns stable `blocker_codes` for workspace gating, backend internals now name the owner gate `workspace_enabled` explicitly, the legacy `feature_enabled` field remains only as a compatibility alias, and frontend owner gating can now consume structured diagnostics without changing owner-safe copy.
   - Deterministic consultant-verification contract proof is green for P16: targeted backend tests, OpenAPI/types regeneration, frontend lint/build, targeted Playwright owner-access lanes, and `session_check` all pass.
   - The local P15 webhook/livecheck edits remain out-of-scope for this consultant-verification block and are not closure evidence for this slice.
+  - P17 tenant acceptance tooling is now implemented: `ops/consultant_verification_acceptance.py` reuses the real overview/session/message service path through the running `truffles-api` container and emits one structured `go|no_go` artifact with separate `overview`, `session_probe`, and invariant fields.
+  - The first canary probe exposed a real tooling bug inside P17, not a product regression: the acceptance script serialized raw UUIDs and looked only for `assistant` turns even though consultant-verification persists reply turns with role `consultant`. The block fixed both issues inside the script and added regression coverage.
+  - Canary acceptance is now green on `demo_salon/main`: the artifact shows `decision=go`, `workspace_enabled=true`, `can_verify_now=true`, `team_tools_enabled=false`, `preview_truth_source=draft`, and `session_probe.status=go` with a real consultant reply.
 - next:
-  - Run tenant-specific consultant-verification acceptance on the target client/branch using the overview payload and one real session-create/message flow only.
-  - After tenant acceptance, decide whether to keep or later deprecate the legacy `feature_enabled` alias in the public response.
+  - Run `ops/consultant_verification_acceptance.py` on the actual target client/branch and attach the artifact as the final closure evidence for the original consultant-verification task.
+  - After that target run, decide whether to keep or later deprecate the legacy `feature_enabled` alias in the public response.
 - evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-tenant-acceptance-p17-a30.md
+  - ops/consultant_verification_acceptance.py
+  - truffles-api/tests/test_consultant_verification_acceptance.py
+  - /tmp/consultant_verification_acceptance_demo_salon_main.json
+  - `pytest -q truffles-api/tests/test_consultant_verification_acceptance.py` (`6 passed`)
+  - `ruff check ops/consultant_verification_acceptance.py truffles-api/tests/test_consultant_verification_acceptance.py` (`pass`)
+  - `python3 -m py_compile ops/consultant_verification_acceptance.py` (`pass`)
+  - `python3 ops/consultant_verification_acceptance.py --client-slug demo_salon --branch-slug main --output /tmp/consultant_verification_acceptance_demo_salon_main.json --pretty` (`decision=go`)
   - docs/TASK_PACKAGES/TP-2026-03-16-consultant-verification-acceptance-diagnostics-p16-a30.md
   - truffles-api/app/services/console_consultant_verification.py
   - truffles-api/app/schemas/console.py
@@ -157,4 +168,4 @@
 - `npm run lint -- --file src/components/OpsPage.tsx --file src/lib/api-client.ts`
 - `npm run build`
 - `python3 scripts/generate_openapi.py --check`
-- last_updated: 2026-03-16T18:40:00+05:00
+- last_updated: 2026-03-16T20:19:00+05:00
