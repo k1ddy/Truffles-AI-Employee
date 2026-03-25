@@ -183,7 +183,7 @@
   - Tests/Runbooks: none explicit; backlog path is exercised in `truffles-api/tests/test_message_endpoint.py`.
   - Limits/GAP: admin endpoint requires `ALERTS_ADMIN_TOKEN`; backlog accuracy depends on trace/meta flow.
 - **Embedding service (BGE-M3) and ops helpers.**
-  - Facts/Code: `ops/docker-compose-bge.yml`, `ops/start_bge_m3_v2.sh`,
+  - Facts/Code: `ops/docker-compose-bge.yml`, `ops/start_bge_m3.sh`,
     `ops/test_bge.py`, `ops/test_full_flow.py`.
   - Tests/Runbooks: no formal tests; verify via ops scripts.
   - Limits/GAP: embedding service is external; failures degrade semantic retrieval.

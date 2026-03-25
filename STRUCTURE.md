@@ -1318,11 +1318,14 @@ ops/fix_*.py          # ~50 файлов — одноразовые фиксы
 ops/add_*.py          # ~20 файлов — добавление нод
 ops/get_*.py          # ~10 файлов — отладка
 ops/*.sql             # Большинство — одноразовые запросы
-ops/*.sh              # Кроме monitor.sh — одноразовое
+ops/*.sh              # По умолчанию одноразовое; canonical keep-скрипты перечислены ниже
 ```
 
 **Сохранить из ops/:**
 - `monitor.sh`
+- `start_bge_m3.sh`
+- `backup_postgres.sh`
+- `backup_qdrant.sh`
 - `health_check.py`
 - `sync_client.py`
 - `manual_sync_demo.py`
