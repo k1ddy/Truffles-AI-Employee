@@ -2577,7 +2577,6 @@ def test_reset_session_memory_clears_carryover_family_from_canonical_state() -> 
     }
     assert snapshot == {
         "reason": "manual_reset",
-        "last_question_type": None,
         "active_goal": None,
         "goal_stack_depth": 0,
         "goal_stack_top": None,

@@ -11,6 +11,7 @@ from app.routers.webhook.trace import _record_decision_trace, _update_message_de
 from app.services.ai_service import normalize_for_matching
 from app.services.state_service import (
     SessionMemoryRuntimeHooks,
+    _build_session_memory_observability_snapshot,
     _clear_session_memory_expected_reply_context,
     _reset_session_memory_context,
     _should_reset_session_memory_trigger,
@@ -98,43 +99,7 @@ def _is_session_reset_only_message(message_text: str | None) -> bool:
 
 
 def _session_memory_snapshot(memory: dict) -> dict:
-    pending_slots = memory.get("pending_slots")
-    if isinstance(pending_slots, dict):
-        pending_keys = sorted(
-            key for key in pending_slots.keys() if isinstance(key, str) and key.strip()
-        )
-    else:
-        pending_keys = []
-    goal_stack = memory.get("goal_stack")
-    if isinstance(goal_stack, list):
-        cleaned_goals = [item for item in goal_stack if isinstance(item, str) and item.strip()]
-    else:
-        cleaned_goals = []
-    unanswered = memory.get("unanswered_questions")
-    if isinstance(unanswered, list):
-        unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
-    else:
-        unanswered_count = 0
-    interaction_state = memory.get("interaction_state")
-    interaction_resume_slot = None
-    interaction_owner = None
-    if isinstance(interaction_state, dict):
-        raw_resume_slot = interaction_state.get("resume_slot")
-        if isinstance(raw_resume_slot, str) and raw_resume_slot.strip():
-            interaction_resume_slot = raw_resume_slot.strip()
-        raw_interaction_owner = interaction_state.get("interaction_owner")
-        if isinstance(raw_interaction_owner, str) and raw_interaction_owner.strip():
-            interaction_owner = raw_interaction_owner.strip()
-    return {
-        "last_question_type": memory.get("last_question_type"),
-        "active_goal": memory.get("active_goal"),
-        "goal_stack_depth": len(cleaned_goals),
-        "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
-        "pending_slots": pending_keys,
-        "unanswered_questions_count": unanswered_count,
-        "interaction_resume_slot": interaction_resume_slot,
-        "interaction_owner": interaction_owner,
-    }
+    return _build_session_memory_observability_snapshot(memory)
 
 
 def _record_session_memory_update(

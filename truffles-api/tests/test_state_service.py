@@ -31,6 +31,7 @@ from app.services.state_service import (
     HandoverConfirmationRuntimeHooks,
     PendingResumeBoundaryRuntimeHooks,
     PendingContinuityRuntimeHooks,
+    _build_session_memory_observability_snapshot,
     _build_pending_resume_snapshot_payload,
     _capture_pending_resume_context,
     _handle_handover_confirmation_runtime,
@@ -1348,6 +1349,65 @@ def test_build_pending_resume_snapshot_payload_prefers_canonical_question_contra
         "reason": "booking_interrupt",
         "next_question": "datetime",
         "open_questions": ["datetime"],
+    }
+
+
+def test_build_session_memory_observability_snapshot_prefers_canonical_question_contract() -> None:
+    snapshot = _build_session_memory_observability_snapshot(
+        {
+            "active_goal": "booking",
+            "last_question_type": "name",
+            "pending_question_contract": {
+                "expected_reply_type": "time",
+                "reason": "booking_interrupt",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            "goal_stack": ["booking"],
+            "pending_slots": {"datetime": "завтра 18:00"},
+            "unanswered_questions": ["datetime"],
+            "interaction_state": {
+                "resume_slot": "datetime",
+                "interaction_owner": "question_contract:booking",
+            },
+        }
+    )
+
+    assert snapshot == {
+        "active_goal": "booking",
+        "goal_stack_depth": 1,
+        "goal_stack_top": "booking",
+        "pending_slots": ["datetime"],
+        "unanswered_questions_count": 1,
+        "interaction_resume_slot": "datetime",
+        "interaction_owner": "question_contract:booking",
+        "pending_question_contract": {
+            "expected_reply_type": "time",
+            "reason": "booking_interrupt",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+    }
+
+
+def test_build_session_memory_observability_snapshot_falls_back_to_legacy_question_type() -> None:
+    snapshot = _build_session_memory_observability_snapshot(
+        {
+            "active_goal": "booking",
+            "last_question_type": "time",
+            "interaction_state": {"resume_slot": "datetime"},
+        }
+    )
+
+    assert snapshot == {
+        "active_goal": "booking",
+        "goal_stack_depth": 0,
+        "goal_stack_top": None,
+        "pending_slots": [],
+        "unanswered_questions_count": 0,
+        "interaction_resume_slot": "datetime",
+        "interaction_owner": None,
+        "last_question_type": "time",
     }
 
 

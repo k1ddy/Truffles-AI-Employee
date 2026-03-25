@@ -150,6 +150,67 @@ def _normalize_slot_value(value: object) -> str | None:
     return cleaned or None
 
 
+def _build_session_memory_observability_snapshot(
+    memory: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized_memory, _ = _dialog_state_service().normalize_session_memory_payload(memory)
+    explicit_pending_question_contract = _dialog_state_service().project_pending_question_contract(
+        memory.get("pending_question_contract")
+        if isinstance(memory, dict)
+        else None
+    )
+    pending_slots = normalized_memory.get("pending_slots")
+    if isinstance(pending_slots, dict):
+        pending_keys = sorted(
+            key for key in pending_slots.keys() if isinstance(key, str) and key.strip()
+        )
+    else:
+        pending_keys = []
+    goal_stack = normalized_memory.get("goal_stack")
+    if isinstance(goal_stack, list):
+        cleaned_goals = [item for item in goal_stack if isinstance(item, str) and item.strip()]
+    else:
+        cleaned_goals = []
+    unanswered = normalized_memory.get("unanswered_questions")
+    if isinstance(unanswered, list):
+        unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
+    else:
+        unanswered_count = 0
+    interaction_state = normalized_memory.get("interaction_state")
+    interaction_resume_slot = None
+    interaction_owner = None
+    if isinstance(interaction_state, dict):
+        raw_resume_slot = interaction_state.get("resume_slot")
+        if isinstance(raw_resume_slot, str) and raw_resume_slot.strip():
+            interaction_resume_slot = raw_resume_slot.strip()
+        raw_interaction_owner = interaction_state.get("interaction_owner")
+        if isinstance(raw_interaction_owner, str) and raw_interaction_owner.strip():
+            interaction_owner = raw_interaction_owner.strip()
+    snapshot = {
+        "active_goal": normalized_memory.get("active_goal"),
+        "goal_stack_depth": len(cleaned_goals),
+        "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
+        "pending_slots": pending_keys,
+        "unanswered_questions_count": unanswered_count,
+        "interaction_resume_slot": interaction_resume_slot,
+        "interaction_owner": interaction_owner,
+    }
+    if explicit_pending_question_contract is not None:
+        snapshot["pending_question_contract"] = explicit_pending_question_contract
+    else:
+        last_question_type = _dialog_state_service().project_expected_reply_projections(
+            expected_reply_type=(
+                memory.get("last_question_type")
+                if isinstance(memory, dict)
+                else None
+            ),
+            expected_reply_reason=None,
+        ).expected_reply_type
+        if last_question_type is not None:
+            snapshot["last_question_type"] = last_question_type
+    return snapshot
+
+
 def _get_pending_sla(context: dict | None) -> dict[str, Any]:
     payload = context.get(PENDING_SLA_CONTEXT_KEY) if isinstance(context, dict) else None
     return dict(payload) if isinstance(payload, dict) else {}
@@ -1033,20 +1094,12 @@ def _reset_session_memory_context(
         now=now,
         default_ttl_hours=session_memory_ttl_hours,
     )
+    snapshot = _build_session_memory_observability_snapshot(memory_payload)
+    snapshot["reason"] = reason
     return (
         updated_context,
         manager,
-        {
-            "reason": reason,
-            "last_question_type": memory_payload.get("last_question_type"),
-            "active_goal": memory_payload.get("active_goal"),
-            "goal_stack_depth": 0,
-            "goal_stack_top": None,
-            "pending_slots": [],
-            "unanswered_questions_count": 0,
-            "interaction_resume_slot": None,
-            "interaction_owner": None,
-        },
+        snapshot,
     )
 
 

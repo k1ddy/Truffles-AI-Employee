@@ -657,7 +657,17 @@ def _trace_has_session_memory_question_set(
             continue
         if _normalize_lower_token(entry.get("decision")) != "update":
             continue
-        if _normalize_lower_token(entry.get("last_question_type")) != reply_kind:
+        pending_question_contract = (
+            entry.get("pending_question_contract")
+            if isinstance(entry.get("pending_question_contract"), Mapping)
+            else None
+        )
+        entry_reply_kind = _normalize_lower_token(
+            pending_question_contract.get("expected_reply_type")
+            if isinstance(pending_question_contract, Mapping)
+            else entry.get("last_question_type")
+        )
+        if entry_reply_kind != reply_kind:
             continue
         owner = str(entry.get("interaction_owner") or "").strip()
         if owner.startswith("question_contract:"):
