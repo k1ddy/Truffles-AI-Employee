@@ -1418,6 +1418,90 @@ def test_turn_executor_adds_pricing_info_sections_for_price_reply() -> None:
     assert "pricing" in (result.meta.get("info_sections") or [])
 
 
+def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def _get_pack_decision(query_text: str, client_slug: str | None = None):
+        captured["query_text"] = query_text
+        return SimpleNamespace(response="Цена зависит от услуги.", intent="price_query", meta={}, action="reply")
+
+    monkeypatch.setattr("app.services.pack_runtime_service.get_pack_decision", _get_pack_decision)
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "fact_refs": ["pricing"],
+            "reason": "pricing_question",
+            "goal": "booking",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="И сколько это будет?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert captured["query_text"] == "И сколько это будет?"
+    assert result.tool_decision == "price_query"
+
+
+def test_turn_executor_does_not_use_truth_semantic_fallback_when_pack_misses(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.get_pack_decision",
+        lambda *args, **kwargs: SimpleNamespace(response="", intent=None, meta={}, action="reply"),
+    )
+
+    def _format_reply_from_truth(*args, **kwargs):
+        raise AssertionError("truth fallback should not run")
+
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.format_reply_from_truth",
+        _format_reply_from_truth,
+    )
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "fact_refs": ["promotions"],
+            "reason": "promotions_question",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Есть ли акции?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == "Есть ли акции?"
+    assert result.tool_decision == "passthrough"
+    assert result.meta == {"fact_fallback": True}
+
+
 def test_consultant_runtime_records_question_contract_trace_entries() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {

@@ -20,13 +20,9 @@ from app.core import (
     BlockBoundaryRequest,
     DegradeBoundaryRequest,
     PolicyDecision,
-    PolicyCoreRouteSnapshot,
-    detect_policy_core_route_snapshot,
     DialogStateService,
-    detect_controller_route_snapshot,
-    detect_domain_routing_snapshot,
-    detect_intent_routing_primitives,
     OwnerCutoverAction,
+    PolicyCoreRouteSnapshot,
     TurnExecutor,
     TurnPlanner,
     TurnResult,
@@ -1180,14 +1176,6 @@ def _resolve_active_conversation_snapshot(
         message_text=body.message if body is not None else None,
         client_slug=payload.client_slug if payload is not None else None,
     )
-
-
-def _should_prime_ingress_semantic_overrides(
-    snapshot: ReasoningCoreConversationSnapshot | None,
-) -> bool:
-    if snapshot is None:
-        return True
-    return snapshot.allow_bot_reply
 
 
 def _resolve_turn_planner_owner_client(
@@ -11634,79 +11622,6 @@ def _use_runtime_loader_overrides(
         yield
 
 
-@contextmanager
-def _use_intent_routing_primitives_override(primitives: object | None) -> Iterator[None]:
-    if primitives is None:
-        yield
-        return
-
-    with ExitStack() as stack:
-        stack.enter_context(use_intent_signal_override(primitives.to_ai_signal_override()))
-        stack.enter_context(use_intent_semantic_override(primitives.to_intent_override()))
-        yield
-
-
-def _detect_ingress_intent_routing_primitives(payload: WebhookRequest):
-    body = payload.body if payload else None
-    return detect_intent_routing_primitives(
-        body.message if body is not None else None,
-    )
-
-
-def _detect_ingress_domain_routing_snapshot(
-    db: Session,
-    *,
-    payload: WebhookRequest,
-    preflight_payload: dict[str, object] | None,
-    client_id: UUID | None,
-):
-    body = payload.body if payload else None
-    client_config = _resolve_client_config_for_domain_routing(
-        db,
-        payload=payload,
-        preflight_payload=preflight_payload,
-        client_id=client_id,
-    )
-    return detect_domain_routing_snapshot(
-        body.message if body is not None else None,
-        client_config=client_config,
-    )
-
-
-@contextmanager
-def _use_domain_routing_snapshot_override(snapshot: object | None) -> Iterator[None]:
-    if snapshot is None:
-        yield
-        return
-
-    with use_domain_routing_override(snapshot.to_override()):
-        yield
-
-
-@contextmanager
-def _use_controller_route_snapshot_override(
-    snapshot: object | None,
-) -> Iterator[None]:
-    if snapshot is None:
-        yield
-        return
-
-    with use_dialogue_controller_override(snapshot.to_override()):
-        yield
-
-
-@contextmanager
-def _use_policy_core_route_snapshot_override(
-    snapshot: object | None,
-) -> Iterator[None]:
-    if snapshot is None:
-        yield
-        return
-
-    with use_policy_core_override(snapshot.to_override()):
-        yield
-
-
 async def run_reasoning_core(request: ReasoningCoreRequest) -> WebhookResponse:
     return await handle_webhook_payload(
         request.payload,
@@ -11932,71 +11847,6 @@ async def handle_webhook_payload(
 
     try:
         with ExitStack() as stack:
-            controller_route_snapshot = None
-            policy_core_route_snapshot = None
-            if _should_prime_ingress_semantic_overrides(conversation_snapshot):
-                ingress_primitives = _detect_ingress_intent_routing_primitives(
-                    normalized_payload
-                )
-                ingress_domain_snapshot = _detect_ingress_domain_routing_snapshot(
-                    db,
-                    payload=normalized_payload,
-                    preflight_payload=secret_preflight_payload,
-                    client_id=client_id,
-                )
-                body = normalized_payload.body if normalized_payload else None
-                controller_route_snapshot = detect_controller_route_snapshot(
-                    body.message if body is not None else None,
-                    primitives=ingress_primitives,
-                    domain_snapshot=ingress_domain_snapshot,
-                )
-                policy_core_route_snapshot = detect_policy_core_route_snapshot(
-                    body.message if body is not None else None,
-                    primitives=ingress_primitives,
-                    has_media=bool(inbound.has_media),
-                    client_slug=normalized_payload.client_slug,
-                    reply_slot=(
-                        conversation_snapshot.reply_slot if conversation_snapshot is not None else None
-                    ),
-                    resume_reason=(
-                        conversation_snapshot.resume_reason
-                        if conversation_snapshot is not None
-                        else None
-                    ),
-                    has_active_service_referent=bool(
-                        conversation_snapshot is not None and conversation_snapshot.service_referent
-                    ),
-                    active_service_referent=(
-                        conversation_snapshot.service_referent
-                        if conversation_snapshot is not None
-                        else None
-                    ),
-                    active_booking_time_token=(
-                        conversation_snapshot.booking_time_token
-                        if conversation_snapshot is not None
-                        else None
-                    ),
-                    active_booking_datetime_value=(
-                        conversation_snapshot.booking_datetime_value
-                        if conversation_snapshot is not None
-                        else None
-                    ),
-                    booking_active=bool(
-                        conversation_snapshot is not None and conversation_snapshot.booking_active
-                    ),
-                )
-                stack.enter_context(
-                    _use_intent_routing_primitives_override(ingress_primitives)
-                )
-                stack.enter_context(
-                    _use_domain_routing_snapshot_override(ingress_domain_snapshot)
-                )
-                stack.enter_context(
-                    _use_controller_route_snapshot_override(controller_route_snapshot)
-                )
-                stack.enter_context(
-                    _use_policy_core_route_snapshot_override(policy_core_route_snapshot)
-                )
             if secret_preflight_payload is not None:
                 from app.routers.webhook import http as http_helpers
 

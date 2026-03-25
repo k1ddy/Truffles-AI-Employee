@@ -355,7 +355,6 @@ class TurnExecutor:
     ) -> RuntimeExecutionResult:
         from app.services.pack_runtime_service import (
             build_master_reply_from_pack,
-            format_reply_from_truth,
             get_pack_decision,
             resolve_master_intent,
         )
@@ -423,19 +422,6 @@ class TurnExecutor:
                     meta=master_meta,
                     request_handoff=master_reply.action == "escalate",
                 )
-        if (decision.intent == "pricing" or "pricing" in fact_refs) and service_name:
-            query_text = f"Сколько стоит {service_name}?"
-        elif (decision.intent == "duration" or "duration" in fact_refs) and service_name:
-            query_text = f"Сколько длится {service_name}?"
-        elif decision.intent == "promotions" or "promotions" in fact_refs:
-            query_text = "Какие сейчас акции?"
-        elif decision.intent == "hours" or "hours" in fact_refs:
-            query_text = "Какие у вас часы работы?"
-        elif "parking" in fact_refs:
-            query_text = "Есть ли у вас парковка?"
-        elif decision.intent == "location" or "location" in fact_refs:
-            query_text = "Где вы находитесь?"
-
         pack_decision = get_pack_decision(query_text, client_slug=client_slug)
         if pack_decision and isinstance(pack_decision.response, str) and pack_decision.response.strip():
             pack_meta = dict(pack_decision.meta) if isinstance(pack_decision.meta, dict) else {}
@@ -468,37 +454,6 @@ class TurnExecutor:
                 meta=pack_meta,
                 request_handoff=request_handoff,
             )
-        truth_intent = None
-        if decision.intent == "promotions_rules":
-            truth_intent = "promotions_rules"
-        elif decision.intent == "promotions" or "promotions" in fact_refs:
-            truth_intent = "promotions"
-        elif decision.intent == "hours" or "hours" in fact_refs:
-            truth_intent = "hours"
-        elif "parking" in fact_refs:
-            truth_intent = "parking"
-        elif decision.intent == "location" or "location" in fact_refs:
-            truth_intent = "location"
-        if truth_intent:
-            truth_reply = format_reply_from_truth(truth_intent, client_slug=client_slug)
-            if isinstance(truth_reply, str) and truth_reply.strip():
-                info_sections = {
-                    "promotions": ["promotions", "promotions_rules"],
-                    "promotions_rules": ["promotions", "promotions_rules"],
-                    "hours": ["hours"],
-                    "location": ["location", "address"],
-                    "parking": ["parking", "location", "address"],
-                }.get(truth_intent, [truth_intent])
-                return RuntimeExecutionResult(
-                    text=truth_reply.strip(),
-                    tool_action=decision.tool_action,
-                    tool_decision=truth_intent,
-                    meta={
-                        "truth_fallback": True,
-                        "truth_intent": truth_intent,
-                        "info_sections": info_sections,
-                    },
-                )
         fallback_text = (message_text or "").strip() or "Я уточню это для вас."
         return RuntimeExecutionResult(
             text=fallback_text,

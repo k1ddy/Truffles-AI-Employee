@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -1509,6 +1510,11 @@ async def test_reasoning_core_non_secret_preflight_payload_primes_owner_path(mon
     monkeypatch.setattr(reasoning_core, "_lookup_client_branch_phone", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         reasoning_core,
+        "_get_preflight_tenant_context_rejection",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        reasoning_core,
         "_lookup_preexisting_duplicate_message",
         lambda *args, **kwargs: reasoning_core.ReasoningCoreDuplicateProbe(duplicate=False),
     )
@@ -1724,6 +1730,11 @@ async def test_reasoning_core_primes_domain_routing_override_for_delegate(monkey
     monkeypatch.setattr(reasoning_core, "_lookup_client_branch_phone", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         reasoning_core,
+        "_resolve_turn_planner_owner_client",
+        lambda *args, **kwargs: client,
+    )
+    monkeypatch.setattr(
+        reasoning_core,
         "_lookup_preexisting_duplicate_message",
         lambda *args, **kwargs: reasoning_core.ReasoningCoreDuplicateProbe(duplicate=False),
     )
@@ -1784,6 +1795,16 @@ async def test_reasoning_core_primes_controller_route_override_for_out_of_domain
     monkeypatch.setattr(reasoning_core, "_lookup_client_branch_phone", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         reasoning_core,
+        "_resolve_turn_planner_owner_client",
+        lambda *args, **kwargs: client,
+    )
+    monkeypatch.setattr(
+        reasoning_core,
+        "_get_preflight_tenant_context_rejection",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        reasoning_core,
         "_lookup_preexisting_duplicate_message",
         lambda *args, **kwargs: reasoning_core.ReasoningCoreDuplicateProbe(duplicate=False),
     )
@@ -1808,6 +1829,15 @@ async def test_reasoning_core_primes_controller_route_override_for_out_of_domain
     assert response.success is True
     assert response.message == "delegated"
     assert intent_service.get_dialogue_controller_override() is None
+
+
+def test_reasoning_core_default_runtime_no_longer_contains_ingress_semantic_override_priming():
+    source = inspect.getsource(reasoning_core.handle_webhook_payload)
+
+    assert "_use_intent_routing_primitives_override" not in source
+    assert "_use_domain_routing_snapshot_override" not in source
+    assert "_use_controller_route_snapshot_override" not in source
+    assert "_use_policy_core_route_snapshot_override" not in source
 
 
 @pytest.mark.asyncio
