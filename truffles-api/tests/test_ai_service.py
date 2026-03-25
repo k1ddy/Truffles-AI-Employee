@@ -26,6 +26,7 @@ from app.services.ai_service import (
     is_greeting_message,
     use_intent_signal_override,
 )
+from app.services.intent_service import hybrid_retrieve_knowledge
 from app.services.result import Result
 
 
@@ -116,6 +117,56 @@ class TestKnowledgeConfidenceThreshold:
 
     def test_threshold_is_float(self):
         assert isinstance(KNOWLEDGE_CONFIDENCE_THRESHOLD, float)
+
+
+def test_hybrid_retrieve_knowledge_reports_sparse_only_when_dense_unavailable(monkeypatch):
+    monkeypatch.setenv("QDRANT_API_KEY", "test-key")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.services.intent_service.QDRANT_API_KEY", "test-key")
+
+    bm25_results = [
+        {
+            "id": "point-1",
+            "text": "client_pack: city: Almaty",
+            "source": "client_pack",
+            "metadata": {
+                "client_slug": "demo_salon",
+                "branch_id": "branch-123",
+                "knowledge_tag": "tag-1",
+            },
+            "bm25_score": 1.7,
+        }
+    ]
+    bm25_filter = {
+        "client_slug": "demo_salon",
+        "branch_id": "branch-123",
+        "knowledge_tag": "tag-1",
+        "filter_mode": "branch",
+        "filter_reason": "knowledge_tag",
+    }
+
+    with patch("app.services.intent_service._bm25_search", return_value=(bm25_results, bm25_filter)):
+        results, rag_scores = hybrid_retrieve_knowledge(
+            query="RBAC Demo Salon Almaty",
+            client_slug="demo_salon",
+            vector_results=[],
+            limit=3,
+            branch_id="branch-123",
+            knowledge_tag="tag-1",
+            dense_meta={
+                "status": "unavailable",
+                "attempted": True,
+                "available": False,
+                "unavailable_reason": "bge_dns_failure",
+            },
+        )
+
+    assert len(results) == 1
+    assert results[0]["source"] == "client_pack"
+    assert rag_scores["retrieval_mode"] == "sparse_only"
+    assert rag_scores["dense_available"] is False
+    assert rag_scores["dense_unavailable_reason"] == "bge_dns_failure"
+    assert rag_scores["bm25_filter"] == bm25_filter
 
 
 class TestGetSystemPrompt:

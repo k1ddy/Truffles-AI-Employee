@@ -3,7 +3,7 @@ import math
 import os
 import re
 import time
-from typing import Callable, List
+from typing import Any, Callable, List
 
 import httpx
 
@@ -344,6 +344,64 @@ def _set_rag_filter_trace(trace_context: dict | None, filter_meta: dict) -> None
         trace_context["rag_filter"] = dict(filter_meta)
 
 
+def _set_rag_dense_trace(
+    trace_context: dict | None,
+    *,
+    status: str,
+    attempted: bool,
+    available: bool,
+    reason: str | None = None,
+    results: int | None = None,
+) -> dict[str, Any]:
+    dense_meta: dict[str, Any] = {
+        "status": status,
+        "attempted": attempted,
+        "available": available,
+    }
+    if reason:
+        dense_meta["unavailable_reason"] = reason
+    if results is not None:
+        dense_meta["results"] = results
+    if isinstance(trace_context, dict):
+        trace_context["rag_dense"] = dict(dense_meta)
+    return dense_meta
+
+
+def _classify_dense_failure_reason(exc: Exception | str, *, stage: str) -> str:
+    raw = str(exc or "").casefold()
+    if not raw:
+        return f"{stage}_error"
+    if "backoff active" in raw:
+        return "bge_backoff_active"
+    if any(
+        marker in raw
+        for marker in (
+            "temporary failure in name resolution",
+            "name or service not known",
+            "failed to resolve",
+            "nodename nor servname",
+        )
+    ):
+        return "bge_dns_failure" if stage == "embedding" else f"{stage}_dns_failure"
+    if any(marker in raw for marker in ("timed out", "timeout", "readtimeout", "connect timeout")):
+        return "bge_timeout" if stage == "embedding" else f"{stage}_timeout"
+    if any(
+        marker in raw
+        for marker in (
+            "connection refused",
+            "connection aborted",
+            "connection reset",
+            "max retries exceeded",
+        )
+    ):
+        return "bge_connection_error" if stage == "embedding" else f"{stage}_connection_error"
+    if "bge-m3 error:" in raw:
+        return "bge_http_error"
+    if stage == "qdrant_search":
+        return "qdrant_search_error"
+    return f"{stage}_error"
+
+
 def search_knowledge(
     query: str,
     client_slug: str,
@@ -375,56 +433,123 @@ def search_knowledge(
     _set_rag_filter_trace(trace_context, filter_meta)
     if filter_meta.get("filter_reason") == "branch_missing":
         logger.info(f"Knowledge search skipped (branch missing) for '{query[:30]}...'")
+        _set_rag_dense_trace(
+            trace_context,
+            status="skipped",
+            attempted=False,
+            available=False,
+            reason="branch_missing",
+            results=0,
+        )
         _log_search({"reason": "branch_missing"})
         return []
 
     # Get embedding for query
-    embedding = get_embedding(query, client_slug=client_slug)
+    try:
+        embedding = get_embedding(query, client_slug=client_slug)
+    except Exception as exc:
+        reason = _classify_dense_failure_reason(exc, stage="embedding")
+        _set_rag_dense_trace(
+            trace_context,
+            status="unavailable",
+            attempted=True,
+            available=False,
+            reason=reason,
+            results=0,
+        )
+        logger.warning(
+            "Dense knowledge search unavailable before vector query",
+            extra={"context": {"client_slug": client_slug, "reason": reason}},
+        )
+        _log_search({"reason": "dense_unavailable", "dense_unavailable_reason": reason})
+        return []
 
     # Search in Qdrant
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(
-            f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/search",
-            headers=headers,
-            json={
-                "vector": embedding,
-                "limit": limit,
-                "score_threshold": score_threshold,
-                "filter": filter_payload,
-                "with_payload": True,
-            },
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/search",
+                headers=headers,
+                json={
+                    "vector": embedding,
+                    "limit": limit,
+                    "score_threshold": score_threshold,
+                    "filter": filter_payload,
+                    "with_payload": True,
+                },
+            )
+    except Exception as exc:
+        reason = _classify_dense_failure_reason(exc, stage="qdrant_search")
+        _set_rag_dense_trace(
+            trace_context,
+            status="unavailable",
+            attempted=True,
+            available=False,
+            reason=reason,
+            results=0,
+        )
+        logger.warning(
+            "Dense knowledge vector query failed",
+            extra={"context": {"client_slug": client_slug, "reason": reason}},
+        )
+        _log_search({"reason": "dense_unavailable", "dense_unavailable_reason": reason})
+        return []
+
+    if response.status_code != 200:
+        reason = _classify_dense_failure_reason(
+            f"Qdrant search error: {response.status_code} - {response.text}",
+            stage="qdrant_search",
+        )
+        _set_rag_dense_trace(
+            trace_context,
+            status="unavailable",
+            attempted=True,
+            available=False,
+            reason=reason,
+            results=0,
+        )
+        logger.error(f"Qdrant search error: {response.status_code} - {response.text}")
+        alert_warning("Qdrant search failed", {"status": response.status_code, "query": query[:50]})
+        _log_search(
+            {
+                "status_code": response.status_code,
+                "reason": "qdrant_error",
+                "dense_unavailable_reason": reason,
+            }
+        )
+        return []
+
+    data = response.json()
+    results = []
+
+    for point in data.get("result", []):
+        payload = point.get("payload", {})
+        results.append(
+            {
+                "score": point.get("score"),
+                "text": payload.get("content"),  # content field in Qdrant
+                "source": payload.get("metadata", {}).get("doc_name"),
+                "metadata": payload.get("metadata", {}),
+            }
         )
 
-        if response.status_code != 200:
-            logger.error(f"Qdrant search error: {response.status_code} - {response.text}")
-            alert_warning("Qdrant search failed", {"status": response.status_code, "query": query[:50]})
-            _log_search({"status_code": response.status_code, "reason": "qdrant_error"})
-            return []
-
-        data = response.json()
-        results = []
-
-        for point in data.get("result", []):
-            payload = point.get("payload", {})
-            results.append(
-                {
-                    "score": point.get("score"),
-                    "text": payload.get("content"),  # content field in Qdrant
-                    "source": payload.get("metadata", {}).get("doc_name"),
-                    "metadata": payload.get("metadata", {}),
-                }
-            )
-
-        if results or filter_meta.get("filter_mode") != "branch":
-            logger.info(f"Knowledge search: found {len(results)} results for '{query[:30]}...'")
-            _log_search({"results": len(results)})
-            return results
-
-        filter_meta.update({"filter_reason": "branch_filter_empty"})
-        _set_rag_filter_trace(trace_context, filter_meta)
-        logger.info(f"Knowledge search: found 0 results for '{query[:30]}...' (strict branch)")
-        _log_search({"results": len(results), "reason": "branch_filter_empty"})
+    _set_rag_dense_trace(
+        trace_context,
+        status="ok",
+        attempted=True,
+        available=True,
+        results=len(results),
+    )
+    if results or filter_meta.get("filter_mode") != "branch":
+        logger.info(f"Knowledge search: found {len(results)} results for '{query[:30]}...'")
+        _log_search({"results": len(results)})
         return results
+
+    filter_meta.update({"filter_reason": "branch_filter_empty"})
+    _set_rag_filter_trace(trace_context, filter_meta)
+    logger.info(f"Knowledge search: found 0 results for '{query[:30]}...' (strict branch)")
+    _log_search({"results": len(results), "reason": "branch_filter_empty"})
+    return results
 
 
 def format_knowledge_context(results: List[dict]) -> str:

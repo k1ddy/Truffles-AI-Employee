@@ -30,6 +30,7 @@ from app.services.ai_service import (
     get_llm_provider,
     normalize_for_matching,
 )
+from app.services.knowledge_service import QDRANT_COLLECTION as KNOWLEDGE_QDRANT_COLLECTION
 
 logger = get_logger("intent_service")
 _INTENT_SEMANTIC_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
@@ -148,7 +149,7 @@ def _classify_llm_error(exc: Exception) -> str:
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "truffles_knowledge")
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION") or KNOWLEDGE_QDRANT_COLLECTION
 
 RAG_BM25_LIMIT = int(os.environ.get("RAG_BM25_LIMIT", "5"))
 RAG_BM25_MAX_DOCS = int(os.environ.get("RAG_BM25_MAX_DOCS", "200"))
@@ -3559,6 +3560,7 @@ def hybrid_retrieve_knowledge(
     limit: int = 5,
     branch_id: str | None = None,
     knowledge_tag: str | None = None,
+    dense_meta: dict | None = None,
 ) -> tuple[list[dict], dict]:
     bm25_enabled = _is_env_enabled(os.environ.get("RAG_BM25_ENABLED"), default=True)
     if not QDRANT_API_KEY or os.environ.get("PYTEST_CURRENT_TEST"):
@@ -3605,6 +3607,15 @@ def hybrid_retrieve_knowledge(
         merged["bm25_score"] = bm25_score
         by_key[key] = merged
 
+    vector_count = len(vector_results or [])
+    dense_trace = dict(dense_meta) if isinstance(dense_meta, dict) else {}
+    dense_attempted = bool(dense_trace.get("attempted")) or vector_count > 0
+    dense_available = dense_trace.get("available")
+    if not isinstance(dense_available, bool):
+        dense_available = vector_count > 0
+    dense_status = str(dense_trace.get("status") or ("ok" if dense_available else "not_attempted"))
+    dense_unavailable_reason = dense_trace.get("unavailable_reason")
+
     vector_weight = max(RAG_HYBRID_VECTOR_WEIGHT, 0.0)
     bm25_weight = max(RAG_HYBRID_BM25_WEIGHT, 0.0)
     if vector_weight + bm25_weight <= 0:
@@ -3625,17 +3636,32 @@ def hybrid_retrieve_knowledge(
     )
     merged_results = merged_results[: max(limit, 1)]
 
+    bm25_count = len(bm25_results)
+    if vector_count > 0 and bm25_count > 0:
+        retrieval_mode = "dense_sparse"
+    elif bm25_count > 0:
+        retrieval_mode = "sparse_only"
+    elif vector_count > 0:
+        retrieval_mode = "dense_only"
+    else:
+        retrieval_mode = "empty"
+
     bm25_max_norm = 1.0 if bm25_max > 0 else 0.0
     rag_scores = {
         "vector_max": vector_max,
         "bm25_max": bm25_max,
         "bm25_max_norm": bm25_max_norm,
         "hybrid_max": merged_results[0]["hybrid_score"] if merged_results else 0.0,
-        "vector_count": len(vector_results or []),
-        "bm25_count": len(bm25_results),
+        "vector_count": vector_count,
+        "bm25_count": bm25_count,
         "vector_weight": vector_weight,
         "bm25_weight": bm25_weight,
         "bm25_enabled": bm25_enabled,
+        "retrieval_mode": retrieval_mode,
+        "dense_attempted": dense_attempted,
+        "dense_available": dense_available,
+        "dense_status": dense_status,
+        "dense_unavailable_reason": dense_unavailable_reason,
     }
     if isinstance(bm25_filter_meta, dict):
         rag_scores["bm25_filter"] = bm25_filter_meta

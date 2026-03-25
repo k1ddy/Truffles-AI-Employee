@@ -2137,6 +2137,15 @@ def _extract_branch_filter(timing_context: dict | None) -> tuple[str | None, str
     return branch_id, knowledge_tag
 
 
+def _extract_dense_retrieval_meta(timing_context: dict | None) -> dict | None:
+    if not isinstance(timing_context, dict):
+        return None
+    dense_meta = timing_context.get("rag_dense")
+    if not isinstance(dense_meta, dict):
+        return None
+    return dict(dense_meta)
+
+
 def _record_rag_trace(
     *,
     timing_context: dict | None,
@@ -2267,6 +2276,7 @@ def get_rag_confidence(
             limit=3,
             branch_id=branch_id,
             knowledge_tag=knowledge_tag,
+            dense_meta=_extract_dense_retrieval_meta(timing_context),
         )
         _log_timing(
             "rag_ms",
@@ -2324,6 +2334,7 @@ def get_rag_confidence(
                         limit=3,
                         branch_id=branch_id,
                         knowledge_tag=knowledge_tag,
+                        dense_meta=_extract_dense_retrieval_meta(timing_context),
                     )
                     _log_timing(
                         "rag_ms",
@@ -2446,6 +2457,7 @@ def generate_ai_response(
                 limit=3,
                 branch_id=branch_id,
                 knowledge_tag=knowledge_tag,
+                dense_meta=_extract_dense_retrieval_meta(timing_context),
             )
             _log_timing(
                 "rag_ms",
@@ -2509,6 +2521,7 @@ def generate_ai_response(
                             limit=3,
                             branch_id=branch_id,
                             knowledge_tag=knowledge_tag,
+                            dense_meta=_extract_dense_retrieval_meta(timing_context),
                         )
                         _log_timing(
                             "rag_ms",
