@@ -2105,7 +2105,7 @@ def test_line_has_phrase_branching_blocks_phrase_tuple_in_signal_services():
 
     assert detector(
         '_DEICTIC_TIME_PHRASES = ("в это время", "на это время")',
-        path="truffles-api/app/services/info_signal_service.py",
+        path="truffles-api/app/services/booking_signal_service.py",
     )
 
 
@@ -2135,7 +2135,7 @@ def test_line_has_phrase_branching_ignores_interpolation_only_fstring_in_signal_
 
     assert not detector(
         'if not normalized_datetime_value.startswith(f"{relative_date_token} "):',
-        path="truffles-api/app/services/info_signal_service.py",
+        path="truffles-api/app/services/booking_signal_service.py",
     )
 
 
@@ -2191,7 +2191,7 @@ def test_hardcode_core_gate_scopes_signal_services():
     core_paths = set(ns["LLM_QUALITY_HARDCODE_CORE_PREFIXES"])
 
     assert "truffles-api/app/services/booking_signal_service.py" in core_paths
-    assert "truffles-api/app/services/info_signal_service.py" in core_paths
+    assert "truffles-api/app/routers/webhook/info.py" in core_paths
 
 
 def test_hardcode_core_scope_includes_webhook_and_runtime_signal_files():

@@ -23,7 +23,7 @@ def write_config(repo: Path) -> dict:
         "version": "test",
         "hotspots": [
             {
-                "path": "truffles-api/app/services/info_signal_service.py",
+                "path": "truffles-api/app/services/policy_signal_hotspot.py",
                 "active_waiver": None,
                 "tracked_function_names": {
                     "name_patterns": [r"^detect_.*followup.*$", r"^looks_like_.*policy.*$"],
@@ -46,7 +46,7 @@ def write_config(repo: Path) -> dict:
 
 
 def write_hotspots(repo: Path, *, info_text: str, snapshot_text: str) -> None:
-    info_path = repo / "truffles-api" / "app" / "services" / "info_signal_service.py"
+    info_path = repo / "truffles-api" / "app" / "services" / "policy_signal_hotspot.py"
     info_path.parent.mkdir(parents=True, exist_ok=True)
     info_path.write_text(info_text, encoding="utf-8")
 

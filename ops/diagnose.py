@@ -1032,7 +1032,6 @@ LLM_QUALITY_HARDCODE_CORE_PREFIXES = (
     "truffles-api/app/routers/webhook/info.py",
     "truffles-api/app/services/tool_registry_service.py",
     "truffles-api/app/services/booking_signal_service.py",
-    "truffles-api/app/services/info_signal_service.py",
 )
 LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX = "truffles-api/app/routers/webhook/"
 LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX = "truffles-api/app/services/"
