@@ -6,28 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
-KNOWN_DUPLICATE_TOP_LEVEL_DEF_COUNTS = {
-    Path("truffles-api/app/services/reasoning_core.py"): {
-        "_filter_specialist_followup_helper_meta": 2,
-        "_finalize_tool_reply_owner_execution": 2,
-        "_should_accept_turn_planner_booking_verification_result": 2,
-        "_should_accept_turn_planner_duration_collect_result": 2,
-        "_should_accept_turn_planner_master_query_collect_result": 2,
-        "_should_accept_turn_planner_master_query_result": 2,
-        "_should_accept_turn_planner_master_query_service_not_found_collect_result": 2,
-        "_should_accept_turn_planner_pricing_collect_result": 2,
-        "_try_handle_turn_planner_safe_active_name_time_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_bookability_time_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_duration_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_master_query_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_master_query_fact_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_pricing_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_specialist_datetime_collect_owner_cutover": 2,
-        "_try_handle_turn_planner_safe_specialist_name_collect_owner_cutover": 2,
-    }
-}
+KNOWN_DUPLICATE_TOP_LEVEL_DEF_COUNTS: dict[Path, dict[str, int]] = {}
 
 
 def _top_level_duplicate_defs(path: Path) -> dict[str, list[int]]:
@@ -71,3 +50,9 @@ def test_known_duplicate_top_level_core_defs_do_not_grow() -> None:
         + "\nStale allowances:\n- "
         + "\n- ".join(stale_allowances or ["none"])
     )
+
+
+def test_reasoning_core_has_no_duplicate_top_level_defs() -> None:
+    actual = _top_level_duplicate_defs(ROOT / Path("truffles-api/app/services/reasoning_core.py"))
+
+    assert actual == {}
