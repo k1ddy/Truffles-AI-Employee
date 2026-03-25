@@ -11,16 +11,6 @@ from app.core.dialog_state_service import (
     DialogStateService,
     InteractionState,
 )
-from app.core.intent_routing import (
-    ControllerRouteSnapshot,
-    DomainRoutingSnapshot,
-    PolicyCoreRouteSnapshot,
-    detect_controller_route_snapshot,
-    detect_policy_core_route_snapshot,
-    IntentRoutingPrimitives,
-    detect_domain_routing_snapshot,
-    detect_intent_routing_primitives,
-)
 from app.core.response_realizer import ReplyEnvelope, ReplyKind, ResponseRealizer
 from app.core.turn_executor import (
     BlockBoundaryRequest,
@@ -50,21 +40,17 @@ __all__ = [
     "BoundaryValidator",
     "BlockBoundaryRequest",
     "CurrentReferents",
-    "ControllerRouteSnapshot",
     "DegradeBoundaryRequest",
     "DecisionOutcome",
     "DialogState",
     "DialogStateProjections",
     "DialogStateService",
-    "DomainRoutingSnapshot",
-    "IntentRoutingPrimitives",
     "InteractionContract",
     "InteractionState",
     "InboundTurnInput",
     "OwnerCutoverAction",
     "PendingQuestionContract",
     "PolicyDecision",
-    "PolicyCoreRouteSnapshot",
     "ReplyEnvelope",
     "ReplyKind",
     "ResponseRealizer",
@@ -76,8 +62,4 @@ __all__ = [
     "TurnPlanner",
     "TurnResult",
     "TurnTrace",
-    "detect_domain_routing_snapshot",
-    "detect_controller_route_snapshot",
-    "detect_policy_core_route_snapshot",
-    "detect_intent_routing_primitives",
 ]

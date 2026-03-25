@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Callable, Iterator, Sequence
@@ -22,7 +22,6 @@ from app.core import (
     PolicyDecision,
     DialogStateService,
     OwnerCutoverAction,
-    PolicyCoreRouteSnapshot,
     TurnExecutor,
     TurnPlanner,
     TurnResult,
@@ -118,6 +117,60 @@ from app.services.state_service import (
     _resolve_pending_ack,
     transition_state,
 )
+
+# Legacy snapshot payload stays local to reasoning_core while residual shadow paths are removed.
+@dataclass(frozen=True)
+class PolicyCoreRouteSnapshot:
+    normalized_text: str
+    intent: str
+    action: str
+    tool_action: str
+    confidence: float
+    reason: str
+    needs_manager: bool = True
+    goal: str = "handoff"
+    tool_args: dict[str, object] = field(default_factory=dict)
+    pack_refs: tuple[str, ...] = field(default_factory=tuple)
+    slots: dict[str, str] = field(default_factory=dict)
+    next_question: str | None = None
+    open_questions: tuple[str, ...] = field(default_factory=tuple)
+    capability: str | None = None
+    subject_kind: str | None = None
+    temporal_scope: str | None = None
+    resolution_mode: str | None = None
+    pending_question_act: str | None = None
+    pending_question_target: str | None = None
+    active_question_relation: str | None = None
+
+    def to_override(self) -> dict[str, object]:
+        return {
+            "normalized_text": self.normalized_text,
+            "intent": self.intent,
+            "action": self.action,
+            "tool_action": self.tool_action,
+            "tool_args": dict(self.tool_args),
+            "pack_refs": list(self.pack_refs),
+            "slots": dict(self.slots),
+            "next_question": self.next_question,
+            "open_questions": list(self.open_questions),
+            "needs_manager": self.needs_manager,
+            "risk_signals": [],
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "goal": self.goal,
+            "capability": self.capability,
+            "entity_refs": [],
+            "subject_kind": self.subject_kind,
+            "temporal_scope": self.temporal_scope,
+            "resolution_mode": self.resolution_mode,
+            "pending_question_act": self.pending_question_act,
+            "pending_question_target": self.pending_question_target,
+            "active_question_relation": self.active_question_relation,
+            "resolver_id": "consultant_core_ingress_override",
+            "resolver_version": "2026-03-16",
+        }
+
+
 from app.services.state_machine import ConversationState
 from app.services.tenant_context_contract import validate_tenant_context_contract
 from app.services.tool_registry_service import execute_tool_action

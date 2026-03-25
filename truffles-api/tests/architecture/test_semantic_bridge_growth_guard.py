@@ -31,7 +31,7 @@ def write_config(repo: Path) -> dict:
                 },
             },
             {
-                "path": "truffles-api/app/core/intent_routing.py",
+                "path": "truffles-api/app/services/policy_snapshot_hotspot.py",
                 "active_waiver": None,
                 "tracked_policy_snapshot_reasons": {
                     "exact_allowlist": ["known_reason"],
@@ -45,14 +45,14 @@ def write_config(repo: Path) -> dict:
     return config
 
 
-def write_hotspots(repo: Path, *, info_text: str, routing_text: str) -> None:
+def write_hotspots(repo: Path, *, info_text: str, snapshot_text: str) -> None:
     info_path = repo / "truffles-api" / "app" / "services" / "info_signal_service.py"
     info_path.parent.mkdir(parents=True, exist_ok=True)
     info_path.write_text(info_text, encoding="utf-8")
 
-    routing_path = repo / "truffles-api" / "app" / "core" / "intent_routing.py"
-    routing_path.parent.mkdir(parents=True, exist_ok=True)
-    routing_path.write_text(routing_text, encoding="utf-8")
+    snapshot_path = repo / "truffles-api" / "app" / "services" / "policy_snapshot_hotspot.py"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(snapshot_text, encoding="utf-8")
 
 
 BASE_INFO = '''
@@ -64,7 +64,7 @@ def looks_like_known_policy_message():
     return False
 '''
 
-BASE_ROUTING = '''
+BASE_SNAPSHOT = '''
 class PolicyCoreRouteSnapshot:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -80,7 +80,7 @@ def test_semantic_bridge_growth_guard_allows_exact_snapshot(tmp_path: Path) -> N
     repo = tmp_path / "repo"
     repo.mkdir()
     config = write_config(repo)
-    write_hotspots(repo, info_text=BASE_INFO, routing_text=BASE_ROUTING)
+    write_hotspots(repo, info_text=BASE_INFO, snapshot_text=BASE_SNAPSHOT)
 
     violations = module.evaluate(repo, config)
     assert violations == []
@@ -96,7 +96,7 @@ def test_semantic_bridge_growth_guard_blocks_new_tracked_function(tmp_path: Path
         repo,
         info_text=BASE_INFO
         + '\n\ndef detect_new_followup():\n    return True\n',
-        routing_text=BASE_ROUTING,
+        snapshot_text=BASE_SNAPSHOT,
     )
 
     violations = module.evaluate(repo, config)
@@ -114,7 +114,7 @@ def test_semantic_bridge_growth_guard_blocks_new_policy_snapshot_reason(tmp_path
     write_hotspots(
         repo,
         info_text=BASE_INFO,
-        routing_text=BASE_ROUTING
+        snapshot_text=BASE_SNAPSHOT
         + '\n\ndef build_extra():\n    return PolicyCoreRouteSnapshot(reason="new_reason")\n',
     )
 
