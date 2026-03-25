@@ -25,6 +25,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 1000,
         timeout_seconds: Optional[float] = None,
         response_format: Optional[dict[str, Any]] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> LLMResponse:
         """Generate response from OpenAI."""
 
@@ -40,6 +41,8 @@ class OpenAIProvider(LLMProvider):
             }
             if isinstance(response_format, dict) and response_format:
                 payload["response_format"] = response_format
+            if isinstance(reasoning_effort, str) and reasoning_effort.strip():
+                payload["reasoning_effort"] = reasoning_effort.strip()
             logger.debug(f"OpenAI request: model={model}, messages_count={len(messages)}")
 
             response = client.post(

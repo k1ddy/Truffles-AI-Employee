@@ -3195,6 +3195,8 @@ def _detect_promotion_intent(normalized: str, *, client_slug: str | None = None)
         "promotion_student_weekday_terms",
     ) and _signal_contains_any(normalized, client_slug, "promotion_student_discount_terms"):
         return "promotion_student"
+    if _signal_contains_any(normalized, client_slug, "promotion_general_terms"):
+        return "promotions"
     return None
 
 

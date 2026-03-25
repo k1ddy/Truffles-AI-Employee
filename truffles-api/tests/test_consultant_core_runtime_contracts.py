@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
@@ -1416,6 +1417,65 @@ def test_turn_executor_adds_pricing_info_sections_for_price_reply() -> None:
 
     assert result.tool_decision in {"price_query", "price_manicure"}
     assert "pricing" in (result.meta.get("info_sections") or [])
+
+
+def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_registry(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _execute_tool_action(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Официальные акции: первое посещение 10%.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.service_query",
+                "tool_decision": "promotions",
+                "info_sections": ["promotions"],
+            },
+            trace={"stage": "tool_registry", "decision": "promotions"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "info",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {"service_query": "маникюр"},
+            "pack_refs": ["promotions"],
+            "reason": "promo_interrupt",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Есть ли акции?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert captured["tool_action"] == "catalog.service_query"
+    assert captured["service_query"] == "маникюр"
+    assert captured["info_sections_hint"] == ["promotions"]
+    assert result.text == "Официальные акции: первое посещение 10%."
+    assert result.tool_decision == "promotions"
+    assert result.tool_action == "catalog.service_query"
+    assert result.meta.get("resolved_tool_action") == "catalog.service_query"
 
 
 def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(monkeypatch) -> None:

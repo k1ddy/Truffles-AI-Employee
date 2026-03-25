@@ -256,9 +256,12 @@ class TurnExecutor:
         if decision.outcome == "FACT":
             return self._execute_fact(
                 decision,
+                db=db,
                 message_text=message_text,
                 client_slug=client_slug,
+                branch_id=branch_id,
                 booking_state=merged_booking,
+                now=now,
             )
         if decision.outcome == "HANDOFF":
             return RuntimeExecutionResult(
@@ -349,15 +352,19 @@ class TurnExecutor:
         self,
         decision: PolicyDecision,
         *,
+        db: Any,
         message_text: str | None,
         client_slug: str | None,
+        branch_id: Any,
         booking_state: dict[str, Any] | None,
+        now: datetime,
     ) -> RuntimeExecutionResult:
         from app.services.pack_runtime_service import (
             build_master_reply_from_pack,
             get_pack_decision,
             resolve_master_intent,
         )
+        from app.services.tool_registry_service import execute_tool_action, is_tool_action
 
         if decision.tool_action == "calendar.get_booking" and decision.intent in {
             "check_booking",
@@ -422,6 +429,40 @@ class TurnExecutor:
                     meta=master_meta,
                     request_handoff=master_reply.action == "escalate",
                 )
+        resolved_tool_action = self._resolve_fact_tool_action(
+            decision=decision,
+            fact_refs=fact_refs,
+            service_name=service_name,
+        )
+        if db is not None and branch_id is not None and is_tool_action(resolved_tool_action):
+            tool_args = dict(decision.tool_args) if isinstance(decision.tool_args, dict) else {}
+            service_query = self._resolve_fact_service_query(
+                decision=decision,
+                service_name=service_name,
+            )
+            tool_result = execute_tool_action(
+                db,
+                tool_action=resolved_tool_action,
+                tool_args=tool_args,
+                conversation_id=None,
+                branch_id=branch_id,
+                client_slug=client_slug,
+                service_query=service_query,
+                info_sections_hint=self._resolve_fact_info_sections(fact_refs),
+                message_text=query_text,
+                expected_reply_type=None,
+                now=now,
+            )
+            if tool_result.handled and isinstance(tool_result.response_text, str) and tool_result.response_text.strip():
+                tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
+                if resolved_tool_action != decision.tool_action:
+                    tool_meta["resolved_tool_action"] = resolved_tool_action
+                return RuntimeExecutionResult(
+                    text=tool_result.response_text.strip(),
+                    tool_action=resolved_tool_action,
+                    tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
+                    meta=tool_meta,
+                )
         pack_decision = get_pack_decision(query_text, client_slug=client_slug)
         if pack_decision and isinstance(pack_decision.response, str) and pack_decision.response.strip():
             pack_meta = dict(pack_decision.meta) if isinstance(pack_decision.meta, dict) else {}
@@ -461,6 +502,54 @@ class TurnExecutor:
             tool_decision="passthrough",
             meta={"fact_fallback": True},
         )
+
+    @staticmethod
+    def _normalize_fact_hint(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip().casefold()
+        return cleaned or None
+
+    def _resolve_fact_info_sections(self, fact_refs: set[str]) -> list[str] | None:
+        sections: list[str] = []
+        for token in fact_refs:
+            normalized = self._normalize_fact_hint(token)
+            if normalized in {"pricing", "promotions", "duration", "services_overview", "location"}:
+                sections.append(normalized)
+        return sections or None
+
+    def _resolve_fact_service_query(
+        self,
+        *,
+        decision: PolicyDecision,
+        service_name: str | None,
+    ) -> str | None:
+        if isinstance(decision.tool_args, dict):
+            raw_service_query = decision.tool_args.get("service_query")
+            if isinstance(raw_service_query, str) and raw_service_query.strip():
+                return raw_service_query.strip()
+        if isinstance(service_name, str) and service_name.strip():
+            return service_name.strip()
+        return None
+
+    def _resolve_fact_tool_action(
+        self,
+        *,
+        decision: PolicyDecision,
+        fact_refs: set[str],
+        service_name: str | None,
+    ) -> str:
+        normalized_tool_action = self._normalize_fact_hint(decision.tool_action) or "info"
+        if normalized_tool_action != "info":
+            return decision.tool_action
+        if "location" in fact_refs:
+            return "catalog.location"
+        if service_name or any(
+            token in {"pricing", "promotions", "duration", "services_overview"}
+            for token in fact_refs
+        ):
+            return "catalog.service_query"
+        return decision.tool_action
 
     def _execute_booking_confirmation(
         self,

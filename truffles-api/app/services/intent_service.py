@@ -164,7 +164,7 @@ PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
 PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
 POLICY_CORE_PROMPT_PATH = PROMPTS_DIR / "llm_policy_core.md"
 POLICY_CORE_TIMEOUT_SECONDS = float(
-    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "5.0")
+    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "8.0")
 )
 POLICY_CORE_MIN_TIMEOUT_SECONDS = max(
     float(os.environ.get("LLM_POLICY_CORE_MIN_TIMEOUT_SECONDS", "1.2")),
@@ -175,7 +175,11 @@ POLICY_CORE_BUDGET_GUARD_MS = max(
     0.0,
 )
 POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
-    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "2.5")),
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "4.0")),
+    0.1,
+)
+POLICY_CORE_FALLBACK_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_FALLBACK_SECONDS", "6.0")),
     0.1,
 )
 POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
@@ -183,12 +187,21 @@ POLICY_CORE_RETRY_ON_TRANSIENT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TRANSI
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
 POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
 _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL = (
-    _DEFAULT_CONTROLLER_MODEL if _DEFAULT_CONTROLLER_MODEL.strip() else FAST_MODEL
+    FAST_MODEL.strip()
+    if FAST_MODEL.strip().lower().startswith("gpt-5")
+    else (_DEFAULT_CONTROLLER_MODEL if _DEFAULT_CONTROLLER_MODEL.strip() else FAST_MODEL)
 )
 POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
     "LLM_POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
     _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL,
 ).strip()
+POLICY_CORE_REASONING_EFFORT = (
+    os.environ.get("LLM_POLICY_CORE_REASONING_EFFORT", "minimal").strip().lower()
+)
+POLICY_CORE_GPT5_MIN_MAX_TOKENS = max(
+    int(os.environ.get("LLM_POLICY_CORE_GPT5_MIN_MAX_TOKENS", "400")),
+    1,
+)
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
     os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
 )
@@ -340,6 +353,7 @@ def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
 def _resolve_policy_core_max_tokens_with_cap(
     timeout_seconds: float,
     max_tokens_override: int | None,
+    model_name: str | None = None,
 ) -> int:
     max_tokens_cap = POLICY_CORE_MAX_TOKENS
     if max_tokens_override is not None:
@@ -353,10 +367,30 @@ def _resolve_policy_core_max_tokens_with_cap(
     if timeout_seconds < 1.4:
         return min(max_tokens_cap, 120)
     if timeout_seconds < 2.2:
-        return min(max_tokens_cap, 160)
-    if timeout_seconds < 3.0:
-        return min(max_tokens_cap, 200)
-    return max_tokens_cap
+        resolved = min(max_tokens_cap, 160)
+    elif timeout_seconds < 3.0:
+        resolved = min(max_tokens_cap, 200)
+    else:
+        resolved = max_tokens_cap
+    if isinstance(model_name, str) and model_name.strip().lower().startswith("gpt-5"):
+        return max(resolved, POLICY_CORE_GPT5_MIN_MAX_TOKENS)
+    return resolved
+
+
+def _resolve_policy_core_reasoning_effort(model_name: str | None) -> str | None:
+    normalized = (model_name or "").strip().lower()
+    if not normalized.startswith("gpt-5"):
+        return None
+    if POLICY_CORE_REASONING_EFFORT in {"minimal", "low", "medium", "high"}:
+        return POLICY_CORE_REASONING_EFFORT
+    return "minimal"
+
+
+def _resolve_model_temperature(model_name: str | None) -> float:
+    normalized = (model_name or "").strip().lower()
+    if normalized.startswith("gpt-5"):
+        return 1.0
+    return 0.0
 
 
 def _policy_core_structured_output_enabled() -> bool:
@@ -1399,7 +1433,7 @@ capability values: pricing, duration, location, hours, promotions, bookability,
 live_availability, booking_manage, consultation, portfolio, other.
 temporal_scope values: none, specific_time, day, weekday, weekend, date_range.
 resolution_mode values: direct, referent_followup, clarify_missing_subject,
-clarify_missing_time, policy_fact, live_calendar.
+clarify_missing_time, ask_about_requested_slot, policy_fact, live_calendar.
 pending_question_target values: time, specialist.
 active_question_relation values: fill_requested_slot, ask_about_requested_slot,
 slot_constraint, slot_compare, mixed_fill_plus_question, referent_followup,
@@ -2278,10 +2312,7 @@ def route_llm_policy_core(
         logger.warning(f"Policy core provider init failed: {exc}")
         result["error"] = _classify_llm_error(exc)
         return result
-    temperature = 0.0
-    model_name = POLICY_CORE_MODEL.strip().lower()
-    if model_name.startswith("gpt-5"):
-        temperature = 1.0
+    temperature = _resolve_model_temperature(POLICY_CORE_MODEL)
 
     messages = _build_policy_core_messages(prompt, policy_input)
     compact_messages: list[dict[str, str]] | None = None
@@ -2303,27 +2334,30 @@ def route_llm_policy_core(
     if micro_deadline_mode:
         retry_on_timeout = False
         retry_on_transient = False
-    timeout_attempts = [policy_timeout_seconds]
-    if retry_on_timeout:
-        retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
-        if retry_timeout > 0 and retry_timeout not in timeout_attempts:
-            timeout_attempts.append(retry_timeout)
-    if retry_on_transient and len(timeout_attempts) == 1:
-        timeout_attempts.append(timeout_attempts[0])
     fallback_model = POLICY_CORE_TIMEOUT_FALLBACK_MODEL.strip()
     if fallback_model.casefold() == POLICY_CORE_MODEL.strip().casefold():
         fallback_model = ""
+    timeout_attempts = [policy_timeout_seconds]
+    if retry_on_timeout and not fallback_model:
+        retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        if retry_timeout > 0 and retry_timeout not in timeout_attempts:
+            timeout_attempts.append(retry_timeout)
+    if retry_on_transient and len(timeout_attempts) == 1 and not fallback_model:
+        timeout_attempts.append(timeout_attempts[0])
 
     llm_start = time.monotonic()
     response = None
     error = None
     attempt_count = 0
     model_name_used = POLICY_CORE_MODEL
+    temperature_used = temperature
+    reasoning_effort_used = _resolve_policy_core_reasoning_effort(POLICY_CORE_MODEL)
     fallback_model_attempted = False
     timeout_seconds_used = policy_timeout_seconds
     max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
         policy_timeout_seconds,
         max_tokens_override,
+        POLICY_CORE_MODEL,
     )
     transient_retry_used = False
     structured_output_fallback_used = False
@@ -2333,6 +2367,7 @@ def route_llm_policy_core(
         max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
             timeout_seconds,
             max_tokens_override,
+            POLICY_CORE_MODEL,
         )
         attempt_uses_compact = use_compact_messages
         if attempt_uses_compact and compact_messages is None:
@@ -2356,6 +2391,7 @@ def route_llm_policy_core(
                 timeout_seconds=timeout_seconds,
                 temperature=temperature,
                 response_format=policy_response_format,
+                reasoning_effort=reasoning_effort_used,
             )
             model_name_used = POLICY_CORE_MODEL
             error = None
@@ -2393,6 +2429,7 @@ def route_llm_policy_core(
                         model=POLICY_CORE_MODEL,
                         timeout_seconds=timeout_seconds,
                         temperature=temperature,
+                        reasoning_effort=reasoning_effort_used,
                     )
                     model_name_used = POLICY_CORE_MODEL
                     error = None
@@ -2465,7 +2502,10 @@ def route_llm_policy_core(
             break
 
     if error == "timeout" and fallback_model:
-        fallback_timeout_seconds = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        fallback_timeout_seconds = min(
+            max(POLICY_CORE_FALLBACK_TIMEOUT_SECONDS, POLICY_CORE_RETRY_TIMEOUT_SECONDS),
+            policy_timeout_seconds,
+        )
         fallback_use_compact = use_compact_messages or compact_input_used
         if not fallback_use_compact:
             fallback_use_compact = True
@@ -2483,9 +2523,12 @@ def route_llm_policy_core(
         ):
             attempt_count += 1
             timeout_seconds_used = fallback_timeout_seconds
+            temperature_used = _resolve_model_temperature(fallback_model)
+            reasoning_effort_used = _resolve_policy_core_reasoning_effort(fallback_model)
             max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
                 fallback_timeout_seconds,
                 max_tokens_override,
+                fallback_model,
             )
             fallback_model_attempted = True
             try:
@@ -2494,8 +2537,9 @@ def route_llm_policy_core(
                     max_tokens=max_tokens_used,
                     model=fallback_model,
                     timeout_seconds=fallback_timeout_seconds,
-                    temperature=temperature,
+                    temperature=temperature_used,
                     response_format=policy_response_format,
+                    reasoning_effort=reasoning_effort_used,
                 )
                 model_name_used = fallback_model
                 error = None
@@ -2515,7 +2559,8 @@ def route_llm_policy_core(
                             max_tokens=max_tokens_used,
                             model=fallback_model,
                             timeout_seconds=fallback_timeout_seconds,
-                            temperature=temperature,
+                            temperature=temperature_used,
+                            reasoning_effort=reasoning_effort_used,
                         )
                         model_name_used = fallback_model
                         error = None
@@ -2557,7 +2602,7 @@ def route_llm_policy_core(
             "max_tokens": max_tokens_used,
             "max_tokens_override": max_tokens_override,
             "timeout_budgeted": policy_timeout_seconds,
-            "temperature": temperature,
+            "temperature": temperature_used,
             "micro_deadline_mode": micro_deadline_mode,
             "compact_first_attempt": compact_first_attempt,
             "compact_input_used": compact_input_used,
@@ -2565,6 +2610,7 @@ def route_llm_policy_core(
             "compact_trigger_timeout_seconds": POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS,
             "structured_output_enabled": structured_output_enabled,
             "structured_output_fallback_used": structured_output_fallback_used,
+            "reasoning_effort": reasoning_effort_used,
         },
     )
     record_llm_time(client_slug, "policy_core_llm_ms", elapsed_ms)

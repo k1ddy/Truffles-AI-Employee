@@ -144,6 +144,7 @@ SEMANTIC_RESOLUTION_MODE_VALUES = {
     "referent_followup",
     "clarify_missing_subject",
     "clarify_missing_time",
+    "ask_about_requested_slot",
     "policy_fact",
     "live_calendar",
 }

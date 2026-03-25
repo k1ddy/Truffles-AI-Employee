@@ -391,24 +391,39 @@ class TestPolicyCoreTimeoutRetry:
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
-            "gpt-fallback",
+            "gpt-5-mini",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_REASONING_EFFORT",
+            "minimal",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_GPT5_MIN_MAX_TOKENS",
+            400,
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_FALLBACK_TIMEOUT_SECONDS",
+            6.0,
         )
 
         payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
                 httpx.TimeoutException("timeout-1"),
-                httpx.TimeoutException("timeout-2"),
                 DummyResponse(json.dumps(payload)),
             ]
             result = route_llm_policy_core("Нужно время", expected_reply_type="time")
 
         assert result["ok"] is True
         assert result["error"] is None
-        assert mock_llm.return_value.generate.call_count == 3
+        assert mock_llm.return_value.generate.call_count == 2
         models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
-        assert models[:2] == ["gpt-primary", "gpt-primary"]
-        assert models[2] == "gpt-fallback"
+        assert models == ["gpt-primary", "gpt-5-mini"]
+        fallback_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
+        assert fallback_kwargs["reasoning_effort"] == "minimal"
+        assert fallback_kwargs["max_tokens"] >= 400
+        assert fallback_kwargs["temperature"] == 1.0
+        assert fallback_kwargs["timeout_seconds"] == 6.0
 
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -635,6 +650,7 @@ class TestPolicyCoreTimeoutRetry:
                 "open_questions": ["datetime"],
                 "needs_manager": False,
                 "risk_signals": [],
+                "resolution_mode": "ask_about_requested_slot",
                 "pending_question_act": "ask_about_requested_slot",
                 "pending_question_target": "time",
                 "active_question_relation": "ask_about_requested_slot",
@@ -648,6 +664,7 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
+        assert result["payload"]["resolution_mode"] == "ask_about_requested_slot"
         assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
         assert result["payload"]["pending_question_target"] == "time"
         assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
@@ -802,6 +819,7 @@ class TestPolicyCoreTimeoutRetry:
         assert '`pending_question_act="ask_about_requested_slot"`' in prompt
         assert '`pending_question_target="time"`' in prompt
         assert '`active_question_relation="ask_about_requested_slot"`' in prompt
+        assert "ask_about_requested_slot" in prompt
         assert "Какой мастер свободен на этой неделе?" in prompt
         assert "А какие мастера доступны?" in prompt
         assert "А есть ли свободные слоты на 15:00?" in prompt

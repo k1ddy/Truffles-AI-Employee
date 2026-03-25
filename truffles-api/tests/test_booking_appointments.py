@@ -104,6 +104,18 @@ def test_create_booking_appointment_collect_preferences(monkeypatch):
     assert kwargs["commit"] is False
 
 
+def test_demo_salon_generic_promotions_intent_detected():
+    normalized = demo_salon_knowledge._normalize_text("Есть ли акции?")
+
+    assert (
+        demo_salon_knowledge._detect_promotion_intent(
+            normalized,
+            client_slug="demo_salon",
+        )
+        == "promotions"
+    )
+
+
 def test_parse_booking_datetime_handles_dateparser_timezone_conflict():
     now = datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc)
 
