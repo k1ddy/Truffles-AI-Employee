@@ -2504,6 +2504,58 @@ def test_context_manager_expected_reply_getters_prefer_canonical_question_contra
     )
 
 
+def test_set_expected_reply_context_records_canonical_pending_question_contract_in_evidence():
+    now = datetime.now(timezone.utc)
+    saved_message = SimpleNamespace(message_metadata={})
+    conversation = SimpleNamespace(
+        context={
+            "context_manager": {
+                "message_count": 4,
+                "current_goal": "booking",
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+        }
+    )
+
+    updated = webhook_router._set_expected_reply_context(
+        conversation=conversation,
+        saved_message=saved_message,
+        context=conversation.context,
+        expected_reply_type=webhook_router.EXPECTED_REPLY_TIME,
+        reason="booking_prompt",
+        now=now,
+    )
+
+    expected_contract = {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        "reason": "booking_prompt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert (
+        updated.get("context_manager", {})
+        .get("canonical_dialog_state", {})
+        .get("pending_question_contract")
+        == expected_contract
+    )
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "question_contract"
+        and entry.get("decision") == "set"
+        and entry.get("pending_question_contract") == expected_contract
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+    assert (
+        saved_message.message_metadata.get("decision_meta", {}).get("pending_question_contract")
+        == expected_contract
+    )
+
+
 
 
 

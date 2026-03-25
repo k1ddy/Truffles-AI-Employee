@@ -373,6 +373,7 @@ def _set_expected_reply_context(
     context = result.context
     normalized_expected_reply_type = result.expected_reply_type
     normalized_reason = result.expected_reply_reason
+    pending_question_contract = result.pending_question_contract
     _set_conversation_context(conversation, context)
     if result.re_entry_cleared:
         _record_decision_trace(
@@ -383,23 +384,23 @@ def _set_expected_reply_context(
                 "reason": normalized_reason,
             },
         )
-    _record_decision_trace(
-        conversation,
-        {
-            "stage": "question_contract",
-            "decision": "set",
-            "expected_reply_type": normalized_expected_reply_type,
-            "reason": normalized_reason,
-        },
-    )
+    question_trace = {
+        "stage": "question_contract",
+        "decision": "set",
+        "expected_reply_type": normalized_expected_reply_type,
+        "reason": normalized_reason,
+    }
+    if pending_question_contract:
+        question_trace["pending_question_contract"] = pending_question_contract
+    _record_decision_trace(conversation, question_trace)
     if saved_message:
-        _update_message_decision_metadata(
-            saved_message,
-            {
-                "expected_reply_type": normalized_expected_reply_type,
-                "expected_reply_reason": normalized_reason,
-            },
-        )
+        meta_updates = {
+            "expected_reply_type": normalized_expected_reply_type,
+            "expected_reply_reason": normalized_reason,
+        }
+        if pending_question_contract:
+            meta_updates["pending_question_contract"] = pending_question_contract
+        _update_message_decision_metadata(saved_message, meta_updates)
     if normalized_expected_reply_type:
         _record_session_memory_update(
             conversation,

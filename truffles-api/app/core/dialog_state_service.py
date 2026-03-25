@@ -219,6 +219,7 @@ class ExpectedReplyContextSyncResult:
     context_manager: dict[str, Any]
     expected_reply_type: str | None
     expected_reply_reason: str | None
+    pending_question_contract: dict[str, Any] | None
     question_memory: dict[str, Any] | None
     re_entry_cleared: bool
 
@@ -1956,11 +1957,19 @@ class DialogStateService:
                 key=session_memory_key,
             )
 
+        pending_question_contract = self.project_context_pending_question_contract(
+            updated,
+            context_manager_key=context_manager_key,
+            canonical_state_key=canonical_state_key,
+            session_memory_key=session_memory_key,
+        )
+
         return ExpectedReplyContextSyncResult(
             context=updated,
             context_manager=manager,
             expected_reply_type=normalized_type,
             expected_reply_reason=normalized_reason,
+            pending_question_contract=pending_question_contract,
             question_memory=question_memory,
             re_entry_cleared=re_entry_cleared,
         )

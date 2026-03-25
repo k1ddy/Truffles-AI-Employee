@@ -161,6 +161,35 @@ def test_dialog_state_service_projects_session_memory_pending_question_contract(
     }
 
 
+def test_expected_reply_context_sync_result_carries_canonical_pending_question_contract() -> None:
+    service = DialogStateService()
+    now = datetime.now(timezone.utc)
+
+    result = service.build_expected_reply_context_sync_result(
+        {
+            "context_manager": {
+                "message_count": 7,
+                "current_goal": "booking",
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+        },
+        expected_reply_type=" time ",
+        reason=" booking_prompt ",
+        now=now,
+    )
+
+    assert result.pending_question_contract == {
+        "expected_reply_type": "time",
+        "reason": "booking_prompt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
 def test_dialog_state_service_builds_collect_owner_state() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {
