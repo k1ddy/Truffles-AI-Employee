@@ -1585,6 +1585,47 @@ def test_prepare_resolved_handoff_resume_boundary_restore_prefers_canonical_ques
     }
 
 
+def test_prepare_resolved_handoff_resume_boundary_restore_does_not_treat_matching_projection_as_completion() -> None:
+    now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
+
+    restore = _prepare_resolved_handoff_resume_boundary_restore(
+        {
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                },
+            },
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_interrupt",
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+            "re_entry_required": {
+                "required": True,
+                "reason": "pending_resume",
+                "set_at": now.isoformat(),
+            },
+        },
+        now=now,
+        prompt_builder=lambda expected_reply_type: {
+            "time": "Когда вам удобно?",
+        }.get(expected_reply_type),
+    )
+
+    assert restore.restored is True
+    assert restore.pending_reason == "booking_interrupt"
+    assert restore.expected_reply_type == "time"
+    assert restore.apply_boundary_booking_state is True
+
+
 def test_resolve_resolved_handoff_resume_boundary_restore_uses_owner_surface() -> None:
     now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
     conversation = SimpleNamespace(context={})

@@ -5482,6 +5482,49 @@ def test_provider_unavailable_human_request_pending_resume_restores_resolved_bot
     assert meta.get("resolved_handoff_resume_boundary") is True
 
 
+def test_provider_unavailable_human_request_pending_resume_restores_even_when_projection_matches_canonical():
+    now = datetime.now(timezone.utc)
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    context = _build_provider_unavailable_human_request_pending_resume_context(now=now)
+    context["expected_reply_type"] = webhook_router.EXPECTED_REPLY_TIME
+    context["expected_reply_reason"] = "booking_interrupt"
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        state=ConversationState.BOT_ACTIVE.value,
+        context=context,
+    )
+
+    restore = _resolve_resolved_handoff_resume_boundary_restore(
+        conversation=conversation,
+        saved_message=saved_message,
+        context=conversation.context,
+        conversation_state=conversation.state,
+        now=now,
+        prompt_builder=webhook_router._booking_prompt_for_expected_reply_type,
+        hooks=PendingResumeBoundaryRuntimeHooks(
+            set_booking_context=webhook_router._set_booking_context,
+            set_expected_reply_context=webhook_router._set_expected_reply_context,
+            set_conversation_context=webhook_router._set_conversation_context,
+            record_decision_trace=webhook_router._record_decision_trace,
+            update_message_decision_metadata=webhook_router._update_message_decision_metadata,
+        ),
+    )
+
+    assert restore.restored is True
+    assert restore.context.get("re_entry_required", {}).get("required") is False
+    assert (
+        restore.context.get("context_manager", {})
+        .get("canonical_dialog_state", {})
+        .get("pending_question_contract", {})
+        .get("reason")
+        == "booking_interrupt"
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("pending_resume_restored") is True
+    assert meta.get("pending_resume_restore_reason") == "resolved_handoff_resume_boundary"
+
+
 def test_provider_unavailable_human_request_pending_resume_skips_restore_without_booking_boundary():
     now = datetime.now(timezone.utc)
     saved_message = Mock()

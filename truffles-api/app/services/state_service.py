@@ -727,10 +727,6 @@ def _prepare_resolved_handoff_resume_boundary_restore(
     pending_question_contract = _dialog_state_service().project_context_pending_question_contract(
         context
     )
-    projections = _dialog_state_service().project_expected_reply_projections(
-        expected_reply_type=context.get("expected_reply_type"),
-        expected_reply_reason=context.get("expected_reply_reason"),
-    )
     canonical_expected_reply_type = (
         pending_question_contract.get("expected_reply_type")
         if isinstance(pending_question_contract, dict)
@@ -741,17 +737,6 @@ def _prepare_resolved_handoff_resume_boundary_restore(
         if isinstance(pending_question_contract, dict)
         else None
     )
-    if projections.expected_reply_type and (
-        not canonical_expected_reply_type
-        or (
-            projections.expected_reply_type == canonical_expected_reply_type
-            and (
-                canonical_reason is None
-                or projections.expected_reply_reason == canonical_reason
-            )
-        )
-    ):
-        return PendingResumeBoundaryRestore(context=context, restored=False)
 
     boundary_payload = _derive_pending_booking_resume_boundary_payload(
         context,
