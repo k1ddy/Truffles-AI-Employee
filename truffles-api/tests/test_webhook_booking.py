@@ -5,11 +5,16 @@ from app.routers.webhook import booking as booking_router
 
 
 def test_get_set_expected_reply_type_round_trip():
-    context = {"expected_reply_type": "  service  "}
+    context = {
+        "expected_reply_type": "  service  ",
+        "expected_reply_reason": "  booking_prompt  ",
+    }
     assert webhook._get_expected_reply_type(context) == "service"
+    assert webhook._get_expected_reply_reason(context) == "booking_prompt"
 
     updated = webhook._set_expected_reply_type(context, "  time ")
     assert updated[webhook.EXPECTED_REPLY_TYPE_KEY] == "time"
+    assert webhook.EXPECTED_REPLY_REASON_KEY not in updated
 
     cleared = webhook._set_expected_reply_type(updated, "  ")
     assert webhook.EXPECTED_REPLY_TYPE_KEY not in cleared

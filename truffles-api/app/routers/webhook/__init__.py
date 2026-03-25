@@ -1,12 +1,6 @@
-"""Re-export webhook symbols for import compatibility."""
+"""Minimal webhook package exports for the single-runtime ingress."""
 
-from . import _legacy as _legacy
-from .http import router as router
+from .decision import _process_outbox_rows
+from .http import router
 
-_EXPORTS = {
-    name: value for name, value in _legacy.__dict__.items() if not name.startswith("__")
-}
-_EXPORTS["router"] = router
-
-globals().update(_EXPORTS)
-__all__ = sorted(_EXPORTS)
+__all__ = ["_process_outbox_rows", "router"]

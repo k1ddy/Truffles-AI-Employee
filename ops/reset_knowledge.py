@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-" \\Полный сброс коллекции truffles_knowledge\\\
+# Full reset of truffles_knowledge collection.
 import requests
 import sys
 

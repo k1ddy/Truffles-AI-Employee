@@ -8,6 +8,8 @@ def _load_suppress_helper():
     tree = ast.parse(source, filename=str(script_path))
 
     wanted_functions = {
+        "_llm_quality_booking_collect_contract",
+        "_llm_quality_booking_collect_prompt_ok",
         "_llm_quality_normalize_expect_token",
         "_llm_quality_normalize_tool_token",
         "_llm_quality_effective_intent",
@@ -118,6 +120,70 @@ def test_suppresses_missed_question_when_followup_prompt_is_present():
         booking_active=True,
         turn_tags=["booking"],
         outbox_text="Как вас зовут?",
+    )
+
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_booking_prompt_followup_without_reason_code():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "booking_prompt",
+            "expected_reply_reason": "booking_prompt",
+        },
+        meta_action="booking_prompt",
+        expected_reply_type_value="name",
+        booking_active=True,
+        turn_tags=["reschedule", "booking"],
+        outbox_text="Отлично, время подходит. Как вас зовут?",
+    )
+
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_check_booking_collect_reference_prompt():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "check_booking_prompt",
+            "intent": "check_booking",
+            "expected_reply_reason": "calendar_get_booking_collect_reference",
+        },
+        meta_action="check_booking_prompt",
+        expected_reply_type_value="name",
+        booking_active=True,
+        turn_tags=["confirm", "check_booking"],
+        outbox_text="Чтобы проверить, перенести или отменить запись, подскажите номер телефона и примерную дату/время записи.",
+    )
+
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_master_service_not_found_collect():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "reply",
+            "intent": "master_query",
+            "clarify_reason": "master_service_not_found",
+            "expected_reply_reason": "master_service_not_found",
+            "info_sections": ["master"],
+        },
+        meta_action="reply",
+        expected_reply_type_value="service_choice",
+        booking_active=True,
+        turn_tags=["master", "booking"],
+        outbox_text='Po usluge "Маникюр" utochnu dostupnyh masterov u administratora.',
     )
 
     assert suppress is True

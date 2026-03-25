@@ -34,6 +34,15 @@ from app.services.info_signal_service import (
     is_short_reply as _is_short_reply_impl,
 )
 from app.services.info_signal_service import (
+    looks_like_promotions_policy_message as _looks_like_promotions_policy_message,
+)
+from app.services.info_signal_service import (
+    looks_like_promotions_rules_policy_message as _looks_like_promotions_rules_policy_message,
+)
+from app.services.info_signal_service import (
+    looks_like_hours_policy_message as _looks_like_hours_policy_message,
+)
+from app.services.info_signal_service import (
     normalized_contains_any as _normalized_contains_any,
 )
 from app.services.info_signal_service import (
@@ -54,6 +63,7 @@ from app.services.info_signal_service import (
 from app.services.info_signal_service import (
     tokens_have_prefixes as _tokens_have_prefixes,
 )
+from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.pack_runtime_service import (
     _build_fact_meta,
     _has_contact_signal,
@@ -162,6 +172,29 @@ def _detect_info_class_intents(
         message_text,
         client_slug=client_slug,
     )
+    prep_brows_lashes_signal = bool(
+        _signal_any_match(normalized, client_slug, "prep_brows_lashes_prepare_terms")
+        and (
+            _signal_any_match(normalized, client_slug, "prep_brows_lashes_focus_terms")
+            or _signal_any_match(normalized, client_slug, "prep_brows_lashes_extra_terms")
+        )
+    )
+    if not prep_brows_lashes_signal:
+        prep_brows_lashes_signal = bool(
+            _normalized_contains_any(normalized, ("подготов", "перед процедур", "что-то нужно делать"))
+            and _normalized_contains_any(normalized, ("ресниц", "бров", "ламинир"))
+        )
+    hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_keywords")
+    if not hygiene_signal:
+        hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_dry_heat_terms")
+    if not hygiene_signal:
+        hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_disposables_terms")
+    if not hygiene_signal:
+        hygiene_signal = _signal_any_match(
+            normalized,
+            client_slug,
+            "hygiene_friend_inflammation_terms",
+        )
     location_signal = parking_signal or _signal_any_match(
         normalized,
         client_slug,
@@ -227,6 +260,9 @@ def _detect_info_class_intents(
         force_master_intent=False,
     )
     master_signal = bool(master_resolution.explicit)
+    if "pricing" in anchor_intents and not price_signal:
+        anchor_intents.discard("pricing")
+        anchor_hits.pop("pricing", None)
 
     if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
         location_signal = True
@@ -254,6 +290,38 @@ def _detect_info_class_intents(
         intents.add("duration")
     if contact_signal:
         intents.add("contact")
+    if prep_brows_lashes_signal:
+        intents.add("prep_brows_lashes")
+    if hygiene_signal:
+        intents.add("hygiene")
+    promotions_rules_signal = _looks_like_promotions_rules_policy_message(
+        message_text,
+        client_slug=client_slug,
+    )
+    promotions_signal = False
+    from app.routers.webhook.policy import _looks_like_promotions_request
+
+    if promotions_rules_signal:
+        intents.add("promotions_rules")
+    else:
+        promotions_signal = _looks_like_promotions_policy_message(
+            message_text,
+            client_slug=client_slug,
+        )
+        if (
+            not promotions_signal
+            and _looks_like_promotions_request(
+                message_text,
+                client_slug=client_slug,
+            )
+            and not price_signal
+            and not duration_signal
+            and not hours_signal
+        ):
+            promotions_signal = True
+            meta["promotions_request_rescue"] = True
+        if promotions_signal:
+            intents.add("promotions")
     if location_signal:
         intents.add("location")
     if hours_signal:
@@ -274,10 +342,26 @@ def _detect_info_class_intents(
             intents.add(question_type.kind)
             meta["question_type"] = question_type.kind
             meta["question_type_score"] = question_type.score
+    explicit_hours_request = (
+        not daypart_preference_statement
+        and _looks_like_hours_policy_message(
+        message_text,
+        client_slug=client_slug,
+        )
+    )
+    if explicit_hours_request:
+        intents.add("hours")
+        intents.discard("duration")
+        anchor_intents.discard("duration")
+        anchor_hits.pop("duration", None)
+        meta["explicit_hours_request"] = True
     work_schedule_phrase = bool(hours_stem_signal and not service_duration_context)
     if work_schedule_phrase and "duration" in intents:
         intents.discard("duration")
         intents.add("hours")
+        duration_signal = False
+        hours_signal = True
+    if explicit_hours_request:
         duration_signal = False
         hours_signal = True
     if suppressed_info_intents:
@@ -296,6 +380,10 @@ def _detect_info_class_intents(
         "duration": duration_signal,
         "contact": contact_signal,
         "guest": guest_signal,
+        "prep_brows_lashes": prep_brows_lashes_signal,
+        "hygiene": hygiene_signal,
+        "promotions": promotions_signal,
+        "promotions_rules": promotions_rules_signal,
         "location": location_signal,
         "location_address_hint": address_hint_signal,
         "hours": hours_signal,
@@ -332,6 +420,8 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
                 "duration",
                 "contact",
                 "guest",
+                "prep_brows_lashes",
+                "hygiene",
                 "location",
                 "hours",
                 "master",
@@ -568,6 +658,26 @@ def _build_info_intent_reply(
             resolved_intent=decision.intent or "master",
             resolved_action=decision.action or "reply",
         )
+    if intent == "hygiene":
+        reply = format_reply_from_truth("hygiene", client_slug=client_slug)
+        if not reply:
+            return None, None
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=["hygiene"],
+            info_sections=["hygiene"],
+        )
+        return reply, _resolverize(meta, resolved_intent="hygiene")
+    if intent == "prep_brows_lashes":
+        reply = format_reply_from_truth("prep_brows_lashes", client_slug=client_slug)
+        if not reply:
+            return None, None
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=["prep_brows_lashes"],
+            info_sections=["prep_brows_lashes"],
+        )
+        return reply, _resolverize(meta, resolved_intent="prep_brows_lashes")
     if intent == "promotions":
         reply = format_reply_from_truth("promotions", client_slug=client_slug)
         if not reply:
@@ -580,6 +690,16 @@ def _build_info_intent_reply(
             info_sections=["promotions"],
         )
         return reply, _resolverize(meta, resolved_intent="promotions")
+    if intent == "promotions_rules":
+        reply = format_reply_from_truth("promotions_rules", client_slug=client_slug)
+        if not reply:
+            return None, None
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=["promotions"],
+            info_sections=["promotions"],
+        )
+        return reply, _resolverize(meta, resolved_intent="promotions_rules")
     if intent in {"pricing", "duration"} and not service_query and message_text:
         service_query = get_pack_service_hint(message_text, client_slug=client_slug)
         if not service_query:
@@ -1043,7 +1163,18 @@ def _handle_info_flow(
         isinstance(info_signals, dict)
         and any(
             bool(info_signals.get(key))
-            for key in ("parking", "pricing", "duration", "contact", "guest", "location", "hours", "master")
+            for key in (
+                "parking",
+                "pricing",
+                "duration",
+                "contact",
+                "guest",
+                "location",
+                "hours",
+                "prep_brows_lashes",
+                "hygiene",
+                "master",
+            )
         )
     )
     force_parking_followup = bool(
@@ -1369,7 +1500,16 @@ def _handle_info_flow(
         if isinstance(info_signals, dict):
             info_signal_override = any(
                 bool(info_signals.get(key))
-                for key in ("parking", "location", "hours", "guest", "pricing", "duration")
+                for key in (
+                    "parking",
+                    "location",
+                    "hours",
+                    "guest",
+                    "pricing",
+                    "duration",
+                    "prep_brows_lashes",
+                    "hygiene",
+                )
             )
         force_truth_gate_intents = {
             "pricing",
@@ -1377,6 +1517,8 @@ def _handle_info_flow(
             "parking",
             "location",
             "hours",
+            "prep_brows_lashes",
+            "hygiene",
             "guest_policy",
             "master",
             "promotions",
@@ -1756,6 +1898,12 @@ def _handle_truth_gate_fallback(
                 message=message_text,
                 source="truth_gate",
                 intent=decision.intent,
+                hooks=ActiveHandoverReuseRuntimeHooks(
+                    get_active_handover=legacy.get_active_handover,
+                    transition_state=legacy.transition_state,
+                    send_telegram_notification=legacy.send_telegram_notification,
+                    record_decision_trace=legacy._record_decision_trace,
+                ),
             )
             if reused:
                 result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"

@@ -63,7 +63,7 @@ from app.services.console_auth import (
 from app.services.console_errors import ConsoleAPIError
 from app.services.google_calendar_service import GoogleCalendarService
 from app.services.onboarding_state import OnboardingStep, ensure_onboarding_step
-from app.services.state_service import manager_reopen as state_manager_reopen
+from app.services.handover_owner_service import manager_reopen as state_manager_reopen
 
 logger = get_logger(__name__)
 

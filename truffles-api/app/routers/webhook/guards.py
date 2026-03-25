@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core import DialogStateService
 from app.models import Conversation, Message, User
 from app.routers.webhook.trace import (
     _record_message_decision_meta,
@@ -14,6 +15,7 @@ from app.routers.webhook.trace import (
 )
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
+from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
 from app.services.sla_runtime_service import (
     SLA_RUNTIME_CONTEXT_KEY,
@@ -22,6 +24,7 @@ from app.services.sla_runtime_service import (
 )
 
 DECISION_TRACE_KEY = "decision_trace"
+_DIALOG_STATE_SERVICE = DialogStateService()
 
 
 def _is_human_lock_trace_entry(item: dict, *, lock_until: str | None = None) -> bool:
@@ -69,43 +72,11 @@ def _ensure_human_lock_trace_persisted(
 
 
 def _get_intent_queue(context: dict) -> list[str]:
-    from . import _legacy as legacy
-
-    queue = context.get(legacy.INTENT_QUEUE_KEY) if isinstance(context, dict) else None
-    if not isinstance(queue, list):
-        return []
-    cleaned: list[str] = []
-    seen = set()
-    for item in queue:
-        if not isinstance(item, str):
-            continue
-        value = item.strip().casefold()
-        if not value or value in seen:
-            continue
-        cleaned.append(value)
-        seen.add(value)
-    return cleaned
+    return _DIALOG_STATE_SERVICE.get_intent_queue(context)
 
 
 def _set_intent_queue(context: dict, queue: list[str] | None) -> dict:
-    from . import _legacy as legacy
-
-    context = dict(context)
-    cleaned: list[str] = []
-    seen = set()
-    for item in queue or []:
-        if not isinstance(item, str):
-            continue
-        value = item.strip().casefold()
-        if not value or value in seen:
-            continue
-        cleaned.append(value)
-        seen.add(value)
-    if cleaned:
-        context[legacy.INTENT_QUEUE_KEY] = cleaned
-    else:
-        context.pop(legacy.INTENT_QUEUE_KEY, None)
-    return context
+    return _DIALOG_STATE_SERVICE.set_intent_queue(context, queue=queue)
 
 
 def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | None:
@@ -194,27 +165,16 @@ def _format_intent_queue_prompt(intent_queue: list[str]) -> str | None:
 
 
 def _get_clarify_attempt_state(manager: dict, intent: str) -> tuple[int, str | None]:
-    attempts = manager.get("clarify_attempts")
-    if not isinstance(attempts, dict):
-        return 0, None
-    payload = attempts.get(intent)
-    if not isinstance(payload, dict):
-        return 0, None
-    value = payload.get("count", 0)
-    try:
-        count = max(0, int(value))
-    except (TypeError, ValueError):
-        count = 0
-    last_at = payload.get("last_at")
-    return count, last_at if isinstance(last_at, str) else None
+    return _DIALOG_STATE_SERVICE.get_clarify_attempt_state(manager, intent=intent)
 
 
 def _set_clarify_attempt(manager: dict, intent: str, count: int, now: datetime) -> dict:
-    attempts = manager.get("clarify_attempts")
-    attempts_map = dict(attempts) if isinstance(attempts, dict) else {}
-    attempts_map[intent] = {"count": max(0, int(count)), "last_at": now.isoformat()}
-    manager["clarify_attempts"] = attempts_map
-    return manager
+    return _DIALOG_STATE_SERVICE.set_clarify_attempt_state(
+        manager,
+        intent=intent,
+        count=count,
+        now=now,
+    )
 
 
 def _should_escalate_for_clarify(manager: dict, intent: str) -> bool:
@@ -313,6 +273,12 @@ def _handle_clarify_limit_escalation(
         message=message_text,
         source=source,
         intent=escalation_intent,
+        hooks=ActiveHandoverReuseRuntimeHooks(
+            get_active_handover=legacy.get_active_handover,
+            transition_state=legacy.transition_state,
+            send_telegram_notification=legacy.send_telegram_notification,
+            record_decision_trace=legacy._record_decision_trace,
+        ),
     )
     if reused:
         result_message = f"{source} clarify limit reuse, telegram={'sent' if telegram_sent else 'failed'}"
@@ -697,6 +663,65 @@ def _handle_reengage_and_mute_gate(
             )
 
     return None, batch_messages, reengage_override
+
+
+def _handle_post_debounce_muted_state_gate(
+    *,
+    conversation: Conversation,
+    message_text: str,
+    batch_messages: list[str] | None,
+    client_slug: str,
+    now: datetime,
+) -> WebhookResponse | None:
+    from . import _legacy as legacy
+
+    is_muted = conversation.bot_status == "muted" or (
+        conversation.bot_muted_until and conversation.bot_muted_until > now
+    )
+    if not is_muted:
+        return None
+
+    signal_messages = legacy._coerce_batch_messages(message_text, batch_messages)
+    opt_out_in_batch = any(legacy.is_opt_out_message(msg) for msg in signal_messages)
+    booking_signal, _ = legacy._evaluate_booking_signal(
+        signal_messages,
+        client_slug=client_slug,
+        message_text=message_text,
+    )
+    context = legacy._get_conversation_context(conversation)
+    booking_active = bool(legacy._get_booking_context(context).get("active"))
+    reengage_confirmation = legacy._get_reengage_confirmation(context)
+
+    if reengage_confirmation and legacy._is_reengage_confirmation_active(reengage_confirmation, now):
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
+        conversation.no_count = 0
+        return None
+    if (booking_signal or booking_active) and not opt_out_in_batch:
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
+        conversation.no_count = 0
+        return None
+
+    legacy._record_decision_trace(
+        conversation,
+        {
+            "stage": "routing",
+            "decision": "muted_skip_after_debounce",
+            "state": conversation.state,
+            "booking_signal": booking_signal,
+            "booking_active": booking_active,
+            "opt_out_in_batch": opt_out_in_batch,
+        },
+    )
+    return WebhookResponse(
+        success=True,
+        message="Bot muted (after debounce), forwarded to topic"
+        if conversation.telegram_topic_id
+        else "Bot muted (after debounce)",
+        conversation_id=conversation.id,
+        bot_response=None,
+    )
 
 
 def _handle_opt_out_mute_gate(

@@ -8,7 +8,13 @@ from pydantic import ValidationError
 from app.routers.webhook.booking import _resolve_booking_settings
 from app.schemas.capabilities import CapabilitiesPayload
 from app.services import capabilities_runtime
-from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
+from app.services.capabilities_runtime import (
+    RuntimeCapabilities,
+    get_runtime_capabilities,
+    get_runtime_capabilities_override,
+    set_runtime_capabilities,
+    use_runtime_capabilities_override,
+)
 
 
 def test_build_runtime_capabilities_missing_client():
@@ -209,3 +215,39 @@ def test_capabilities_payload_rejects_hard_law_override_section():
                 }
             }
         )
+
+
+def test_build_runtime_capabilities_uses_override_for_matching_branch():
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload(),
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        source="override",
+        has_records=False,
+    )
+
+    with use_runtime_capabilities_override(runtime):
+        resolved = capabilities_runtime.build_runtime_capabilities(
+            db=Mock(),
+            client_id=runtime.client_id,
+            branch_id=runtime.branch_id,
+        )
+
+    assert resolved is runtime
+
+
+def test_use_runtime_capabilities_override_resets_context():
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload(),
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        source="override",
+        has_records=False,
+    )
+
+    with use_runtime_capabilities_override(runtime):
+        assert get_runtime_capabilities() is runtime
+        assert get_runtime_capabilities_override() is runtime
+
+    assert get_runtime_capabilities() is None
+    assert get_runtime_capabilities_override() is None

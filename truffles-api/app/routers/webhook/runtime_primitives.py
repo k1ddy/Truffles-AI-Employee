@@ -38,6 +38,8 @@ INFO_INTENTS = {
     "pricing",
     "hours",
     "duration",
+    "prep_brows_lashes",
+    "hygiene",
     "location",
     "parking",
     "promotions",
@@ -45,9 +47,34 @@ INFO_INTENTS = {
     "contact",
 }
 INFO_SERVICE_DEPENDENT_INTENTS = {"pricing", "duration"}
-INFO_NON_SERVICE_INTENTS = {"hours", "location", "parking", "promotions", "master", "contact"}
-INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours", "master")
-INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration", "master")
+INFO_NON_SERVICE_INTENTS = {
+    "hours",
+    "location",
+    "parking",
+    "promotions",
+    "prep_brows_lashes",
+    "hygiene",
+    "master",
+    "contact",
+}
+INFO_INTENT_PRIORITY_SERVICE = (
+    "pricing",
+    "duration",
+    "location",
+    "hours",
+    "prep_brows_lashes",
+    "hygiene",
+    "master",
+)
+INFO_INTENT_PRIORITY_GENERIC = (
+    "location",
+    "hours",
+    "pricing",
+    "duration",
+    "prep_brows_lashes",
+    "hygiene",
+    "master",
+)
 
 BOOKING_TIME_SERVICE_INTENTS = {
     "service_match",

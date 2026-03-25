@@ -8,6 +8,7 @@ from app.models import Client, ClientSettings, Conversation, User
 from app.models.branch import Branch
 from app.routers import webhook as webhook_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
+from app.services import handover_owner_service
 from app.services.result import Result
 from app.services.state_machine import ConversationState
 
@@ -158,6 +159,13 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         "error": "stubbed",
     }
 
+    def _reuse_active_handover(*, hooks, **_kwargs):
+        assert isinstance(
+            hooks,
+            handover_owner_service.ActiveHandoverReuseRuntimeHooks,
+        )
+        return None, True, False
+
     with patch(
         "app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED",
         False,
@@ -193,7 +201,7 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         return_value=(appointment_stub, dict(appointment_meta)),
     ) as create_booking, patch(
         "app.routers.webhook._legacy._reuse_active_handover",
-        return_value=(None, True, False),
+        side_effect=_reuse_active_handover,
     ), patch(
         "app.routers.webhook._legacy.route_dialogue_controller",
         return_value={"ok": False, "error": "skipped"},

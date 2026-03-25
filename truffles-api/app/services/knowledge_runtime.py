@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 from uuid import UUID
 
 from app.services.knowledge_registry_service import get_current_published
@@ -58,20 +59,31 @@ def should_allow_truth_fallback() -> bool:
     return _is_env_enabled(os.environ.get("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK"), default=False)
 
 
-def set_runtime_truth(runtime_truth: RuntimeTruth | None) -> None:
-    _RUNTIME_TRUTH.set(runtime_truth)
+def set_runtime_truth(runtime_truth: RuntimeTruth | None):
+    return _RUNTIME_TRUTH.set(runtime_truth)
 
 
 def get_runtime_truth() -> RuntimeTruth | None:
     return _RUNTIME_TRUTH.get()
 
 
-def set_runtime_truth_override(runtime_truth: RuntimeTruth | None) -> None:
-    _RUNTIME_TRUTH_OVERRIDE.set(runtime_truth)
+def set_runtime_truth_override(runtime_truth: RuntimeTruth | None):
+    return _RUNTIME_TRUTH_OVERRIDE.set(runtime_truth)
 
 
 def get_runtime_truth_override() -> RuntimeTruth | None:
     return _RUNTIME_TRUTH_OVERRIDE.get()
+
+
+@contextmanager
+def use_runtime_truth_override(runtime_truth: RuntimeTruth | None) -> Iterator[None]:
+    override_token = set_runtime_truth_override(runtime_truth)
+    runtime_token = set_runtime_truth(runtime_truth)
+    try:
+        yield
+    finally:
+        _RUNTIME_TRUTH.reset(runtime_token)
+        _RUNTIME_TRUTH_OVERRIDE.reset(override_token)
 
 
 def build_runtime_truth(
@@ -200,4 +212,5 @@ __all__ = [
     "set_runtime_truth",
     "set_runtime_truth_override",
     "should_allow_truth_fallback",
+    "use_runtime_truth_override",
 ]

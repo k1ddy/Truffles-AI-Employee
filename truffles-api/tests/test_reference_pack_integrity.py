@@ -59,3 +59,17 @@ def test_evaluate_reference_pack_integrity_fails_for_checksum_mismatch():
     )
 
     assert "reference_pack_required_fields_checksum" in issues
+
+
+def test_build_reference_pack_metadata_generic_uses_generic_contract():
+    metadata = build_reference_pack_metadata(domain_slug="generic")
+
+    issues = evaluate_reference_pack_integrity(
+        domain_slug="generic",
+        schema_version=REFERENCE_PACK_SCHEMA_VERSION,
+        metadata=metadata,
+    )
+
+    assert issues == []
+    assert "client_pack.booking.collect_fields" in metadata["integrity"]["required_fields"]
+    assert "client_pack.guest_policy" not in metadata["integrity"]["required_fields"]

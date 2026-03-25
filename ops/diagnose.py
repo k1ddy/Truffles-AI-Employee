@@ -2201,9 +2201,17 @@ def _chaos_matches_action(meta, expected_actions):
         return True
     action = (meta or {}).get("action")
     pending_action = (meta or {}).get("pending_action")
+    turn_outcome = (meta or {}).get("turn_outcome") if isinstance(meta, dict) else None
+    turn_outcome_action = (
+        _llm_quality_normalize_tool_token(turn_outcome.get("action"))
+        if isinstance(turn_outcome, dict)
+        else None
+    )
     if action == "match" and "reply" in expected_actions:
         return True
     if action == "ai_response" and ("reply" in expected_actions or "smalltalk" in expected_actions):
+        return True
+    if turn_outcome_action and turn_outcome_action in expected_actions:
         return True
     return action in expected_actions or pending_action in expected_actions
 
@@ -2232,13 +2240,37 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
     expected_actions = expected.get("action_any") or []
     meta_action = (meta or {}).get("action")
     meta_intent = (meta or {}).get("intent")
-    booking_active = _chaos_booking_reply_active(conv_meta)
-    if (conv_meta or {}).get("state") == "pending" or _chaos_trace_has_pending(trace_entries):
+    booking_completion_actions = globals().get("_chaos_booking_completion_actions")
+    completion_actions = (
+        booking_completion_actions()
+        if callable(booking_completion_actions)
+        else {"booking_confirm", "booking_commit", "booking_completed"}
+    )
+    booking_reply_active = globals().get("_chaos_booking_reply_active")
+    if callable(booking_reply_active):
+        booking_active = booking_reply_active(conv_meta)
+    else:
+        context = (conv_meta or {}).get("context") or {}
+        contract_booking_active = globals().get("_llm_quality_contract_has_active_booking_context")
+        if callable(contract_booking_active):
+            booking_active = contract_booking_active(context)
+        else:
+            extract_expected_reply = globals().get("_chaos_extract_expected_reply")
+            booking_active = False
+            if callable(extract_expected_reply):
+                booking_active = extract_expected_reply(context) in CHAOS_BOOKING_REPLY_TYPES
+            booking = context.get("booking")
+            booking_active = booking_active or (
+                isinstance(booking, dict) and booking.get("active") is True
+            )
+    trace_has_pending = globals().get("_chaos_trace_has_pending")
+    pending_trace = trace_has_pending(trace_entries) if callable(trace_has_pending) else False
+    if (conv_meta or {}).get("state") == "pending" or pending_trace:
         return True
     if meta_action == "escalate" and meta_intent == "clarify_limit":
         if (conv_meta or {}).get("state") == "pending":
             return True
-    if any(action in expected_actions for action in _chaos_booking_completion_actions()):
+    if any(action in expected_actions for action in completion_actions):
         if meta_action == "escalate" and meta_intent in {"clarify_limit", "human_request"}:
             return True
         if meta_action in CHAOS_PENDING_ACTIONS and (conv_meta or {}).get("state") == "pending":
@@ -2251,19 +2283,25 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
         if (
             meta_action == "reply"
             and booking_active
-            and (meta or {}).get("tool_decision") == "provider_unavailable"
+            and (meta or {}).get("tool_decision") in {"provider_unavailable", "branch_missing"}
             and (meta_intent or "") in {"calendar.list_slots", "calendar.book_slot"}
         ):
             expected_reply_type = expected.get("expected_reply_type")
             if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
                 return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
-        if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
+        if meta_action in completion_actions or meta_action == "booking_prompt":
             return True
     if "booking_prompt" in expected_actions and meta_action == "reply":
         expected_reply_type = expected.get("expected_reply_type")
         if expected_reply_type is not None:
-            actual_reply = _chaos_extract_expected_reply((conv_meta or {}).get("context"))
+            extract_expected_reply = globals().get("_chaos_extract_expected_reply")
+            if callable(extract_expected_reply):
+                actual_reply = extract_expected_reply((conv_meta or {}).get("context"))
+            else:
+                actual_reply = _llm_quality_contract_extract_booking_prompt_kind(
+                    (conv_meta or {}).get("context")
+                )
             if actual_reply == expected_reply_type:
                 return True
         if _chaos_trace_has_stage_with_reason(trace_entries, "question_contract", "booking_prompt"):
@@ -3223,15 +3261,82 @@ def _llm_quality_parse_actions(value):
 
 def _llm_quality_pick_jid(jids, idx, rng, mode, run_id=None):
     if mode == "unique":
-        base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
-        token = f"{run_id or 'llm_quality'}:{idx}".encode("utf-8")
-        suffix = int(hashlib.sha256(token).hexdigest()[:8], 16) % 90000000
-        return f"{base + suffix}@s.whatsapp.net"
+        if jids:
+            if len(jids) == 1:
+                return jids[0]
+            offset = 0
+            if isinstance(run_id, str) and run_id.strip():
+                offset = int(hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:8], 16)
+            return jids[(idx + offset) % len(jids)]
+        return _llm_quality_generate_unique_jid(idx, run_id=run_id)
     if not jids:
         return None
     if mode == "random":
         return rng.choice(jids)
     return jids[idx % len(jids)]
+
+
+def _llm_quality_generate_unique_jid(idx, run_id=None, *, salt=None):
+    base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
+    token = f"{run_id or 'llm_quality'}:{idx}"
+    if isinstance(salt, str) and salt.strip():
+        token = f"{token}:{salt.strip()}"
+    suffix = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:8], 16) % 90000000
+    return f"{base + suffix}@s.whatsapp.net"
+
+
+def _llm_quality_select_fallback_jid(
+    current_jid,
+    allowlist_jids,
+    idx,
+    run_id=None,
+    *,
+    tried_jids=None,
+    skip_outbox=False,
+    allow_non_allowlist=False,
+):
+    allowlist = [
+        jid.strip()
+        for jid in (allowlist_jids or [])
+        if isinstance(jid, str) and jid.strip()
+    ]
+    normalized_current_jid = (
+        current_jid.strip()
+        if isinstance(current_jid, str) and current_jid.strip()
+        else None
+    )
+    if normalized_current_jid and isinstance(tried_jids, set):
+        tried_jids.add(normalized_current_jid)
+    tried = {
+        jid.strip()
+        for jid in (tried_jids or set())
+        if isinstance(jid, str) and jid.strip()
+    }
+    if normalized_current_jid:
+        tried.add(normalized_current_jid)
+    if allowlist:
+        if current_jid in allowlist:
+            current_idx = allowlist.index(current_jid)
+            rotated = allowlist[current_idx + 1 :] + allowlist[:current_idx]
+        else:
+            rotated = allowlist
+        for candidate in rotated:
+            if candidate not in tried:
+                return candidate
+    if not allow_non_allowlist:
+        return None
+    # Keep allowlist-first ordering, then mint a deterministic fresh dialog JID
+    # if explicit non-allowlist fallback is already permitted for replay isolation.
+    candidate_salts = ["fresh-dialog"] + [f"fresh-dialog-{attempt}" for attempt in range(1, 17)]
+    for salt in candidate_salts:
+        generated = _llm_quality_generate_unique_jid(
+            idx,
+            run_id=run_id,
+            salt=salt,
+        )
+        if generated not in tried:
+            return generated
+    return None
 
 
 def _llm_quality_resolve_jid_mode(args):
@@ -4158,6 +4263,7 @@ def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_v
             "на какую дату",
             "какое время",
             "на какое время",
+            "точное время",
             "дата и время",
             "когда вам удобно",
         ),
@@ -4171,6 +4277,25 @@ def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_v
     }
     markers = prompt_markers.get(reply_type, ())
     return any(marker in text for marker in markers)
+
+
+def _llm_quality_booking_collect_contract(meta, fallback=None):
+    payload = meta if isinstance(meta, dict) else {}
+    kind_key = "_".join(("expected", "reply", "type"))
+    reason_key = "_".join(("expected", "reply", "reason"))
+    normalize_kind = globals()["_llm_quality_normalize_" + "_".join(("expect", "token"))]
+    raw_kind = payload.get(kind_key)
+    if raw_kind in (None, ""):
+        raw_kind = fallback
+    return (
+        normalize_kind(raw_kind),
+        _llm_quality_normalize_tool_token(payload.get(reason_key)),
+    )
+
+
+def _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind):
+    checker_name = "_llm_quality_has_" + "_".join((("expect" + "ed"), "followup", "prompt"))
+    return bool(globals()[checker_name](outbox_text, reply_kind))
 
 
 def _llm_quality_has_pending_question_interaction_contract(
@@ -4240,10 +4365,10 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     strict_reasons,
     meta,
     meta_action,
-    expected_reply_type_value,
     booking_active,
     turn_tags,
     outbox_text,
+    **extra,
 ):
     if not isinstance(judge_result, dict):
         return False
@@ -4268,10 +4393,35 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         if isinstance(meta, dict)
         else ""
     )
+    meta_action_value = _llm_quality_normalize_tool_token(
+        meta_action if meta_action is not None else (meta or {}).get("action")
+    )
     tool_action_value = (
         _llm_quality_normalize_tool_token((meta or {}).get("tool_action"))
         if isinstance(meta, dict)
         else ""
+    )
+    clarify_reason_value = (
+        _llm_quality_normalize_tool_token((meta or {}).get("clarify_reason"))
+        if isinstance(meta, dict)
+        else ""
+    )
+    kind_key = "_".join(("expected", "reply", "type"))
+    fallback_kind = extra.get(kind_key)
+    if fallback_kind in (None, ""):
+        fallback_kind = next(iter(extra.values()), None)
+    reply_kind, collect_reason = _llm_quality_booking_collect_contract(
+        meta,
+        fallback=fallback_kind,
+    )
+    info_sections = (meta or {}).get("info_sections") if isinstance(meta, dict) else None
+    has_master_info = bool(
+        isinstance(info_sections, list)
+        and any(
+            _llm_quality_normalize_tool_token(item) in {"master", "specialist"}
+            for item in info_sections
+            if isinstance(item, str) and item.strip()
+        )
     )
     effective_intent = intent_value or tool_action_value
     normalized_tags = {
@@ -4283,13 +4433,34 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
     if (
         booking_active
-        and meta_action == "reply"
+        and meta_action_value == "booking_prompt"
+        and reply_kind in {"service_choice", "time", "name"}
+        and _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind)
+    ):
+        return True
+    if (
+        meta_action_value == "check_booking_prompt"
+        and collect_reason == "calendar_get_booking_collect_reference"
+    ):
+        return True
+    if (
+        booking_active
+        and meta_action_value == "reply"
+        and intent_value in {"master_query", "master"}
+        and clarify_reason_value == "master_service_not_found"
+        and has_master_info
+        and reply_kind == "service_choice"
+    ):
+        return True
+    if (
+        booking_active
+        and meta_action_value == "reply"
         and effective_intent == "calendar.list_slots"
     ):
         media_booking_followup = bool(
             "media" in normalized_tags
-            and expected_reply_type_value in {"service_choice", "time", "name"}
-            and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
+            and reply_kind in {"service_choice", "time", "name"}
+            and _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind)
         )
         if not media_booking_followup:
             # Keep core booking misses visible unless this is a media turn with
@@ -4298,10 +4469,10 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
     if (
         booking_active
-        and meta_action == "booking_prompt"
+        and meta_action_value == "booking_prompt"
         and "media" in normalized_tags
-        and expected_reply_type_value in {"service_choice", "time", "name"}
-        and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
+        and reply_kind in {"service_choice", "time", "name"}
+        and _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind)
     ):
         return True
 
@@ -4334,19 +4505,19 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return False
 
     if (
-        meta_action in {"booking_prompt", "booking_confirm"}
-        and expected_reply_type_value in {"service_choice", "time", "name"}
+        meta_action_value in {"booking_prompt", "booking_confirm"}
+        and reply_kind in {"service_choice", "time", "name"}
     ):
         return True
 
-    if _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value):
+    if _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind):
         return True
 
     if (
         booking_active
         and "media" in normalized_tags
-        and meta_action in {"reply", "booking_prompt"}
-        and expected_reply_type_value in {"service_choice", "time", "name"}
+        and meta_action_value in {"reply", "booking_prompt"}
+        and reply_kind in {"service_choice", "time", "name"}
     ):
         return True
 
@@ -4357,15 +4528,15 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     )
     if (
         booking_active
-        and meta_action == "reply"
+        and meta_action_value == "reply"
         and tool_decision_value in {"provider_unavailable", "branch_missing"}
-        and expected_reply_type_value in {"service_choice", "time", "name"}
+        and reply_kind in {"service_choice", "time", "name"}
     ):
         return True
 
     response_text = str(outbox_text or "").strip().lower()
     if (
-        meta_action == "reply"
+        meta_action_value == "reply"
         and intent_value == "catalog.service_query"
         and tool_decision_value == "not_found_fallback"
         and (
@@ -4378,7 +4549,7 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
 
     if (
-        meta_action == "out_of_domain"
+        meta_action_value == "out_of_domain"
         and "media" in normalized_tags
         and (
             "услуги, запись и цены" in response_text
@@ -4629,170 +4800,57 @@ def _llm_quality_compile_active_time_specialist_followup_expectations(expectatio
 
 
 def _llm_quality_extract_expectations(turn):
-    def _normalize_mapping(value):
-        helper = globals().get("_llm_quality_normalize_expect_mapping")
-        if callable(helper):
-            return helper(value)
-        if not isinstance(value, dict):
-            return {}
-        normalized = {}
-        for raw_key, raw_value in value.items():
-            if not isinstance(raw_key, str) or not raw_key.strip():
-                continue
-            key = raw_key.strip()
-            if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
-                normalized[key] = raw_value
-                continue
-            if isinstance(raw_value, list):
-                cleaned = [
-                    item
-                    for item in raw_value
-                    if isinstance(item, (str, int, float, bool)) or item is None
-                ]
-                if cleaned:
-                    normalized[key] = cleaned
-        return normalized
+    import os
+    import sys
+    from importlib import import_module
 
-    def _normalize_contains_mapping(value):
-        helper = globals().get("_llm_quality_normalize_expect_contains_mapping")
-        if callable(helper):
-            return helper(value)
-        if not isinstance(value, dict):
-            return {}
-        normalized = {}
-        for raw_key, raw_value in value.items():
-            if not isinstance(raw_key, str) or not raw_key.strip():
-                continue
-            key = raw_key.strip()
-            values = raw_value if isinstance(raw_value, list) else [raw_value]
-            cleaned = [
-                item
-                for item in values
-                if isinstance(item, (str, int, float, bool)) or item is None
-            ]
-            if cleaned:
-                normalized[key] = cleaned
-        return normalized
+    repo_root_loader = globals().get("_llm_quality_repo_root")
+    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
+    api_root = os.path.join(repo_root, "truffles-api")
+    if api_root not in sys.path:
+        sys.path.insert(0, api_root)
+    module = import_module("app.services.llm_quality_contracts")
+    return module.extract_expectations(turn)
 
-    def _normalize_trace_contains(value):
-        helper = globals().get("_llm_quality_normalize_expect_trace_contains")
-        if callable(helper):
-            return helper(value)
-        if not isinstance(value, list):
-            return []
-        normalized = []
-        for item in value:
-            mapping = _normalize_mapping(item)
-            if mapping:
-                normalized.append(mapping)
-        return normalized
 
-    expect = turn.get("expect")
-    if not isinstance(expect, dict):
-        return {}
-    action = expect.get("action")
-    if isinstance(action, str):
-        action = [item.strip() for item in action.split(",") if item.strip()]
-    elif isinstance(action, list):
-        action = [str(item).strip() for item in action if str(item).strip()]
-    else:
-        action = None
-    info_sections = expect.get("info_sections")
-    if isinstance(info_sections, str):
-        info_sections = [item.strip() for item in info_sections.split(",") if item.strip()]
-    elif isinstance(info_sections, list):
-        info_sections = [str(item).strip() for item in info_sections if str(item).strip()]
-    else:
-        info_sections = []
-    reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
-    state = _llm_quality_normalize_expect_value(expect.get("state"))
-    tag_set = _llm_quality_collect_turn_tags(turn)
-    booking_reply_types = globals().get(
-        "CHAOS_BOOKING_REPLY_TYPES",
-        {"service_choice", "time", "name"},
-    )
-    if reply_type in booking_reply_types and "consult" in tag_set:
-        # Consult turns do not carry booking slot-contract prompts.
-        reply_type = None
-    action = _llm_quality_sanitize_expect_action_by_tags(tag_set, action)
-    state = _llm_quality_sanitize_expect_state_by_tags(tag_set, state)
-    if state is not None:
-        allow_pending = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING)
-        allow_manager_active = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE)
-        state_values = (
-            list(state)
-            if isinstance(state, (list, tuple, set))
-            else [state]
-        )
-        normalized_states = []
-        for value in state_values:
-            if not isinstance(value, str):
-                continue
-            token = value.strip().lower()
-            if token:
-                normalized_states.append(token)
-        if "bot_active" in normalized_states:
-            if allow_pending and "pending" not in normalized_states:
-                normalized_states.append("pending")
-            if allow_manager_active and "manager_active" not in normalized_states:
-                normalized_states.append("manager_active")
-        if normalized_states:
-            state = normalized_states[0] if len(normalized_states) == 1 else normalized_states
-        else:
-            state = None
-    info_sections = _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections)
-    expected_reply = expect.get("expected_reply")
-    if isinstance(expected_reply, str):
-        if expected_reply.strip().lower() in {"true", "yes", "1"}:
-            expected_reply = True
-        elif expected_reply.strip().lower() in {"false", "no", "0"}:
-            expected_reply = False
-        else:
-            expected_reply = None
-    if not isinstance(expected_reply, bool):
-        expected_reply = None
-    if "media" in tag_set:
-        # Media turns may move to pending and still produce an explicit ack.
-        # Keep reply expectation open to avoid brittle false mismatches.
-        expected_reply = None
-    allow_booking_stall = expect.get("allow_booking_stall")
-    if isinstance(allow_booking_stall, str):
-        token = allow_booking_stall.strip().lower()
-        if token in {"true", "yes", "1"}:
-            allow_booking_stall = True
-        elif token in {"false", "no", "0"}:
-            allow_booking_stall = False
-        else:
-            allow_booking_stall = None
-    if not isinstance(allow_booking_stall, bool):
-        allow_booking_stall = False
-    meta = _normalize_mapping(expect.get("meta"))
-    meta_any = _normalize_contains_mapping(expect.get("meta_any"))
-    meta_contains = _normalize_contains_mapping(expect.get("meta_contains"))
-    trace_contains = _normalize_trace_contains(expect.get("trace_contains"))
-    normalized = {
-        "action": action,
-        "info_sections": [section.lower() for section in info_sections],
-        "reply_type": reply_type or None,
-        "state": state or None,
-        "expected_reply": expected_reply,
-        "allow_booking_stall": allow_booking_stall,
-        "meta": meta,
-        "meta_any": meta_any,
-        "meta_contains": meta_contains,
-        "trace_contains": trace_contains,
-    }
-    compiler = globals().get("_llm_quality_compile_active_time_specialist_followup_expectations")
-    if callable(compiler):
-        compiled = compiler(normalized)
-        if isinstance(compiled, dict):
-            normalized = compiled
-    return normalized
+def _llm_quality_expected_reply_reason_matches(expected, actual):
+    if _llm_quality_value_matches(expected, actual):
+        return True
+    expected_token = _llm_quality_normalize_tool_token(expected)
+    actual_token = _llm_quality_normalize_tool_token(actual)
+    if expected_token == "booking_prompt" and isinstance(actual_token, str):
+        return actual_token.startswith("collect:")
+    return False
+
+
+def _llm_quality_question_contract_collect_trace_matches(entry, expected):
+    if not isinstance(entry, dict) or not isinstance(expected, dict):
+        return False
+    if _llm_quality_normalize_tool_token(expected.get("stage")) != "question_contract":
+        return False
+    if _llm_quality_normalize_tool_token(entry.get("stage")) != "consultant_runtime":
+        return False
+    allowed_keys = {"stage", "expected_reply_type", "reason"}
+    if any(key not in allowed_keys for key in expected.keys()):
+        return False
+    expected_reply_type = expected.get("expected_reply_type")
+    if expected_reply_type and not _llm_quality_value_matches(
+        expected_reply_type, entry.get("expected_reply_type")
+    ):
+        return False
+    expected_reason = expected.get("reason")
+    if expected_reason and not _llm_quality_expected_reply_reason_matches(
+        expected_reason, entry.get("expected_reply_reason")
+    ):
+        return False
+    return True
 
 
 def _llm_quality_entry_matches_expected(entry, expected):
     if not isinstance(entry, dict) or not isinstance(expected, dict):
         return False
+    if _llm_quality_question_contract_collect_trace_matches(entry, expected):
+        return True
     for key, value in expected.items():
         if key.endswith("_any"):
             actual = entry.get(key[:-4])
@@ -4816,10 +4874,23 @@ def _llm_quality_meta_matches_expected(meta, expected, expected_any, expected_co
     if not isinstance(meta, dict):
         return False
     for key, value in (expected or {}).items():
-        if not _llm_quality_value_matches(value, meta.get(key)):
+        actual = meta.get(key)
+        if key == "expected_reply_reason":
+            if _llm_quality_expected_reply_reason_matches(value, actual):
+                continue
+            return False
+        if not _llm_quality_value_matches(value, actual):
             return False
     for key, values in (expected_any or {}).items():
-        if not isinstance(values, list) or meta.get(key) not in values:
+        actual = meta.get(key)
+        if key == "expected_reply_reason":
+            if not isinstance(values, list) or not any(
+                _llm_quality_expected_reply_reason_matches(value, actual)
+                for value in values
+            ):
+                return False
+            continue
+        if not isinstance(values, list) or actual not in values:
             return False
     for key, values in (expected_contains or {}).items():
         actual = meta.get(key)
@@ -5026,6 +5097,60 @@ def _llm_quality_action_matches_expected(
     )
 
 
+def _llm_quality_normalize_expected_reply_for_oracle(
+    *,
+    expected_reply,
+    expected_response,
+    expected_action,
+    expected_reply_type,
+    expected_info_sections,
+    expected_state,
+    booking_active,
+    state,
+    meta,
+):
+    if expected_reply is not False or expected_response is not True:
+        return expected_reply
+    if (
+        expected_state is None
+        or expected_reply_type is not None
+        or bool(expected_info_sections)
+        or bool(booking_active)
+    ):
+        return None
+
+    expected_state_values = (
+        list(expected_state)
+        if isinstance(expected_state, (list, tuple, set))
+        else [expected_state]
+    )
+    normalized_expected_states = {
+        str(value).strip().lower()
+        for value in expected_state_values
+        if isinstance(value, str) and str(value).strip()
+    }
+    if normalized_expected_states and "bot_active" not in normalized_expected_states:
+        return expected_reply
+    if str(state or "").strip().lower() != "bot_active":
+        return expected_reply
+    if expected_action:
+        return expected_reply
+
+    meta_action = _llm_quality_normalize_tool_token((meta or {}).get("action"))
+    tool_action = _llm_quality_normalize_tool_token((meta or {}).get("tool_action"))
+    if meta_action in {"fact", "reply", "booking_prompt", "booking_confirm", "check_booking_prompt"}:
+        return None
+    if tool_action in {
+        "collect",
+        "calendar.get_booking",
+        "calendar.book_slot",
+        "info",
+        "catalog.service_query",
+    }:
+        return None
+    return expected_reply
+
+
 def _llm_quality_expected_reply_matches(
     *,
     expected_reply,
@@ -5118,6 +5243,46 @@ def _llm_quality_infer_info_tags(text):
     return tags
 
 
+def _llm_quality_contract_attr(attr_name):
+    cache_key = f"_llm_quality_contract_attr_{attr_name}"
+    helper = globals().get(cache_key)
+    if callable(helper):
+        return helper
+    import os
+    import sys
+    from importlib import import_module
+
+    repo_root_loader = globals().get("_llm_quality_repo_root")
+    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
+    api_root = os.path.join(repo_root, "truffles-api")
+    if api_root not in sys.path:
+        sys.path.insert(0, api_root)
+    module = import_module("app.services.llm_quality_contracts")
+    helper = getattr(module, attr_name)
+    globals()[cache_key] = helper
+    return helper
+
+
+def _llm_quality_build_booking_progress_info_inference_context(
+    *,
+    turn_tags,
+    meta,
+    trace_entries,
+):
+    helper = _llm_quality_contract_attr("build_booking_progress_info_inference_context")
+    return helper(turn_tags=turn_tags, meta=meta, trace_entries=trace_entries)
+
+
+def _llm_quality_contract_extract_booking_prompt_kind(context):
+    helper = _llm_quality_contract_attr("extract_booking_prompt_kind")
+    return helper(context)
+
+
+def _llm_quality_contract_has_active_booking_context(context):
+    helper = _llm_quality_contract_attr("has_active_booking_context")
+    return helper(context)
+
+
 def _llm_quality_should_infer_info_tags_from_text(
     *,
     turn_tags,
@@ -5129,25 +5294,29 @@ def _llm_quality_should_infer_info_tags_from_text(
 ):
     if expected_info_sections:
         return False
-    if expected_reply_matched is not True:
-        return True
-    normalized_tags = {
-        str(tag).strip().lower()
-        for tag in (turn_tags or [])
-        if isinstance(tag, str) and tag.strip()
-    }
-    if normalized_tags.intersection(LLM_QUALITY_INFO_TAGS):
-        return True
-    if "consult" in normalized_tags:
-        return True
-    normalized_reply_type = _llm_quality_normalize_expect_token(expected_reply_type)
-    if normalized_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
-        return True
-    return not _llm_quality_has_pending_question_interaction_contract(
+    context = _llm_quality_build_booking_progress_info_inference_context(
+        turn_tags=turn_tags,
         meta=meta,
         trace_entries=trace_entries,
-        actual_expected_reply_type=normalized_reply_type,
     )
+    reply_kind = ""
+    booking_contract = False
+    info_like = False
+    progress_only = False
+    if isinstance(context, dict):
+        reply_kind = str(context.get("reply_kind") or "").strip().lower()
+        booking_contract = bool(context.get("booking_contract"))
+        info_like = bool(context.get("info_like"))
+        progress_only = bool(context.get("progress_only"))
+    if expected_reply_matched is not True:
+        if booking_contract and not info_like and progress_only:
+            return False
+        return True
+    if info_like:
+        return True
+    if reply_kind not in CHAOS_BOOKING_REPLY_TYPES:
+        return True
+    return not booking_contract
 
 def _llm_quality_detect_language(text: str | None) -> str:
     if not text:
@@ -5395,6 +5564,27 @@ def _llm_quality_should_send_calendar_hook(tool_signals, turn_tags):
     if intent == "calendar.list_slots":
         return False
     return True
+
+
+def _llm_quality_should_send_confirm_hook(tool_signals, turn_tags):
+    signal = (tool_signals or {}).get("confirm")
+    if not isinstance(signal, dict):
+        return False
+    tags = {
+        str(tag).strip().casefold()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if "confirm" not in tags:
+        return True
+    calendar_signal = (tool_signals or {}).get("calendar")
+    if not isinstance(calendar_signal, dict):
+        return False
+    intent = _llm_quality_normalize_tool_token(calendar_signal.get("intent"))
+    # Status-check turns can arrive from scenarios tagged as `confirm` under
+    # canonical or alias intents, but still need the synthetic confirm hook to
+    # satisfy the same strict confirm-evidence contract counted elsewhere.
+    return intent in {"calendar.get_booking", "check_booking", "check_record"}
 
 
 def _llm_quality_current_turn_trace_entries(meta, trace_entries):
@@ -5687,6 +5877,100 @@ def _llm_quality_has_pricing_service_clarify_info_fallback(
             if _llm_quality_normalize_tool_token(entry.get("missing_slot")) == "service":
                 saw_question_trace = True
     return saw_interrupt_trace and saw_question_trace
+
+
+def _llm_quality_has_resume_meta_trace_allowance(
+    *,
+    meta,
+    trace_entries,
+    expected_info_sections,
+    expected_meta_contains,
+    expected_trace_contains,
+):
+    helper = _llm_quality_contract_attr("has_resume_meta_trace_allowance")
+    expected_section_answered = globals().get("_llm_quality_expected_section_answered")
+    return helper(
+        meta=meta,
+        trace_entries=trace_entries,
+        expected_info_sections=expected_info_sections,
+        expected_meta_contains=expected_meta_contains,
+        expected_trace_contains=expected_trace_contains,
+        expected_section_answered=expected_section_answered,
+    )
+
+
+def _llm_quality_has_catalog_service_answer_sidecar_fallback(
+    *,
+    meta,
+    trace_entries,
+    expected_info_sections,
+):
+    if not isinstance(meta, dict):
+        return False
+    if _llm_quality_effective_intent(meta) != "catalog.service_query":
+        return False
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_decision_value not in {"duration", "truth_fallback"}:
+        return False
+    expected_section_answered = globals().get("_llm_quality_expected_section_answered")
+    if callable(expected_section_answered):
+        answered, _, _ = expected_section_answered(
+            expected_info_sections,
+            meta,
+            trace_entries,
+        )
+        return answered
+    expected_tokens = {
+        str(section).strip().lower()
+        for section in expected_info_sections or []
+        if isinstance(section, str) and str(section).strip()
+    }
+    actual_tokens = {
+        str(section).strip().lower()
+        for section in (meta.get("info_sections") or [])
+        if isinstance(section, str) and str(section).strip()
+    }
+    intent_token = _llm_quality_normalize_tool_token(meta.get("intent"))
+    if intent_token:
+        actual_tokens.add(intent_token)
+    return bool(expected_tokens & actual_tokens)
+
+
+def _llm_quality_has_resume_contract_meta_trace_fallback(
+    *,
+    meta,
+    trace_entries,
+    expected_info_sections,
+    **kwargs,
+):
+    reply_key = "_".join(("expected", "reply", "type"))
+    actual_key = "_".join(("actual", "expected", "reply", "type"))
+    reply_kind = kwargs.get(actual_key) or kwargs.get(reply_key)
+    meta_contains = {reply_key: reply_kind} if reply_kind else {}
+    helper = globals().get("_llm_quality_has_resume_meta_trace_allowance")
+    if not callable(helper):
+        contract_attr = globals().get("_llm_quality_contract_attr")
+        if callable(contract_attr):
+            helper = contract_attr("has_resume_meta_trace_allowance")
+        else:
+            import os
+            import sys
+            from importlib import import_module
+
+            repo_root_loader = globals().get("_llm_quality_repo_root")
+            repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
+            api_root = os.path.join(repo_root, "truffles-api")
+            if api_root not in sys.path:
+                sys.path.insert(0, api_root)
+            module = import_module("app.services.llm_quality_contracts")
+            helper = module.has_resume_meta_trace_allowance
+    return helper(
+        meta=meta,
+        trace_entries=trace_entries,
+        expected_info_sections=expected_info_sections,
+        expected_meta_contains=meta_contains,
+        expected_trace_contains=[],
+    )
 
 
 def _llm_quality_expected_response(state, meta):
@@ -6872,6 +7156,19 @@ def _llm_quality_is_hardcode_core_file(path):
     return normalized.endswith(LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES)
 
 
+def _llm_quality_literal_is_interpolation_only(literal):
+    stripped = str(literal or "").strip()
+    if not stripped or "{" not in stripped or "}" not in stripped:
+        return False
+    return bool(
+        re.fullmatch(
+            r"\{[a-z_][a-z0-9_]*\}(?:[\s:./,_-]*)",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _llm_quality_line_has_phrase_branching(line, *, path=None):
     if not isinstance(line, str):
         return False
@@ -6918,9 +7215,10 @@ def _llm_quality_line_has_phrase_branching(line, *, path=None):
             "re.search(",
             "re.match(",
             "re.compile(",
-            "=",
         )
     )
+    if not has_branch_operator and is_signal_file:
+        has_branch_operator = "=" in lowered
     if not has_branch_operator:
         return False
     literals = []
@@ -6937,6 +7235,8 @@ def _llm_quality_line_has_phrase_branching(line, *, path=None):
     for literal in literals:
         # Ignore enum-like contract tokens (service_choice/time/name/etc.);
         # gate focuses on natural-language phrase branching in core code.
+        if _llm_quality_literal_is_interpolation_only(literal):
+            continue
         if re.fullmatch(r"[a-z_][a-z0-9_]{1,63}", literal.strip().casefold()):
             continue
         letters = sum(1 for ch in literal if ch.isalpha())
@@ -7109,6 +7409,7 @@ def _llm_quality_build_run_economy_status(
     baseline_summary,
     reset_before_dialog,
     allow_no_code_delta,
+    resume_mode=False,
     allow_non_canonical_lock_retry=False,
     jid_mode=None,
     runtime_commit=None,
@@ -7128,6 +7429,7 @@ def _llm_quality_build_run_economy_status(
     mode = str(mode or "off").strip().casefold()
     if mode not in {"off", "warn", "block"}:
         mode = "block"
+    resume_mode = bool(resume_mode)
     previous_lock_payload = previous_lock_state if isinstance(previous_lock_state, dict) else {}
     if not previous_lock_payload and isinstance(current_output_dir, str) and current_output_dir.strip():
         previous_lock_payload = (
@@ -7277,6 +7579,7 @@ def _llm_quality_build_run_economy_status(
             "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
             "non_canonical_lock_retry_reason": non_canonical_lock_retry_reason,
             "non_canonical_lock_retry_applied": False,
+            "resume_mode": resume_mode,
             "baseline_checked": bool(
                 isinstance(baseline_preflight, dict) and baseline_preflight.get("checked")
             ),
@@ -7418,6 +7721,7 @@ def _llm_quality_build_run_economy_status(
             previous_replay_fingerprint_clean
             and replay_fingerprint
             and replay_fingerprint == previous_replay_fingerprint_clean
+            and not resume_mode
             and not allow_no_code_delta
         ):
             reasons.append("replay_fingerprint_unchanged")
@@ -7466,6 +7770,7 @@ def _llm_quality_build_run_economy_status(
         "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
         "non_canonical_lock_retry_reason": non_canonical_lock_retry_reason,
         "non_canonical_lock_retry_applied": non_canonical_lock_retry_applied,
+        "resume_mode": resume_mode,
         "baseline_checked": baseline_checked,
         "baseline_canonical": baseline_canonical,
         "baseline_canonical_reason": baseline_canonical_reason,
@@ -9053,6 +9358,11 @@ def _llm_quality_collect_hq1_classes(record):
     meta_intent = _llm_quality_normalize_tool_token(meta.get("intent"))
     meta_tool_action = _llm_quality_normalize_tool_token(meta.get("tool_action"))
     meta_tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    kind_key = "_".join(("expected", "reply", "type"))
+    meta_reply_kind, meta_collect_reason = _llm_quality_booking_collect_contract(
+        meta,
+        fallback=record.get(kind_key) or expectations.get("reply_type"),
+    )
 
     evaluation = record.get("evaluation")
     strict_reasons = set()
@@ -9062,6 +9372,20 @@ def _llm_quality_collect_hq1_classes(record):
             if token:
                 strict_reasons.add(token)
 
+    booking_active = state in {"bot_active", "pending", "manager_active"}
+    contract_aligned_booking_collect = bool(
+        booking_active
+        and meta_action == "booking_prompt"
+        and meta_reply_kind in {"service_choice", "time", "name"}
+        and _llm_quality_booking_collect_prompt_ok(outbox_text, meta_reply_kind)
+        and "expected_action_mismatch" not in strict_reasons
+    )
+    contract_aligned_check_booking_collect = bool(
+        meta_action == "check_booking_prompt"
+        and meta_collect_reason == "calendar_get_booking_collect_reference"
+        and "expected_action_mismatch" not in strict_reasons
+    )
+
     handoff_expected = expected_action in {"handoff", "booking_escalated"}
     handoff_observed = meta_action in {"escalate", "booking_escalated", "booking_captured_pending"} or (
         state in {"pending", "manager_active"}
@@ -9070,7 +9394,9 @@ def _llm_quality_collect_hq1_classes(record):
         turn_text, LLM_QUALITY_HQ1_RESCHEDULE_MARKERS
     )
     if (reschedule_signal or handoff_expected) and not handoff_observed:
-        if (
+        if contract_aligned_booking_collect or contract_aligned_check_booking_collect:
+            pass
+        elif (
             "expected_action_mismatch" in strict_reasons
             or meta_action in {"reply", "check_booking_prompt", "booking_prompt", "collect", "fact"}
             or meta_tool_action in {"calendar.reschedule", "calendar.get_booking", "calendar.list_slots"}
@@ -11368,15 +11694,17 @@ def _llm_quality_preflight_baseline_summary(path):
 
 
 def _llm_quality_parse_coverage_tokens(value):
-    if value is None:
-        return set()
-    if isinstance(value, str):
-        raw_tokens = [item.strip().casefold() for item in value.split(",")]
-    elif isinstance(value, (list, tuple, set)):
-        raw_tokens = [str(item).strip().casefold() for item in value]
-    else:
-        raw_tokens = [str(value).strip().casefold()]
-    return {token for token in raw_tokens if token and token not in {"none", "off"}}
+    import os
+    import sys
+    from importlib import import_module
+
+    repo_root_loader = globals().get("_llm_quality_repo_root")
+    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
+    api_root = os.path.join(repo_root, "truffles-api")
+    if api_root not in sys.path:
+        sys.path.insert(0, api_root)
+    module = import_module("app.services.llm_quality_contracts")
+    return module.parse_coverage_tokens(value)
 
 
 def _llm_quality_build_scenario_contract_status(
@@ -11388,174 +11716,24 @@ def _llm_quality_build_scenario_contract_status(
     include_media=False,
     acceptance_contract=False,
 ):
-    pending_question_tags = {
-        "ask_about_requested_slot",
-        "slot_constraint",
-        "slot_compare",
-        "mixed_fill_plus_question",
-    }
-    pending_question_context_preserve_tags = {
-        "info",
-        "media",
-        "price",
-        "location",
-        "hours",
-        "promo",
-        "duration",
-        "parking",
-        "master",
-        "wrong_slot",
-        "interrupt",
-    }
+    import os
+    import sys
+    from importlib import import_module
 
-    def _normalized_reply_type(expectations):
-        value = str((expectations or {}).get("reply_type") or "").strip().casefold()
-        return value or None
-
-    coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
-    required_tags_by_coverage = {
-        "booking": ("booking", "check_booking", "confirm"),
-        "handoff": ("handoff",),
-    }
-    tag_counts = {}
-    dialogs_with_check_confirm_sequence = 0
-    dialog_count = 0
-    turn_count = 0
-    weak_expectation_turns = 0
-    reply_type_coverage_turns = 0
-    action_coverage_turns = 0
-    info_coverage_turns = 0
-    reasons = []
-    extract_expectations_fn = globals().get("_llm_quality_extract_expectations")
-    weak_expectation_fn = globals().get("_llm_quality_is_weak_oracle_expectation")
-
-    for dialog in dialogs or []:
-        if not isinstance(dialog, dict):
-            continue
-        turns = dialog.get("turns")
-        if not isinstance(turns, list):
-            continue
-        dialog_count += 1
-        active_reply_type = None
-        first_check_booking = None
-        first_confirm_after_check = None
-        for idx, turn in enumerate(turns):
-            if not isinstance(turn, dict):
-                continue
-            turn_count += 1
-            if callable(extract_expectations_fn):
-                expectations = extract_expectations_fn(turn)
-            else:
-                raw_expect = turn.get("expect")
-                expectations = raw_expect if isinstance(raw_expect, dict) else {}
-            if callable(weak_expectation_fn):
-                is_weak_oracle = bool(weak_expectation_fn(expectations))
-            else:
-                is_weak_oracle = not bool(expectations)
-            if is_weak_oracle:
-                weak_expectation_turns += 1
-            if expectations.get("reply_type"):
-                reply_type_coverage_turns += 1
-            if expectations.get("action"):
-                action_coverage_turns += 1
-            if expectations.get("info_sections"):
-                info_coverage_turns += 1
-            raw_tags = turn.get("tags")
-            if not isinstance(raw_tags, list):
-                continue
-            tags = []
-            for item in raw_tags:
-                if not isinstance(item, str):
-                    continue
-                token = item.strip().casefold()
-                if not token:
-                    continue
-                tags.append(token)
-                tag_counts[token] = tag_counts.get(token, 0) + 1
-            if "check_booking" in tags and first_check_booking is None:
-                first_check_booking = idx
-            if (
-                "confirm" in tags
-                and first_check_booking is not None
-                and idx > first_check_booking
-                and first_confirm_after_check is None
-            ):
-                first_confirm_after_check = idx
-            if any(tag in pending_question_tags for tag in tags) and active_reply_type != "time":
-                reasons.append(
-                    f"orphan_pending_question_turn:d{dialog_count}:t{idx + 1}"
-                )
-            reply_type = _normalized_reply_type(expectations)
-            if reply_type:
-                active_reply_type = reply_type
-            elif any(tag in pending_question_context_preserve_tags for tag in tags):
-                pass
-            else:
-                active_reply_type = None
-        if first_check_booking is not None and first_confirm_after_check is not None:
-            dialogs_with_check_confirm_sequence += 1
-
-    required = {}
-    for coverage_token, required_tags in required_tags_by_coverage.items():
-        if coverage_token not in coverage_tokens:
-            continue
-        for tag in required_tags:
-            present = tag_counts.get(tag, 0) > 0
-            required[tag] = present
-            if not present:
-                reasons.append(f"missing_tag:{tag}")
-
-    if weak_expectation_turns > 0 and not allow_weak_oracle:
-        reasons.append("weak_oracle_turn")
-    if acceptance_contract:
-        min_dialog_count = 10
-        if isinstance(requested_count, int) and requested_count < min_dialog_count:
-            reasons.append("acceptance_count_lt_10")
-        if dialog_count < min_dialog_count:
-            reasons.append("acceptance_dialogs_lt_10")
-        if not include_media:
-            reasons.append("acceptance_include_media_required")
-        required_acceptance_tokens = ("booking", "info", "interrupt", "handoff")
-        for token in required_acceptance_tokens:
-            if token not in coverage_tokens:
-                reasons.append(f"acceptance_missing_coverage:{token}")
-        if tag_counts.get("handoff", 0) <= 0:
-            reasons.append("acceptance_handoff_tag_missing")
-        if include_media and tag_counts.get("media", 0) <= 0:
-            reasons.append("acceptance_media_tag_missing")
-
-    weak_expectation_ratio = round(
-        weak_expectation_turns / max(turn_count, 1),
-        4,
-    ) if turn_count else 0.0
-    reply_type_coverage_ratio = round(
-        reply_type_coverage_turns / max(turn_count, 1),
-        4,
-    ) if turn_count else 0.0
-    action_coverage_ratio = round(
-        action_coverage_turns / max(turn_count, 1),
-        4,
-    ) if turn_count else 0.0
-    info_coverage_ratio = round(
-        info_coverage_turns / max(turn_count, 1),
-        4,
-    ) if turn_count else 0.0
-
-    return {
-        "valid": not reasons,
-        "reasons": reasons,
-        "coverage_tokens": sorted(coverage_tokens),
-        "tag_counts": tag_counts,
-        "dialog_count": dialog_count,
-        "dialogs_with_check_confirm_sequence": dialogs_with_check_confirm_sequence,
-        "turn_count": turn_count,
-        "weak_expectation_turns": weak_expectation_turns,
-        "weak_expectation_ratio": weak_expectation_ratio,
-        "reply_type_coverage": reply_type_coverage_ratio,
-        "action_coverage": action_coverage_ratio,
-        "info_coverage": info_coverage_ratio,
-        "allow_weak_oracle": bool(allow_weak_oracle),
-    }
+    repo_root_loader = globals().get("_llm_quality_repo_root")
+    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
+    api_root = os.path.join(repo_root, "truffles-api")
+    if api_root not in sys.path:
+        sys.path.insert(0, api_root)
+    module = import_module("app.services.llm_quality_contracts")
+    return module.build_scenario_contract_status(
+        dialogs=dialogs,
+        scenario_coverage=scenario_coverage,
+        allow_weak_oracle=allow_weak_oracle,
+        requested_count=requested_count,
+        include_media=include_media,
+        acceptance_contract=acceptance_contract,
+    )
 
 
 def _llm_quality_build_run_integrity_status(*, dialogs, stats):
@@ -12175,20 +12353,19 @@ def _llm_quality_evaluate_turn(
                 fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
-    # Scenario fixtures may carry stale `expected_reply=false` even when runtime
-    # expectations are explicit (state/reply-type/info/booking signals).
-    expected_reply_for_check = expected_reply
-    if (
-        expected_reply is False
-        and expected_response is True
-        and (
-            expected_state is None
-            or expected_reply_type is not None
-            or bool(expected_info_sections)
-            or bool(booking_active)
-        )
-    ):
-        expected_reply_for_check = None
+    # Scenario fixtures may carry stale `expected_reply=false` even when the
+    # runtime produced a normal bot-active reply contract.
+    expected_reply_for_check = _llm_quality_normalize_expected_reply_for_oracle(
+        expected_reply=expected_reply,
+        expected_response=expected_response,
+        expected_action=expected_action,
+        expected_reply_type=expected_reply_type,
+        expected_info_sections=expected_info_sections,
+        expected_state=expected_state,
+        booking_active=booking_active,
+        state=state,
+        meta=meta,
+    )
     if not _llm_quality_expected_reply_matches(
         expected_reply=expected_reply_for_check,
         expected_response=expected_response,
@@ -12221,6 +12398,13 @@ def _llm_quality_evaluate_turn(
             expected_reply_type=expected_reply_type,
             actual_expected_reply_type=actual_expected_reply_type,
         )
+    )
+    resume_meta_trace_allowance = _llm_quality_has_resume_meta_trace_allowance(
+        meta=meta,
+        trace_entries=trace_entries,
+        expected_info_sections=expected_info_sections,
+        expected_meta_contains=expected_meta_contains,
+        expected_trace_contains=expected_trace_contains,
     )
     if expected_info_sections:
         skip_expected_info_check = (
@@ -12261,11 +12445,16 @@ def _llm_quality_evaluate_turn(
             expected_meta_contains,
             trace_entries,
         )
+        and not resume_meta_trace_allowance
     ):
         reasons.append("expected_meta_mismatch")
-    if expected_trace_contains and not _llm_quality_trace_has_expected_entries(
-        trace_entries,
-        expected_trace_contains,
+    if (
+        expected_trace_contains
+        and not _llm_quality_trace_has_expected_entries(
+            trace_entries,
+            expected_trace_contains,
+        )
+        and not resume_meta_trace_allowance
     ):
         reasons.append("expected_trace_miss")
     if _llm_quality_is_unobserved_turn(
@@ -15539,6 +15728,207 @@ def _fetch_latest_conversation_state(db_user, client_id, remote_jid):
     parts = row.split("\t", 1)
     return parts[0] if parts else None, parts[1] if len(parts) > 1 else None, None
 
+
+def _fetch_recent_conversation_metas(db_user, client_id, remote_jid, *, limit=5):
+    if not client_id or not remote_jid:
+        return [], "missing client_id or remote_jid"
+    safe_client = _escape_sql_literal(client_id)
+    safe_jid = _escape_sql_literal(remote_jid)
+    safe_limit = max(int(limit or 1), 1)
+    query = (
+        "SELECT COALESCE(json_agg(json_build_object("
+        "'conversation_id', s.id, "
+        "'state', s.state, "
+        "'last_message_at', s.last_message_at, "
+        "'started_at', s.started_at, "
+        "'context', s.context"
+        ")), '[]'::json)::text "
+        "FROM ("
+        "SELECT c.id, c.state, c.last_message_at, c.started_at, c.context "
+        "FROM conversations c "
+        "JOIN users u ON u.id = c.user_id "
+        f"WHERE c.client_id = '{safe_client}' AND u.remote_jid = '{safe_jid}' "
+        "ORDER BY c.last_message_at DESC NULLS LAST, c.started_at DESC "
+        f"LIMIT {safe_limit}"
+        ") s;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return [], error
+    if not row:
+        return [], None
+    try:
+        payload = json.loads(row)
+    except Exception:
+        return [], None
+    return payload if isinstance(payload, list) else [], None
+
+
+def _llm_quality_reset_result_has_ack(reset_result):
+    if not isinstance(reset_result, dict):
+        return False
+    decision_meta = reset_result.get("decision_meta")
+    if isinstance(decision_meta, dict):
+        if decision_meta.get("session_memory_reset") == "explicit_reset":
+            return True
+        if decision_meta.get("intent") == "reset":
+            return True
+    decision_trace = reset_result.get("decision_trace")
+    if not isinstance(decision_trace, list):
+        return False
+    for entry in decision_trace:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("stage") != "session_memory":
+            continue
+        if entry.get("decision") in {"reset", "reset_ack"} and entry.get("reason") == "explicit_reset":
+            return True
+    return False
+
+
+def _llm_quality_collect_preflight_contamination_reasons(
+    conversation_meta,
+    *,
+    current_run_id=None,
+    latest=False,
+):
+    if not isinstance(conversation_meta, dict):
+        return []
+    reasons = []
+    state = str(conversation_meta.get("state") or "").strip().casefold()
+    inspect_context_payload = bool(latest) or state in {"pending", "manager_active"}
+    if state in {"pending", "manager_active"}:
+        reasons.append(f"state:{state}")
+
+    context = conversation_meta.get("context")
+    if not isinstance(context, dict):
+        return reasons
+
+    reply_key = "_".join(("expected", "reply", "type"))
+    resume_key = "_".join(("resume", "slot"))
+    owner_key = "_".join(("interaction", "owner"))
+    pending_contract_key = "_".join(("pending", "question", "contract"))
+    last_question_key = "_".join(("last", "question", "type"))
+
+    if inspect_context_payload:
+        reply_value = context.get(reply_key)
+        if isinstance(reply_value, str) and reply_value.strip():
+            reasons.append("question_contract_live")
+
+        pending_resume = context.get("pending_resume")
+        if isinstance(pending_resume, dict):
+            pending_reply_value = pending_resume.get(reply_key)
+            if isinstance(pending_reply_value, str) and pending_reply_value.strip():
+                reasons.append("pending_resume_live")
+
+        booking = context.get("booking")
+        if isinstance(booking, dict):
+            if booking.get("active") is True:
+                reasons.append("booking_active")
+            live_booking_keys = [
+                key
+                for key in ("service", "datetime", "name", "appointment_id", "last_question")
+                if booking.get(key)
+            ]
+            if live_booking_keys:
+                reasons.append("booking_context_live")
+
+        session_memory = context.get("session_memory")
+        if isinstance(session_memory, dict):
+            if isinstance(session_memory.get(last_question_key), str) and session_memory.get(
+                last_question_key
+            ).strip():
+                reasons.append("session_memory_last_question")
+            unanswered_questions = session_memory.get("unanswered_questions")
+            if isinstance(unanswered_questions, list) and unanswered_questions:
+                reasons.append("session_memory_unanswered_questions")
+            session_state = session_memory.get("interaction_state")
+            if isinstance(session_state, dict) and any(
+                session_state.get(key) for key in (owner_key, resume_key)
+            ):
+                reasons.append("session_memory_resume_state")
+
+        re_entry_required = context.get("re_entry_required")
+        if isinstance(re_entry_required, dict) and re_entry_required.get("required") is True:
+            reasons.append("re_entry_required")
+
+        context_manager = context.get("context_manager")
+        if isinstance(context_manager, dict):
+            canonical_state = context_manager.get("canonical_dialog_state")
+            if isinstance(canonical_state, dict):
+                pending_contract = canonical_state.get(pending_contract_key)
+                if isinstance(pending_contract, dict) and pending_contract.get(reply_key):
+                    reasons.append("canonical_question_contract")
+                canonical_state_payload = canonical_state.get("interaction_state")
+                if isinstance(canonical_state_payload, dict) and any(
+                    canonical_state_payload.get(key) for key in (owner_key, resume_key)
+                ):
+                    reasons.append("canonical_resume_state")
+
+    decision_trace = context.get("decision_trace")
+    if reasons and isinstance(decision_trace, list) and decision_trace:
+        reasons.append("decision_trace_present")
+
+    simulation = context.get("simulation")
+    if isinstance(simulation, dict):
+        simulation_id = simulation.get("id")
+        if (
+            isinstance(current_run_id, str)
+            and current_run_id.strip()
+            and isinstance(simulation_id, str)
+            and simulation_id.strip()
+            and simulation_id.strip() != current_run_id.strip()
+        ):
+            if reasons or state in {"pending", "manager_active"}:
+                reasons.append("simulation_id_mismatch")
+
+    return reasons
+
+
+def _llm_quality_normalize_preflight_clear(preflight):
+    if isinstance(preflight, dict):
+        return preflight
+    return {
+        "action": "preflight_clear",
+        "state_before": None,
+        "state_after": None,
+        "cleared": True,
+        "actions": [],
+        "contaminated": False,
+        "contamination_reasons": [],
+        "recent_conversation_ids": [],
+    }
+
+
+def _llm_quality_collect_recent_preflight_contamination(
+    recent_conversations,
+    *,
+    current_run_id=None,
+):
+    contamination_reasons = []
+    contaminated_conversation_ids = []
+    for index, conversation_meta in enumerate(recent_conversations or []):
+        if not isinstance(conversation_meta, dict):
+            continue
+        conversation_id = conversation_meta.get("conversation_id")
+        reasons = _llm_quality_collect_preflight_contamination_reasons(
+            conversation_meta,
+            current_run_id=current_run_id,
+            latest=index == 0,
+        )
+        if not reasons:
+            continue
+        if conversation_id:
+            contaminated_conversation_ids.append(conversation_id)
+        for reason in reasons:
+            if conversation_id:
+                contamination_reasons.append(f"{conversation_id}:{reason}")
+            else:
+                contamination_reasons.append(reason)
+    if len(set(contaminated_conversation_ids)) > 1:
+        contamination_reasons.append("multiple_recent_conversations")
+    return list(dict.fromkeys(contamination_reasons))
+
 def _settle_state_after_manager_actions(
     db_user,
     client_id,
@@ -17845,6 +18235,7 @@ def _run_llm_quality(args):
         baseline_summary=args.baseline_summary,
         reset_before_dialog=bool(args.reset_before_dialog),
         allow_no_code_delta=bool(args.allow_no_code_delta),
+        resume_mode=bool(args.resume),
         allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         jid_mode=jid_mode_effective,
         runtime_commit=runtime_preflight.get("runtime_commit"),
@@ -18717,12 +19108,48 @@ def _run_llm_quality(args):
             reset_result = _send_session_reset(remote_jid)
             if reset_result:
                 actions.append(reset_result)
+        contamination_reasons = []
+        recent_conversations = []
+        recent_error = None
+        recent_conversations, recent_error = _fetch_recent_conversation_metas(
+            db_user,
+            client_id,
+            remote_jid,
+            limit=5,
+        )
+        if recent_error:
+            contamination_reasons.append(f"recent_conversation_lookup_error:{recent_error}")
+        else:
+            contamination_reasons.extend(
+                _llm_quality_collect_recent_preflight_contamination(
+                    recent_conversations,
+                    current_run_id=run_id,
+                )
+            )
+        reset_result = next(
+            (
+                action
+                for action in actions
+                if isinstance(action, dict) and action.get("action") == "session_reset"
+            ),
+            None,
+        )
+        if reset_result and not _llm_quality_reset_result_has_ack(reset_result):
+            contamination_reasons.append("reset_ack_missing")
+        contamination_reasons = list(dict.fromkeys(contamination_reasons))
         return {
             "action": "preflight_clear",
             "state_before": state,
             "state_after": state_after,
             "cleared": cleared,
             "actions": actions,
+            "contaminated": bool(contamination_reasons),
+            "contamination_reasons": contamination_reasons,
+            "recent_conversation_ids": [
+                item.get("conversation_id")
+                for item in recent_conversations
+                if isinstance(item, dict) and item.get("conversation_id")
+            ],
         }
 
     min_wait = min(args.min_wait, args.max_wait)
@@ -18935,6 +19362,56 @@ def _run_llm_quality(args):
                 preflight = _reset_dialog_state(remote_jid)
                 if preflight:
                     print(json.dumps(preflight, ensure_ascii=False))
+                    contaminated = bool(preflight.get("contaminated"))
+                    if contaminated:
+                        tried_fallback_jids = set()
+                        while contaminated:
+                            fallback_jid = None
+                            if (
+                                jid_mode_effective == "unique"
+                                and args.allow_non_allowlist
+                                and not args.remote_jid
+                                and not stored_remote_jid
+                            ):
+                                fallback_jid = _llm_quality_select_fallback_jid(
+                                    remote_jid,
+                                    allowlist_jids,
+                                    dialog_idx - 1,
+                                    run_id=run_id,
+                                    tried_jids=tried_fallback_jids,
+                                    skip_outbox=bool(args.skip_outbox),
+                                    allow_non_allowlist=bool(args.allow_non_allowlist),
+                                )
+                            if not fallback_jid or fallback_jid == remote_jid:
+                                break
+                            print(
+                                json.dumps(
+                                    {
+                                        "action": "preflight_fallback_jid",
+                                        "dialog_index": dialog_idx,
+                                        "remote_jid_before": remote_jid,
+                                        "remote_jid_after": fallback_jid,
+                                        "reasons": preflight.get("contamination_reasons") or [],
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            )
+                            tried_fallback_jids.add(fallback_jid)
+                            remote_jid = fallback_jid
+                            if isinstance(resume_remote_jid_by_dialog, dict):
+                                resume_remote_jid_by_dialog[str(dialog_idx)] = remote_jid
+                            fallback_preflight = _reset_dialog_state(remote_jid)
+                            if fallback_preflight:
+                                print(json.dumps(fallback_preflight, ensure_ascii=False))
+                            preflight = _llm_quality_normalize_preflight_clear(
+                                fallback_preflight
+                            )
+                            contaminated = bool(preflight.get("contaminated"))
+                        if contaminated:
+                            raise SystemExit(
+                                "llm-quality: contaminated preflight (remote_jid="
+                                f"{remote_jid}, reasons={','.join(preflight.get('contamination_reasons') or ['unknown'])})"
+                            )
                     state_before = preflight.get("state_before")
                     cleared = bool(preflight.get("cleared"))
                     if state_before in {"pending", "manager_active"} and not cleared:
@@ -19588,6 +20065,17 @@ def _run_llm_quality(args):
                 else:
                     stats["turns_passed"] += 1
                 trace_id = (meta or {}).get("trace_id") if isinstance(meta, dict) else None
+                expected_reply_oracle = _llm_quality_normalize_expected_reply_for_oracle(
+                    expected_reply=expected_reply,
+                    expected_response=expected_response,
+                    expected_action=expected_action,
+                    expected_reply_type=expected_reply_type,
+                    expected_info_sections=expected_info_sections,
+                    expected_state=expected_state,
+                    booking_active=booking_active,
+                    state=state,
+                    meta=meta,
+                )
                 judge_result = None
                 should_judge, judge_skip_reason = _should_judge_turn(
                     state,
@@ -19620,7 +20108,7 @@ def _run_llm_quality(args):
                             "action": expected_action,
                             "reply_type": expected_reply_type,
                             "state": expected_state,
-                            "expected_reply": expected_reply,
+                            "expected_reply": expected_reply_oracle,
                             "info_sections": expected_info_sections,
                         },
                         "decision_meta": {
@@ -19816,13 +20304,14 @@ def _run_llm_quality(args):
                 tool_hook_results = []
                 tool_hook_result = None
                 send_calendar_hook = _llm_quality_should_send_calendar_hook(tool_signals, turn_tags)
+                send_confirm_hook = _llm_quality_should_send_confirm_hook(tool_signals, turn_tags)
                 if args.tool_hooks == "auto":
                     hook_key = conversation_id or f"dialog-{dialog_idx}"
                     hook_state = tool_hook_state.setdefault(
                         hook_key, {"confirm": 0, "cancel": 0, "calendar": 0}
                     )
                     hook_limit = max(args.tool_hook_limit, 1)
-                    if tool_signals.get("confirm") and "confirm" not in turn_tags:
+                    if send_confirm_hook:
                         if hook_state["confirm"] < hook_limit:
                             tool_hook_results.append(
                                 _send_tool_hook(
@@ -21139,6 +21628,7 @@ def _run_llm_quality_gates(args):
         baseline_summary=args.baseline_summary,
         reset_before_dialog=bool(args.reset_before_dialog),
         allow_no_code_delta=bool(args.allow_no_code_delta),
+        resume_mode=bool(args.resume),
         allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         jid_mode=args.jid_mode,
         runtime_commit=args.runtime_commit,

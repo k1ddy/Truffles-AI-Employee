@@ -20,6 +20,13 @@ SOURCES OF TRUTH (owner docs; read in this order)
 If any path is unclear: locate the canonical file via `STRUCTURE.md`.  
 If conflict exists, follow owner docs. Do NOT invent new norms here.
 
+EXECUTION STRATEGY LOCK (read before choosing a block)
+- Generated packet is mandatory context: `docs/_generated/AGENT_PACKET.md` and `docs/_generated/AGENT_PACKET.json`.
+- Treat `Execution Strategy Lock` in the packet as binding, not advisory.
+- Do NOT count new bridge growth as progress.
+- Prefer owner replacement over new hotspot seams.
+- If a candidate block cannot delete or bypass an old authority seam, choose a different block.
+
 ---
 
 PRODUCT CONTRACT (do not debate; enforce)
@@ -35,8 +42,8 @@ SESSION RITUAL (every session)
 Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public IP matches `TECH.md` — you're already on prod, no SSH. Quick check: `hostname; whoami; pwd; curl -s https://ifconfig.me`.
 Set `SESSION_AGENT` once per agent (e.g., `a1`, `a2`, `a3`). Session IDs must end with `-<agent>`.
 If context compaction happens: run `scripts/session_resume.sh --agent $SESSION_AGENT` and continue in that worktree. Do NOT start a new session; `session_start` blocks when any session is still open for the same agent.
-1) Read `STATE.md` NOW (1 screen) and pick ONE issue; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
-2) Produce a Task Package BEFORE session start. If Task Package is missing/ambiguous: STOP and write the missing pieces.
+1) Read `STATE.md` NOW (1 screen) and pick ONE failure family; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
+2) Produce a Task Package BEFORE session start. If the family boundary is still unclear, open a `forensic` Task Package first; do not create a new TP per surfaced turn. If Task Package is missing/ambiguous: STOP and write the missing pieces.
    - Do NOT run `scripts/session_start.sh` until the Task Package is ready.
 3) Create session log + worktree: `scripts/session_start.sh --session-id YYYY-MM-DD-<slug>-<agent> --task-package docs/TASK_PACKAGES/TP-....md`, then `scripts/install_hooks.sh`; run `scripts/session_check.sh` before commit/push. Doc-only changes push directly to `main` (fast-forward), no PR.
    - `session_start` must pass sync gate (`local main == origin/main`) and duplicate block gate (no active session with same `BLOCK_ID` when TP defines it).
@@ -45,11 +52,12 @@ If context compaction happens: run `scripts/session_resume.sh --agent $SESSION_A
   - Research-gate modes in session metadata are `required|optional|off`; new sessions default to `required` for `research/root_cause/reuse/release_safety/context_integrity`.
 4) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
 5) Before first code change in the block, run FACT pre-check against live code/contracts/tests and capture baseline evidence in report (`Input baseline (FACT)` + commands/results).
-6) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
-7) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
-8) Close doc/code drift in the same block (or record explicit GAP owner/follow-up) and include this in report.
+6) Work by mode: `forensic` maps the family, `implementation` lands the bounded fix, `closure` proves it. Do not collapse all three into one turn-by-turn churn loop.
+7) Implement with family-first flow: smallest bounded change that satisfies the invariant + DoD.
+8) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
+9) Close doc/code drift in the same block (or record explicit GAP owner/follow-up) and include this in report.
    - `Task Package` must include `Residual architecture debt (mandatory)` and `Next-block contract (mandatory)` with explicit follow-up TP IDs.
-9) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
+10) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
 
 ---
 
@@ -104,6 +112,7 @@ C) Task Package (required fields):
    - Touch-list (files/tables)
    - Plan (1..N)
    - DoD
+   - Work mode (`forensic|implementation|closure`)
    - Checks (commands)
    - Evidence plan (what will be captured + запись в `STATE.md` до merge при изменениях поведения/core)
    - Residual architecture debt (mandatory)

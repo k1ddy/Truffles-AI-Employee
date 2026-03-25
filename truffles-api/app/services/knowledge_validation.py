@@ -71,12 +71,14 @@ _LANGUAGE_ALIASES = {"kz": "kk"}
 _DOMAIN_DEFAULT_BOOKING_REQUIRED = {
     "beauty": True,
     "clinic": True,
+    "generic": True,
     "legal": False,
     "ecom": False,
 }
 _DOMAIN_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "beauty": _BEAUTY_REQUIRED_FIELDS,
     "clinic": _BEAUTY_REQUIRED_FIELDS,
+    "generic": (),
     "legal": (),
     "ecom": (),
 }

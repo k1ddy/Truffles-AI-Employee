@@ -17,8 +17,8 @@ Prerequisites
 
 LLM-quality start here (mandatory for new agents)
 1. Entry points
-   - `acceptance`: only `scripts/llm_quality_guarded.sh` (it injects chain token and enforces order).
-   - `dev`: prefer `scripts/llm_quality_guarded.sh`; direct `python3 ops/diagnose.py llm-quality` is allowed only for forensic/dev lane and never as acceptance evidence.
+   - `acceptance`: only `scripts/llm_quality_guarded.sh` (it injects chain token and enforces order). This lane is for closure evidence, not discovery.
+   - `dev/forensic`: prefer `scripts/llm_quality_guarded.sh --forensic-override-reason "..."` when you need to continue discovery after a non-canonical/pending artifact; direct `python3 ops/diagnose.py llm-quality` is allowed only for low-level forensic/dev lane probes and never as acceptance evidence.
 2. Source of process truth
    - Lane model and gates: section `Quality Operating Model v2 (mandatory for all future runs)` in this file.
    - Acceptance chain operations: section `Guarded llm-quality quickstart (single entrypoint)` in this file.
@@ -54,6 +54,30 @@ Tool map (quick reference)
 | `scripts/quality_chain_controller.sh` | Step orchestration (`prepare/finalize/status/abort/rollback/close`) | Running quality itself |
 | `python3 ops/diagnose.py llm-quality` | Low-level engine (invoked by wrapper) | Manual acceptance launch without chain token |
 | `python3 ops/diagnose.py llm-quality-audit` | Mandatory post-run manual audit artifact | Replacing contract evidence with judge text |
+
+Work modes (residual debugging)
+- `forensic`: map one failure family, continue on audited non-canonical artifacts only with explicit reason, never update baseline.
+- `implementation`: land the bounded family fix and close deterministic regressions first.
+- `closure`: run guarded acceptance replay/full only after the family fix is in place.
+- One surfaced turn does not automatically mean a new Task Package; first decide whether it is still the same family.
+
+Forensic guarded example
+```bash
+scripts/llm_quality_guarded.sh \
+  --mode replay \
+  --run-id booking-replay-forensic-<id> \
+  --forensic-override-reason "map adjacent failures inside the same family after audited non-canonical replay" \
+  -- \
+  --base-url http://127.0.0.1:18186 \
+  --client-slug demo_salon \
+  --scenarios-file /tmp/booking_quality/<lock>/scenarios.json \
+  --baseline-summary /tmp/booking_quality/<lock>/summary.json \
+  --count 10 \
+  --tool-hooks auto \
+  --reset-before-dialog \
+  --jid-mode unique \
+  --quality-lane dev
+```
 
 Quickstart (script)
 ```bash
@@ -180,6 +204,7 @@ Purpose
 Important
 - Commands in this section can be used for forensic/dev workflows.
 - For acceptance evidence, use only `scripts/llm_quality_guarded.sh` flow from section `Guarded llm-quality quickstart (single entrypoint)`.
+- If you use `--forensic-override-reason`, the resulting run stays discovery-only and cannot count as baseline or closure evidence.
 
 When to use
 - After any booking-related changes (packs, routing, booking slots, expected_reply_type).
@@ -618,6 +643,7 @@ Guarded llm-quality quickstart (single entrypoint)
    - `scripts/llm_quality_guarded.sh --mode <lock|replay|canary|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
 9. Why a run can be blocked by guard
    - Previous run in same mode is `incomplete/invalid/failed`.
+   - Exception: a fresh `lock` may continue to `ops/diagnose.py` when the latest prior `lock` is still non-canonical but already has `manual_audit=done` and valid artifacts; the run-economy gate then arbitrates whether the new lock is admissible.
    - Previous run has `manual_audit != done`.
    - Forensic SLA invalid (`manual_audit` missing analyst/timestamp/root-cause/next-step/oracle arbitration contract).
    - Oracle conflict unresolved (judge-vs-contract conflict without `winner=contract` and resolution).

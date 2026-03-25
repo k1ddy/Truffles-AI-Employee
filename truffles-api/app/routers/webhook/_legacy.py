@@ -33,6 +33,18 @@ from app.routers.webhook.runtime_primitives import (
     ConversationState,
 )
 from app.services.chatflow_service import send_bot_response
+from app.services.handover_owner_service import (
+    _create_pending_escalation_with_notification as _handover_owner_create_pending_escalation_with_notification,
+    _reuse_active_handover as _handover_owner_reuse_active_handover,
+    escalate_to_pending as _handover_owner_escalate_to_pending,
+    get_active_handover as _handover_owner_get_active_handover,
+    manager_reassign as _handover_owner_manager_reassign,
+    manager_reopen as _handover_owner_manager_reopen,
+    manager_resolve as _handover_owner_manager_resolve,
+    manager_return as _handover_owner_manager_return,
+    manager_take as _handover_owner_manager_take,
+    resolve_active_handover_rejection as _handover_owner_resolve_active_handover_rejection,
+)
 
 from . import decision as _decision
 
@@ -71,6 +83,23 @@ for _name, _value in _decision.__dict__.items():
     if _name.startswith("__") or _name in _SHARED_EXPORTS:
         continue
     globals()[_name] = _value
+
+globals().update(
+    {
+        "get_active_handover": _handover_owner_get_active_handover,
+        "_reuse_active_handover": _handover_owner_reuse_active_handover,
+        "_create_pending_escalation_with_notification": (
+            _handover_owner_create_pending_escalation_with_notification
+        ),
+        "escalate_to_pending": _handover_owner_escalate_to_pending,
+        "manager_take": _handover_owner_manager_take,
+        "manager_reassign": _handover_owner_manager_reassign,
+        "manager_resolve": _handover_owner_manager_resolve,
+        "manager_return": _handover_owner_manager_return,
+        "manager_reopen": _handover_owner_manager_reopen,
+        "resolve_active_handover_rejection": _handover_owner_resolve_active_handover_rejection,
+    }
+)
 
 del _decision
 del _SHARED_EXPORTS

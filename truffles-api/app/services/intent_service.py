@@ -3,9 +3,11 @@ import math
 import os
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Tuple
+from typing import Any, Iterable, Iterator, Tuple
 
 import httpx
 
@@ -30,6 +32,22 @@ from app.services.ai_service import (
 )
 
 logger = get_logger("intent_service")
+_INTENT_SEMANTIC_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
+    "intent_semantic_override",
+    default=None,
+)
+_DOMAIN_ROUTING_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
+    "domain_routing_override",
+    default=None,
+)
+_DIALOGUE_CONTROLLER_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
+    "dialogue_controller_override",
+    default=None,
+)
+_POLICY_CORE_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
+    "policy_core_override",
+    default=None,
+)
 
 
 def _log_timing(
@@ -333,15 +351,29 @@ def _resolve_policy_core_micro_timeout_seconds(timing_context: dict | None) -> f
 
 
 def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
+    return _resolve_policy_core_max_tokens_with_cap(timeout_seconds, None)
+
+
+def _resolve_policy_core_max_tokens_with_cap(
+    timeout_seconds: float,
+    max_tokens_override: int | None,
+) -> int:
+    max_tokens_cap = POLICY_CORE_MAX_TOKENS
+    if max_tokens_override is not None:
+        try:
+            max_tokens_cap = int(max_tokens_override)
+        except (TypeError, ValueError):
+            max_tokens_cap = POLICY_CORE_MAX_TOKENS
+    max_tokens_cap = max(1, min(POLICY_CORE_MAX_TOKENS, max_tokens_cap))
     if timeout_seconds <= 0:
-        return min(POLICY_CORE_MAX_TOKENS, 120)
+        return min(max_tokens_cap, 120)
     if timeout_seconds < 1.4:
-        return min(POLICY_CORE_MAX_TOKENS, 120)
+        return min(max_tokens_cap, 120)
     if timeout_seconds < 2.2:
-        return min(POLICY_CORE_MAX_TOKENS, 160)
+        return min(max_tokens_cap, 160)
     if timeout_seconds < 3.0:
-        return min(POLICY_CORE_MAX_TOKENS, 200)
-    return POLICY_CORE_MAX_TOKENS
+        return min(max_tokens_cap, 200)
+    return max_tokens_cap
 
 
 def _policy_core_structured_output_enabled() -> bool:
@@ -1681,6 +1713,9 @@ FRUSTRATION_PATTERNS = (
 
 
 def is_human_request_message(message: str) -> bool:
+    override_value = _resolve_intent_override_flag(message, "is_human_request")
+    if override_value is not None:
+        return override_value
     normalized = normalize_for_matching(message)
     if not normalized:
         return False
@@ -1688,6 +1723,9 @@ def is_human_request_message(message: str) -> bool:
 
 
 def is_opt_out_message(message: str) -> bool:
+    override_value = _resolve_intent_override_flag(message, "is_opt_out")
+    if override_value is not None:
+        return override_value
     normalized = normalize_for_matching(message)
     if not normalized:
         return False
@@ -1697,6 +1735,9 @@ def is_opt_out_message(message: str) -> bool:
 
 
 def is_frustration_message(message: str) -> bool:
+    override_value = _resolve_intent_override_flag(message, "is_frustration")
+    if override_value is not None:
+        return override_value
     normalized = normalize_for_matching(message)
     if not normalized:
         return False
@@ -1706,6 +1747,10 @@ def is_frustration_message(message: str) -> bool:
 def classify_intent(message: str, *, timing_context: dict | None = None) -> Intent:
     """Classify user message intent using LLM."""
     try:
+        override_intent = _resolve_override_intent(message)
+        if override_intent is not None:
+            return override_intent
+
         if is_opt_out_message(message):
             return Intent.REJECTION
 
@@ -1784,6 +1829,284 @@ def classify_intent(message: str, *, timing_context: dict | None = None) -> Inte
         return Intent.OTHER
 
 
+def get_intent_semantic_override() -> dict[str, object] | None:
+    override = _INTENT_SEMANTIC_OVERRIDE.get()
+    if not isinstance(override, dict):
+        return None
+    return dict(override)
+
+
+@contextmanager
+def use_intent_semantic_override(override: dict[str, object] | None) -> Iterator[None]:
+    if not isinstance(override, dict):
+        yield
+        return
+
+    token = _INTENT_SEMANTIC_OVERRIDE.set(dict(override))
+    try:
+        yield
+    finally:
+        _INTENT_SEMANTIC_OVERRIDE.reset(token)
+
+
+def _resolve_intent_semantic_override(message: str | None) -> dict[str, object] | None:
+    override = _INTENT_SEMANTIC_OVERRIDE.get()
+    if not isinstance(override, dict):
+        return None
+    normalized = normalize_for_matching(message)
+    override_text = override.get("normalized_text")
+    if not isinstance(override_text, str) or override_text != normalized:
+        return None
+    return override
+
+
+def _resolve_intent_override_flag(message: str | None, field: str) -> bool | None:
+    override = _resolve_intent_semantic_override(message)
+    if override is None:
+        return None
+    value = override.get(field)
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _resolve_override_intent(message: str | None) -> Intent | None:
+    override = _resolve_intent_semantic_override(message)
+    if override is None:
+        return None
+    token = override.get("intent")
+    if not isinstance(token, str):
+        return None
+    try:
+        return Intent(token)
+    except ValueError:
+        return None
+
+
+def get_domain_routing_override() -> dict[str, object] | None:
+    override = _DOMAIN_ROUTING_OVERRIDE.get()
+    if not isinstance(override, dict):
+        return None
+    return dict(override)
+
+
+@contextmanager
+def use_domain_routing_override(override: dict[str, object] | None) -> Iterator[None]:
+    if not isinstance(override, dict):
+        yield
+        return
+
+    token = _DOMAIN_ROUTING_OVERRIDE.set(dict(override))
+    try:
+        yield
+    finally:
+        _DOMAIN_ROUTING_OVERRIDE.reset(token)
+
+
+def _resolve_domain_routing_override(text: str | None) -> tuple[DomainIntent, float, float, dict] | None:
+    override = _DOMAIN_ROUTING_OVERRIDE.get()
+    if not isinstance(override, dict):
+        return None
+    normalized = _normalize_text(text or "")
+    override_text = override.get("normalized_text")
+    if not isinstance(override_text, str) or override_text != normalized:
+        return None
+    raw_domain_intent = override.get("domain_intent")
+    if not isinstance(raw_domain_intent, str):
+        return None
+    try:
+        domain_intent = DomainIntent(raw_domain_intent)
+    except ValueError:
+        return None
+    in_score = override.get("in_score")
+    out_score = override.get("out_score")
+    meta = override.get("meta")
+    return (
+        domain_intent,
+        float(in_score) if isinstance(in_score, (int, float)) else 0.0,
+        float(out_score) if isinstance(out_score, (int, float)) else 0.0,
+        dict(meta) if isinstance(meta, dict) else {},
+    )
+
+
+def _copy_dialogue_controller_override(
+    override: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if not isinstance(override, dict):
+        return None
+    copied = dict(override)
+    for list_key in ("intents", "followups", "safety_flags"):
+        raw_value = copied.get(list_key)
+        if isinstance(raw_value, list):
+            copied[list_key] = list(raw_value)
+    raw_slots = copied.get("slots")
+    if isinstance(raw_slots, dict):
+        copied["slots"] = dict(raw_slots)
+    raw_carryover = copied.get("carryover")
+    if isinstance(raw_carryover, dict):
+        copied["carryover"] = dict(raw_carryover)
+    return copied
+
+
+def get_dialogue_controller_override() -> dict[str, object] | None:
+    return _copy_dialogue_controller_override(_DIALOGUE_CONTROLLER_OVERRIDE.get())
+
+
+@contextmanager
+def use_dialogue_controller_override(override: dict[str, object] | None) -> Iterator[None]:
+    copied = _copy_dialogue_controller_override(override)
+    if copied is None:
+        yield
+        return
+
+    token = _DIALOGUE_CONTROLLER_OVERRIDE.set(copied)
+    try:
+        yield
+    finally:
+        _DIALOGUE_CONTROLLER_OVERRIDE.reset(token)
+
+
+def _resolve_dialogue_controller_override(message: str | None) -> dict[str, object] | None:
+    override = _copy_dialogue_controller_override(_DIALOGUE_CONTROLLER_OVERRIDE.get())
+    if override is None:
+        return None
+    normalized = normalize_for_matching(message)
+    override_text = override.get("normalized_text")
+    if not isinstance(override_text, str) or override_text != normalized:
+        return None
+
+    controller_class = _clean_controller_class(override.get("class"))
+    if controller_class is None:
+        return None
+    goal = _clean_controller_goal(override.get("goal")) or controller_class
+    if goal not in CONTROLLER_ALLOWED_GOALS:
+        return None
+
+    intents = _clean_controller_intents(override.get("intents"))
+    if not intents:
+        intents = [controller_class]
+    slots = dict(override.get("slots") or {}) if isinstance(override.get("slots"), dict) else {}
+    slots["service_query"] = _clean_controller_service_query(slots.get("service_query"))
+    followups = _clean_controller_followups(override.get("followups"))
+    safety_flags = _clean_controller_safety_flags(override.get("safety_flags"))
+    confidence = override.get("confidence")
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(confidence, 1.0))
+    reason = override.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+
+    resolved = {
+        "normalized_text": normalized,
+        "class": controller_class,
+        "goal": goal,
+        "intents": intents,
+        "slots": slots,
+        "followups": followups,
+        "safety_flags": safety_flags,
+        "confidence": confidence,
+        "reason": reason,
+    }
+    carryover = override.get("carryover")
+    if isinstance(carryover, dict):
+        resolved["carryover"] = dict(carryover)
+    return resolved
+
+
+def _copy_policy_core_override(
+    override: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if not isinstance(override, dict):
+        return None
+    copied = dict(override)
+    for list_key in ("pack_refs", "open_questions", "risk_signals"):
+        raw_value = copied.get(list_key)
+        if isinstance(raw_value, list):
+            copied[list_key] = list(raw_value)
+    raw_entity_refs = copied.get("entity_refs")
+    if isinstance(raw_entity_refs, list):
+        copied["entity_refs"] = [
+            dict(item) if isinstance(item, dict) else item for item in raw_entity_refs
+        ]
+    for dict_key in ("tool_args", "slots"):
+        raw_value = copied.get(dict_key)
+        if isinstance(raw_value, dict):
+            copied[dict_key] = dict(raw_value)
+    return copied
+
+
+def get_policy_core_override() -> dict[str, object] | None:
+    return _copy_policy_core_override(_POLICY_CORE_OVERRIDE.get())
+
+
+@contextmanager
+def use_policy_core_override(override: dict[str, object] | None) -> Iterator[None]:
+    copied = _copy_policy_core_override(override)
+    if copied is None:
+        yield
+        return
+
+    token = _POLICY_CORE_OVERRIDE.set(copied)
+    try:
+        yield
+    finally:
+        _POLICY_CORE_OVERRIDE.reset(token)
+
+
+def _resolve_policy_core_override(message: str | None) -> dict[str, Any] | None:
+    override = _copy_policy_core_override(_POLICY_CORE_OVERRIDE.get())
+    if override is None:
+        return None
+
+    normalized = normalize_for_matching(message)
+    override_text = override.get("normalized_text")
+    if not isinstance(override_text, str) or override_text != normalized:
+        return None
+
+    candidate = {
+        "intent": override.get("intent"),
+        "action": override.get("action"),
+        "tool_action": override.get("tool_action"),
+        "tool_args": dict(override.get("tool_args") or {})
+        if isinstance(override.get("tool_args"), dict)
+        else {},
+        "pack_refs": list(override.get("pack_refs") or [])
+        if isinstance(override.get("pack_refs"), list)
+        else [],
+        "slots": dict(override.get("slots") or {}) if isinstance(override.get("slots"), dict) else {},
+        "next_question": override.get("next_question"),
+        "open_questions": list(override.get("open_questions") or [])
+        if isinstance(override.get("open_questions"), list)
+        else [],
+        "needs_manager": bool(override.get("needs_manager")),
+        "risk_signals": list(override.get("risk_signals") or [])
+        if isinstance(override.get("risk_signals"), list)
+        else [],
+        "confidence": override.get("confidence"),
+        "reason": override.get("reason"),
+        "goal": override.get("goal"),
+        "entity_refs": list(override.get("entity_refs") or [])
+        if isinstance(override.get("entity_refs"), list)
+        else [],
+        "subject_kind": override.get("subject_kind"),
+        "capability": override.get("capability"),
+        "temporal_scope": override.get("temporal_scope"),
+        "resolution_mode": override.get("resolution_mode"),
+        "pending_question_act": override.get("pending_question_act"),
+        "pending_question_target": override.get("pending_question_target"),
+        "active_question_relation": override.get("active_question_relation"),
+        "resolver_id": override.get("resolver_id"),
+        "resolver_version": override.get("resolver_version"),
+    }
+    contract, schema_error = validate_llm_policy_core_output(candidate)
+    if schema_error:
+        return None
+    return contract.model_dump()
+
+
 def route_dialogue_controller(
     message: str,
     *,
@@ -1853,6 +2176,27 @@ def route_dialogue_controller(
     if not normalized:
         result["error"] = "empty_message"
         result["payload"] = _build_payload(controller_error="empty_message")
+        return result
+    controller_override = _resolve_dialogue_controller_override(message)
+    if controller_override is not None:
+        carryover_payload = controller_override.get("carryover")
+        if not isinstance(carryover_payload, dict):
+            carryover_payload = carryover_input
+        result["ok"] = True
+        result["payload"] = _build_payload(
+            controller_class=controller_override["class"],
+            goal=controller_override["goal"],
+            intents=controller_override.get("intents"),
+            slots=controller_override.get("slots"),
+            followups=controller_override.get("followups"),
+            safety_flags=controller_override.get("safety_flags"),
+            confidence=float(controller_override.get("confidence") or 0.0),
+            reason=str(controller_override.get("reason") or ""),
+            carryover_payload=carryover_payload,
+            controller_llm_ms=0.0,
+            controller_error="none",
+            controller_retry_flag=False,
+        )
         return result
     prompt = _load_controller_prompt()
     if not prompt:
@@ -2156,6 +2500,7 @@ def route_llm_policy_core(
     client_slug: str | None = None,
     client_config: dict | None = None,
     timing_context: dict | None = None,
+    max_tokens_override: int | None = None,
 ) -> dict:
     result: dict[str, Any] = {
         "ok": False,
@@ -2172,6 +2517,11 @@ def route_llm_policy_core(
     normalized = (message or "").strip()
     if not normalized:
         result["error"] = "empty_message"
+        return result
+    policy_override = _resolve_policy_core_override(message)
+    if policy_override is not None:
+        result["ok"] = True
+        result["payload"] = policy_override
         return result
     prompt = _load_policy_core_prompt()
     if not prompt:
@@ -2305,13 +2655,19 @@ def route_llm_policy_core(
     model_name_used = POLICY_CORE_MODEL
     fallback_model_attempted = False
     timeout_seconds_used = policy_timeout_seconds
-    max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
+    max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
+        policy_timeout_seconds,
+        max_tokens_override,
+    )
     transient_retry_used = False
     structured_output_fallback_used = False
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
         attempt_count = attempt_idx + 1
         timeout_seconds_used = timeout_seconds
-        max_tokens_used = _resolve_policy_core_max_tokens(timeout_seconds)
+        max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
+            timeout_seconds,
+            max_tokens_override,
+        )
         attempt_uses_compact = use_compact_messages
         if attempt_uses_compact and compact_messages is None:
             compact_input = _build_policy_core_compact_input(policy_input)
@@ -2461,7 +2817,10 @@ def route_llm_policy_core(
         ):
             attempt_count += 1
             timeout_seconds_used = fallback_timeout_seconds
-            max_tokens_used = _resolve_policy_core_max_tokens(fallback_timeout_seconds)
+            max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
+                fallback_timeout_seconds,
+                max_tokens_override,
+            )
             fallback_model_attempted = True
             try:
                 response = llm.generate(
@@ -2530,6 +2889,7 @@ def route_llm_policy_core(
             "fallback_model_attempted": fallback_model_attempted,
             "fallback_model": fallback_model or None,
             "max_tokens": max_tokens_used,
+            "max_tokens_override": max_tokens_override,
             "timeout_budgeted": policy_timeout_seconds,
             "temperature": temperature,
             "micro_deadline_mode": micro_deadline_mode,
@@ -2858,6 +3218,10 @@ def classify_domain_with_scores(
     Classify message domain using per-client anchors (no network calls).
     Returns (domain_intent, in_score, out_score, meta).
     """
+    override = _resolve_domain_routing_override(text)
+    if override is not None:
+        return override
+
     config = _get_domain_router_config(client_config)
     anchors_in = _ensure_list(config.get("anchors_in"))
     anchors_out = _ensure_list(config.get("anchors_out"))

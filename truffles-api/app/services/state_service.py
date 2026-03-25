@@ -1,23 +1,116 @@
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, Message, User
-from app.services.escalation_service import get_or_create_topic, resolve_telegram_routing
 from app.services.handover_context_service import (
     build_handover_context_summary,
     build_handover_messages,
     get_recent_conversation_messages,
 )
-from app.services.result import Result
 from app.services.state_machine import ConversationState, is_transition_allowed
-from app.services.telegram_service import TelegramService
 
 logger = get_logger("state_service")
+
+
+def _dialog_state_service():
+    from app.core.dialog_state_service import DialogStateService
+
+    return DialogStateService()
+
+
+@dataclass(frozen=True)
+class PendingResumeBoundaryRestore:
+    context: dict[str, Any]
+    restored: bool
+    pending_reason: str | None = None
+    expected_reply_type: str | None = None
+    boundary_payload: dict[str, Any] | None = None
+    apply_boundary_booking_state: bool = False
+
+
+@dataclass(frozen=True)
+class PendingResumeBoundaryRuntimeHooks:
+    set_booking_context: Callable[..., dict[str, Any]]
+    set_expected_reply_context: Callable[..., dict[str, Any]]
+    set_conversation_context: Callable[..., None]
+    record_decision_trace: Callable[..., None]
+    update_message_decision_metadata: Callable[..., None]
+
+
+@dataclass(frozen=True)
+class PendingResumeBoundaryActivation:
+    context: dict[str, Any]
+    boundary_payload: dict[str, Any] | None
+    boundary_active: bool
+    boundary_restored: bool
+
+
+@dataclass(frozen=True)
+class ResolvedHandoffResumeBoundaryResult:
+    context: dict[str, Any]
+    restored: bool
+
+
+@dataclass(frozen=True)
+class PendingResumeSessionMemoryPolicy:
+    preserve_session_memory: bool = False
+    reset_reason: str | None = None
+    trace_payload: dict[str, Any] | None = None
+    decision_meta_updates: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ContinuityTransportDecision:
+    handled: bool
+    bot_response: str | None = None
+    success_message: str | None = None
+    failure_message: str | None = None
+
+
+@dataclass(frozen=True)
+class PendingContinuityRuntimeHooks:
+    get_conversation_context: Callable[..., dict[str, Any]]
+    set_conversation_context: Callable[..., None]
+    transition_state: Callable[..., Any]
+    manager_resolve: Callable[..., Any]
+    record_decision_trace: Callable[..., None]
+    update_message_decision_metadata: Callable[..., None]
+
+
+@dataclass(frozen=True)
+class HandoverConfirmationRuntimeHooks:
+    get_conversation_context: Callable[..., dict[str, Any]]
+    get_handover_confirmation: Callable[..., dict[str, Any] | None]
+    is_handover_confirmation_active: Callable[..., bool]
+    set_handover_confirmation: Callable[..., dict[str, Any]]
+    set_conversation_context: Callable[..., None]
+    reset_low_confidence_retry: Callable[..., None]
+    classify_confirmation: Callable[..., str | None]
+    reuse_active_handover: Callable[..., tuple[Any, bool, bool]]
+    escalate_to_pending: Callable[..., Any]
+    send_telegram_notification: Callable[..., bool]
+    record_escalation_metric: Callable[..., None]
+    record_decision_trace: Callable[..., None]
+    msg_escalated: str
+    msg_ai_error: str
+    msg_handover_declined: str
+
+
+@dataclass(frozen=True)
+class SessionMemoryRuntimeHooks:
+    set_context_manager: Callable[..., dict[str, Any]]
+    set_expected_reply_type: Callable[..., dict[str, Any]]
+    set_intent_queue: Callable[..., dict[str, Any]]
+    set_booking_context: Callable[..., dict[str, Any]]
+    clear_service_hint: Callable[..., dict[str, Any]]
+
 
 PENDING_RESUME_KEY = "pending_resume"
 DECISION_TRACE_KEY = "decision_trace"
@@ -45,7 +138,6 @@ PENDING_RESUME_CLEAR_KEYS = {
     "last_service_hint",
     "last_service_hint_at",
 }
-HANDOVER_REOPEN_WINDOW_SECONDS = 4 * 60 * 60
 HANDOVER_MEDIA_LOOKBACK_LIMIT = 12
 HANDOVER_MEDIA_HISTORY_WINDOW = timedelta(minutes=30)
 
@@ -55,6 +147,34 @@ def _normalize_slot_value(value: object) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _get_pending_sla(context: dict | None) -> dict[str, Any]:
+    payload = context.get(PENDING_SLA_CONTEXT_KEY) if isinstance(context, dict) else None
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _set_pending_sla(context: dict | None, payload: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(context) if isinstance(context, dict) else {}
+    updated[PENDING_SLA_CONTEXT_KEY] = dict(payload) if isinstance(payload, dict) else {}
+    return updated
+
+
+def _get_pending_resume(context: dict | None) -> dict[str, Any] | None:
+    payload = context.get(PENDING_RESUME_KEY) if isinstance(context, dict) else None
+    return dict(payload) if isinstance(payload, dict) else None
+
+
+def _set_pending_resume(
+    context: dict | None,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    updated = dict(context) if isinstance(context, dict) else {}
+    if payload:
+        updated[PENDING_RESUME_KEY] = dict(payload)
+    else:
+        updated.pop(PENDING_RESUME_KEY, None)
+    return updated
 
 
 def _normalize_media_ref(
@@ -250,176 +370,6 @@ def _extract_decision_meta(message: Message | None) -> dict:
     return decision_meta if isinstance(decision_meta, dict) else {}
 
 
-def _build_handover_meta(
-    conversation: Conversation,
-    message: Message | None,
-    user: User | None,
-    *,
-    recent_messages: list[Message] | None = None,
-) -> dict | None:
-    decision_meta = _extract_decision_meta(message)
-    meta: dict = {}
-    intent = decision_meta.get("intent")
-    if isinstance(intent, str) and intent.strip():
-        meta["intent"] = intent.strip()
-    info_sections = decision_meta.get("info_sections")
-    if isinstance(info_sections, list):
-        cleaned_sections = [item.strip() for item in info_sections if isinstance(item, str) and item.strip()]
-        if cleaned_sections:
-            meta["info_sections"] = cleaned_sections
-
-    slots: dict[str, str] = {}
-    raw_slots = decision_meta.get("slots")
-    if isinstance(raw_slots, dict):
-        for key in ("service", "datetime", "name", "phone"):
-            value = _normalize_slot_value(raw_slots.get(key))
-            if value:
-                slots[key] = value
-
-    context = conversation.context if isinstance(conversation.context, dict) else {}
-    booking = context.get("booking") if isinstance(context, dict) else None
-    if isinstance(booking, dict):
-        for key in ("service", "datetime", "name", "phone"):
-            if key in slots:
-                continue
-            value = _normalize_slot_value(booking.get(key))
-            if value:
-                slots[key] = value
-
-    if user:
-        if "name" not in slots:
-            name = _normalize_slot_value(getattr(user, "name", None))
-            if name:
-                slots["name"] = name
-        if "phone" not in slots:
-            phone = _normalize_slot_value(getattr(user, "phone", None))
-            if phone:
-                slots["phone"] = phone
-
-    if slots:
-        meta["slots"] = slots
-
-    media_refs, media_required = _extract_handover_media_refs(
-        conversation,
-        message,
-        recent_messages=recent_messages,
-    )
-    if media_refs:
-        meta["media_refs"] = media_refs
-    if media_required or media_refs:
-        contract = {
-            "required": bool(media_required),
-            "bound": bool(media_refs),
-            "media_refs_count": len(media_refs),
-        }
-        sources = sorted({item.get("source") for item in media_refs if isinstance(item.get("source"), str)})
-        if sources:
-            contract["sources"] = sources
-        if media_required and not media_refs:
-            contract["reason"] = "media_ref_missing"
-        meta["media_handoff_contract"] = contract
-
-    return meta or None
-
-
-def _apply_handover_contract_to_message(message: Message | None, handover_meta: dict | None) -> None:
-    if not message or not isinstance(handover_meta, dict):
-        return
-    contract = handover_meta.get("media_handoff_contract")
-    if not isinstance(contract, dict):
-        return
-
-    metadata = dict(message.message_metadata or {})
-    decision_meta = dict(metadata.get("decision_meta") or {})
-    media_refs = handover_meta.get("media_refs") if isinstance(handover_meta.get("media_refs"), list) else []
-    sources = sorted(
-        {
-            item.get("source")
-            for item in media_refs
-            if isinstance(item, dict) and isinstance(item.get("source"), str)
-        }
-    )
-    decision_meta.update(
-        {
-            "media_handoff_required": bool(contract.get("required")),
-            "media_handoff_bound": bool(contract.get("bound")),
-            "media_handoff_refs_count": len(media_refs),
-            "media_handoff_missing": bool(contract.get("required")) and not bool(contract.get("bound")),
-        }
-    )
-    if sources:
-        decision_meta["media_handoff_sources"] = sources
-    metadata["decision_meta"] = decision_meta
-    message.message_metadata = metadata
-
-
-def _record_handover_contract_trace(conversation: Conversation, handover_meta: dict | None) -> None:
-    if not isinstance(handover_meta, dict):
-        return
-    contract = handover_meta.get("media_handoff_contract")
-    if not isinstance(contract, dict):
-        return
-
-    context = conversation.context if isinstance(conversation.context, dict) else {}
-    existing = context.get(DECISION_TRACE_KEY)
-    if isinstance(existing, list):
-        trace_list = [item for item in existing if isinstance(item, dict)]
-    elif isinstance(existing, dict):
-        trace_list = [existing]
-    else:
-        trace_list = []
-
-    decision = "bound" if contract.get("bound") else "missing"
-    trace_list.append(
-        {
-            "stage": "media_handoff_contract",
-            "decision": decision,
-            "required": bool(contract.get("required")),
-            "media_refs_count": int(contract.get("media_refs_count") or 0),
-            "state": conversation.state,
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    # Keep this lightweight to avoid unbounded growth when service writes traces directly.
-    if len(trace_list) > 100:
-        trace_list = trace_list[-100:]
-    context[DECISION_TRACE_KEY] = trace_list
-    conversation.context = context
-
-
-def _get_latest_user_message(db: Session, conversation_id: uuid.UUID) -> Message | None:
-    return (
-        db.query(Message)
-        .filter(Message.conversation_id == conversation_id, Message.role == "user")
-        .order_by(Message.created_at.desc())
-        .first()
-    )
-
-
-def _get_recent_user_messages(
-    db: Session,
-    conversation_id: uuid.UUID,
-    *,
-    limit: int = HANDOVER_MEDIA_LOOKBACK_LIMIT,
-) -> list[Message]:
-    safe_limit = max(1, int(limit or HANDOVER_MEDIA_LOOKBACK_LIMIT))
-    try:
-        rows = (
-            db.query(Message)
-            .filter(Message.conversation_id == conversation_id, Message.role == "user")
-            .order_by(Message.created_at.desc())
-            .limit(safe_limit)
-            .all()
-        )
-    except Exception:
-        return []
-    if isinstance(rows, list):
-        return rows
-    if isinstance(rows, tuple):
-        return list(rows)
-    return []
-
-
 def _reset_context_preserving_trace(conversation: Conversation) -> None:
     existing = conversation.context if isinstance(conversation.context, dict) else {}
     preserved: dict = {}
@@ -575,18 +525,15 @@ def get_simulation_time(value) -> datetime | None:
     return _parse_simulation_time(sim_context.get("time") or sim_context.get("simulation_time"))
 
 
-def _build_simulated_topic_id(conversation: Conversation, user: User | None) -> int:
-    seed = f"sim:{conversation.id}:{getattr(user, 'id', '')}"
-    digest = uuid.uuid5(uuid.NAMESPACE_DNS, seed).int
-    return 1000 + (digest % 2147480000)
-
-
 def _capture_pending_resume_context(context: dict | None) -> dict:
     if not isinstance(context, dict):
         return {}
     if PENDING_RESUME_KEY in context:
         return context
-    resume_payload = {key: context.get(key) for key in PENDING_RESUME_SNAPSHOT_KEYS if key in context}
+    resume_payload = _dialog_state_service().capture_pending_resume_payload(
+        context,
+        snapshot_keys=PENDING_RESUME_SNAPSHOT_KEYS,
+    )
     if not resume_payload:
         return context
     updated = dict(context)
@@ -609,545 +556,965 @@ def _restore_pending_resume_context(context: dict | None, *, now: datetime) -> t
     restored.pop(HANDOVER_CONFIRMATION_KEY, None)
     for key in PENDING_RESUME_CLEAR_KEYS:
         restored.pop(key, None)
-
-    context_manager = pending_resume.get("context_manager")
-    if isinstance(context_manager, dict):
-        restored["context_manager"] = dict(context_manager)
-    else:
-        restored["context_manager"] = {}
-
-    expected_reply_type = pending_resume.get("expected_reply_type")
-    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
-        restored["expected_reply_type"] = expected_reply_type.strip()
-    expected_reply_reason = pending_resume.get("expected_reply_reason")
-    if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
-        restored["expected_reply_reason"] = expected_reply_reason.strip()
-
-    intent_queue = pending_resume.get("intent_queue")
-    if isinstance(intent_queue, list):
-        restored["intent_queue"] = list(intent_queue)
-    else:
-        restored["intent_queue"] = []
-
-    booking_context = pending_resume.get("booking")
-    if isinstance(booking_context, dict):
-        restored["booking"] = dict(booking_context)
-    else:
-        restored["booking"] = {"active": False}
-
-    session_memory = pending_resume.get("session_memory")
-    if isinstance(session_memory, dict) and session_memory:
-        session_memory_restored = dict(session_memory)
-        session_memory_restored["last_updated_at"] = now.isoformat()
-        restored["session_memory"] = session_memory_restored
-
-    # Backward-compatible restore for both old/new snapshot field names.
-    service_hint = None
-    if isinstance(pending_resume.get("last_service_hint"), str):
-        service_hint = pending_resume.get("last_service_hint")
-    elif isinstance(pending_resume.get("service_hint"), str):
-        service_hint = pending_resume.get("service_hint")
-    if isinstance(service_hint, str) and service_hint.strip():
-        restored["last_service_hint"] = service_hint.strip()
-
-    service_hint_at = None
-    if isinstance(pending_resume.get("last_service_hint_at"), str):
-        service_hint_at = pending_resume.get("last_service_hint_at")
-    elif isinstance(pending_resume.get("service_hint_at"), str):
-        service_hint_at = pending_resume.get("service_hint_at")
-    if isinstance(service_hint_at, str) and service_hint_at.strip():
-        restored["last_service_hint_at"] = service_hint_at.strip()
-
-    restored[RE_ENTRY_REQUIRED_KEY] = {
-        "required": True,
-        "reason": "pending_resume",
-        "set_at": now.isoformat(),
-    }
+    restored.update(_dialog_state_service().restore_pending_resume_payload(pending_resume, now=now))
     return restored, True
 
 
-def _find_recent_resolved_handover(
-    db: Session,
-    conversation: Conversation,
+def _build_pending_resume_snapshot_payload(
     *,
-    now: datetime,
-) -> Handover | None:
-    cutoff = now - timedelta(seconds=HANDOVER_REOPEN_WINDOW_SECONDS)
-    last_activity = func.coalesce(Handover.resolved_at, Handover.created_at)
-    return (
-        db.query(Handover)
-        .filter(
-            Handover.conversation_id == conversation.id,
-            Handover.client_id == conversation.client_id,
-            Handover.status == "resolved",
-            last_activity >= cutoff,
-        )
-        .order_by(last_activity.desc())
-        .first()
+    context: dict | None,
+    context_manager: dict,
+    expected_reply_type: str | None,
+    expected_reply_reason: str | None,
+    intent_queue: list[str] | None,
+    booking_context: dict | None,
+    session_memory: dict,
+) -> dict[str, Any]:
+    snapshot_context = dict(context) if isinstance(context, dict) else {}
+    snapshot_context["context_manager"] = (
+        dict(context_manager) if isinstance(context_manager, dict) else {}
+    )
+    snapshot_context["expected_reply_type"] = expected_reply_type
+    snapshot_context["expected_reply_reason"] = expected_reply_reason
+    snapshot_context["intent_queue"] = list(intent_queue) if isinstance(intent_queue, list) else []
+    snapshot_context["booking"] = (
+        dict(booking_context) if isinstance(booking_context, dict) else {"active": False}
+    )
+    snapshot_context["session_memory"] = dict(session_memory) if isinstance(session_memory, dict) else {}
+    return _dialog_state_service().capture_pending_resume_payload(
+        snapshot_context,
+        snapshot_keys=PENDING_RESUME_SNAPSHOT_KEYS,
     )
 
 
-def _reopen_handover(
-    handover: Handover,
+def _restore_pending_resume_payload(
+    *,
+    context: dict | None,
+    pending_resume: dict | None,
+    now: datetime,
+) -> dict[str, Any]:
+    working_context = dict(context) if isinstance(context, dict) else {}
+    if not isinstance(pending_resume, dict):
+        return working_context
+    working_context[PENDING_RESUME_KEY] = dict(pending_resume)
+    restored_context, restored = _restore_pending_resume_context(working_context, now=now)
+    if restored:
+        return restored_context
+    return working_context
+
+
+def _derive_pending_resume_reason(context: dict | None) -> str | None:
+    return _dialog_state_service().derive_pending_resume_reason(
+        context,
+        pending_resume_key=PENDING_RESUME_KEY,
+    )
+
+
+def _derive_pending_booking_resume_boundary_payload(
+    context: dict | None,
+    *,
+    now: datetime | None = None,
+    prompt_builder: Callable[[str | None], str | None] | None = None,
+) -> dict[str, Any] | None:
+    return _dialog_state_service().derive_pending_booking_resume_boundary_payload(
+        context,
+        now=now,
+        prompt_builder=prompt_builder,
+        pending_resume_key=PENDING_RESUME_KEY,
+    )
+
+
+def _prepare_pending_handoff_resume_boundary_restore(
+    context: dict | None,
     *,
     now: datetime,
-    trigger_type: str,
-    trigger_value: str | None,
-    user_message: str | None,
-    channel_ref: str | None,
-    trigger_message_id: uuid.UUID | None = None,
-    meta: dict | None = None,
-    context_summary: str | None = None,
-    messages: list[dict] | None = None,
-) -> None:
-    handover.status = "pending"
-    handover.trigger_type = trigger_type
-    handover.trigger_value = trigger_value
-    handover.user_message = user_message
-    handover.created_at = now
-    handover.context_summary = context_summary
-    handover.messages = list(messages or [])
-    handover.notified_at = None
-    handover.first_response_at = None
-    handover.resolved_at = None
-    handover.resolved_by_id = None
-    handover.resolved_by_name = None
-    handover.resolution_time_seconds = None
-    handover.resolution_type = None
-    handover.resolution_notes = None
-    handover.manager_response = None
-    handover.manager_id = None
-    handover.assigned_to = None
-    handover.assigned_to_name = None
-    handover.telegram_message_id = None
-    handover.reminder_1_sent_at = None
-    handover.reminder_2_sent_at = None
-    handover.skipped_by = []
-    if trigger_message_id:
-        handover.trigger_message_id = trigger_message_id
-    if meta:
-        handover.meta = meta
-    if channel_ref:
-        handover.channel_ref = channel_ref
-    handover._reopened = True
+    prompt_builder: Callable[[str | None], str | None] | None = None,
+) -> PendingResumeBoundaryRestore:
+    if not isinstance(context, dict):
+        return PendingResumeBoundaryRestore(context={}, restored=False)
+
+    restored_context, restored = _restore_pending_resume_context(context, now=now)
+    if not restored:
+        return PendingResumeBoundaryRestore(context=context, restored=False)
+
+    projections = _dialog_state_service().project_expected_reply_projections(
+        expected_reply_type=restored_context.get("expected_reply_type"),
+        expected_reply_reason=restored_context.get("expected_reply_reason"),
+    )
+    boundary_payload = _derive_pending_booking_resume_boundary_payload(
+        restored_context,
+        now=now,
+        prompt_builder=prompt_builder,
+    )
+    expected_reply_type = projections.expected_reply_type
+    apply_boundary_booking_state = False
+    if not expected_reply_type and boundary_payload is not None:
+        expected_reply_type = boundary_payload.get("expected_reply_type")
+        apply_boundary_booking_state = True
+
+    return PendingResumeBoundaryRestore(
+        context=restored_context,
+        restored=True,
+        pending_reason=_derive_pending_resume_reason(restored_context),
+        expected_reply_type=expected_reply_type,
+        boundary_payload=boundary_payload,
+        apply_boundary_booking_state=apply_boundary_booking_state,
+    )
 
 
-def escalate_to_pending(
-    db: Session,
+def _prepare_resolved_handoff_resume_boundary_restore(
+    context: dict | None,
+    *,
+    now: datetime,
+    prompt_builder: Callable[[str | None], str | None] | None = None,
+) -> PendingResumeBoundaryRestore:
+    if not isinstance(context, dict):
+        return PendingResumeBoundaryRestore(context={}, restored=False)
+    if not _dialog_state_service().is_re_entry_required(context.get(RE_ENTRY_REQUIRED_KEY)):
+        return PendingResumeBoundaryRestore(context=context, restored=False)
+
+    projections = _dialog_state_service().project_expected_reply_projections(
+        expected_reply_type=context.get("expected_reply_type"),
+        expected_reply_reason=context.get("expected_reply_reason"),
+    )
+    if projections.expected_reply_type:
+        return PendingResumeBoundaryRestore(context=context, restored=False)
+
+    boundary_payload = _derive_pending_booking_resume_boundary_payload(
+        context,
+        now=now,
+        prompt_builder=prompt_builder,
+    )
+    expected_reply_type = (
+        boundary_payload.get("expected_reply_type")
+        if isinstance(boundary_payload, dict)
+        else None
+    )
+    pending_reason = _derive_pending_resume_reason(context)
+    if not (
+        isinstance(expected_reply_type, str)
+        and expected_reply_type.strip()
+        and isinstance(pending_reason, str)
+        and pending_reason.strip()
+    ):
+        return PendingResumeBoundaryRestore(context=context, restored=False)
+
+    return PendingResumeBoundaryRestore(
+        context=context,
+        restored=True,
+        pending_reason=pending_reason.strip(),
+        expected_reply_type=expected_reply_type.strip(),
+        boundary_payload=boundary_payload,
+        apply_boundary_booking_state=True,
+    )
+
+
+def _resolve_resolved_handoff_resume_boundary_restore(
+    *,
     conversation: Conversation,
-    user_message: str,
-    trigger_type: str,
-    trigger_value: str = None,
-) -> Result[Handover]:
-    """Атомарный переход bot_active → pending с созданием handover и topic."""
+    saved_message: Message | None,
+    context: dict | None,
+    conversation_state: str | None,
+    now: datetime,
+    prompt_builder: Callable[[str | None], str | None] | None = None,
+    hooks: PendingResumeBoundaryRuntimeHooks,
+) -> ResolvedHandoffResumeBoundaryResult:
+    working_context = context if isinstance(context, dict) else {}
+    if conversation_state != ConversationState.BOT_ACTIVE.value:
+        return ResolvedHandoffResumeBoundaryResult(context=working_context, restored=False)
 
-    if conversation.state != ConversationState.BOT_ACTIVE.value:
-        return Result.failure(f"Cannot escalate from state {conversation.state}", "invalid_state")
+    restore = _prepare_resolved_handoff_resume_boundary_restore(
+        working_context,
+        now=now,
+        prompt_builder=prompt_builder,
+    )
+    if not restore.restored:
+        return ResolvedHandoffResumeBoundaryResult(context=working_context, restored=False)
 
-    try:
-        if is_simulation_context(conversation):
-            conversation.context = _capture_pending_resume_context(conversation.context)
-            now = datetime.now(timezone.utc)
-            user = db.query(User).filter(User.id == conversation.user_id).first()
-            remote_jid = user.remote_jid if user else None
-            topic_id = _build_simulated_topic_id(conversation, user)
-            trigger_message = _get_latest_user_message(db, conversation.id)
-            recent_messages = _get_recent_user_messages(db, conversation.id)
-            recent_conversation_messages = get_recent_conversation_messages(db, conversation.id)
-            handover_messages = build_handover_messages(recent_conversation_messages)
-            handover_context_summary = build_handover_context_summary(
-                handover_messages,
-                fallback=user_message,
-            )
-            handover_meta = _build_handover_meta(
-                conversation,
-                trigger_message,
-                user,
-                recent_messages=recent_messages,
-            )
-            _apply_handover_contract_to_message(trigger_message, handover_meta)
-            _record_handover_contract_trace(conversation, handover_meta)
+    restored_context = restore.context
+    if restore.apply_boundary_booking_state and restore.boundary_payload is not None:
+        restored_context = hooks.set_booking_context(
+            restored_context,
+            restore.boundary_payload.get("booking_state"),
+        )
+    restored_context = hooks.set_expected_reply_context(
+        conversation=conversation,
+        saved_message=saved_message,
+        context=restored_context,
+        expected_reply_type=restore.expected_reply_type.strip(),
+        reason=restore.pending_reason.strip(),
+        now=now,
+    )
+    hooks.record_decision_trace(
+        conversation,
+        {
+            "stage": "pending_resume",
+            "decision": "restore_resolved_handoff_boundary",
+            "reason": "resolved_handoff_resume_boundary",
+        },
+    )
+    if saved_message:
+        hooks.update_message_decision_metadata(
+            saved_message,
+            {
+                "pending_resume_restored": True,
+                "pending_resume_restore_reason": "resolved_handoff_resume_boundary",
+                "resolved_handoff_resume_boundary": True,
+            },
+        )
+    return ResolvedHandoffResumeBoundaryResult(
+        context=restored_context,
+        restored=True,
+    )
 
-            handover = _find_recent_resolved_handover(db, conversation, now=now)
-            if handover:
-                _reopen_handover(
-                    handover,
+
+def _resolve_pending_resume_boundary_activation(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    context: dict | None,
+    conversation_state: str | None,
+    message_text: str | None,
+    now: datetime,
+    prompt_builder: Callable[[str | None], str | None] | None = None,
+    is_handover_status_question: Callable[[str], bool] | None = None,
+    is_opt_out_message: Callable[[str], bool] | None = None,
+    hooks: PendingResumeBoundaryRuntimeHooks,
+) -> PendingResumeBoundaryActivation:
+    working_context = dict(context) if isinstance(context, dict) else {}
+    pending_resume_control_message = bool(
+        message_text
+        and (
+            callable(is_handover_status_question)
+            and is_handover_status_question(message_text)
+            or callable(is_opt_out_message)
+            and is_opt_out_message(message_text)
+        )
+    )
+    boundary_payload = _derive_pending_booking_resume_boundary_payload(
+        working_context,
+        now=now,
+        prompt_builder=prompt_builder,
+    )
+    boundary_active = bool(
+        conversation_state == ConversationState.PENDING.value
+        and not pending_resume_control_message
+        and boundary_payload is not None
+    )
+    boundary_restored = False
+    if boundary_active and isinstance(working_context.get(PENDING_RESUME_KEY), dict):
+        restore = _prepare_pending_handoff_resume_boundary_restore(
+            working_context,
+            now=now,
+            prompt_builder=prompt_builder,
+        )
+        working_context = restore.context
+        if restore.restored:
+            boundary_restored = True
+            if restore.apply_boundary_booking_state and restore.boundary_payload is not None:
+                working_context = hooks.set_booking_context(
+                    working_context,
+                    restore.boundary_payload.get("booking_state"),
+                )
+            pending_reason = restore.pending_reason
+            pending_expected_reply_type = restore.expected_reply_type
+            if (
+                pending_expected_reply_type
+                and isinstance(pending_reason, str)
+                and pending_reason.strip()
+            ):
+                working_context = hooks.set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=working_context,
+                    expected_reply_type=pending_expected_reply_type,
+                    reason=pending_reason.strip(),
                     now=now,
-                    trigger_type=trigger_type,
-                    trigger_value=trigger_value,
-                    user_message=user_message,
-                    channel_ref=remote_jid,
-                    trigger_message_id=trigger_message.id if trigger_message else None,
-                    meta=handover_meta,
-                    context_summary=handover_context_summary,
-                    messages=handover_messages,
                 )
             else:
-                handover = Handover(
-                    conversation_id=conversation.id,
-                    client_id=conversation.client_id,
-                    trigger_type=trigger_type,
-                    trigger_value=trigger_value,
-                    user_message=user_message,
-                    status="pending",
-                    created_at=now,
-                    channel="telegram",
-                    channel_ref=remote_jid,
-                    trigger_message_id=trigger_message.id if trigger_message else None,
-                    context_summary=handover_context_summary,
-                    messages=handover_messages,
-                    meta=handover_meta,
-                )
-                db.add(handover)
-
-            transition_state(
+                hooks.set_conversation_context(conversation, working_context)
+            hooks.record_decision_trace(
                 conversation,
-                ConversationState.PENDING,
-                allow_same=False,
-                enforce=True,
-                handover=handover,
+                {
+                    "stage": "pending_resume",
+                    "decision": "restore_soft_pass",
+                    "reason": "handover_soft_pass",
+                },
             )
-            conversation.telegram_topic_id = topic_id
-            if user:
-                user.telegram_topic_id = topic_id
-            conversation.escalated_at = now
-            conversation.retry_offered_at = None
-
-            db.flush()
-
-            logger.info(
-                "Escalated conversation %s to pending (simulation), topic=%s, reopened=%s",
-                conversation.id,
-                topic_id,
-                bool(getattr(handover, "_reopened", False)),
-            )
-            return Result.success(handover)
-
-        conversation.context = _capture_pending_resume_context(conversation.context)
-        routing_meta = resolve_telegram_routing(
-            db,
-            conversation=conversation,
-            client_id=conversation.client_id,
+            if saved_message:
+                hooks.update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_resume_restored": True,
+                        "pending_resume_restore_reason": "handover_soft_pass",
+                    },
+                )
+        boundary_payload = _derive_pending_booking_resume_boundary_payload(
+            working_context,
+            now=now,
+            prompt_builder=prompt_builder,
         )
-        bot_token = routing_meta.get("bot_token")
-        chat_id = routing_meta.get("chat_id")
-        if not bot_token or not chat_id:
-            return Result.failure("No Telegram credentials", "no_telegram")
-
-        telegram = TelegramService(bot_token)
-        user = db.query(User).filter(User.id == conversation.user_id).first()
-        remote_jid = user.remote_jid if user else None
-        trigger_message = _get_latest_user_message(db, conversation.id)
-        recent_messages = _get_recent_user_messages(db, conversation.id)
-        recent_conversation_messages = get_recent_conversation_messages(db, conversation.id)
-        handover_messages = build_handover_messages(recent_conversation_messages)
-        handover_context_summary = build_handover_context_summary(
-            handover_messages,
-            fallback=user_message,
-        )
-        handover_meta = _build_handover_meta(
-            conversation,
-            trigger_message,
-            user,
-            recent_messages=recent_messages,
-        )
-        _apply_handover_contract_to_message(trigger_message, handover_meta)
-        _record_handover_contract_trace(conversation, handover_meta)
-
-        topic_id = get_or_create_topic(db, telegram, chat_id, conversation, user)
-        if not topic_id:
-            return Result.failure("Failed to create topic", "topic_error")
-
-        now = datetime.now(timezone.utc)
-        handover = _find_recent_resolved_handover(db, conversation, now=now)
-        if handover:
-            _reopen_handover(
-                handover,
-                now=now,
-                trigger_type=trigger_type,
-                trigger_value=trigger_value,
-                user_message=user_message,
-                channel_ref=remote_jid,
-                trigger_message_id=trigger_message.id if trigger_message else None,
-                meta=handover_meta,
-                context_summary=handover_context_summary,
-                messages=handover_messages,
-            )
-        else:
-            handover = Handover(
-                conversation_id=conversation.id,
-                client_id=conversation.client_id,
-                trigger_type=trigger_type,
-                trigger_value=trigger_value,
-                user_message=user_message,
-                status="pending",
-                created_at=now,
-                channel="telegram",
-                channel_ref=remote_jid,
-                trigger_message_id=trigger_message.id if trigger_message else None,
-                context_summary=handover_context_summary,
-                messages=handover_messages,
-                meta=handover_meta,
-            )
-            db.add(handover)
-
-        transition_state(
-            conversation,
-            ConversationState.PENDING,
-            allow_same=False,
-            enforce=True,
-            handover=handover,
-        )
-        conversation.telegram_topic_id = topic_id
-        conversation.escalated_at = now
-        conversation.retry_offered_at = None
-
-        db.flush()
-
-        logger.info(
-            "Escalated conversation %s to pending, topic=%s, reopened=%s",
-            conversation.id,
-            topic_id,
-            bool(getattr(handover, "_reopened", False)),
-        )
-        return Result.success(handover)
-
-    except Exception as e:
-        try:
-            db.rollback()
-        except Exception as rollback_exc:
-            logger.warning(
-                "Escalation rollback failed",
-                extra={"context": {"error": str(rollback_exc)}},
-            )
-        logger.error(f"Escalation failed: {e}")
-        return Result.failure(str(e), "escalation_error")
+        boundary_active = boundary_payload is not None
+    return PendingResumeBoundaryActivation(
+        context=working_context,
+        boundary_payload=boundary_payload,
+        boundary_active=boundary_active,
+        boundary_restored=boundary_restored,
+    )
 
 
-def manager_take(
-    db: Session,
-    conversation: Conversation,
-    handover: Handover,
-    manager_id: str,
-    manager_name: str,
-) -> Result[bool]:
-    """Атомарный переход pending → manager_active."""
-
-    if conversation.state != ConversationState.PENDING.value:
-        return Result.failure(f"Cannot take from state {conversation.state}", "invalid_state")
-
-    if handover.status != "pending":
-        return Result.failure(f"Handover status is {handover.status}", "invalid_handover")
-
-    try:
-        now = datetime.now(timezone.utc)
-
-        transition_state(
-            conversation,
-            ConversationState.MANAGER_ACTIVE,
-            allow_same=False,
-            enforce=True,
-            handover=handover,
-        )
-        handover.status = "active"
-        handover.assigned_to = manager_id
-        handover.assigned_to_name = manager_name
-
-        db.flush()
-
-        logger.info(f"Manager {manager_name} took conversation {conversation.id}")
-        return Result.success(True)
-
-    except Exception as e:
-        logger.error(f"Manager take failed: {e}")
-        return Result.failure(str(e), "take_error")
-
-
-def manager_reassign(
-    db: Session,
-    conversation: Conversation,
-    handover: Handover,
+def _resolve_pending_resume_session_memory_policy(
     *,
-    manager_id: str,
-    manager_name: str,
-) -> Result[bool]:
-    """Переassign активный handover другому оператору без закрытия кейса."""
+    conversation_state: str | None,
+    resume_boundary_active: bool,
+    boundary_restored: bool,
+) -> PendingResumeSessionMemoryPolicy:
+    if conversation_state not in {
+        ConversationState.PENDING.value,
+        ConversationState.MANAGER_ACTIVE.value,
+    }:
+        return PendingResumeSessionMemoryPolicy()
+    if resume_boundary_active:
+        return PendingResumeSessionMemoryPolicy(
+            preserve_session_memory=True,
+            trace_payload={
+                "stage": "session_memory",
+                "decision": "preserve",
+                "reason": "pending_handoff_resume_boundary",
+                "state": conversation_state,
+                "restored_from_pending_resume": boundary_restored,
+            },
+            decision_meta_updates={
+                "session_memory_reset_skipped": "pending_handoff_resume_boundary",
+                "pending_handoff_resume_boundary": True,
+            },
+        )
+    return PendingResumeSessionMemoryPolicy(reset_reason="handover")
 
-    if conversation.state != ConversationState.MANAGER_ACTIVE.value:
-        return Result.failure(f"Cannot reassign from state {conversation.state}", "invalid_state")
 
-    if handover.status != "active":
-        return Result.failure(f"Handover status is {handover.status}", "invalid_handover")
-
-    try:
-        handover.assigned_to = manager_id
-        handover.assigned_to_name = manager_name
-        db.flush()
-        logger.info("Manager %s reassigned conversation %s", manager_name, conversation.id)
-        return Result.success(True)
-    except Exception as e:
-        logger.error(f"Manager reassign failed: {e}")
-        return Result.failure(str(e), "reassign_error")
-
-
-def manager_resolve(
-    db: Session,
-    conversation: Conversation,
-    handover: Handover,
-    manager_id: str,
-    manager_name: str,
+def _resolve_pending_timeout_resume_boundary_payload(
+    context: dict | None,
     *,
-    preserve_context: bool = False,
-) -> Result[bool]:
-    """Атомарный переход manager_active/pending → bot_active."""
+    conversation_state: str | None,
+    policy_core_timeout_degrade: bool,
+    resume_boundary_active: bool,
+    now: datetime,
+    prompt_builder: Callable[[str | None], str | None] | None = None,
+    required_expected_reply_type: str | None = None,
+) -> dict[str, Any] | None:
+    if (
+        conversation_state != ConversationState.PENDING.value
+        or not policy_core_timeout_degrade
+        or not resume_boundary_active
+    ):
+        return None
+    boundary_payload = _derive_pending_booking_resume_boundary_payload(
+        context,
+        now=now,
+        prompt_builder=prompt_builder,
+    )
+    if not isinstance(boundary_payload, dict):
+        return None
+    if (
+        isinstance(required_expected_reply_type, str)
+        and required_expected_reply_type.strip()
+        and boundary_payload.get("expected_reply_type") != required_expected_reply_type
+    ):
+        return None
+    return boundary_payload
 
-    if conversation.state not in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
-        return Result.failure(f"Cannot resolve from state {conversation.state}", "invalid_state")
 
-    try:
-        now = datetime.now(timezone.utc)
+def _should_reset_session_memory_trigger(
+    message_text: str | None,
+    *,
+    normalize_text: Callable[[str], str | None],
+    reset_phrases: list[str] | set[str] | tuple[str, ...],
+) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_text(message_text)
+    if not normalized:
+        return False
+    return any(phrase in normalized for phrase in reset_phrases)
 
-        transition_state(
+
+def _reset_session_memory_context(
+    *,
+    context: dict,
+    context_manager: dict,
+    reason: str,
+    now: datetime,
+    session_memory_ttl_hours: int,
+    class_manager_key: str,
+    service_manager_key: str,
+    consult_manager_key: str,
+    canonical_state_key: str,
+    referent_key: str,
+    hooks: SessionMemoryRuntimeHooks,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    manager = _dialog_state_service().clear_context_manager_carryover_family(
+        context_manager,
+        class_manager_key=class_manager_key,
+        service_manager_key=service_manager_key,
+        consult_manager_key=consult_manager_key,
+        canonical_state_key=canonical_state_key,
+        referent_key=referent_key,
+    )
+    updated_context = hooks.set_context_manager(context, manager)
+    updated_context = hooks.set_expected_reply_type(updated_context, None)
+    updated_context = hooks.set_intent_queue(updated_context, [])
+    updated_context = hooks.set_booking_context(updated_context, {"active": False})
+    updated_context = hooks.clear_service_hint(updated_context)
+    updated_context = _dialog_state_service().set_context_session_memory(
+        updated_context,
+        None,
+        key="session_memory",
+    )
+    memory_payload = _dialog_state_service().touch_session_memory_payload(
+        {},
+        now=now,
+        default_ttl_hours=session_memory_ttl_hours,
+    )
+    return (
+        updated_context,
+        manager,
+        {
+            "reason": reason,
+            "last_question_type": memory_payload.get("last_question_type"),
+            "active_goal": memory_payload.get("active_goal"),
+            "goal_stack_depth": 0,
+            "goal_stack_top": None,
+            "pending_slots": [],
+            "unanswered_questions_count": 0,
+            "interaction_resume_slot": None,
+            "interaction_owner": None,
+        },
+    )
+
+
+def _clear_session_memory_expected_reply_context(
+    *,
+    context: dict,
+    expected_reply_type: str | None,
+    now: datetime,
+    session_memory_ttl_hours: int,
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    memory = context.get("session_memory") if isinstance(context.get("session_memory"), dict) else {}
+    if not memory:
+        return context, {}, False
+    memory, changed = _dialog_state_service().clear_session_memory_expected_reply(
+        memory,
+        expected_reply_type=expected_reply_type,
+    )
+    if not changed:
+        return context, memory, False
+
+    memory = _dialog_state_service().touch_session_memory_payload(
+        memory,
+        now=now,
+        default_ttl_hours=session_memory_ttl_hours,
+    )
+    updated_context = _dialog_state_service().set_context_session_memory(
+        context,
+        memory,
+        key="session_memory",
+    )
+    return updated_context, memory, True
+
+
+def _resolve_pending_no_handover_reset(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    router_pending_meta: dict[str, Any] | None,
+    hooks: PendingContinuityRuntimeHooks,
+) -> None:
+    context = hooks.get_conversation_context(conversation)
+    context = _set_pending_resume(context, None)
+    context = _set_pending_sla(context, {})
+    context.pop(HANDOVER_CONFIRMATION_KEY, None)
+    hooks.set_conversation_context(conversation, context)
+    hooks.transition_state(
+        conversation,
+        ConversationState.BOT_ACTIVE,
+        allow_same=False,
+        enforce=True,
+    )
+    trace_payload = {
+        "stage": "pending_guard",
+        "decision": "reset_no_handover",
+        "state": conversation.state,
+    }
+    if isinstance(router_pending_meta, dict):
+        trace_payload.update(router_pending_meta)
+    hooks.record_decision_trace(conversation, trace_payload)
+    if saved_message:
+        hooks.update_message_decision_metadata(
+            saved_message,
+            {
+                "pending_action": "pending_guard_reset",
+                "pending_guard": "no_handover",
+            },
+        )
+
+
+def _resolve_pending_close(
+    *,
+    conversation: Conversation,
+    handover: Handover | None,
+    saved_message: Message | None,
+    router_pending_meta: dict[str, Any] | None,
+    hooks: PendingContinuityRuntimeHooks,
+) -> ContinuityTransportDecision:
+    if handover:
+        hooks.manager_resolve(
+            conversation,
+            handover,
+            manager_id="system",
+            manager_name="system",
+        )
+    conversation.bot_status = "muted"
+    conversation.bot_muted_until = None
+    trace_payload = {
+        "stage": "pending_sla",
+        "decision": "pending_close",
+        "state": conversation.state,
+    }
+    if isinstance(router_pending_meta, dict):
+        trace_payload.update(router_pending_meta)
+    hooks.record_decision_trace(conversation, trace_payload)
+    if saved_message:
+        hooks.update_message_decision_metadata(
+            saved_message,
+            {"pending_action": "pending_close"},
+        )
+    return ContinuityTransportDecision(
+        handled=True,
+        success_message="Pending closed by user",
+    )
+
+
+def _resolve_pending_ack(
+    *,
+    conversation: Conversation,
+    handover: Handover | None,
+    saved_message: Message | None,
+    now: datetime,
+    router_pending_meta: dict[str, Any] | None,
+    msg_pending_ack: str,
+    hooks: PendingContinuityRuntimeHooks,
+) -> ContinuityTransportDecision:
+    if handover:
+        hooks.manager_resolve(
+            conversation,
+            handover,
+            manager_id="system",
+            manager_name="system",
+            preserve_context=True,
+        )
+    else:
+        hooks.transition_state(
             conversation,
             ConversationState.BOT_ACTIVE,
             allow_same=False,
             enforce=True,
-            handover=handover,
         )
-        conversation.bot_muted_until = None
-        conversation.no_count = 0
-        conversation.retry_offered_at = None
-        if not preserve_context:
-            _reset_context_preserving_trace(conversation)
-        else:
-            restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)
-            conversation.context = restored_context
+        if not isinstance(conversation.context, dict):
+            conversation.context = {}
+    conversation.bot_status = "active"
 
-        handover.status = "resolved"
-        handover.resolved_at = now
-        handover.resolved_by_id = manager_id
-        handover.resolved_by_name = manager_name
-
-        if handover.created_at:
-            handover.resolution_time_seconds = int((now - handover.created_at).total_seconds())
-
-        db.flush()
-
-        logger.info(f"Manager {manager_name} resolved conversation {conversation.id}")
-        return Result.success(True)
-
-    except Exception as e:
-        logger.error(f"Manager resolve failed: {e}")
-        return Result.failure(str(e), "resolve_error")
-
-
-def manager_return(
-    db: Session,
-    conversation: Conversation,
-    handover: Handover,
-    manager_id: str,
-    manager_name: str,
-    *,
-    preserve_context: bool = True,
-) -> Result[bool]:
-    """Атомарный переход manager_active/pending → bot_active без закрытия handover."""
-
-    if conversation.state not in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
-        return Result.failure(f"Cannot return from state {conversation.state}", "invalid_state")
-
-    try:
-        now = datetime.now(timezone.utc)
-        transition_state(
+    context = hooks.get_conversation_context(conversation)
+    pending_resume = _get_pending_resume(context)
+    if pending_resume:
+        restored_context = _restore_pending_resume_payload(
+            context=context,
+            pending_resume=pending_resume,
+            now=now,
+        )
+        hooks.set_conversation_context(conversation, restored_context)
+        hooks.record_decision_trace(
             conversation,
-            ConversationState.BOT_ACTIVE,
-            allow_same=False,
-            enforce=True,
-            handover=handover,
+            {
+                "stage": "pending_resume",
+                "decision": "restore",
+                "reason": "pending_ack",
+            },
         )
-        conversation.bot_muted_until = None
-        conversation.no_count = 0
-        conversation.retry_offered_at = None
-        if not preserve_context:
-            _reset_context_preserving_trace(conversation)
-        else:
-            restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)
-            conversation.context = restored_context
+        hooks.record_decision_trace(
+            conversation,
+            {
+                "stage": "re_entry",
+                "decision": "required",
+                "reason": "pending_resume",
+            },
+        )
+    elif not handover:
+        hooks.record_decision_trace(
+            conversation,
+            {
+                "stage": "pending_resume",
+                "decision": "resume",
+                "reason": "pending_ack_no_handover",
+            },
+        )
 
-        handover.status = "bot_handling"
-        handover.resolved_at = None
-        handover.resolved_by_id = None
-        handover.resolved_by_name = None
-        handover.resolution_time_seconds = None
-        handover.resolution_type = None
-        handover.resolution_notes = None
-        handover.assigned_to = None
-        handover.assigned_to_name = None
+    trace_payload = {
+        "stage": "pending_sla",
+        "decision": "pending_ack",
+        "state": conversation.state,
+    }
+    if isinstance(router_pending_meta, dict):
+        trace_payload.update(router_pending_meta)
+    hooks.record_decision_trace(conversation, trace_payload)
+    if saved_message:
+        hooks.update_message_decision_metadata(
+            saved_message,
+            {
+                "pending_action": "pending_ack",
+                "pending_resume_restored": bool(pending_resume),
+            },
+        )
+    return ContinuityTransportDecision(
+        handled=True,
+        bot_response=msg_pending_ack,
+        success_message="Pending ack response sent",
+        failure_message="Pending ack send failed",
+    )
 
-        db.flush()
 
-        logger.info(f"Manager {manager_name} returned conversation {conversation.id} to bot")
-        return Result.success(True)
+def _record_pending_sla_violation_metadata(
+    *,
+    saved_message: Message | None,
+    sla_violation,
+    hooks: PendingContinuityRuntimeHooks,
+) -> None:
+    if not sla_violation or not saved_message:
+        return
+    hooks.update_message_decision_metadata(
+        saved_message,
+        {
+            "sla_violation_severity": sla_violation.severity,
+            "sla_violation_action": sla_violation.action,
+            "sla_violation_reason": sla_violation.reason_code,
+            "sla_elapsed_minutes": sla_violation.elapsed_minutes,
+            "sla_threshold_minutes": sla_violation.threshold_minutes,
+            "sla_profile_id": str(sla_violation.profile_id) if sla_violation.profile_id else None,
+            "sla_profile_version": sla_violation.profile_version,
+            "sla_profile_scope": sla_violation.profile_scope,
+            "sla_domain_key": sla_violation.domain_key,
+        },
+    )
 
-    except Exception as e:
-        logger.error(f"Manager return failed: {e}")
-        return Result.failure(str(e), "return_error")
 
-
-def manager_reopen(
+def _handle_pending_sla_runtime(
+    *,
     db: Session,
     conversation: Conversation,
-    handover: Handover,
-    *,
-    manager_id: str,
-    manager_name: str,
-) -> Result[bool]:
-    """Вернуть resolved handover в manager_active без создания нового кейса."""
+    saved_message: Message | None,
+    now: datetime,
+    guard_only_skip: bool,
+    router_pending_meta: dict[str, Any] | None,
+    pending_sla_ping_minutes: int,
+    pending_sla_ping_sent_key: str,
+    msg_pending_wait: str,
+    msg_pending_sla_ping: str,
+    resolve_pending_sla_violation_fn: Callable[..., Any],
+    hooks: PendingContinuityRuntimeHooks,
+) -> ContinuityTransportDecision | None:
+    from app.services.sla_runtime_service import (
+        SLA_RUNTIME_CONTEXT_KEY,
+        build_collect_only_runtime_context,
+    )
 
+    context = hooks.get_conversation_context(conversation)
+    pending_sla = _get_pending_sla(context)
+    ping_sent_at = pending_sla.get(pending_sla_ping_sent_key)
+    sla_violation = resolve_pending_sla_violation_fn(
+        db,
+        conversation=conversation,
+        now=now,
+    )
+    _record_pending_sla_violation_metadata(
+        saved_message=saved_message,
+        sla_violation=sla_violation,
+        hooks=hooks,
+    )
+
+    if sla_violation and sla_violation.severity != "none" and sla_violation.action == "collect_only":
+        if guard_only_skip:
+            trace_payload = {
+                "stage": "pending_sla",
+                "decision": "guard_only",
+                "state": conversation.state,
+                "sla_severity": sla_violation.severity,
+                "sla_action": sla_violation.action,
+                "sla_reason": sla_violation.reason_code,
+            }
+            if isinstance(router_pending_meta, dict):
+                trace_payload.update(router_pending_meta)
+            hooks.record_decision_trace(conversation, trace_payload)
+            if saved_message:
+                hooks.update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_sla_collect_only_guard_only",
+                        "pending_guard_only": True,
+                    },
+                )
+            return None
+
+        pending_sla[pending_sla_ping_sent_key] = now.isoformat()
+        pending_sla["collect_only_at"] = now.isoformat()
+        updated_context = _set_pending_sla(context, pending_sla)
+        updated_context[SLA_RUNTIME_CONTEXT_KEY] = build_collect_only_runtime_context(
+            decision=sla_violation,
+            now=now,
+        )
+        hooks.set_conversation_context(conversation, updated_context)
+        trace_payload = {
+            "stage": "pending_sla",
+            "decision": "collect_only",
+            "state": conversation.state,
+            "sla_severity": sla_violation.severity,
+            "sla_action": sla_violation.action,
+            "sla_reason": sla_violation.reason_code,
+            "sla_elapsed_minutes": sla_violation.elapsed_minutes,
+            "sla_threshold_minutes": sla_violation.threshold_minutes,
+        }
+        if isinstance(router_pending_meta, dict):
+            trace_payload.update(router_pending_meta)
+        hooks.record_decision_trace(conversation, trace_payload)
+        if saved_message:
+            hooks.update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_action": "pending_sla_collect_only",
+                    "sla_collect_only": True,
+                },
+            )
+        return ContinuityTransportDecision(
+            handled=True,
+            bot_response=msg_pending_wait,
+            success_message="Pending SLA collect_only response sent",
+            failure_message="Pending SLA collect_only send failed",
+        )
+
+    escalated_at = conversation.escalated_at
+    if escalated_at and escalated_at.tzinfo is None:
+        escalated_at = escalated_at.replace(tzinfo=timezone.utc)
+    if sla_violation:
+        ping_due = bool(
+            sla_violation.severity in {"breach", "severe_breach"}
+            and sla_violation.action in {"notify_manager", "escalate"}
+            and not ping_sent_at
+        )
+    else:
+        ping_due = bool(
+            escalated_at
+            and not ping_sent_at
+            and now - escalated_at >= timedelta(minutes=pending_sla_ping_minutes)
+        )
+
+    if not ping_due:
+        return None
+
+    if guard_only_skip:
+        trace_payload = {
+            "stage": "pending_sla",
+            "decision": "guard_only",
+            "state": conversation.state,
+        }
+        if sla_violation:
+            trace_payload["sla_severity"] = sla_violation.severity
+            trace_payload["sla_action"] = sla_violation.action
+            trace_payload["sla_reason"] = sla_violation.reason_code
+        if isinstance(router_pending_meta, dict):
+            trace_payload.update(router_pending_meta)
+        hooks.record_decision_trace(conversation, trace_payload)
+        if saved_message:
+            hooks.update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_action": (
+                        "pending_sla_escalate_guard_only"
+                        if sla_violation and sla_violation.action == "escalate"
+                        else "pending_sla_notify_manager_guard_only"
+                        if sla_violation and sla_violation.action == "notify_manager"
+                        else "pending_sla_guard_only"
+                    ),
+                    "pending_guard_only": True,
+                },
+            )
+        return None
+
+    pending_sla[pending_sla_ping_sent_key] = now.isoformat()
+    updated_context = _set_pending_sla(context, pending_sla)
+    hooks.set_conversation_context(conversation, updated_context)
+    trace_payload = {
+        "stage": "pending_sla",
+        "decision": (
+            "escalate"
+            if sla_violation and sla_violation.action == "escalate"
+            else "notify_manager"
+            if sla_violation and sla_violation.action == "notify_manager"
+            else "ping"
+        ),
+        "state": conversation.state,
+    }
+    if sla_violation:
+        trace_payload["sla_severity"] = sla_violation.severity
+        trace_payload["sla_action"] = sla_violation.action
+        trace_payload["sla_reason"] = sla_violation.reason_code
+        trace_payload["sla_elapsed_minutes"] = sla_violation.elapsed_minutes
+        trace_payload["sla_threshold_minutes"] = sla_violation.threshold_minutes
+    if isinstance(router_pending_meta, dict):
+        trace_payload.update(router_pending_meta)
+    hooks.record_decision_trace(conversation, trace_payload)
+    if saved_message:
+        hooks.update_message_decision_metadata(
+            saved_message,
+            {
+                "pending_sla_ping": True,
+                "pending_action": (
+                    "pending_sla_escalate"
+                    if sla_violation and sla_violation.action == "escalate"
+                    else "pending_sla_notify_manager"
+                    if sla_violation and sla_violation.action == "notify_manager"
+                    else "pending_sla_ping"
+                ),
+            },
+        )
+    return ContinuityTransportDecision(
+        handled=True,
+        bot_response=msg_pending_sla_ping,
+        success_message=(
+            "Pending SLA escalation sent"
+            if sla_violation and sla_violation.action == "escalate"
+            else "Pending SLA notify sent"
+            if sla_violation and sla_violation.action == "notify_manager"
+            else "Pending SLA ping sent"
+        ),
+        failure_message="Pending SLA ping send failed",
+    )
+
+
+def _handle_handover_confirmation_runtime(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str,
+    now: datetime,
+    hooks: HandoverConfirmationRuntimeHooks,
+) -> ContinuityTransportDecision:
     if conversation.state != ConversationState.BOT_ACTIVE.value:
-        return Result.failure(f"Cannot reopen from state {conversation.state}", "invalid_state")
+        return ContinuityTransportDecision(handled=False)
 
-    if handover.status != "resolved":
-        return Result.failure(f"Handover status is {handover.status}", "invalid_handover")
+    context = hooks.get_conversation_context(conversation)
+    confirmation = hooks.get_handover_confirmation(context)
+    if not confirmation:
+        return ContinuityTransportDecision(handled=False)
 
-    try:
-        now = datetime.now(timezone.utc)
-        # Reopen is an explicit operator override from bot_active back to manager_active.
-        force_state(
+    if not hooks.is_handover_confirmation_active(confirmation, now):
+        cleared_context = hooks.set_handover_confirmation(context, None)
+        hooks.set_conversation_context(conversation, cleared_context)
+        return ContinuityTransportDecision(handled=False)
+
+    decision = hooks.classify_confirmation(message_text)
+    if decision == "yes":
+        cleared_context = hooks.set_handover_confirmation(context, None)
+        hooks.set_conversation_context(conversation, cleared_context)
+        hooks.reset_low_confidence_retry(conversation)
+
+        escalation_message = confirmation.get("user_message") or message_text
+        _, reused, telegram_sent = hooks.reuse_active_handover(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message=escalation_message,
+            source="handover_confirmation",
+            intent="low_confidence",
+        )
+        if reused:
+            bot_response = hooks.msg_escalated
+            success_message = (
+                "Handover confirmed (reused), telegram=sent"
+                if telegram_sent
+                else "Handover confirmed (reused), telegram=failed"
+            )
+            failure_message = f"{success_message}; response_send=failed"
+        else:
+            hooks.record_escalation_metric("intent")
+            escalation_result = hooks.escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                trigger_type="intent",
+                trigger_value="low_confidence",
+                user_message=escalation_message,
+            )
+            if escalation_result.ok:
+                handover = escalation_result.value
+                telegram_sent = hooks.send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=escalation_message,
+                )
+                bot_response = hooks.msg_escalated
+                success_message = (
+                    "Handover confirmed, telegram=sent"
+                    if telegram_sent
+                    else "Handover confirmed, telegram=failed"
+                )
+                failure_message = f"{success_message}; response_send=failed"
+            else:
+                bot_response = hooks.msg_ai_error
+                success_message = (
+                    f"Handover confirm escalation failed: {escalation_result.error}"
+                )
+                failure_message = f"{success_message}; response_send=failed"
+
+        hooks.record_decision_trace(
             conversation,
-            ConversationState.MANAGER_ACTIVE,
-            reason="manager_reopen",
-            handover=handover,
+            {
+                "stage": "handover_confirmation",
+                "decision": "confirmed",
+                "reason": "user_confirmed",
+                "state": conversation.state,
+                "reused": reused,
+            },
+        )
+        return ContinuityTransportDecision(
+            handled=True,
+            bot_response=bot_response,
+            success_message=success_message,
+            failure_message=failure_message,
         )
 
-        meta = dict(handover.meta or {})
-        reopen_count = int(meta.get("reopen_count") or 0) + 1
-        if handover.resolved_at:
-            meta["last_resolved_at"] = handover.resolved_at.isoformat()
-        meta["reopen_count"] = reopen_count
-        meta["last_reopened_at"] = now.isoformat()
-        meta["last_reopened_by"] = manager_name
-        handover.meta = meta
+    if decision == "no":
+        cleared_context = hooks.set_handover_confirmation(context, None)
+        hooks.set_conversation_context(conversation, cleared_context)
+        hooks.reset_low_confidence_retry(conversation)
+        hooks.record_decision_trace(
+            conversation,
+            {
+                "stage": "handover_confirmation",
+                "decision": "declined",
+                "reason": "user_declined",
+                "state": conversation.state,
+            },
+        )
+        return ContinuityTransportDecision(
+            handled=True,
+            bot_response=hooks.msg_handover_declined,
+            success_message="Handover declined, asked for salon details",
+            failure_message="Handover decline send failed",
+        )
 
-        handover.status = "active"
-        handover.created_at = now
-        handover.notified_at = None
-        handover.first_response_at = None
-        handover.resolved_at = None
-        handover.resolved_by_id = None
-        handover.resolved_by_name = None
-        handover.resolution_time_seconds = None
-        handover.resolution_type = None
-        handover.resolution_notes = None
-        handover.assigned_to = manager_id
-        handover.assigned_to_name = manager_name
-
-        db.flush()
-
-        logger.info("Manager %s reopened conversation %s", manager_name, conversation.id)
-        return Result.success(True)
-    except Exception as e:
-        logger.error(f"Manager reopen failed: {e}")
-        return Result.failure(str(e), "reopen_error")
+    cleared_context = hooks.set_handover_confirmation(context, None)
+    hooks.set_conversation_context(conversation, cleared_context)
+    return ContinuityTransportDecision(handled=False)
 
 
 def check_invariants(conversation: Conversation, handover: Handover = None) -> list[str]:

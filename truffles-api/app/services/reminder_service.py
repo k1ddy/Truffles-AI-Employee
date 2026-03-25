@@ -18,7 +18,8 @@ from app.services.sla_runtime_service import (
     resolve_pending_sla_violation,
 )
 from app.services.state_machine import ConversationState
-from app.services.state_service import force_state, manager_resolve
+from app.services.handover_owner_service import manager_resolve
+from app.services.state_service import force_state
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("reminder_service")

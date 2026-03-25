@@ -22,6 +22,14 @@ from app.services.pack_runtime_types import PackDecision
 _KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _DEFAULT_CLIENT_SLUG = "generic"
 _PROMO_MARKERS = ("акци", "скидк", "промо", "бонус", "special offer")
+_PRICE_QUESTION_PATTERNS = (
+    re.compile(r"\bскольк\w*(?:\s+\w+){0,2}\s+сто(?:ит|ят)\b"),
+    re.compile(r"\bкак(?:ая|ова)?\s+цен\w*\b"),
+)
+_DURATION_QUESTION_PATTERNS = (
+    re.compile(r"\bскольк\w*(?:\s+\w+){0,3}\s+(?:длит|заним)\w*\b"),
+    re.compile(r"\bкак(?:\s+\w+){0,2}\s+долг\w*\b"),
+)
 
 
 @dataclass(frozen=True)
@@ -211,6 +219,44 @@ def _contains_any(text: str, tokens: list[str]) -> bool:
     return any(token and token in text for token in tokens)
 
 
+def _contains_word(text: str, token: str) -> bool:
+    return re.search(rf"\b{re.escape(token)}\b", text) is not None
+
+
+def _contains_any_terms(
+    text: str,
+    tokens: list[str],
+    *,
+    exact_terms: set[str] | None = None,
+    stem_terms: dict[str, str] | None = None,
+) -> bool:
+    if not text:
+        return False
+    words = [token for token in text.split() if token]
+    exact_terms = {term.casefold() for term in (exact_terms or set()) if term}
+    stem_terms = {
+        str(term).casefold(): str(stem).casefold()
+        for term, stem in (stem_terms or {}).items()
+        if term and stem
+    }
+    for token in tokens:
+        candidate = str(token or "").strip().casefold()
+        if not candidate:
+            continue
+        if any(char.isspace() for char in candidate):
+            if candidate in text:
+                return True
+            continue
+        if candidate in exact_terms:
+            if any(word == candidate for word in words):
+                return True
+            continue
+        stem = stem_terms.get(candidate, candidate)
+        if any(word.startswith(stem) for word in words):
+            return True
+    return False
+
+
 def _has_price_signal(
     normalized: str,
     raw_text: str | None = None,
@@ -218,7 +264,14 @@ def _has_price_signal(
     client_slug: str | None = None,
 ) -> bool:
     text = normalized or _normalize_text(raw_text or "")
-    return _contains_any(text, get_signal_lexicon_list(client_slug, "price_keywords"))
+    if _contains_any_terms(
+        text,
+        get_signal_lexicon_list(client_slug, "price_keywords"),
+        exact_terms={"почем", "скок", "скока"},
+        stem_terms={"цена": "цен", "стоимость": "стоимост"},
+    ):
+        return True
+    return any(pattern.search(text) for pattern in _PRICE_QUESTION_PATTERNS)
 
 
 def _has_duration_signal(
@@ -228,7 +281,13 @@ def _has_duration_signal(
     client_slug: str | None = None,
 ) -> bool:
     text = normalized or _normalize_text(message or "")
-    return _contains_any(text, get_signal_lexicon_list(client_slug, "duration_keywords"))
+    if _contains_any(text, get_signal_lexicon_list(client_slug, "duration_keywords")):
+        return True
+    if any(pattern.search(text) for pattern in _DURATION_QUESTION_PATTERNS):
+        return True
+    if "время на" in text and get_pack_service_hint(message or "", client_slug=client_slug):
+        return True
+    return False
 
 
 def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> bool:

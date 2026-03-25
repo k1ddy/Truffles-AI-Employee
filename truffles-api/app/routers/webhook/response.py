@@ -21,6 +21,7 @@ from app.routers.webhook.trace import (
     _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookResponse
+from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.pack_runtime_service import _normalize_text
 from app.services.state_machine import ConversationState
 
@@ -1896,6 +1897,12 @@ def _handle_consult_flow(
                 message=message_text,
                 source="consult",
                 intent=consult_decision.intent,
+                hooks=ActiveHandoverReuseRuntimeHooks(
+                    get_active_handover=legacy.get_active_handover,
+                    transition_state=legacy.transition_state,
+                    send_telegram_notification=legacy.send_telegram_notification,
+                    record_decision_trace=legacy._record_decision_trace,
+                ),
             )
             if reused:
                 result_message = f"Consult reuse, telegram={'sent' if telegram_sent else 'failed'}"
@@ -2201,6 +2208,12 @@ def _handle_llm_primary(
                 message=message_text,
                 source="llm_guard",
                 intent="llm_guard",
+                hooks=ActiveHandoverReuseRuntimeHooks(
+                    get_active_handover=legacy.get_active_handover,
+                    transition_state=legacy.transition_state,
+                    send_telegram_notification=legacy.send_telegram_notification,
+                    record_decision_trace=legacy._record_decision_trace,
+                ),
             )
             if reused:
                 result_message = f"LLM guard reuse, telegram={'sent' if telegram_sent else 'failed'}"

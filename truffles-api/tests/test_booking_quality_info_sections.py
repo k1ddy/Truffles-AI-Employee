@@ -55,8 +55,11 @@ def _load_info_tag_infer():
         "LLM_QUALITY_INFO_TAGS",
         "LLM_QUALITY_TAG_HINTS",
         "LLM_QUALITY_TAG_HINTS_RE",
+        "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
+        "LLM_QUALITY_PROGRESS_SKIP_TAGS",
     }
     wanted_functions = {
+        "_llm_quality_build_booking_progress_info_inference_context",
         "_llm_quality_has_pending_question_interaction_contract",
         "_llm_quality_infer_info_tags",
         "_llm_quality_normalize_expect_token",
@@ -199,6 +202,44 @@ def test_info_tag_infer_is_suppressed_for_matched_booking_slot_constraint_contra
     )
 
     tags = sorted(_infer_info_tags("Я предпочла бы утренние часы.")) if should_infer else []
+
+    assert should_infer is False
+    assert tags == []
+
+
+def test_info_tag_infer_is_suppressed_for_booking_time_guidance_with_master_wording():
+    should_infer = _should_infer_info_tags_from_text(
+        turn_tags=["time"],
+        expected_info_sections=[],
+        expected_reply_type="time",
+        expected_reply_matched=False,
+        meta={
+            "intent": "booking",
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "pending_question_interaction": "ask_about_requested_slot",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "time",
+            },
+            {
+                "stage": "pending_question_interaction",
+                "decision": "booking_slot_guidance",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+            },
+        ],
+    )
+
+    tags = (
+        sorted(_infer_info_tags("А в какое время доступны мастера?"))
+        if should_infer
+        else []
+    )
 
     assert should_infer is False
     assert tags == []

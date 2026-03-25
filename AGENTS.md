@@ -84,6 +84,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Open-World Proof Gate:** claim про `business-agnostic`/`multilingual` robustness допустим только если есть оба слоя evidence: `deterministic metamorphic expansion` и `LLM stress synthesis` как минимум на нескольких `pack/capability` envelope; surface-mutation генератор сам по себе не закрывает proof.
 - **Open-World Closure Artifact Gate:** финальное закрытие `P6` допускается только при machine-readable closure evidence от `python3 ops/diagnose.py llm-quality-open-world-closure ...`; narrative summary без closure artifact = `BLOCKED`.
 - **Failure Family Gate:** дорогие quality-run handoff/acceptance решения должны опираться на `failure families` (invariant/root-cause clusters), а не только на список отдельных bad turns.
+- **Shadowed Core Definition Gate:** duplicate top-level `def`/`async def` в активных core hotspot-файлах должны быть либо устранены, либо явно зафиксированы в architecture guard; silent growth такого долга = stop-the-line.
 - **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
 - **Semantic Ownership Gate:** post-hoc semantic rewrite вне whitelist reason-codes считается нарушением контракта.
 - **Boundary Determinism Gate:** детерминированные ветки не подменяют semantic-owner решение; они только валидируют/блокируют/деградируют контрактно.
@@ -108,9 +109,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 ## 3) Один рабочий протокол (для всех)
 
-### 3.1 One-issue flow
-**1 проблема → 1 правка → 1 проверка → 1 запись в `STATE.md` (до merge для core/поведенческих изменений).**
-Проблема должна быть из `STATE.md` (NOW/GAP) или оформлена как GAP до старта.
+### 3.1 Family-first flow
+**1 failure family → 1 bounded implementation family → 1 closure check/replay → 1 запись в `STATE.md` (до merge для core/поведенческих изменений).**
+Сценарий или отдельный turn — unit of evidence, но не unit of implementation для residual debugging. Если граница family ещё не доказана, сначала открывай `forensic`-блок и картируй кластер, а не создавай новый micro-fix TP на каждый surfaced turn. Проблема должна быть из `STATE.md` (NOW/GAP) или оформлена как GAP до старта.
 
 ### 3.2 Не создавай — обновляй
 Перед созданием нового файла:
@@ -154,14 +155,15 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 2) **Scope / Out of scope**.
 3) **Touch-list**: файлы/таблицы, которые можно менять.
 4) **Plan**: шаги 1..N.
-5) **DoD**: критерии приёмки.
-6) **Checks**: тесты/команды (для новых фич — минимум один тест или waiver).
-7) **Evidence**: что сохраняем (CI run URL + логи/SQL/trace) и кто фиксирует запись в `STATE.md` (Brain или Top Architect, до merge при изменениях поведения/core).
-8) **Rollback**: как откатить.
-9) **No-go**: что запрещено.
-10) **Canon refs**: owner‑doc(и) + ссылка на `STATE.md` NOW/GAP; **CA_ID** если фикс закрывает CA‑пункт.
-11) **Residual architecture debt (mandatory)**: что остаётся техническим долгом после блока и почему.
-12) **Next-block contract (mandatory)**: точный следующий блок, его первый deterministic check и блокирующие условия.
+5) **Work mode**: `forensic` / `implementation` / `closure`.
+6) **DoD**: критерии приёмки.
+7) **Checks**: тесты/команды (для новых фич — минимум один тест или waiver).
+8) **Evidence**: что сохраняем (CI run URL + логи/SQL/trace) и кто фиксирует запись в `STATE.md` (Brain или Top Architect, до merge при изменениях поведения/core).
+9) **Rollback**: как откатить.
+10) **No-go**: что запрещено.
+11) **Canon refs**: owner‑doc(и) + ссылка на `STATE.md` NOW/GAP; **CA_ID** если фикс закрывает CA‑пункт.
+12) **Residual architecture debt (mandatory)**: что остаётся техническим долгом после блока и почему.
+13) **Next-block contract (mandatory)**: точный следующий блок, его первый deterministic check и блокирующие условия.
 
 Шаблон (копируй в задачу):
 - Название/цель (1–2 предложения)
@@ -172,6 +174,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Touch-list (файлы/таблицы)
 - Plan (1..N)
 - DoD
+- Work mode (mandatory)
 - Checks
 - Evidence
 - Rollback
@@ -181,7 +184,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Next-block contract (mandatory)
 
 ### 5.1 External Research Gate (обязательно)
-- Для каждой нетривиальной реализации/фикса до начала кода обязателен **ровно один точный web-search**.
+- Для каждой нетривиальной implementation-family реализации/фикса до начала кода обязателен **ровно один точный web-search**. Документирование decision/replay внутри уже открытого family-блока не требует нового query.
 - Search фиксируется в Task Package секции `One web search (mandatory before implementation)`:
   - точная строка запроса,
   - дата/время,
@@ -215,6 +218,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
   - ожидаемый измеримый эффект,
   - stop condition.
 - Две подряд итерации без новой evidence => stop-the-line, возврат к RCA/research.
+- `fail-fast` acceptance replay = closure tool, а не default discovery tool. Для картирования соседних отказов используй `dev/forensic` lane и держи один family-блок до стабилизации failure boundary.
 - Запрещено ослаблять acceptance-гейты/thresholds для «ускорения».
 
 ### 5.5 Context Continuity Gate (обязательно)
@@ -321,8 +325,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 **Что делаем (как):**
 1) **Lock-run (один раз):** фиксируем baseline с неизменными параметрами; принимаем только валидный run (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`); сохраняем `scenarios.json`, `summary.json`, `brief.md`.
-2) **Replay-run (на каждую правку):** запускаем только по lock-сценариям (`--scenarios-file`) и сравниваем только с lock-summary (`--baseline-summary`), с fail-fast (`--max-failures`) для скорости; обязательно `--reset-before-dialog`, чтобы не тянуть state/trace из прошлых прогонов.
-3) **Handoff:** в session/STATE кладём `summary.json` + `brief.md` + top-failures + replay command.
+2) **Replay-run (на каждую правку):** запускаем только по lock-сценариям (`--scenarios-file`) и сравниваем только с lock-summary (`--baseline-summary`), с fail-fast (`--max-failures`) для скорости; обязательно `--reset-before-dialog`, чтобы не тянуть state/trace из прошлых прогонов. Этот replay используется для closure, а не как основной discovery-механизм.
+3) **Forensic-run (когда family boundary ещё не закрыта):** используется только в `dev/forensic` lane, не обновляет baseline и может продолжать работу поверх audited non-canonical artifacts при явном reason. Один surfaced turn не открывает новый TP, пока не доказано, что это уже другой failure family.
+4) **Handoff:** в session/STATE кладём `summary.json` + `brief.md` + top-failures + replay command.
 
 **Короткая памятка (не нарушать):**
 - Нельзя сравнивать прогоны с разными сценариями/seed/параметрами.
@@ -331,6 +336,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Нельзя начинать новый фикс без `brief.md` от предыдущего прогона.
 - Нельзя использовать `INVALID` run (`infra_valid=false`) для сравнения и baseline.
 - Если реплей хуже baseline — stop-the-line, сначала root cause, потом новый фикс.
+- Нельзя открывать новый runtime TP только потому, что fail-fast surfaced следующий turn; сначала докажи, это новый family или тот же самый.
 - Перед каждым новым run обязателен индекс артефактов и блокировка повторов:
   - все quality-прогоны фиксируются в `run_manifest.json` и индексе `/tmp/booking_quality/_index` (по часу и по типу `lock/replay/full`),
   - новый run запрещён, если предыдущий в том же режиме `incomplete/invalid/failed` или `manual_audit != done`,

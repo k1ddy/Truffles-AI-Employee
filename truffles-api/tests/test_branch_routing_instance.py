@@ -365,9 +365,9 @@ def test_preflight_resolves_branch_instance_id():
     assert preflight_payload.get("tenant_context", {}).get("instance_id") == "inst-123"
 
 
-def test_preflight_drops_branch_sender():
+def test_preflight_no_longer_drops_branch_sender():
     client = SimpleNamespace(id=uuid4(), name="demo_salon")
-    settings = SimpleNamespace(branch_resolution_mode="by_instance", webhook_secret=None)
+    settings = SimpleNamespace(branch_resolution_mode="disabled", webhook_secret=None)
     branch = SimpleNamespace(
         id=uuid4(),
         client_id=client.id,
@@ -383,7 +383,7 @@ def test_preflight_drops_branch_sender():
     settings_query.filter.return_value.first.return_value = settings
     branch_query = Mock()
     branch_query.filter.return_value.first.return_value = branch
-    branch_query.filter.return_value.all.return_value = [(branch.phone,)]
+    branch_query.filter.return_value.all.return_value = []
 
     def _query_side_effect(model):
         if model is Client:
@@ -417,10 +417,10 @@ def test_preflight_drops_branch_sender():
         record_early_trace=lambda *args, **kwargs: False,
     )
 
-    assert response is not None
-    assert response.success is True
-    assert response.message == "Ignored sender (branch number)"
-    assert preflight_payload == {}
+    assert response is None
+    assert preflight_payload.get("client") is client
+    assert preflight_payload.get("settings") is settings
+    assert preflight_payload.get("remote_jid") == "77055740455@s.whatsapp.net"
 
 
 def test_get_or_create_conversation_sets_branch_id():

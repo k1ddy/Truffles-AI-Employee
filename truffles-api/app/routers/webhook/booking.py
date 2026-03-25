@@ -70,6 +70,7 @@ from app.services.expected_reply_contract import (
     should_skip_booking_interrupt_for_expected_reply,
     should_use_expected_service_off_topic_prompt,
 )
+from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.pack_runtime_service import get_system_lexicon_list, phrase_match_intent
 
 if TYPE_CHECKING:
@@ -1706,6 +1707,12 @@ def _handle_booking_interrupt(
             message=handover_message,
             source="booking_interrupt",
             intent="reschedule_request",
+            hooks=ActiveHandoverReuseRuntimeHooks(
+                get_active_handover=legacy.get_active_handover,
+                transition_state=legacy.transition_state,
+                send_telegram_notification=legacy.send_telegram_notification,
+                record_decision_trace=legacy._record_decision_trace,
+            ),
         )
         if reused:
             result_message = (
@@ -2362,6 +2369,12 @@ def _handle_booking_interrupt(
                     message=message_text,
                     source=info_source or "booking_interrupt",
                     intent=info_decision.intent,
+                    hooks=ActiveHandoverReuseRuntimeHooks(
+                        get_active_handover=legacy.get_active_handover,
+                        transition_state=legacy.transition_state,
+                        send_telegram_notification=legacy.send_telegram_notification,
+                        record_decision_trace=legacy._record_decision_trace,
+                    ),
                 )
                 if reused:
                     result_message = f"Booking interrupt reuse, telegram={'sent' if telegram_sent else 'failed'}"
@@ -2918,6 +2931,12 @@ def _handle_booking_flow(
                     message=message_text,
                     source="booking",
                     intent=decision.intent,
+                    hooks=ActiveHandoverReuseRuntimeHooks(
+                        get_active_handover=legacy.get_active_handover,
+                        transition_state=legacy.transition_state,
+                        send_telegram_notification=legacy.send_telegram_notification,
+                        record_decision_trace=legacy._record_decision_trace,
+                    ),
                 )
                 if reused:
                     result_message = f"Booking same-day reuse, telegram={'sent' if telegram_sent else 'failed'}"
@@ -3011,6 +3030,12 @@ def _handle_booking_flow(
                 message=message_text,
                 source="booking",
                 intent="human_request",
+                hooks=ActiveHandoverReuseRuntimeHooks(
+                    get_active_handover=legacy.get_active_handover,
+                    transition_state=legacy.transition_state,
+                    send_telegram_notification=legacy.send_telegram_notification,
+                    record_decision_trace=legacy._record_decision_trace,
+                ),
             )
             if reused:
                 bot_response = legacy.MSG_ESCALATED
@@ -3745,6 +3770,12 @@ def _handle_booking_flow(
                     message=booking_summary,
                     source="booking",
                     intent="booking",
+                    hooks=ActiveHandoverReuseRuntimeHooks(
+                        get_active_handover=legacy.get_active_handover,
+                        transition_state=legacy.transition_state,
+                        send_telegram_notification=legacy.send_telegram_notification,
+                        record_decision_trace=legacy._record_decision_trace,
+                    ),
                 )
                 if reused:
                     bot_response = legacy._combine_sidecar(legacy.MSG_ESCALATED, policy_price_sidecar)

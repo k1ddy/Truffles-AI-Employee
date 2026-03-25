@@ -875,11 +875,11 @@ from app.services.sla_profile_registry_service import (
     resolve_effective_profile_version,
     rollback_profile_version,
 )
-from app.services.state_service import manager_reassign as state_manager_reassign
-from app.services.state_service import manager_reopen as state_manager_reopen
-from app.services.state_service import manager_resolve as state_manager_resolve
-from app.services.state_service import manager_return as state_manager_return
-from app.services.state_service import manager_take as state_manager_take
+from app.services.handover_owner_service import manager_reassign as state_manager_reassign
+from app.services.handover_owner_service import manager_reopen as state_manager_reopen
+from app.services.handover_owner_service import manager_resolve as state_manager_resolve
+from app.services.handover_owner_service import manager_return as state_manager_return
+from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 from app.services.tool_certification_service import (
     TOOL_CERTIFICATION_CERTIFIED,

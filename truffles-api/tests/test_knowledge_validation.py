@@ -187,6 +187,26 @@ def test_unknown_domain_keeps_fail_closed_profile_for_beauty_fields():
     assert "client_pack.quality.expectations_photo" in missing
 
 
+def test_domain_generic_requires_booking_but_skips_beauty_specific_fields():
+    payload = _base_payload()
+    payload["client_pack"].pop("guest_policy", None)
+    payload["client_pack"].pop("safety", None)
+    payload["client_pack"].pop("pricing", None)
+    payload["client_pack"].pop("quality", None)
+    payload["client_pack"].pop("service_duration_estimates", None)
+    payload["client_pack"].pop("booking", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="generic")
+
+    assert "client_pack.guest_policy" not in missing
+    assert "client_pack.safety.medical_note" not in missing
+    assert "client_pack.pricing.price_from_reason" not in missing
+    assert "client_pack.quality.expectations_photo" not in missing
+    assert "client_pack.service_duration_estimates" in missing
+    assert "client_pack.booking.collect_fields" in missing
+    assert "client_pack.booking.bot_can_confirm" in missing
+
+
 def test_domain_legal_accepts_neutral_business_alias_fields():
     payload = _base_payload()
     payload["client_pack"]["business"] = {"name": "Demo Legal"}

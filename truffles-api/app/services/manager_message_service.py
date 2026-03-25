@@ -30,7 +30,7 @@ from app.services.learning_service import get_client_slug
 from app.services.message_service import save_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_service import is_simulation_context
-from app.services.state_service import manager_take as state_manager_take
+from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("manager_message_service")
@@ -220,15 +220,6 @@ def notify_client_manager_status(
         message = MANAGER_DISCONNECTED_MESSAGE
         idempotency_key = f"manager_disconnected:{handover.id}"
 
-    save_message(
-        db=db,
-        conversation_id=conversation.id,
-        client_id=conversation.client_id,
-        role="assistant",
-        content=message,
-        message_metadata={"system": True, "event": f"manager_{status}", "source": "system"},
-    )
-
     sent = send_bot_response(
         db=db,
         client_id=conversation.client_id,
@@ -236,6 +227,19 @@ def notify_client_manager_status(
         message=message,
         branch_id=conversation.branch_id,
         idempotency_key=idempotency_key,
+    )
+    save_message(
+        db=db,
+        conversation_id=conversation.id,
+        client_id=conversation.client_id,
+        role="assistant",
+        content=message,
+        message_metadata={
+            "system": True,
+            "event": f"manager_{status}",
+            "source": "system",
+            "delivery_ok": bool(sent),
+        },
     )
     if not sent:
         return False, "chatflow_failed"

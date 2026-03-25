@@ -32,8 +32,8 @@ from app.services.manager_message_service import (
     process_manager_message,
     resolve_linked_agent,
 )
-from app.services.state_service import manager_resolve as state_manager_resolve
-from app.services.state_service import manager_take as state_manager_take
+from app.services.handover_owner_service import manager_resolve as state_manager_resolve
+from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("telegram_webhook")

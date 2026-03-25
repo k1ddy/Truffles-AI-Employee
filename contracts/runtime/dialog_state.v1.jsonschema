@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/dialog_state.v1.jsonschema",
+  "title": "DialogState v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "current_referents",
+    "pending_question_contract",
+    "interaction_state",
+    "projections",
+    "meta"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "dialog_state.v1"
+    },
+    "current_referents": {
+      "$ref": "#/$defs/currentReferents"
+    },
+    "pending_question_contract": {
+      "$ref": "#/$defs/pendingQuestionContract"
+    },
+    "interaction_state": {
+      "$ref": "#/$defs/interactionState"
+    },
+    "projections": {
+      "$ref": "#/$defs/projections"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "nullableToken": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "currentReferents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "specialist", "branch", "booking", "customer"],
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "specialist": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "branch": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "booking": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "customer": {
+          "$ref": "#/$defs/nullableToken"
+        }
+      }
+    },
+    "pendingQuestionContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_reply_type",
+        "pending_question_target",
+        "active_question_relation",
+        "next_question",
+        "open_questions"
+      ],
+      "properties": {
+        "expected_reply_type": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "pending_question_target": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "active_question_relation": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "next_question": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "interactionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resume_slot",
+        "interaction_target",
+        "interaction_relation",
+        "interaction_owner",
+        "grounded_referents",
+        "confirmation_state",
+        "degrade_reason"
+      ],
+      "properties": {
+        "resume_slot": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "interaction_target": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "interaction_relation": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "interaction_owner": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "grounded_referents": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "confirmation_state": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "degrade_reason": {
+          "$ref": "#/$defs/nullableToken"
+        }
+      }
+    },
+    "projections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_reply_type", "expected_reply_reason", "session_memory_interaction_state"],
+      "properties": {
+        "expected_reply_type": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "expected_reply_reason": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "session_memory_interaction_state": {
+          "$ref": "#/$defs/interactionState"
+        }
+      }
+    }
+  }
+}

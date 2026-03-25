@@ -3,8 +3,10 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 from uuid import UUID
 
 import httpx
@@ -20,6 +22,10 @@ from app.services.pack_runtime_service import get_system_lexicon_list
 from app.services.result import Result
 
 logger = get_logger("ai_service")
+_INTENT_SIGNAL_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
+    "intent_signal_override",
+    default=None,
+)
 
 try:
     import redis  # type: ignore
@@ -1878,10 +1884,16 @@ def generate_consult_controller_output(
 
 
 def is_acknowledgement_message(text: str) -> bool:
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        return bool(override.get("is_ack"))
     return normalize_for_matching(text) in ACKNOWLEDGEMENT_PHRASES
 
 
 def is_greeting_message(text: str) -> bool:
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        return bool(override.get("is_greeting"))
     normalized = normalize_for_matching(text)
     if not normalized:
         return False
@@ -1897,6 +1909,9 @@ def is_greeting_message(text: str) -> bool:
 
 
 def is_thanks_message(text: str) -> bool:
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        return bool(override.get("is_thanks"))
     if not text:
         return False
     normalized = normalize_for_matching(text)
@@ -1922,6 +1937,9 @@ def is_thanks_message(text: str) -> bool:
 
 
 def is_low_signal_message(text: str) -> bool:
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        return bool(override.get("is_low_signal"))
     normalized = normalize_for_matching(text)
     if not normalized:
         return True
@@ -1941,6 +1959,14 @@ def _has_refusal_phrase(normalized: str) -> bool:
 
 
 def detect_refusal_flags(text: str) -> dict[str, bool]:
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        refusal_flags = override.get("refusal_flags")
+        if isinstance(refusal_flags, dict):
+            return {
+                "name": bool(refusal_flags.get("name")),
+                "phone": bool(refusal_flags.get("phone")),
+            }
     normalized = normalize_for_matching(text)
     if not normalized:
         return {"name": False, "phone": False}
@@ -1996,6 +2022,13 @@ def _assistant_expects_yes_no(text: str) -> bool:
 
 def classify_confirmation(text: str) -> str:
     """Classify short confirmation replies as yes/no/unknown."""
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        decision = override.get("confirmation_decision")
+        if isinstance(decision, str):
+            normalized_decision = decision.strip().casefold()
+            if normalized_decision in {"yes", "no", "unknown"}:
+                return normalized_decision
     normalized = normalize_for_matching(text)
     if not normalized:
         return "unknown"
@@ -2015,12 +2048,46 @@ def classify_confirmation(text: str) -> str:
 
 def is_bot_status_question(text: str) -> bool:
     """Detect questions like 'бот не отвечает/ты тут?' to avoid escalation."""
+    override = _resolve_intent_signal_override(text)
+    if override is not None:
+        return bool(override.get("is_status_question"))
     normalized = normalize_for_matching(text)
     if not normalized:
         return False
     if normalized in BOT_STATUS_KEYWORDS:
         return True
     return any(keyword in normalized for keyword in BOT_STATUS_KEYWORDS)
+
+
+def get_intent_signal_override() -> dict[str, object] | None:
+    override = _INTENT_SIGNAL_OVERRIDE.get()
+    if not isinstance(override, dict):
+        return None
+    return dict(override)
+
+
+@contextmanager
+def use_intent_signal_override(override: dict[str, object] | None) -> Iterator[None]:
+    if not isinstance(override, dict):
+        yield
+        return
+
+    token = _INTENT_SIGNAL_OVERRIDE.set(dict(override))
+    try:
+        yield
+    finally:
+        _INTENT_SIGNAL_OVERRIDE.reset(token)
+
+
+def _resolve_intent_signal_override(text: str | None) -> dict[str, object] | None:
+    override = _INTENT_SIGNAL_OVERRIDE.get()
+    if not isinstance(override, dict):
+        return None
+    normalized = normalize_for_matching(text)
+    override_text = override.get("normalized_text")
+    if not isinstance(override_text, str) or override_text != normalized:
+        return None
+    return override
 
 
 BAD_WORDS = {

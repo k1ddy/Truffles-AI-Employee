@@ -277,6 +277,9 @@ location_question_scope_terms:
     - адрес
     - наход
     - располож
+location_question_prefixes:
+  ru:
+    - где
 service_question_keywords:
   ru:
     - делаете
@@ -346,6 +349,12 @@ booking_verification_keywords:
     - check
     - confirm
     - verify
+booking_confirmation_keywords:
+  ru:
+    - подтверд
+    - подтвержд
+  en:
+    - confirm
 services_overview_phrases:
   ru:
     - ассортимент услуг
@@ -355,6 +364,17 @@ services_overview_phrases:
     - что у вас есть
     - какие процедуры
     - какие есть услуги
+portfolio_question_keywords:
+  ru:
+    - портфолио
+    - примеры работ
+    - покажите работы
+    - есть фото результатов
+  en:
+    - portfolio
+    - examples of work
+    - show your work
+    - before and after
 daypart_evening_keywords:
   ru:
     - вечер
@@ -381,6 +401,36 @@ daypart_preference_markers:
     - подход
     - удоб
     - только
+deictic_time_phrases:
+  ru:
+    - в это время
+    - на это время
+deictic_day_phrases:
+  ru:
+    - на этот день
+    - в этот день
+deictic_time_availability_prefixes:
+  ru:
+    - свобод
+    - мест
+    - слот
+    - окошк
+availability_confirmation_prefixes:
+  ru:
+    - есть
+specialist_availability_prefixes:
+  ru:
+    - доступ
+    - свобод
+specialist_date_range_followup_phrases:
+  ru:
+    - на этой неделе
+weekday_prefixes:
+  ru:
+    - будн
+weekend_prefixes:
+  ru:
+    - выходн
 offtopic_keywords:
   ru:
     - чат бот

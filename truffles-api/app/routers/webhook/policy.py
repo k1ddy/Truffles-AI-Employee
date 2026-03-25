@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
 from app.services.capabilities_runtime import get_runtime_capabilities
+from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.intent_service import Intent
 from app.services.pack_runtime_service import (
     PackDecision,
@@ -826,6 +827,12 @@ def _apply_policy_decision(
             message=message_text,
             source=policy_source,
             intent=decision.intent,
+            hooks=ActiveHandoverReuseRuntimeHooks(
+                get_active_handover=legacy.get_active_handover,
+                transition_state=legacy.transition_state,
+                send_telegram_notification=legacy.send_telegram_notification,
+                record_decision_trace=legacy._record_decision_trace,
+            ),
         )
         if reused:
             result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"

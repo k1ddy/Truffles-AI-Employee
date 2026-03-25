@@ -60,6 +60,7 @@ def _load_quality_helpers():
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_generate_unique_jid",
         "_llm_quality_effective_intent",
         "_llm_quality_is_timeout_degrade_reason",
         "_clean_webhook_secret",
@@ -76,6 +77,8 @@ def _load_quality_helpers():
         "_llm_quality_collect_override_reason_codes",
         "_llm_quality_collect_semantic_intent_override_audit",
         "_llm_quality_collect_plan_delta_audit",
+        "_chaos_matches_action",
+        "_chaos_action_fallback_ok",
         "_llm_quality_init_rewrite_governance_state",
         "_llm_quality_track_rewrite_governance",
         "_llm_quality_finalize_rewrite_governance",
@@ -86,6 +89,7 @@ def _load_quality_helpers():
         "_llm_quality_is_lexicon_regex_delta_file",
         "_llm_quality_build_lexicon_regex_delta_status",
         "_llm_quality_is_hardcode_core_file",
+        "_llm_quality_literal_is_interpolation_only",
         "_llm_quality_line_has_phrase_branching",
         "_llm_quality_collect_hardcode_core_violations",
         "_llm_quality_build_hardcode_core_gate_status",
@@ -110,6 +114,10 @@ def _load_quality_helpers():
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_collect_evidence_handoff_status",
         "_llm_quality_build_governance_closure_status",
+        "_llm_quality_reset_result_has_ack",
+        "_llm_quality_collect_preflight_contamination_reasons",
+        "_llm_quality_collect_recent_preflight_contamination",
+        "_llm_quality_normalize_preflight_clear",
         "_llm_quality_is_iso_timestamp",
         "_llm_quality_extract_chain_id",
         "_llm_quality_extract_oracle_conflict_count",
@@ -117,6 +125,10 @@ def _load_quality_helpers():
         "_llm_quality_sync_manual_audit_summary",
         "_llm_quality_find_latest_pending_manual_audit",
         "_llm_quality_find_latest_completed_manual_audit",
+        "_llm_quality_trace_has_session_memory_question_set",
+        "_llm_quality_trace_has_service_clarify_question_contract",
+        "_llm_quality_has_catalog_service_answer_sidecar_fallback",
+        "_llm_quality_has_resume_contract_meta_trace_fallback",
         "_llm_quality_build_manual_audit_gate_status",
         "_llm_quality_build_forensic_sla_gate_status",
         "_llm_quality_build_oracle_conflict_gate_status",
@@ -134,9 +146,20 @@ def _load_quality_helpers():
         "_llm_quality_hq1_normalize_text",
         "_llm_quality_hq1_contains_any",
         "_llm_quality_hq1_has_hallucination_signal",
+        "_llm_quality_booking_collect_contract",
+        "_llm_quality_booking_collect_prompt_ok",
+        "_llm_quality_value_matches",
+        "_llm_quality_normalize_expect_token",
+        "_llm_quality_normalize_expected_reply_for_oracle",
+        "_llm_quality_expected_reply_reason_matches",
+        "_llm_quality_question_contract_collect_trace_matches",
+        "_llm_quality_entry_matches_expected",
+        "_llm_quality_has_expected_followup_prompt",
         "_llm_quality_collect_hq1_classes",
         "_llm_quality_should_expect_booking_progress",
         "_llm_quality_should_promote_judge_fail",
+        "_llm_quality_meta_matches_expected",
+        "_llm_quality_trace_has_expected_entries",
     }
 
     selected_nodes = []
@@ -735,6 +758,122 @@ def test_weak_oracle_expectation_detects_empty_contract():
     assert is_weak({"expected_reply": True, "action": "collect"}) is False
 
 
+def test_expected_reply_false_is_relaxed_for_bot_active_booking_confirmation():
+    ns = _load_quality_helpers()
+    normalize = ns["_llm_quality_normalize_expected_reply_for_oracle"]
+
+    result = normalize(
+        expected_reply=False,
+        expected_response=True,
+        expected_action=None,
+        expected_reply_type=None,
+        expected_info_sections=[],
+        expected_state="bot_active",
+        booking_active=False,
+        state="bot_active",
+        meta={
+            "action": "booking_confirm",
+            "tool_action": "calendar.book_slot",
+            "appointment_id": "appt-1",
+        },
+    )
+
+    assert result is None
+
+
+def test_expected_reply_false_is_relaxed_for_bot_active_check_booking_prompt():
+    ns = _load_quality_helpers()
+    normalize = ns["_llm_quality_normalize_expected_reply_for_oracle"]
+
+    result = normalize(
+        expected_reply=False,
+        expected_response=True,
+        expected_action=None,
+        expected_reply_type=None,
+        expected_info_sections=[],
+        expected_state="bot_active",
+        booking_active=False,
+        state="bot_active",
+        meta={
+            "action": "fact",
+            "intent": "check_booking",
+            "tool_action": "calendar.get_booking",
+            "tool_decision": "not_found",
+            "booking_verification_prompt": True,
+        },
+    )
+
+    assert result is None
+
+
+def test_expected_reply_false_stays_strict_for_pending_state():
+    ns = _load_quality_helpers()
+    normalize = ns["_llm_quality_normalize_expected_reply_for_oracle"]
+
+    result = normalize(
+        expected_reply=False,
+        expected_response=False,
+        expected_action=None,
+        expected_reply_type=None,
+        expected_info_sections=[],
+        expected_state="pending",
+        booking_active=False,
+        state="pending",
+        meta={"action": "escalate"},
+    )
+
+    assert result is False
+
+
+def test_meta_match_accepts_collect_reason_for_booking_prompt_expectation():
+    ns = _load_quality_helpers()
+    matches = ns["_llm_quality_meta_matches_expected"]
+
+    assert (
+        matches(
+            {"expected_reply_reason": "collect:datetime"},
+            {"expected_reply_reason": "booking_prompt"},
+            None,
+            None,
+        )
+        is True
+    )
+    assert (
+        matches(
+            {"expected_reply_reason": "collect:service"},
+            None,
+            {"expected_reply_reason": ["booking_prompt"]},
+            None,
+        )
+        is True
+    )
+
+
+def test_trace_match_accepts_consultant_runtime_collect_for_question_contract_expectation():
+    ns = _load_quality_helpers()
+    matches = ns["_llm_quality_trace_has_expected_entries"]
+
+    assert (
+        matches(
+            [
+                {
+                    "stage": "consultant_runtime",
+                    "expected_reply_type": "time",
+                    "expected_reply_reason": "collect:datetime",
+                }
+            ],
+            [
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "time",
+                    "reason": "booking_prompt",
+                }
+            ],
+        )
+        is True
+    )
+
+
 def test_run_economy_blocks_full_run_without_non_doc_delta():
     ns = _load_quality_helpers()
     build = ns["_llm_quality_build_run_economy_status"]
@@ -792,6 +931,41 @@ def test_run_economy_allows_replay_with_baseline_and_reset():
 
     assert status["valid"] is True
     assert status["reasons"] == []
+
+
+def test_run_economy_allows_replay_resume_with_unchanged_fingerprint():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_run_economy_status"]
+
+    initial = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file="/tmp/booking_quality/run/scenarios.json",
+        baseline_summary="/tmp/booking_quality/lock/summary.json",
+        reset_before_dialog=True,
+        allow_no_code_delta=False,
+        changed_files=["ops/diagnose.py"],
+    )
+    replay_fingerprint = initial["replay_fingerprint"]
+    assert isinstance(replay_fingerprint, str) and replay_fingerprint
+
+    resumed = build(
+        mode="block",
+        repo_root=".",
+        base_ref="origin/main",
+        scenarios_file="/tmp/booking_quality/run/scenarios.json",
+        baseline_summary="/tmp/booking_quality/lock/summary.json",
+        reset_before_dialog=True,
+        allow_no_code_delta=False,
+        resume_mode=True,
+        previous_replay_fingerprint=replay_fingerprint,
+        changed_files=["ops/diagnose.py"],
+    )
+
+    assert resumed["valid"] is True
+    assert resumed["resume_mode"] is True
+    assert "replay_fingerprint_unchanged" not in resumed["reasons"]
 
 
 def test_run_economy_blocks_lock_with_unchanged_non_canonical_fingerprint():
@@ -1637,6 +1811,186 @@ def test_replay_command_skips_allow_non_allowlist_when_skip_outbox():
     assert "--allow-non-allowlist" not in parts
 
 
+def test_generate_unique_jid_is_deterministic_per_dialog():
+    ns = _load_quality_helpers()
+    generate = ns["_llm_quality_generate_unique_jid"]
+
+    first = generate(2, run_id="run-123")
+    second = generate(2, run_id="run-123")
+    fresh = generate(2, run_id="run-123", salt="fresh-dialog")
+
+    assert first == second
+    assert first.endswith("@s.whatsapp.net")
+    assert fresh.endswith("@s.whatsapp.net")
+    assert fresh != first
+
+
+def test_reset_result_has_ack_accepts_explicit_reset_meta_or_trace():
+    ns = _load_quality_helpers()
+    has_ack = ns["_llm_quality_reset_result_has_ack"]
+
+    assert has_ack({"decision_meta": {"session_memory_reset": "explicit_reset"}}) is True
+    assert (
+        has_ack(
+            {
+                "decision_trace": [
+                    {
+                        "stage": "session_memory",
+                        "decision": "reset_ack",
+                        "reason": "explicit_reset",
+                    }
+                ]
+            }
+        )
+        is True
+    )
+    assert has_ack({"decision_meta": {"action": "escalate"}}) is False
+
+
+def test_collect_preflight_contamination_reasons_flags_live_continuity_payloads():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_preflight_contamination_reasons"]
+
+    reasons = collect(
+        {
+            "conversation_id": "conv-1",
+            "state": "pending",
+            "context": {
+                "expected_reply_type": "time",
+                "booking": {
+                    "active": True,
+                    "service": "Маникюр",
+                    "appointment_id": "apt-1",
+                },
+                "session_memory": {
+                    "last_question_type": "name",
+                    "unanswered_questions": ["time"],
+                    "interaction_state": {
+                        "interaction_owner": "question_contract:booking_prompt",
+                        "resume_slot": "name",
+                    },
+                },
+                "context_manager": {
+                    "canonical_dialog_state": {
+                        "pending_question_contract": {"expected_reply_type": "name"},
+                        "interaction_state": {
+                            "interaction_owner": "question_contract:booking_prompt",
+                            "resume_slot": "name",
+                        },
+                    }
+                },
+                "re_entry_required": {"required": True},
+                "decision_trace": [{"stage": "booking_commit"}],
+                "simulation": {"id": "older-run"},
+            },
+        },
+        current_run_id="run-123",
+    )
+
+    assert "state:pending" in reasons
+    assert "question_contract_live" in reasons
+    assert "booking_active" in reasons
+    assert "booking_context_live" in reasons
+    assert "session_memory_last_question" in reasons
+    assert "session_memory_unanswered_questions" in reasons
+    assert "session_memory_resume_state" in reasons
+    assert "canonical_question_contract" in reasons
+    assert "canonical_resume_state" in reasons
+    assert "re_entry_required" in reasons
+    assert "decision_trace_present" in reasons
+    assert "simulation_id_mismatch" in reasons
+
+
+def test_collect_recent_preflight_contamination_ignores_clean_latest_and_historical_bot_active_rows():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_recent_preflight_contamination"]
+
+    reasons = collect(
+        [
+            {
+                "conversation_id": "conv-latest",
+                "state": "bot_active",
+                "context": {
+                    "booking": {"active": False},
+                    "context_manager": {
+                        "canonical_dialog_state": {
+                            "version": "v1",
+                            "owner_id": "context_manager.dialog_state.v1",
+                            "current_referents": {},
+                        }
+                    },
+                    "decision_trace": [{"stage": "session_memory", "decision": "reset_ack"}],
+                    "simulation": {"id": "run-123"},
+                },
+            },
+            {
+                "conversation_id": "conv-history",
+                "state": "bot_active",
+                "context": {
+                    "booking": {
+                        "active": True,
+                        "service": "Маникюр",
+                        "datetime": "завтра",
+                    },
+                    "expected_reply_type": "service_choice",
+                    "decision_trace": [{"stage": "booking_prompt"}],
+                    "simulation": {"id": "older-run"},
+                },
+            },
+        ],
+        current_run_id="run-123",
+    )
+
+    assert reasons == []
+
+
+def test_collect_recent_preflight_contamination_marks_multiple_live_recent_conversations_only_when_dirty():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_recent_preflight_contamination"]
+
+    reasons = collect(
+        [
+            {
+                "conversation_id": "conv-latest",
+                "state": "pending",
+                "context": {
+                    "expected_reply_type": "time",
+                    "decision_trace": [{"stage": "booking_prompt"}],
+                    "simulation": {"id": "run-123"},
+                },
+            },
+            {
+                "conversation_id": "conv-history",
+                "state": "manager_active",
+                "context": {
+                    "expected_reply_type": "name",
+                    "decision_trace": [{"stage": "handoff"}],
+                    "simulation": {"id": "older-run"},
+                },
+            },
+        ],
+        current_run_id="run-123",
+    )
+
+    assert "conv-latest:state:pending" in reasons
+    assert "conv-history:state:manager_active" in reasons
+    assert "conv-history:simulation_id_mismatch" in reasons
+    assert "multiple_recent_conversations" in reasons
+
+
+def test_normalize_preflight_clear_turns_missing_fallback_into_clean_payload():
+    ns = _load_quality_helpers()
+    normalize = ns["_llm_quality_normalize_preflight_clear"]
+
+    payload = normalize(None)
+
+    assert payload["action"] == "preflight_clear"
+    assert payload["state_before"] is None
+    assert payload["cleared"] is True
+    assert payload["contaminated"] is False
+    assert payload["contamination_reasons"] == []
+
+
 def test_validate_scenario_artifacts_blocks_missing_summary_and_brief(tmp_path):
     ns = _load_quality_helpers()
     validate = ns["_llm_quality_validate_scenario_artifacts"]
@@ -1735,6 +2089,26 @@ def test_line_has_phrase_branching_allows_resolver_or_allow_marker():
     assert not detector('if "без записи" in _normalize_text(message_text):  # hardcode-gate: allow')
 
 
+def test_line_has_phrase_branching_ignores_non_signal_fallback_assignment():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert not detector(
+        'handover_message=message_text or "Клиент просит изменить время записи.",',
+        path="truffles-api/app/routers/webhook/decision.py",
+    )
+
+
+def test_line_has_phrase_branching_blocks_phrase_tuple_in_signal_services():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert detector(
+        '_DEICTIC_TIME_PHRASES = ("в это время", "на это время")',
+        path="truffles-api/app/services/info_signal_service.py",
+    )
+
+
 def test_line_has_phrase_branching_blocks_domain_regex_in_signal_services():
     ns = _load_quality_helpers()
     detector = ns["_llm_quality_line_has_phrase_branching"]
@@ -1752,6 +2126,16 @@ def test_line_has_phrase_branching_allows_technical_format_regex_in_signal_servi
     assert not detector(
         'if re.search(r"\\d{4}-\\d{2}-\\d{2}", token):',
         path="truffles-api/app/services/booking_signal_service.py",
+    )
+
+
+def test_line_has_phrase_branching_ignores_interpolation_only_fstring_in_signal_services():
+    ns = _load_quality_helpers()
+    detector = ns["_llm_quality_line_has_phrase_branching"]
+
+    assert not detector(
+        'if not normalized_datetime_value.startswith(f"{relative_date_token} "):',
+        path="truffles-api/app/services/info_signal_service.py",
     )
 
 
@@ -1862,6 +2246,121 @@ def test_hq1_classifier_ignores_check_booking_confirmation_without_handoff_signa
         "evaluation": {"strict_reasons": []},
         "judge": None,
         "outbox_text": "Не нашел активной записи, подскажите время и имя.",
+    }
+
+    assert "handoff_miss" not in classify(record)
+
+
+def test_hq1_classifier_ignores_contract_valid_reschedule_collect_continuation():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Можно на 19:00?",
+        "turn_tags": ["reschedule", "booking"],
+        "conversation_state": "bot_active",
+        "expected_reply_type": "name",
+        "decision_meta": {
+            "action": "booking_prompt",
+            "intent": "booking",
+            "tool_action": "collect",
+            "tool_decision": "planner_owner_cutover",
+            "expected_reply_reason": "booking_prompt",
+        },
+        "turn_expectations": {"action": "handoff", "info_sections": []},
+        "evaluation": {"strict_reasons": []},
+        "judge": {"verdict": "fail", "reasons": ["missed_question"]},
+        "outbox_text": "Отлично, время подходит. Как вас зовут?",
+    }
+
+    assert "handoff_miss" not in classify(record)
+
+
+def test_hq1_classifier_ignores_contract_valid_reschedule_collect_without_handoff_expectation():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Могу ли я изменить время на 11 утра?",
+        "turn_tags": ["reschedule", "booking"],
+        "conversation_state": "bot_active",
+        "expected_reply_type": "name",
+        "decision_meta": {
+            "action": "booking_prompt",
+            "intent": "booking",
+            "tool_action": "collect",
+            "tool_decision": "planner_owner_cutover",
+            "expected_reply_reason": "booking_prompt",
+        },
+        "turn_expectations": {"action": None, "info_sections": []},
+        "evaluation": {"strict_reasons": []},
+        "judge": {"verdict": "fail", "reasons": ["missed_question"]},
+        "outbox_text": "Отлично, время подходит. Как вас зовут?",
+    }
+
+    assert "handoff_miss" not in classify(record)
+
+
+def test_expected_followup_prompt_accepts_exact_time_phrase():
+    ns = _load_quality_helpers()
+    has_prompt = ns["_llm_quality_has_expected_followup_prompt"]
+
+    assert (
+        has_prompt(
+            "Понял, в субботу по услуге «Маникюр». Подскажите, пожалуйста, точное время.",
+            "time",
+        )
+        is True
+    )
+
+
+def test_hq1_classifier_ignores_contract_valid_reschedule_collect_with_exact_time_prompt():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Почему я не могу записаться на выходные?",
+        "turn_tags": ["reschedule"],
+        "conversation_state": "bot_active",
+        "expected_reply_type": "time",
+        "decision_meta": {
+            "action": "booking_prompt",
+            "intent": "booking",
+            "tool_action": "collect",
+            "tool_decision": "planner_owner_cutover",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_prompt",
+        },
+        "turn_expectations": {"action": "handoff", "info_sections": []},
+        "evaluation": {"strict_reasons": []},
+        "judge": {"verdict": "fail", "reasons": ["missed_question"]},
+        "outbox_text": "Понял, в субботу по услуге «Дизайн ногтей». Подскажите, пожалуйста, точное время.",
+    }
+
+    assert "handoff_miss" not in classify(record)
+
+
+def test_hq1_classifier_ignores_contract_valid_cancel_collect_with_exact_time_prompt():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Как мне отменить запись?",
+        "turn_tags": ["cancel"],
+        "conversation_state": "bot_active",
+        "expected_reply_type": "time",
+        "decision_meta": {
+            "action": "booking_prompt",
+            "intent": "booking",
+            "tool_action": "collect",
+            "tool_decision": "planner_owner_cutover",
+            "expected_reply_type": "time",
+            "expected_reply_reason": "booking_prompt",
+        },
+        "turn_expectations": {"action": "handoff", "info_sections": []},
+        "evaluation": {"strict_reasons": []},
+        "judge": {"verdict": "fail", "reasons": ["missed_question"]},
+        "outbox_text": "Понял, сегодня по услуге «Маникюр». Подскажите, пожалуйста, точное время.",
     }
 
     assert "handoff_miss" not in classify(record)
@@ -3434,3 +3933,131 @@ def test_llm_quality_gates_defaults_do_not_raise_type_error():
     quality_constant_gate = (payload.get("gates") or {}).get("quality_constant_gate")
     assert isinstance(quality_constant_gate, dict)
     assert quality_constant_gate.get("timeout_profile") == "realistic"
+
+
+def test_resume_contract_meta_trace_fallback_accepts_session_memory_question_set():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_resume_contract_meta_trace_fallback"]
+
+    assert (
+        helper(
+            meta={
+                "action": "reply",
+                "source": "consultant_core_runtime",
+                "intent": "promotions",
+                "info_sections": ["promotions"],
+            },
+            trace_entries=[
+                {
+                    "stage": "session_memory",
+                    "decision": "update",
+                    "last_question_type": "time",
+                    "interaction_owner": "question_contract:booking_prompt",
+                }
+            ],
+            expected_info_sections=["promo", "promotion"],
+            expected_reply_type="time",
+            actual_expected_reply_type="time",
+        )
+        is True
+    )
+
+
+def test_catalog_service_answer_sidecar_fallback_accepts_truth_fallback_answer():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_catalog_service_answer_sidecar_fallback"]
+
+    assert (
+        helper(
+            meta={
+                "action": "reply",
+                "source": "tool_registry",
+                "intent": "catalog.service_query",
+                "tool_action": "catalog.service_query",
+                "tool_decision": "truth_fallback",
+                "info_sections": ["pricing"],
+            },
+            trace_entries=[],
+            expected_info_sections=["pricing", "price"],
+        )
+        is True
+    )
+
+    assert (
+        helper(
+            meta={
+                "action": "reply",
+                "source": "tool_registry",
+                "intent": "catalog.service_query",
+                "tool_action": "catalog.service_query",
+                "tool_decision": "not_found_fallback",
+                "info_sections": ["pricing"],
+            },
+            trace_entries=[],
+            expected_info_sections=["pricing", "price"],
+        )
+        is False
+    )
+
+
+def test_resume_contract_meta_trace_fallback_accepts_service_clarify_question_contract():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_resume_contract_meta_trace_fallback"]
+
+    assert (
+        helper(
+            meta={
+                "action": "reply",
+                "source": "llm_policy_core",
+                "intent": "service_clarify",
+                "expected_reply_type": "service_choice",
+            },
+            trace_entries=[
+                {
+                    "stage": "question_contract",
+                    "decision": "llm_policy_core_collect",
+                    "missing_slot": "service",
+                    "info_sections": ["duration"],
+                }
+            ],
+            expected_info_sections=["duration", "service_duration"],
+            expected_reply_type="name",
+            actual_expected_reply_type="service_choice",
+        )
+        is True
+    )
+
+
+def test_action_fallback_accepts_turn_outcome_handoff_and_branch_missing_reply():
+    ns = _load_quality_helpers()
+    matches_action = ns["_chaos_matches_action"]
+    action_fallback = ns["_chaos_action_fallback_ok"]
+
+    assert (
+        matches_action(
+            {
+                "action": "error",
+                "turn_outcome": {"action": "handoff"},
+            },
+            ["handoff"],
+        )
+        is True
+    )
+
+    assert (
+        action_fallback(
+            {
+                "action_any": ["handoff"],
+                "expected_reply_type": "time",
+            },
+            {
+                "action": "reply",
+                "intent": "calendar.book_slot",
+                "tool_decision": "branch_missing",
+            },
+            {"state": "bot_active", "context": {"booking": {"active": True}}},
+            [],
+            True,
+        )
+        is True
+    )

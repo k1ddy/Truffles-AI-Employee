@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema",
+  "title": "PolicyDecision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome",
+    "action",
+    "intent",
+    "source",
+    "tool_action",
+    "tool_args",
+    "slots",
+    "pack_refs",
+    "fact_refs",
+    "interaction",
+    "pending_question_contract",
+    "meta"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "policy_decision.v1"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["FACT", "COLLECT", "HANDOFF"]
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "const": "policy_core"
+    },
+    "tool_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_args": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "slots": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "pack_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "fact_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "capability_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "risk_signals": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "interaction": {
+      "$ref": "#/$defs/interaction"
+    },
+    "pending_question_contract": {
+      "$ref": "#/$defs/pendingQuestionContract"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "nullableToken": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "target", "relation"],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "relation": {
+          "$ref": "#/$defs/nullableToken"
+        }
+      }
+    },
+    "pendingQuestionContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_reply_type",
+        "pending_question_target",
+        "active_question_relation",
+        "next_question",
+        "open_questions"
+      ],
+      "properties": {
+        "expected_reply_type": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "pending_question_target": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "active_question_relation": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "next_question": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

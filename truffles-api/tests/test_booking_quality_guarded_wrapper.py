@@ -123,6 +123,7 @@ def _guarded_base_cmd(
     pg_checklist: Path,
     *,
     mode: str = "lock",
+    allow_pending_previous: bool = True,
     extra_quality_args: list[str] | None = None,
 ) -> list[str]:
     cmd = [
@@ -134,7 +135,6 @@ def _guarded_base_cmd(
         "--pg-checklist",
         str(pg_checklist),
         "--allow-repeat-fingerprint",
-        "--allow-pending-previous",
         "--",
         "--base-url",
         "http://127.0.0.1:18172",
@@ -165,6 +165,8 @@ def _guarded_base_cmd(
         "block",
         "--fail-on-thresholds",
     ]
+    if allow_pending_previous:
+        cmd.insert(7, "--allow-pending-previous")
     if extra_quality_args:
         cmd.extend(extra_quality_args)
     return cmd
@@ -324,3 +326,122 @@ def test_guarded_wrapper_redacts_webhook_secret_in_ledger(tmp_path):
     ledger_text = ledger_file.read_text(encoding="utf-8")
     assert "super-secret-token" not in ledger_text
     assert "redacted" in ledger_text
+
+
+def test_guarded_wrapper_allows_fresh_lock_after_audited_non_canonical_latest_run(tmp_path):
+    repo_root = _repo_root()
+    wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"
+    if not wrapper.exists():
+        pytest.skip("llm_quality_guarded.sh not present")
+
+    controller_log = tmp_path / "controller_lock.log"
+    diagnose_log = tmp_path / "diagnose_lock.log"
+    fake_controller = tmp_path / "fake_controller_lock.sh"
+    fake_diagnose = tmp_path / "fake_diagnose_lock.py"
+    pg_checklist = tmp_path / "pg_checklist_lock.json"
+    index_root = tmp_path / "quality_index"
+    latest_by_mode = index_root / "latest_by_mode"
+    latest_by_mode.mkdir(parents=True, exist_ok=True)
+    (latest_by_mode / "lock.json").write_text(
+        json.dumps(
+            {
+                "run_id": "old-lock",
+                "status": "incomplete",
+                "manual_audit_status": "done",
+                "artifact_integrity_valid": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_fake_controller(fake_controller, controller_log)
+    _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
+
+    run_id = f"booking-lock-wrapper-{uuid4().hex[:8]}"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_CONTROLLER_BIN"] = str(fake_controller)
+    env["LLM_QUALITY_DIAGNOSE_BIN"] = "python3"
+    env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
+    env["LLM_QUALITY_INDEX_ROOT"] = str(index_root)
+
+    result = subprocess.run(
+        _guarded_base_cmd(
+            wrapper,
+            run_id,
+            pg_checklist,
+            allow_pending_previous=False,
+        ),
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "deferring lock admission to diagnose.py run-economy gate" in result.stderr
+    assert diagnose_log.exists()
+
+
+def test_guarded_wrapper_still_blocks_replay_after_non_canonical_latest_run(tmp_path):
+    repo_root = _repo_root()
+    wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"
+    if not wrapper.exists():
+        pytest.skip("llm_quality_guarded.sh not present")
+
+    controller_log = tmp_path / "controller_replay.log"
+    diagnose_log = tmp_path / "diagnose_replay.log"
+    fake_controller = tmp_path / "fake_controller_replay.sh"
+    fake_diagnose = tmp_path / "fake_diagnose_replay.py"
+    pg_checklist = tmp_path / "pg_checklist_replay.json"
+    index_root = tmp_path / "quality_index"
+    latest_by_mode = index_root / "latest_by_mode"
+    latest_by_mode.mkdir(parents=True, exist_ok=True)
+    (latest_by_mode / "replay.json").write_text(
+        json.dumps(
+            {
+                "run_id": "old-replay",
+                "status": "failed",
+                "manual_audit_status": "done",
+                "artifact_integrity_valid": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_fake_controller(fake_controller, controller_log)
+    _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
+
+    run_id = f"booking-replay-wrapper-{uuid4().hex[:8]}"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_CONTROLLER_BIN"] = str(fake_controller)
+    env["LLM_QUALITY_DIAGNOSE_BIN"] = "python3"
+    env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
+    env["LLM_QUALITY_INDEX_ROOT"] = str(index_root)
+
+    result = subprocess.run(
+        _guarded_base_cmd(
+            wrapper,
+            run_id,
+            pg_checklist,
+            mode="replay",
+            allow_pending_previous=False,
+            extra_quality_args=[
+                "--scenarios-file",
+                str(tmp_path / "scenarios.json"),
+                "--baseline-summary",
+                str(tmp_path / "summary.json"),
+                "--reset-before-dialog",
+                "--fail-on-regression",
+            ],
+        ),
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "previous run not canonical" in result.stderr
+    assert not diagnose_log.exists()

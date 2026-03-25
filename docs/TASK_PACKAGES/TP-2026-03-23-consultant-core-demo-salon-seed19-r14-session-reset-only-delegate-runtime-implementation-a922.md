@@ -1,0 +1,64 @@
+# TP-2026-03-23 Consultant Core Demo Salon Seed19 R14 Session Reset Only Delegate Runtime Implementation A922
+
+- Title/goal: repair the bounded `session_reset` control path so exact reset-only messages bypass the direct owner shortcuts and reuse the existing session-memory reset contract instead of reopening handoff or falling into terminal unresolved.
+- Canon refs: `STATE.md` NOW; `docs/ACTIVE_PROGRAM.md`; `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r14-session-reset-pending-ack-terminal-unresolved-runtime-decision-a922.md`; CA_ID `a922-go2f-seed19-r14-session-reset-family`.
+- One web search (mandatory before implementation):
+  - Query: `Rasa docs restart conversation intent reset session official`
+  - Date/time: `2026-03-23 09:14 +06:00`
+  - Opened sources: `https://info.rasa.com/hubfs/2025%20Case%20Studies/%5BRasa%5D%20Lakera%20Red%20Security%20Assessment.pdf`
+  - Found ready-made solutions: none directly reusable for the Truffles owner-chain/runtime boundary.
+  - Decision: `build` via local contract reuse.
+  - Why: the live bug is not a generic framework problem; the repo already has the reset contract implemented in frozen `decision.py`, so the bounded fix is to route exact reset-only control traffic to that contract from non-frozen `reasoning_core.py`.
+  - Rejected options: new reset phrases in core, new fallback reply, frozen-router edits.
+- Root cause (mandatory):
+  - Symptom: after the `pending_ack` repair, replay preflight `session_reset` still returned `Turn planner safe explicit handoff sent` and kept the conversation `pending`.
+  - Minimal reproduction: seed-`19` replay family `r14` / `r22` preflight sends `ок`, then `начнем сначала`; the second message is consumed by the explicit-handoff owner instead of the reset contract.
+  - Evidence: fresh replay `r14`; local deterministic repro in `truffles-api/tests/test_reasoning_core.py`; live path in `truffles-api/app/services/reasoning_core.py`.
+  - Five whys:
+    - Why did preflight fail? `session_reset` did not clear state.
+    - Why did it not clear state? exact reset-only text was intercepted before the reset contract.
+    - Why was it intercepted? the direct owner chain still evaluated explicit-handoff semantics first.
+    - Why did that happen? reasoning-core had no reset-control delegate path on the non-frozen owner surface.
+    - Why was that possible? reset control semantics still lived only in frozen `decision.py`, while the newer owner shortcuts bypassed that surface.
+  - Root cause statement: the non-frozen direct owner chain lacked a bounded reset-control delegate, so exact reset-only inbound text never reached the existing reset contract once semantic owner shortcuts became primary.
+  - Fix mechanism: add a reset-only delegate in `reasoning_core.py`, clear semantic overrides for that control path, and defer explicit-handoff owner handling for reset-only messages.
+- Invariant: do not weaken pending-ack continuity, explicit-handoff owner semantics, or frozen-router boundaries.
+- Scope: non-frozen `reasoning_core.py` routing for exact reset-only control messages and deterministic regressions.
+- Out of scope: proof preflight contamination heuristics, fallback JID policy, frozen router edits.
+- Touch-list:
+  - `truffles-api/app/services/reasoning_core.py`
+  - `truffles-api/tests/test_reasoning_core.py`
+- Plan:
+  1. Add a shared exact-reset-only detector on the reasoning-core owner surface.
+  2. Route reset-only control traffic to the existing frozen reset contract via bounded delegate.
+  3. Keep explicit-handoff owner from re-consuming that control path.
+  4. Add direct and full-path deterministic regressions.
+- DoD:
+  - exact reset-only messages no longer reopen handoff on the live reasoning-core path;
+  - deterministic tests prove explicit-handoff defers and full `handle_webhook_payload(...)` delegates the control path;
+  - no frozen router file changed.
+- Work mode (mandatory): implementation
+- Checks:
+  - `pytest -q truffles-api/tests/test_reasoning_core.py -k "session_reset_only_message or pending_ack_continuity_family_clears_pending_before_terminal_unresolved or explicit_handoff_owner_family_defers_pending_ack or greeting_owner_family_defers_pending_ack"`
+- Evidence:
+  - code diff in `truffles-api/app/services/reasoning_core.py`
+  - deterministic proof in `truffles-api/tests/test_reasoning_core.py`
+  - follow-up replay artifact from the next closure block
+- Rollback: revert the new reset-only delegate/helper and the paired regressions.
+- No-go:
+  - no phrase-hardcode outside the existing reset contract helper;
+  - no new silent fallback;
+  - no frozen router edits.
+- Risks/blockers:
+  - the replay may still fail for proof/preflight reasons unrelated to runtime once the reset delegate is fixed.
+- Residual architecture debt (mandatory):
+  - Current residuals accepted in this block: replay preflight contamination heuristics and allowlist/JID reuse policy remain outside scope.
+  - Why not in this block: they are proof-lane concerns, not the runtime reset owner defect.
+  - Risk if deferred: replay can still stop before dialog turn `1` even when runtime reset is fixed.
+  - Linked follow-up Task Package(s): `TP-2026-03-23-consultant-core-demo-salon-seed19-r22-preflight-contamination-proof-decision-a922.md`
+  - Expiry/trigger to stop deferral: if fresh replay still fails pre-turn after `Session reset ack sent`, the proof family becomes active immediately.
+- Next-block contract (mandatory):
+  - Next block objective: rerun the exact seed-`19` replay on fresh runtime parity and classify the first surviving blocker.
+  - First deterministic check command: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/a922-go2f-seed19-r22 --status done --strict-artifacts`
+  - Blocked-by conditions: stale local runtime; unaudited invalid replay attempts.
+  - Owner role for closure: Brain / Top Architect

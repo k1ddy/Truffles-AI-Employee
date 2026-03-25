@@ -1,0 +1,57 @@
+version: 2026-03-16.v1
+hotspots:
+  - path: truffles-api/app/services/info_signal_service.py
+    label: semantic_bridge_detector_hotspot
+    active_waiver: null
+    tracked_function_names:
+      name_patterns:
+        - '^detect_.*followup.*$'
+        - '^looks_like_.*policy.*$'
+        - '^detect_.*policy.*$'
+      exact_allowlist:
+        - detect_active_name_relative_date_availability_followup_datetime_token
+        - detect_active_name_relative_daypart_availability_followup_datetime_token
+        - detect_active_name_time_availability_followup_time_token
+        - detect_location_policy_pack_refs
+        - detect_portfolio_policy_service_query
+        - detect_service_choice_specialist_day_followup_service_query
+        - detect_service_choice_specialist_daypart_followup
+        - detect_service_choice_specialist_exact_time_followup
+        - detect_service_choice_specialist_weekday_followup_service_query
+        - detect_service_choice_specialist_weekend_followup_service_query
+        - looks_like_bookability_time_collect_policy_message
+        - looks_like_contact_policy_message
+        - looks_like_duration_service_clarify_policy_message
+        - looks_like_hours_policy_message
+        - looks_like_master_service_clarify_policy_message
+        - looks_like_pricing_service_clarify_policy_message
+        - looks_like_promotions_policy_message
+        - looks_like_promotions_rules_policy_message
+  - path: truffles-api/app/core/intent_routing.py
+    label: semantic_bridge_snapshot_reason_hotspot
+    active_waiver: null
+    tracked_policy_snapshot_reasons:
+      exact_allowlist:
+        - booking_specialist_availability_followup
+        - booking_time_availability_followup
+        - booking_verification_text
+        - contact_question
+        - day_followup
+        - daypart_followup
+        - duration_info
+        - hours_question
+        - ingress_explicit_frustration_handoff
+        - ingress_explicit_human_request
+        - master_question
+        - master_service_clarify
+        - missing_temporal_scope
+        - need_service
+        - portfolio_question
+        - pricing_query
+        - promotions_question
+        - promotions_rules_question
+        - services_overview
+        - specialist_exact_time_followup
+        - style_reference_text
+        - weekday_followup
+        - weekend_followup

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Iterator
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -24,6 +26,9 @@ class RuntimeCapabilities:
 
 _RUNTIME_CAPABILITIES: ContextVar[RuntimeCapabilities | None] = ContextVar(
     "runtime_capabilities", default=None
+)
+_RUNTIME_CAPABILITIES_OVERRIDE: ContextVar[RuntimeCapabilities | None] = ContextVar(
+    "runtime_capabilities_override", default=None
 )
 
 
@@ -48,12 +53,31 @@ def _get_latest_capability(
     ).first()
 
 
-def set_runtime_capabilities(runtime_capabilities: RuntimeCapabilities | None) -> None:
-    _RUNTIME_CAPABILITIES.set(runtime_capabilities)
+def set_runtime_capabilities(runtime_capabilities: RuntimeCapabilities | None):
+    return _RUNTIME_CAPABILITIES.set(runtime_capabilities)
 
 
 def get_runtime_capabilities() -> RuntimeCapabilities | None:
     return _RUNTIME_CAPABILITIES.get()
+
+
+def set_runtime_capabilities_override(runtime_capabilities: RuntimeCapabilities | None):
+    return _RUNTIME_CAPABILITIES_OVERRIDE.set(runtime_capabilities)
+
+
+def get_runtime_capabilities_override() -> RuntimeCapabilities | None:
+    return _RUNTIME_CAPABILITIES_OVERRIDE.get()
+
+
+@contextmanager
+def use_runtime_capabilities_override(runtime_capabilities: RuntimeCapabilities | None) -> Iterator[None]:
+    override_token = set_runtime_capabilities_override(runtime_capabilities)
+    runtime_token = set_runtime_capabilities(runtime_capabilities)
+    try:
+        yield
+    finally:
+        _RUNTIME_CAPABILITIES.reset(runtime_token)
+        _RUNTIME_CAPABILITIES_OVERRIDE.reset(override_token)
 
 
 def build_runtime_capabilities(
@@ -62,6 +86,11 @@ def build_runtime_capabilities(
     client_id: UUID | None,
     branch_id: UUID | None,
 ) -> RuntimeCapabilities:
+    override_runtime = get_runtime_capabilities_override()
+    if override_runtime is not None:
+        if branch_id is None or override_runtime.branch_id is None or override_runtime.branch_id == branch_id:
+            return override_runtime
+
     def _payload_has_tool_policy(payload: object) -> bool:
         return isinstance(payload, dict) and "tools" in payload
 
@@ -145,5 +174,8 @@ __all__ = [
     "RuntimeCapabilities",
     "build_runtime_capabilities",
     "get_runtime_capabilities",
+    "get_runtime_capabilities_override",
     "set_runtime_capabilities",
+    "set_runtime_capabilities_override",
+    "use_runtime_capabilities_override",
 ]

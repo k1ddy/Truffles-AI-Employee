@@ -1552,6 +1552,86 @@ def test_consult_followup_generic_booking_request_keeps_service_prompt():
     assert question_contract_trace.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
 
 
+def test_hygiene_eval_case_e549_returns_hygiene_truth_after_long_followup_chain():
+    case_id = "E549"
+    eval_data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
+    case = next(
+        item
+        for item in eval_data.get("eval_cases", [])
+        if item.get("id") == case_id
+    )
+    turns = _normalize_turns(case.get("turns"), case_id)
+    responses, conversation, saved_message = _run_webhook_conversation_turns(
+        [turn["user"] for turn in turns],
+        case_id,
+        None,
+    )
+    response = responses[-1] if responses else ""
+    normalized = response.casefold()
+
+    assert "дезраствор" in normalized, f"{case_id}: missing disinfectant step; response={response}"
+    assert "сухожар" in normalized, f"{case_id}: missing dry-heat step; response={response}"
+    assert "уз-ванн" in normalized or "уз ванн" in normalized, (
+        f"{case_id}: missing ultrasound bath step; response={response}"
+    )
+
+    meta = saved_message.message_metadata.get("decision_meta", {}) if saved_message else {}
+    assert meta.get("action") == "reply", f"{case_id}: action mismatch; meta={meta}"
+    assert meta.get("intent") == "hygiene", f"{case_id}: intent mismatch; meta={meta}"
+    assert meta.get("fact_source") == "truth", f"{case_id}: fact_source mismatch; meta={meta}"
+    assert "hygiene" in (meta.get("fact_intents") or []), (
+        f"{case_id}: hygiene fact_intents missing; meta={meta}"
+    )
+
+    trace = _get_decision_trace(conversation)
+    assert any(
+        isinstance(entry, dict)
+        and entry.get("stage") == "resolver"
+        and entry.get("intent_class") == "hygiene"
+        for entry in trace
+    ), f"{case_id}: hygiene trace missing; trace_tail={trace[-5:]}"
+
+
+def test_prep_brows_lashes_eval_case_e404_beats_stale_hygiene_carryover():
+    case_id = "E404"
+    eval_data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
+    case = next(
+        item
+        for item in eval_data.get("eval_cases", [])
+        if item.get("id") == case_id
+    )
+    turns = _normalize_turns(case.get("turns"), case_id)
+    responses, conversation, saved_message = _run_webhook_conversation_turns(
+        [turn["user"] for turn in turns],
+        case_id,
+        None,
+    )
+    response = responses[-1] if responses else ""
+    normalized = response.casefold()
+
+    assert "без макияжа" in normalized, f"{case_id}: missing no-makeup prep; response={response}"
+    assert "масла" in normalized or "крем" in normalized, (
+        f"{case_id}: missing oils/cream prep; response={response}"
+    )
+    assert "контейнер" in normalized, f"{case_id}: missing lens container prep; response={response}"
+
+    meta = saved_message.message_metadata.get("decision_meta", {}) if saved_message else {}
+    assert meta.get("action") == "reply", f"{case_id}: action mismatch; meta={meta}"
+    assert meta.get("intent_class") == "prep_brows_lashes", f"{case_id}: intent_class mismatch; meta={meta}"
+    assert meta.get("fact_source") == "truth", f"{case_id}: fact_source mismatch; meta={meta}"
+    assert "prep_brows_lashes" in (meta.get("fact_intents") or []), (
+        f"{case_id}: prep fact_intents missing; meta={meta}"
+    )
+
+    trace = _get_decision_trace(conversation)
+    assert any(
+        isinstance(entry, dict)
+        and entry.get("stage") == "resolver"
+        and entry.get("intent_class") == "prep_brows_lashes"
+        for entry in trace
+    ), f"{case_id}: prep trace missing; trace_tail={trace[-5:]}"
+
+
 def test_weekend_booking_oracle_freezes_known_vs_missing_service_contract():
     eval_data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
 
@@ -1628,6 +1708,36 @@ def test_booking_flow_interrupt_after_price_duration_sequence():
         sections = meta.get("info_sections")
         assert isinstance(sections, list) and sections, f"{case_id}: info_sections empty; meta={meta}"
         assert expected_section in sections, f"{case_id}: missing info section {expected_section}; meta={meta}"
+
+
+def test_booking_flow_pricing_interrupt_after_hours_advances_service_followup():
+    _response, conversation, saved_message = _run_webhook_conversation(
+        [
+            "Я хочу записаться на стрижку на пятницу.",
+            "Во сколько можно прийти?",
+            "А какая цена на эту стрижку?",
+        ],
+        "CA05_AFTER_HOURS_PRICE_SERVICE_PROGRESS",
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    sections = meta.get("info_sections")
+    assert isinstance(sections, list) and "pricing" in sections, (
+        f"CA05_AFTER_HOURS_PRICE_SERVICE_PROGRESS: pricing info_sections missing; meta={meta}"
+    )
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME, (
+        f"CA05_AFTER_HOURS_PRICE_SERVICE_PROGRESS: expected_reply_type mismatch; meta={meta}"
+    )
+    assert meta.get("booking_info_interrupt") is True, (
+        f"CA05_AFTER_HOURS_PRICE_SERVICE_PROGRESS: booking interrupt missing; meta={meta}"
+    )
+    booking = conversation.context.get("booking", {}) if isinstance(conversation.context, dict) else {}
+    assert str(booking.get("service") or "").casefold() == "стрижка", (
+        f"CA05_AFTER_HOURS_PRICE_SERVICE_PROGRESS: booking service mismatch; booking={booking}; meta={meta}"
+    )
+    assert booking.get("last_question") == "datetime", (
+        f"CA05_AFTER_HOURS_PRICE_SERVICE_PROGRESS: booking last_question mismatch; booking={booking}; meta={meta}"
+    )
 
 
 def test_consult_pack_only_and_short_circuit():

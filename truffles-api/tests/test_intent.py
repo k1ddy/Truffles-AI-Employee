@@ -4,7 +4,14 @@ from unittest.mock import patch
 
 import httpx
 
+from app.core.intent_routing import (
+    detect_controller_route_snapshot,
+    detect_domain_routing_snapshot,
+    detect_intent_routing_primitives,
+    detect_policy_core_route_snapshot,
+)
 from app.services.intent_service import (
+    DomainIntent,
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
     Intent,
@@ -13,7 +20,13 @@ from app.services.intent_service import (
     _build_service_query_hint_response_format,
     _build_specialist_hint_response_format,
     _load_policy_core_prompt,
+    classify_intent,
+    classify_domain_with_scores,
     extract_customer_name_hint_llm,
+    get_dialogue_controller_override,
+    get_domain_routing_override,
+    get_intent_semantic_override,
+    get_policy_core_override,
     extract_service_query_hint_llm,
     interpret_expected_reply,
     is_frustration_message,
@@ -23,6 +36,10 @@ from app.services.intent_service import (
     route_dialogue_controller,
     route_llm_policy_core,
     should_escalate,
+    use_dialogue_controller_override,
+    use_domain_routing_override,
+    use_intent_semantic_override,
+    use_policy_core_override,
 )
 
 
@@ -105,6 +122,2100 @@ class TestHumanRequestHeuristics:
         assert is_human_request_message("сколько стоит маникюр?") is False
 
 
+class TestIntentSemanticOverride:
+    def test_override_matches_exact_normalized_text(self):
+        override = {
+            "normalized_text": "сколько стоит маникюр",
+            "is_human_request": True,
+            "intent": Intent.HUMAN_REQUEST.value,
+        }
+
+        with use_intent_semantic_override(override):
+            assert get_intent_semantic_override() == override
+            assert is_human_request_message("Сколько стоит маникюр") is True
+            assert is_human_request_message("когда свободно") is False
+
+    def test_override_resets_after_context_exit(self):
+        with use_intent_semantic_override(
+            {
+                "normalized_text": "сколько стоит маникюр",
+                "is_human_request": True,
+                "intent": Intent.HUMAN_REQUEST.value,
+            }
+        ):
+            assert get_intent_semantic_override() is not None
+
+        assert get_intent_semantic_override() is None
+        assert is_human_request_message("сколько стоит маникюр") is False
+
+    def test_classify_intent_uses_override_without_llm(self):
+        override = {
+            "normalized_text": "сколько стоит маникюр",
+            "is_human_request": False,
+            "intent": Intent.GREETING.value,
+        }
+
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            with use_intent_semantic_override(override):
+                assert classify_intent("Сколько стоит маникюр") == Intent.GREETING
+
+        mock_llm.assert_not_called()
+
+    def test_protective_flags_use_override_without_heuristic_match(self):
+        override = {
+            "normalized_text": "останови ответы",
+            "is_opt_out": True,
+            "is_frustration": False,
+            "is_human_request": False,
+            "intent": Intent.REJECTION.value,
+        }
+
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            with use_intent_semantic_override(override):
+                assert is_opt_out_message("Останови ответы") is True
+                assert is_frustration_message("Останови ответы") is False
+                assert classify_intent("Останови ответы") == Intent.REJECTION
+
+        mock_llm.assert_not_called()
+
+    def test_frustration_flag_uses_override_without_heuristic_match(self):
+        override = {
+            "normalized_text": "это уже сломано",
+            "is_opt_out": False,
+            "is_frustration": True,
+            "is_human_request": False,
+            "intent": Intent.FRUSTRATION.value,
+        }
+
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            with use_intent_semantic_override(override):
+                assert is_opt_out_message("Это уже сломано") is False
+                assert is_frustration_message("Это уже сломано") is True
+                assert classify_intent("Это уже сломано") == Intent.FRUSTRATION
+
+        mock_llm.assert_not_called()
+
+
+class TestIntentRoutingPrimitives:
+    def test_detects_human_request_lexical_intent(self):
+        primitives = detect_intent_routing_primitives("Хочу поговорить с менеджером")
+
+        assert primitives is not None
+        assert primitives.is_human_request is True
+        assert primitives.lexical_intent == Intent.HUMAN_REQUEST
+
+    def test_detects_greeting_lexical_intent(self):
+        primitives = detect_intent_routing_primitives("Привет")
+
+        assert primitives is not None
+        assert primitives.is_greeting is True
+        assert primitives.lexical_intent == Intent.GREETING
+
+    def test_detects_opt_out_lexical_intent(self):
+        primitives = detect_intent_routing_primitives("Отпишись")
+
+        assert primitives is not None
+        assert primitives.is_opt_out is True
+        assert primitives.lexical_intent == Intent.REJECTION
+
+    def test_detects_frustration_lexical_intent(self):
+        primitives = detect_intent_routing_primitives("Заебал")
+
+        assert primitives is not None
+        assert primitives.is_frustration is True
+        assert primitives.lexical_intent == Intent.FRUSTRATION
+
+    def test_detects_domain_routing_snapshot(self):
+        client_config = {
+            "domain_router": {
+                "anchors_in": ["маникюр"],
+                "anchors_out": ["налоговая"],
+            }
+        }
+
+        snapshot = detect_domain_routing_snapshot(
+            "маникюр",
+            client_config=client_config,
+        )
+
+        assert snapshot is not None
+        assert snapshot.domain_intent == DomainIntent.IN_DOMAIN
+        assert snapshot.in_score > snapshot.out_score
+
+
+class TestDomainRoutingOverride:
+    def test_override_matches_exact_normalized_text(self):
+        override = {
+            "normalized_text": "налоговая отчетность",
+            "domain_intent": DomainIntent.OUT_OF_DOMAIN.value,
+            "in_score": 0.1,
+            "out_score": 0.9,
+            "meta": {"out_hits": 1, "strict_in_hits": 0},
+        }
+
+        with use_domain_routing_override(override):
+            assert get_domain_routing_override() == override
+            result = classify_domain_with_scores("Налоговая отчетность", {"domain_router": {}})
+            assert result[0] == DomainIntent.OUT_OF_DOMAIN
+            assert result[2] == 0.9
+            assert classify_domain_with_scores("маникюр", {"domain_router": {}})[0] == DomainIntent.UNKNOWN
+
+    def test_override_resets_after_context_exit(self):
+        with use_domain_routing_override(
+            {
+                "normalized_text": "налоговая отчетность",
+                "domain_intent": DomainIntent.OUT_OF_DOMAIN.value,
+                "in_score": 0.1,
+                "out_score": 0.9,
+                "meta": {"out_hits": 1, "strict_in_hits": 0},
+            }
+        ):
+            assert get_domain_routing_override() is not None
+
+        assert get_domain_routing_override() is None
+
+
+class TestControllerRouteSnapshot:
+    def test_detects_greeting_controller_route_snapshot(self):
+        primitives = detect_intent_routing_primitives("Привет")
+
+        snapshot = detect_controller_route_snapshot("Привет", primitives=primitives)
+
+        assert snapshot is not None
+        assert snapshot.controller_class == "greeting"
+        assert snapshot.goal == "greeting"
+        assert snapshot.intents == ("greeting",)
+
+    def test_detects_strong_out_of_domain_controller_route_snapshot(self):
+        domain_snapshot = detect_domain_routing_snapshot(
+            "Налоговая отчетность",
+            client_config={
+                "domain_router": {
+                    "anchors_in": ["маникюр"],
+                    "anchors_out": ["налоговая"],
+                }
+            },
+        )
+
+        snapshot = detect_controller_route_snapshot(
+            "Налоговая отчетность",
+            domain_snapshot=domain_snapshot,
+        )
+
+        assert snapshot is not None
+        assert snapshot.controller_class == "out_of_domain"
+        assert snapshot.goal == "out_of_domain"
+        assert snapshot.intents == ("out_of_domain",)
+
+
+class TestPolicyCoreRouteSnapshot:
+    def test_detects_human_request_policy_handoff_snapshot(self):
+        primitives = detect_intent_routing_primitives("Хочу поговорить с менеджером")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Хочу поговорить с менеджером",
+            primitives=primitives,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "human_request"
+        assert snapshot.action == "handoff"
+        assert snapshot.tool_action == "handoff"
+
+    def test_detects_frustration_policy_handoff_snapshot(self):
+        primitives = detect_intent_routing_primitives("Заебал")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Заебал",
+            primitives=primitives,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "frustration"
+        assert snapshot.action == "handoff"
+        assert snapshot.tool_action == "handoff"
+
+    def test_skips_opt_out_even_if_surface_is_hostile(self):
+        primitives = detect_intent_routing_primitives("Отпишись и заткнись")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Отпишись и заткнись",
+            primitives=primitives,
+        )
+
+        assert snapshot is None
+
+    def test_detects_text_only_style_reference_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Я могу прислать фото своей прически?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Я могу прислать фото своей прически?",
+            primitives=primitives,
+            has_media=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "style_reference"
+        assert snapshot.action == "handoff"
+        assert snapshot.tool_action == "handoff"
+        assert snapshot.reason == "style_reference_text"
+        assert snapshot.needs_manager is False
+
+    def test_skips_style_reference_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Вот фото прически")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Вот фото прически",
+            primitives=primitives,
+            has_media=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_booking_verification_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Проверьте, пожалуйста, мою запись")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Проверьте, пожалуйста, мою запись",
+            primitives=primitives,
+            has_media=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "check_booking"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "calendar.get_booking"
+        assert snapshot.reason == "booking_verification_text"
+        assert snapshot.goal == "booking"
+        assert snapshot.needs_manager is False
+
+    def test_skips_booking_verification_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Проверьте, пожалуйста, мою запись")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Проверьте, пожалуйста, мою запись",
+            primitives=primitives,
+            has_media=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_services_overview_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Что вы предлагаете?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Что вы предлагаете?",
+            primitives=primitives,
+            has_media=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "services_overview"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.service_query"
+        assert snapshot.reason == "services_overview"
+        assert snapshot.goal == "info"
+        assert snapshot.needs_manager is False
+
+    def test_skips_services_overview_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Что вы предлагаете?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Что вы предлагаете?",
+            primitives=primitives,
+            has_media=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_location_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Где вы находитесь?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Где вы находитесь?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.location"
+        assert snapshot.reason == "location_question"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("location",)
+        assert snapshot.needs_manager is False
+
+    def test_detects_parking_policy_snapshot_with_richer_pack_refs(self):
+        primitives = detect_intent_routing_primitives("Парковка есть?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Парковка есть?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.location"
+        assert snapshot.reason == "parking_question"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("location", "parking")
+        assert snapshot.needs_manager is False
+
+    def test_skips_location_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Где вы находитесь?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Где вы находитесь?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_detects_hours_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какие часы работы?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какие часы работы?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "hours"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "info"
+        assert snapshot.reason == "hours_question"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("hours",)
+        assert snapshot.capability == "hours"
+        assert snapshot.needs_manager is False
+
+    def test_skips_hours_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Какие часы работы?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какие часы работы?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_hours_policy_snapshot_for_location_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Где вы находитесь и до скольки работаете?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Где вы находитесь и до скольки работаете?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.tool_action == "catalog.location"
+        assert snapshot.pack_refs == ("location",)
+
+    def test_detects_grounded_pricing_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.service_query"
+        assert snapshot.reason == "pricing_query"
+        assert snapshot.goal == "booking"
+        assert snapshot.tool_args == {"service_query": "Маникюр"}
+        assert snapshot.pack_refs == ("pricing",)
+        assert snapshot.capability == "pricing"
+        assert snapshot.needs_manager is False
+
+    def test_detects_active_booking_pricing_interrupt_snapshot_for_skolko_eto_stoit(self):
+        primitives = detect_intent_routing_primitives("А сколько это стоит?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А сколько это стоит?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="collect:datetime",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.service_query"
+        assert snapshot.reason == "pricing_query"
+        assert snapshot.tool_args == {"service_query": "Маникюр"}
+        assert snapshot.pack_refs == ("pricing",)
+
+    def test_detects_pricing_collect_policy_snapshot_for_missing_service(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "pricing"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "info"
+        assert snapshot.reason == "need_service"
+        assert snapshot.goal == "info"
+        assert snapshot.tool_args == {}
+        assert snapshot.pack_refs == ("pricing",)
+        assert snapshot.capability == "pricing"
+        assert snapshot.next_question == "service"
+        assert snapshot.open_questions == ("service",)
+        assert snapshot.subject_kind == "service"
+        assert snapshot.resolution_mode == "clarify_missing_subject"
+        assert snapshot.needs_manager is False
+
+    def test_skips_pricing_collect_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_pricing_collect_policy_snapshot_when_active_service_referent_exists(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            has_active_service_referent=True,
+        )
+
+        assert snapshot is None
+
+    def test_skips_grounded_pricing_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_grounded_pricing_policy_snapshot_for_duration_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит и сколько длится маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит и сколько длится маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_pricing_collect_policy_snapshot_yields_to_duration_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит и сколько длится?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит и сколько длится?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_detects_duration_collect_policy_snapshot_for_missing_service(self):
+        primitives = detect_intent_routing_primitives("Сколько длится?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько длится?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "duration"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "info"
+        assert snapshot.reason == "need_service"
+        assert snapshot.goal == "info"
+        assert snapshot.tool_args == {}
+        assert snapshot.pack_refs == ("duration",)
+        assert snapshot.capability == "duration"
+        assert snapshot.next_question == "service"
+        assert snapshot.open_questions == ("service",)
+        assert snapshot.subject_kind == "service"
+        assert snapshot.resolution_mode == "clarify_missing_subject"
+        assert snapshot.needs_manager is False
+
+    def test_skips_duration_collect_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Сколько длится?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько длится?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_duration_collect_policy_snapshot_when_active_service_referent_exists(self):
+        primitives = detect_intent_routing_primitives("Сколько длится?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько длится?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            has_active_service_referent=True,
+        )
+
+        assert snapshot is None
+
+    def test_duration_collect_policy_snapshot_yields_to_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Сколько стоит и сколько длится?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько стоит и сколько длится?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_detects_bookability_time_collect_policy_snapshot_for_active_service_referent(self):
+        primitives = detect_intent_routing_primitives("В какое время можно записаться?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "В какое время можно записаться?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "calendar.list_slots"
+        assert snapshot.reason == "missing_temporal_scope"
+        assert snapshot.goal == "booking"
+        assert snapshot.tool_args == {"service_query": "Маникюр"}
+        assert snapshot.slots == {"service": "Маникюр", "datetime": ""}
+        assert snapshot.next_question == "datetime"
+        assert snapshot.open_questions == ("datetime",)
+        assert snapshot.capability == "bookability"
+        assert snapshot.subject_kind == "service"
+        assert snapshot.temporal_scope == "none"
+        assert snapshot.resolution_mode == "clarify_missing_time"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "time"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_skips_bookability_time_collect_policy_snapshot_without_booking_active(self):
+        primitives = detect_intent_routing_primitives("В какое время можно записаться?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "В какое время можно записаться?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            active_service_referent="Маникюр",
+            booking_active=False,
+        )
+
+        assert snapshot is None
+
+    def test_skips_bookability_time_collect_policy_snapshot_when_temporal_scope_present(self):
+        primitives = detect_intent_routing_primitives("В какое время можно записаться завтра?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "В какое время можно записаться завтра?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_skips_bookability_time_collect_policy_snapshot_when_explicit_service_in_text(self):
+        primitives = detect_intent_routing_primitives("На педикюр в какое время можно записаться?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "На педикюр в какое время можно записаться?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_active_name_time_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("А есть ли свободные слоты на 15:00?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А есть ли свободные слоты на 15:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_time_availability_followup",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_time_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "15:00",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "booking"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "time"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_skips_active_name_time_availability_followup_policy_snapshot_without_resume_reason(self):
+        primitives = detect_intent_routing_primitives("А есть ли свободные слоты на 15:00?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А есть ли свободные слоты на 15:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="other_followup",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_skips_active_name_time_availability_followup_policy_snapshot_when_date_scope_present(self):
+        primitives = detect_intent_routing_primitives("А есть ли свободные слоты завтра на 15:00?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А есть ли свободные слоты завтра на 15:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_time_availability_followup",
+            active_service_referent="Маникюр",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_active_name_deictic_time_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("А есть ли у вас места в это время?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А есть ли у вас места в это время?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token="15:00",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_time_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "15:00",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "booking"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "time"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_skips_active_name_deictic_time_availability_followup_policy_snapshot_without_booking_time_token(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("А есть ли у вас места в это время?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А есть ли у вас места в это время?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_skips_active_name_deictic_time_availability_followup_policy_snapshot_when_explicit_time_supplied(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("А есть ли у вас места на 16:00?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А есть ли у вас места на 16:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token="15:00",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_active_name_relative_date_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на завтра?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на завтра?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token="15:00",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_time_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "завтра",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "booking"
+        assert snapshot.capability == "bookability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "time"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_skips_active_name_relative_date_availability_followup_without_booking_time_token(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на завтра?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на завтра?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_active_name_relative_daypart_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на завтра вечером?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на завтра вечером?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token="15:00",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_time_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "завтра вечером",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "booking"
+        assert snapshot.capability == "bookability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "time"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_skips_active_name_relative_daypart_availability_followup_without_booking_time_token(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на завтра вечером?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на завтра вечером?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_skips_active_name_relative_daypart_availability_followup_when_explicit_time_supplied(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives(
+            "У вас есть свободные слоты на завтра вечером в 18:00?"
+        )
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на завтра вечером в 18:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token="15:00",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_specialist_date_range_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер свободен на этой неделе?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер свободен на этой неделе?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_specialist_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "",
+            "name": "",
+        }
+        assert snapshot.next_question == "datetime"
+        assert snapshot.open_questions == ("datetime",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "date_range"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "specialist_availability_followup"
+        assert snapshot.needs_manager is False
+
+    def test_specialist_date_range_availability_followup_falls_back_to_master_service_clarify_without_service_referent(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какой мастер свободен на этой неделе?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер свободен на этой неделе?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "collect"
+        assert snapshot.reason == "master_service_clarify"
+
+    def test_specialist_date_range_availability_followup_falls_back_to_grounded_master_query_when_service_grounded_in_text(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives(
+            "Какой мастер будет делать маникюр в субботу?"
+        )
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр в субботу?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_detects_grounded_specialist_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("А какие мастера доступны?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А какие мастера доступны?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            active_booking_datetime_value="завтра",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_specialist_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "завтра",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "specialist_availability_followup"
+        assert snapshot.needs_manager is False
+
+    def test_grounded_specialist_availability_followup_falls_back_to_master_service_clarify_without_active_booking_datetime(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("А какие мастера доступны?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А какие мастера доступны?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "collect"
+        assert snapshot.reason == "master_service_clarify"
+
+    def test_grounded_specialist_availability_followup_falls_back_to_grounded_master_query_when_service_grounded_in_text(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какие мастера доступны по маникюру?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какие мастера доступны по маникюру?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            active_booking_datetime_value="завтра",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_detects_service_choice_specialist_day_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр в субботу?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр в субботу?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "day_followup"
+        assert snapshot.goal == "info"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "",
+            "name": "",
+        }
+        assert snapshot.next_question == "datetime"
+        assert snapshot.open_questions == ("datetime",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "clarify_missing_time"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_service_choice_specialist_day_followup_requires_service_reply_slot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр в субботу?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр в субботу?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_detects_service_choice_specialist_daypart_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр завтра вечером?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр завтра вечером?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "daypart_followup"
+        assert snapshot.goal == "info"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "завтра вечером",
+            "name": "",
+        }
+        assert snapshot.next_question == "datetime"
+        assert snapshot.open_questions == ("datetime",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "clarify_missing_time"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_detects_service_choice_specialist_exact_time_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр завтра в 18:00?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр завтра в 18:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "specialist_exact_time_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "завтра 18:00",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "specialist_availability_followup"
+        assert snapshot.needs_manager is False
+
+    def test_service_choice_specialist_exact_time_followup_requires_service_reply_slot(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр завтра в 18:00?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр завтра в 18:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_service_choice_specialist_exact_time_followup_yields_to_daypart_exact_time_fallback(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives(
+            "Какой мастер будет делать маникюр завтра вечером в 18:00?"
+        )
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр завтра вечером в 18:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_service_choice_specialist_daypart_followup_requires_service_reply_slot(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр завтра вечером?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр завтра вечером?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_service_choice_specialist_daypart_followup_yields_to_weekend_bridge_for_weekend_hybrid(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр на выходных вечером?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр на выходных вечером?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.reason == "weekend_followup"
+        assert snapshot.temporal_scope == "weekend"
+
+    def test_service_choice_specialist_daypart_followup_yields_to_master_query_with_exact_time(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives(
+            "Какой мастер будет делать маникюр завтра вечером в 18:00?"
+        )
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр завтра вечером в 18:00?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_detects_service_choice_specialist_weekday_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр по будням?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр по будням?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "weekday_followup"
+        assert snapshot.goal == "info"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "",
+            "name": "",
+        }
+        assert snapshot.next_question == "datetime"
+        assert snapshot.open_questions == ("datetime",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "weekday"
+        assert snapshot.resolution_mode == "clarify_missing_time"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_service_choice_specialist_weekday_followup_requires_service_reply_slot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр по будням?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр по будням?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "master_question"
+
+    def test_service_choice_specialist_weekday_followup_specific_day_variant_uses_day_bridge(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр во вторник?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр во вторник?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.reason == "day_followup"
+        assert snapshot.temporal_scope == "specific_time"
+
+    def test_detects_service_choice_specialist_weekend_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр на выходных?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр на выходных?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "weekend_followup"
+        assert snapshot.goal == "info"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "",
+            "name": "",
+        }
+        assert snapshot.next_question == "datetime"
+        assert snapshot.open_questions == ("datetime",)
+        assert snapshot.subject_kind == "specialist"
+        assert snapshot.capability == "live_availability"
+        assert snapshot.temporal_scope == "weekend"
+        assert snapshot.resolution_mode == "clarify_missing_time"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "specialist"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_service_choice_specialist_weekend_followup_requires_service_reply_slot(self):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр на выходных?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр на выходных?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "hours"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "hours_question"
+
+    def test_booking_prompt_service_followup_temporal_booking_request_defers_hours_snapshot(self):
+        primitives = detect_intent_routing_primitives("Можно записаться на выходные?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Можно записаться на выходные?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_booking_interrupt_service_followup_temporal_booking_request_defers_hours_snapshot(self):
+        primitives = detect_intent_routing_primitives("Можно записаться на выходные?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Можно записаться на выходные?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_interrupt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_booking_interrupt_expected_service_followup_temporal_booking_request_defers_hours_snapshot(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Можно записаться на выходные?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Можно записаться на выходные?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service_choice",
+            resume_reason="booking_interrupt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value="в субботу",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_booking_interrupt_expected_time_slot_constraint_defers_hours_snapshot(self):
+        primitives = detect_intent_routing_primitives("Важно, чтобы это было в выходные.")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Важно, чтобы это было в выходные.",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="time",
+            resume_reason="booking_interrupt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_booking_prompt_service_followup_explicit_hours_question_keeps_hours_snapshot(self):
+        primitives = detect_intent_routing_primitives("А по выходным вы работаете?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "А по выходным вы работаете?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "hours"
+        assert snapshot.action == "fact"
+        assert snapshot.reason == "hours_question"
+
+    def test_service_choice_specialist_weekend_followup_specific_day_variant_uses_day_bridge(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("Какой мастер будет делать маникюр в субботу?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер будет делать маникюр в субботу?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service",
+            resume_reason="booking_prompt",
+            active_service_referent=None,
+            active_booking_time_token=None,
+            active_booking_datetime_value=None,
+            booking_active=False,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "info"
+        assert snapshot.action == "collect"
+        assert snapshot.reason == "day_followup"
+        assert snapshot.temporal_scope == "specific_time"
+
+    def test_detects_active_name_deictic_day_availability_followup_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на этот день?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на этот день?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token="03:00",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "booking"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "booking_time_availability_followup"
+        assert snapshot.goal == "booking"
+        assert snapshot.slots == {
+            "service": "Маникюр",
+            "datetime": "03:00",
+            "name": "",
+        }
+        assert snapshot.next_question == "name"
+        assert snapshot.open_questions == ("name",)
+        assert snapshot.subject_kind == "booking"
+        assert snapshot.capability == "bookability"
+        assert snapshot.temporal_scope == "specific_time"
+        assert snapshot.resolution_mode == "referent_followup"
+        assert snapshot.pending_question_act == "ask_about_requested_slot"
+        assert snapshot.pending_question_target == "time"
+        assert snapshot.active_question_relation == "ask_about_requested_slot"
+        assert snapshot.needs_manager is False
+
+    def test_skips_active_name_deictic_day_availability_followup_policy_snapshot_without_booking_time_token(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на этот день?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на этот день?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="booking_prompt",
+            active_service_referent="Маникюр",
+            active_booking_time_token=None,
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_skips_active_name_deictic_day_availability_followup_policy_snapshot_without_booking_prompt_reason(
+        self,
+    ):
+        primitives = detect_intent_routing_primitives("У вас есть свободные слоты на этот день?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "У вас есть свободные слоты на этот день?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="name",
+            resume_reason="other_followup",
+            active_service_referent="Маникюр",
+            active_booking_time_token="03:00",
+            booking_active=True,
+        )
+
+        assert snapshot is None
+
+    def test_detects_grounded_duration_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Сколько длится маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько длится маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "duration"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.service_query"
+        assert snapshot.reason == "duration_info"
+        assert snapshot.goal == "booking"
+        assert snapshot.tool_args == {"service_query": "Маникюр"}
+        assert snapshot.pack_refs == ("duration",)
+        assert snapshot.capability == "duration"
+        assert snapshot.needs_manager is False
+
+    def test_detects_grounded_duration_policy_snapshot_for_vremya_na_service(self):
+        primitives = detect_intent_routing_primitives(
+            "Как вы оцениваете время на наращивание полигелем?"
+        )
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Как вы оцениваете время на наращивание полигелем?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+            reply_slot="service_choice",
+            resume_reason="collect:service",
+            booking_active=True,
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "duration"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.service_query"
+        assert snapshot.reason == "duration_info"
+        assert snapshot.tool_args == {"service_query": "Наращивание полигелем"}
+        assert snapshot.pack_refs == ("duration",)
+
+    def test_skips_grounded_duration_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Сколько длится маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько длится маникюр?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_grounded_duration_policy_snapshot_for_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Сколько длится и сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Сколько длится и сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_detects_promotions_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Есть ли у вас акции?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Есть ли у вас акции?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "promotions"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "info"
+        assert snapshot.reason == "promotions_question"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("promotions",)
+        assert snapshot.capability == "promotions"
+        assert snapshot.needs_manager is False
+
+    def test_detects_promotions_rules_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Скидки суммируются?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Скидки суммируются?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "promotions_rules"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "info"
+        assert snapshot.reason == "promotions_rules_question"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("promotions",)
+        assert snapshot.capability == "promotions"
+        assert snapshot.needs_manager is False
+
+    def test_skips_promotions_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Есть ли у вас акции?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Есть ли у вас акции?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_promotions_rules_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Скидки суммируются?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Скидки суммируются?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_promotions_policy_snapshot_yields_to_promotions_rules(self):
+        primitives = detect_intent_routing_primitives("Скидки суммируются?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Скидки суммируются?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.reason == "promotions_rules_question"
+
+    def test_promotions_rules_policy_snapshot_yields_to_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Скидки суммируются и сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Скидки суммируются и сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.reason == "pricing_query"
+
+    def test_promotions_policy_snapshot_yields_to_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Есть ли скидки и сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Есть ли скидки и сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.reason == "pricing_query"
+
+    def test_detects_contact_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какой у вас номер телефона?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой у вас номер телефона?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "contact"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "info"
+        assert snapshot.reason == "contact_question"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("contact",)
+        assert snapshot.capability is None
+        assert snapshot.needs_manager is False
+
+    def test_skips_contact_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Какой у вас номер телефона?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой у вас номер телефона?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_contact_policy_snapshot_for_integration_turn(self):
+        primitives = detect_intent_routing_primitives("Есть интеграция с WhatsApp?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Есть интеграция с WhatsApp?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_contact_policy_snapshot_for_raw_phone_collection_payload(self):
+        primitives = detect_intent_routing_primitives("Мой номер телефона +77001234567")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Мой номер телефона +77001234567",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_detects_portfolio_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Покажите примеры работ по маникюру")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Покажите примеры работ по маникюру",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "portfolio"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.portfolio"
+        assert snapshot.reason == "portfolio_question"
+        assert snapshot.goal == "info"
+        assert snapshot.tool_args == {"service_query": "Маникюр"}
+        assert snapshot.pack_refs == ("portfolio",)
+        assert snapshot.capability == "portfolio"
+        assert snapshot.needs_manager is False
+
+    def test_skips_portfolio_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Покажите примеры работ по маникюру")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Покажите примеры работ по маникюру",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_portfolio_policy_snapshot_keeps_style_reference_precedence(self):
+        primitives = detect_intent_routing_primitives("Хочу как на фото")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Хочу как на фото",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "style_reference"
+        assert snapshot.reason == "style_reference_text"
+
+    def test_portfolio_policy_snapshot_yields_to_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Покажите примеры работ по маникюру и сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Покажите примеры работ по маникюру и сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.reason == "pricing_query"
+
+    def test_detects_grounded_master_query_policy_snapshot(self):
+        primitives = detect_intent_routing_primitives("Какие мастера делают маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какие мастера делают маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "fact"
+        assert snapshot.tool_action == "catalog.service_query"
+        assert snapshot.reason == "master_question"
+        assert snapshot.goal == "info"
+        assert snapshot.tool_args == {"service_query": "Маникюр"}
+        assert snapshot.pack_refs == ("master",)
+        assert snapshot.capability is None
+        assert snapshot.needs_manager is False
+
+    def test_skips_grounded_master_query_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Какие мастера делают маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какие мастера делают маникюр?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_detects_master_query_collect_policy_snapshot_for_missing_service(self):
+        primitives = detect_intent_routing_primitives("Какой мастер можете предложить?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер можете предложить?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.intent == "master_query"
+        assert snapshot.action == "collect"
+        assert snapshot.tool_action == "collect"
+        assert snapshot.reason == "master_service_clarify"
+        assert snapshot.goal == "info"
+        assert snapshot.pack_refs == ("master",)
+        assert snapshot.next_question == "service"
+        assert snapshot.open_questions == ("service",)
+        assert snapshot.subject_kind == "service"
+        assert snapshot.resolution_mode == "clarify_missing_subject"
+        assert snapshot.capability is None
+        assert snapshot.needs_manager is False
+
+    def test_skips_master_query_collect_policy_snapshot_when_media_already_present(self):
+        primitives = detect_intent_routing_primitives("Какой мастер можете предложить?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер можете предложить?",
+            primitives=primitives,
+            has_media=True,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_skips_grounded_master_query_policy_snapshot_for_named_master_turn(self):
+        primitives = detect_intent_routing_primitives("Алия по маникюру принимает?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Алия по маникюру принимает?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+    def test_grounded_master_query_policy_snapshot_yields_to_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Какие мастера делают маникюр и сколько стоит маникюр?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какие мастера делают маникюр и сколько стоит маникюр?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is not None
+        assert snapshot.reason == "pricing_query"
+
+    def test_master_query_collect_policy_snapshot_yields_to_pricing_mixed_query(self):
+        primitives = detect_intent_routing_primitives("Какой мастер можете предложить и сколько стоит?")
+
+        snapshot = detect_policy_core_route_snapshot(
+            "Какой мастер можете предложить и сколько стоит?",
+            primitives=primitives,
+            has_media=False,
+            client_slug="demo_salon",
+        )
+
+        assert snapshot is None
+
+
 class TestOptOutHeuristics:
     def test_detects_opt_out(self):
         assert is_opt_out_message("я не хочу чтобы ты писал мне") is True
@@ -140,6 +2251,43 @@ class TestDialogueControllerOffline:
         mock_llm.assert_not_called()
 
 
+class TestDialogueControllerOverride:
+    def test_route_dialogue_controller_uses_override_without_llm(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        override = {
+            "normalized_text": "привет",
+            "class": "greeting",
+            "goal": "greeting",
+            "intents": ["greeting"],
+            "confidence": 0.95,
+            "reason": "ingress_lexical_greeting",
+        }
+        with use_dialogue_controller_override(override):
+            with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+                result = route_dialogue_controller("Привет")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["payload"]["class"] == "greeting"
+        assert result["payload"]["goal"] == "greeting"
+        assert result["payload"]["controller_error"] == "none"
+        mock_llm.assert_not_called()
+
+    def test_dialogue_controller_override_resets_after_context_exit(self):
+        override = {
+            "normalized_text": "привет",
+            "class": "greeting",
+            "goal": "greeting",
+            "intents": ["greeting"],
+            "confidence": 0.95,
+            "reason": "ingress_lexical_greeting",
+        }
+        with use_dialogue_controller_override(override):
+            assert get_dialogue_controller_override() is not None
+
+        assert get_dialogue_controller_override() is None
+
+
 class TestDialogueControllerBudget:
     def test_budget_deadline_skips_llm(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -152,6 +2300,65 @@ class TestDialogueControllerBudget:
         payload = result["payload"]
         assert payload["controller_error"] == "deadline_exceeded"
         mock_llm.assert_not_called()
+
+
+class TestPolicyCoreOverride:
+    def test_route_llm_policy_core_uses_override_without_llm(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "")
+        override = {
+            "normalized_text": "хочу поговорить с менеджером",
+            "intent": "human_request",
+            "action": "handoff",
+            "tool_action": "handoff",
+            "tool_args": {},
+            "pack_refs": [],
+            "slots": {},
+            "open_questions": [],
+            "needs_manager": True,
+            "risk_signals": [],
+            "confidence": 0.98,
+            "reason": "ingress_explicit_human_request",
+            "goal": "handoff",
+            "entity_refs": [],
+            "resolver_id": "consultant_core_ingress_override",
+            "resolver_version": "2026-03-16",
+        }
+        with use_policy_core_override(override):
+            with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+                result = route_llm_policy_core("Хочу поговорить с менеджером")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["attempted"] is False
+        assert result["payload"]["intent"] == "human_request"
+        assert result["payload"]["action"] == "handoff"
+        assert result["payload"]["tool_action"] == "handoff"
+        assert result["payload"]["needs_manager"] is True
+        mock_llm.assert_not_called()
+
+    def test_policy_core_override_resets_after_context_exit(self):
+        override = {
+            "normalized_text": "хочу поговорить с менеджером",
+            "intent": "human_request",
+            "action": "handoff",
+            "tool_action": "handoff",
+            "tool_args": {},
+            "pack_refs": [],
+            "slots": {},
+            "open_questions": [],
+            "needs_manager": True,
+            "risk_signals": [],
+            "confidence": 0.98,
+            "reason": "ingress_explicit_human_request",
+            "goal": "handoff",
+            "entity_refs": [],
+            "resolver_id": "consultant_core_ingress_override",
+            "resolver_version": "2026-03-16",
+        }
+        with use_policy_core_override(override):
+            assert get_policy_core_override() is not None
+
+        assert get_policy_core_override() is None
 
 
 class TestDialogueControllerSchema:
@@ -468,6 +2675,21 @@ class TestPolicyCoreTimeoutRetry:
         policy_input = json.loads(mock_llm.return_value.generate.call_args.kwargs["messages"][1]["content"])
         assert len(policy_input["message"]) <= 90
         assert policy_input["message"] != long_message
+
+    def test_policy_core_respects_explicit_max_tokens_override(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                max_tokens_override=120,
+            )
+
+        assert result["ok"] is True
+        kwargs = mock_llm.return_value.generate.call_args.kwargs
+        assert kwargs["max_tokens"] == 120
 
     def test_returns_deadline_when_budget_below_min_policy_timeout(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")

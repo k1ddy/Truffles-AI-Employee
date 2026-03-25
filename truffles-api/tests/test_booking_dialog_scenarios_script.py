@@ -2,17 +2,61 @@ import io
 import json
 import random
 import urllib.error
+from functools import lru_cache
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
 
+from app.services.llm_quality_contracts import (
+    advance_booking_scenario_multi_service_clarify_context,
+    advance_booking_scenario_partial_date_anchor_context,
+    advance_booking_scenario_pending_question_context,
+    apply_booking_scenario_active_name_master_info_interrupt_expectations,
+    apply_booking_scenario_active_pending_question_cancel_interrupt_expectations,
+    apply_booking_scenario_active_pending_question_info_interrupt_expectations,
+    apply_booking_scenario_ambiguous_time_fill_expectations,
+    apply_booking_scenario_active_time_master_info_interrupt_expectations,
+    apply_booking_scenario_active_time_specialist_followup_expectations,
+    apply_booking_scenario_active_name_time_availability_followup_expectations,
+    apply_booking_scenario_exact_time_fill_collect_expectations,
+    apply_booking_scenario_grounded_partial_date_daypart_fill_expectations,
+    apply_booking_scenario_grounded_time_specialist_availability_transition_expectations,
+    apply_booking_scenario_multi_service_booking_clarify_expectations,
+    apply_booking_scenario_partial_date_fill_collect_expectations,
+    apply_booking_scenario_pending_master_info_interrupt_expectations,
+    apply_booking_scenario_pending_specialist_availability_followup_expectations,
+    apply_booking_scenario_service_grounded_booking_expectations,
+    apply_booking_scenario_service_grounded_booking_progress_interrupt_expectations,
+    booking_scenario_orphan_pending_question_expect_override,
+    booking_scenario_expectation_has_contract_reason,
+    booking_scenario_looks_like_check_booking_followup,
+    booking_scenario_looks_like_generic_booking_request,
+    booking_scenario_looks_like_reschedule_followup,
+    booking_scenario_normalize_active_name_master_info_tags,
+    booking_scenario_normalize_active_time_master_info_tags,
+    booking_scenario_normalize_active_time_specialist_master_tags,
+    booking_scenario_normalize_malformed_check_booking_tags,
+    booking_scenario_normalize_pending_question_tags,
+    booking_scenario_normalize_stateful_booking_tags,
+    booking_scenario_normalize_partial_date_slot_constraint_tags,
+    booking_scenario_normalize_slot_compare_partial_date_constraint_tags,
+    booking_scenario_normalize_slot_compare_exact_time_fill_tags,
+    booking_scenario_time_collect_expect_override,
+    clear_booking_scenario_multi_service_info_interrupt_followup_expectations,
+    has_booking_scenario_orphan_pending_question_tags,
+    merge_booking_scenario_expectations,
+    rewrite_booking_scenario_check_booking_followup_tags,
+    rewrite_booking_scenario_orphan_pending_question_tags,
+    rewrite_booking_scenario_reschedule_followup_tags,
+)
 from app.services.scenario_contract_compiler import (
     compile_active_time_specialist_followup_expectations,
     should_compile_active_time_specialist_followup_expectations,
 )
 
 
+@lru_cache(maxsize=1)
 def _load_module():
     base = Path(__file__).resolve()
     candidates = [
@@ -32,8 +76,19 @@ def _load_module():
     return module
 
 
-_module = _load_module()
-_merge_expectations = _module._merge_expectations
+class _LazyModule:
+    def __getattr__(self, name):
+        return getattr(_load_module(), name)
+
+    def __setattr__(self, name, value):
+        setattr(_load_module(), name, value)
+
+    def __delattr__(self, name):
+        delattr(_load_module(), name)
+
+
+_module = _LazyModule()
+_merge_expectations = merge_booking_scenario_expectations
 
 
 def test_resolve_openai_api_key_reads_local_truffles_api_env(monkeypatch, tmp_path):
@@ -140,6 +195,574 @@ def test_merge_expectations_sanitizes_handoff_override_without_handoff_tags():
     assert expect["action"] is None
     assert expect["state"] == "bot_active"
     assert expect["expected_reply"] is True
+
+
+def test_shared_partial_date_slot_constraint_helper_rewrites_into_time_collect():
+    rewritten_tags, changed = booking_scenario_normalize_partial_date_slot_constraint_tags(
+        "Мне нужно записаться на завтра.",
+        ["slot_constraint"],
+        active_reply_type="time",
+    )
+
+    assert changed is True
+    assert rewritten_tags == ["time"]
+
+
+def test_shared_slot_compare_partial_date_constraint_helper_rewrites_into_slot_constraint():
+    rewritten_tags, changed = (
+        booking_scenario_normalize_slot_compare_partial_date_constraint_tags(
+            "Есть ли свободные слоты на завтра?",
+            ["slot_compare"],
+            active_reply_type="time",
+        )
+    )
+
+    assert changed is True
+    assert rewritten_tags == ["slot_constraint"]
+
+
+def test_shared_slot_compare_exact_time_helper_rewrites_into_time():
+    rewritten_tags, changed = booking_scenario_normalize_slot_compare_exact_time_fill_tags(
+        "Можно в 19:00?",
+        ["slot_compare"],
+        active_reply_type="time",
+    )
+
+    assert changed is True
+    assert rewritten_tags == ["time"]
+
+
+def test_shared_followup_helpers_normalize_booking_management_tags():
+    assert has_booking_scenario_orphan_pending_question_tags(
+        ["ask_about_requested_slot"],
+        active_reply_type="name",
+    )
+    assert rewrite_booking_scenario_orphan_pending_question_tags(
+        ["ask_about_requested_slot", "price", "booking"]
+    ) == ["price", "booking"]
+    assert rewrite_booking_scenario_reschedule_followup_tags(
+        ["slot_compare", "booking", "price"]
+    ) == ["reschedule", "price"]
+    assert rewrite_booking_scenario_check_booking_followup_tags(["booking", "price"]) == [
+        "check_booking",
+        "price",
+    ]
+
+
+def test_shared_followup_helpers_return_detached_expect_payloads():
+    orphan_expect = booking_scenario_orphan_pending_question_expect_override()
+    orphan_expect["meta_any"]["expected_reply_type"].append("mutated")
+    orphan_expect["trace_contains"][0]["expected_reply_type"] = "mutated"
+
+    fresh_orphan_expect = booking_scenario_orphan_pending_question_expect_override()
+    assert fresh_orphan_expect["meta_any"]["expected_reply_type"] == ["service_choice"]
+    assert fresh_orphan_expect["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "service_choice",
+        }
+    ]
+
+    time_expect = booking_scenario_time_collect_expect_override()
+    time_expect["meta_any"]["expected_reply_type"].append("mutated")
+
+    fresh_time_expect = booking_scenario_time_collect_expect_override()
+    assert fresh_time_expect["meta_any"]["expected_reply_type"] == ["time"]
+
+
+def test_shared_management_stateful_helpers_detect_followup_predicates():
+    assert booking_scenario_looks_like_reschedule_followup(
+        "Давайте перенесем запись на завтра к 15:00",
+        ["booking", "time"],
+    )
+    assert booking_scenario_looks_like_check_booking_followup(
+        "Проверьте мою запись, пожалуйста",
+        ["booking"],
+    )
+    assert booking_scenario_looks_like_generic_booking_request(
+        "Хочу записаться на маникюр"
+    )
+    assert not booking_scenario_looks_like_generic_booking_request(
+        "Давайте перенесем дату на завтра"
+    )
+
+
+def test_shared_management_stateful_helpers_normalize_stateful_and_malformed_tags():
+    normalized_stateful = booking_scenario_normalize_stateful_booking_tags(
+        "Можно ли завтра утром?",
+        ["booking", "price"],
+        active_reply_type="time",
+    )
+    assert normalized_stateful == ["mixed_fill_plus_question", "price"]
+
+    normalized_malformed, changed = (
+        booking_scenario_normalize_malformed_check_booking_tags(
+            "Хочу записаться на массаж",
+            ["check_booking", "price"],
+        )
+    )
+    assert changed is True
+    assert normalized_malformed == ["booking", "price"]
+
+
+def test_shared_management_stateful_helpers_shape_ambiguous_time_expectations():
+    base_expect = {
+        "reply_type": "service_choice",
+        "expected_reply": True,
+        "meta": {"expected_reply_type": "service_choice"},
+        "meta_any": {
+            "expected_reply_type": ["service_choice"],
+            "pending_question_act": ["slot_compare"],
+            "pending_question_target": ["time"],
+            "pending_question_interaction": ["followup"],
+            "pending_question_owner": ["bot"],
+            "active_question_relation": ["followup"],
+        },
+        "trace_contains": [
+            {
+                "stage": "pending_question_interaction",
+                "pending_question_act": "slot_compare",
+                "pending_question_target": "time",
+            },
+            {
+                "stage": "question_contract",
+                "expected_reply_type": "service_choice",
+            },
+        ],
+    }
+
+    shaped = apply_booking_scenario_ambiguous_time_fill_expectations(
+        base_expect,
+        tags=["time"],
+        text="Можно в 7 или позже?",
+        active_reply_type="time",
+    )
+
+    assert shaped["reply_type"] == "time"
+    assert shaped["meta"]["expected_reply_type"] == "time"
+    assert shaped["meta_any"]["expected_reply_type"] == ["time"]
+    assert "pending_question_act" not in shaped["meta_any"]
+    assert {
+        "stage": "question_contract",
+        "expected_reply_type": "time",
+    } in shaped["trace_contains"]
+    assert not any(
+        entry.get("stage") == "pending_question_interaction"
+        for entry in shaped["trace_contains"]
+    )
+
+    fresh_expect = apply_booking_scenario_ambiguous_time_fill_expectations(
+        {
+            "reply_type": "service_choice",
+            "expected_reply": True,
+            "meta_any": {"expected_reply_type": ["service_choice"]},
+            "trace_contains": [
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "service_choice",
+                }
+            ],
+        },
+        tags=["time"],
+        text="Можно в 7 или позже?",
+        active_reply_type="time",
+    )
+    assert fresh_expect["meta_any"]["expected_reply_type"] == ["time"]
+
+
+def test_shared_pending_question_contract_reason_helper_reads_meta_and_trace():
+    expect = {
+        "meta_any": {"expected_reply_contract_reason": ["multi_service_booking_clarify"]},
+        "trace_contains": [{"stage": "question_contract", "reason": "catalog_service_booking_progress"}],
+    }
+
+    assert booking_scenario_expectation_has_contract_reason(expect, "multi_service_booking_clarify")
+    assert booking_scenario_expectation_has_contract_reason(expect, "catalog_service_booking_progress")
+    assert not booking_scenario_expectation_has_contract_reason(expect, "missing_reason")
+
+
+def test_shared_active_pending_question_info_interrupt_helper_preserves_question_contract():
+    updated = apply_booking_scenario_active_pending_question_info_interrupt_expectations(
+        {
+            "reply_type": None,
+            "meta": {"expected_reply_type": "service_choice"},
+            "meta_any": {
+                "pending_question_act": ["ask_about_requested_slot"],
+                "pending_question_target": ["time"],
+            },
+            "trace_contains": [
+                {
+                    "stage": "pending_question_interaction",
+                    "pending_question_target": "time",
+                }
+            ],
+        },
+        tags=["price"],
+        active_reply_type="time",
+    )
+
+    assert updated["reply_type"] == "time"
+    assert updated["expected_reply"] is True
+    assert updated["meta"]["expected_reply_type"] == "time"
+    assert updated["meta_any"]["expected_reply_type"] == ["time"]
+    assert "pending_question_act" not in updated["meta_any"]
+    assert updated["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+        }
+    ]
+
+
+def test_shared_multi_service_interrupt_clear_helper_drops_followup_contract():
+    updated = clear_booking_scenario_multi_service_info_interrupt_followup_expectations(
+        {
+            "reply_type": "service_choice",
+            "meta": {
+                "expected_reply_type": "service_choice",
+                "expected_reply_contract_reason": "multi_service_booking_clarify",
+            },
+            "meta_any": {
+                "expected_reply_type": ["service_choice"],
+                "expected_reply_contract_reason": ["multi_service_booking_clarify"],
+                "pending_question_interaction": ["ask_about_requested_slot"],
+            },
+            "trace_contains": [
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "service_choice",
+                    "reason": "multi_service_booking_clarify",
+                },
+                {"stage": "booking_interrupt", "decision": "info_reply"},
+            ],
+        },
+        tags=["price"],
+        multi_service_clarify_active=True,
+    )
+
+    assert updated["reply_type"] is None
+    assert "meta" not in updated
+    assert "meta_any" not in updated
+    assert updated["trace_contains"] == [{"stage": "booking_interrupt", "decision": "info_reply"}]
+
+
+def test_shared_pending_question_context_helpers_preserve_and_reset_state():
+    active_reply_type = advance_booking_scenario_pending_question_context(
+        "time",
+        tags=["price"],
+        expect={"reply_type": None},
+    )
+    assert active_reply_type == "time"
+
+    clarified_reply_type = advance_booking_scenario_pending_question_context(
+        "time",
+        tags=["info"],
+        expect={
+            "reply_type": "service_choice",
+            "meta_any": {"expected_reply_contract_reason": ["multi_service_booking_clarify"]},
+        },
+    )
+    assert clarified_reply_type is None
+
+    assert advance_booking_scenario_multi_service_clarify_context(
+        True,
+        tags=["price"],
+        expect={"reply_type": None},
+    )
+    assert not advance_booking_scenario_multi_service_clarify_context(
+        True,
+        tags=["booking"],
+        expect={"reply_type": None},
+    )
+
+    assert advance_booking_scenario_partial_date_anchor_context(
+        True,
+        active_reply_type="time",
+        tags=["price"],
+        text="Сколько стоит эта услуга?",
+        expect={
+            "reply_type": "time",
+            "trace_contains": [{"stage": "question_contract", "reason": "catalog_service_booking_progress"}],
+        },
+    )
+    assert not advance_booking_scenario_partial_date_anchor_context(
+        True,
+        active_reply_type="time",
+        tags=["price"],
+        text="Сколько стоит эта услуга?",
+        expect={"reply_type": "time"},
+    )
+
+
+def test_shared_cancel_interrupt_helper_updates_question_contract():
+    updated = apply_booking_scenario_active_pending_question_cancel_interrupt_expectations(
+        {
+            "trace_contains": [{"stage": "question_contract", "expected_reply_type": "service_choice"}],
+        },
+        tags=["cancel"],
+        active_reply_type="name",
+    )
+
+    assert updated["reply_type"] == "name"
+    assert updated["expected_reply"] is True
+    assert updated["meta_any"]["expected_reply_type"] == ["name"]
+    assert updated["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "name",
+        }
+    ]
+
+
+def test_shared_booking_progress_helpers_shape_multi_service_and_service_grounded_contracts():
+    clarified = apply_booking_scenario_multi_service_booking_clarify_expectations(
+        {},
+        tags=["booking"],
+        text="Хочу маникюр и педикюр, сначала маникюр потом педикюр",
+        service_candidates=("маникюр", "педикюр"),
+        ctx=None,
+    )
+
+    assert clarified["reply_type"] == "service_choice"
+    assert clarified["expected_reply"] is True
+    assert clarified["meta"]["expected_reply_contract_reason"] == "multi_service_booking_clarify"
+    assert clarified["meta_any"]["expected_reply_type"] == ["service_choice"]
+
+    grounded = apply_booking_scenario_service_grounded_booking_expectations(
+        {
+            "reply_type": "service_choice",
+            "meta": {
+                "expected_reply_type": "service_choice",
+                "expected_reply_reason": "collect:service",
+            },
+            "meta_any": {
+                "expected_reply_type": ["service_choice"],
+                "expected_reply_reason": ["collect:service"],
+            },
+            "trace_contains": [
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "service_choice",
+                    "reason": "collect:service",
+                }
+            ],
+        },
+        tags=["booking"],
+        text="Хочу маникюр на вечер",
+        service_candidates=("маникюр", "педикюр"),
+        ctx=None,
+    )
+
+    assert grounded["reply_type"] == "time"
+    assert grounded["meta"]["expected_reply_type"] == "time"
+    assert grounded["meta"]["expected_reply_reason"] == "collect:datetime"
+    assert grounded["meta_any"]["expected_reply_type"] == ["time"]
+    assert grounded["meta_any"]["expected_reply_reason"] == ["collect:datetime"]
+    assert grounded["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+        }
+    ]
+
+
+def test_shared_booking_progress_helpers_shape_collect_and_progress_followups():
+    progressed = apply_booking_scenario_service_grounded_booking_progress_interrupt_expectations(
+        {"trace_contains": [{"stage": "question_contract", "expected_reply_type": "service_choice"}]},
+        tags=["price"],
+        text="Сколько стоит маникюр?",
+        active_reply_type="service_choice",
+        service_candidates=("маникюр", "педикюр"),
+        ctx=None,
+    )
+
+    assert progressed["reply_type"] == "time"
+    assert progressed["meta"]["expected_reply_contract_reason"] == "catalog_service_booking_progress"
+    assert progressed["meta_any"]["expected_reply_type"] == ["time"]
+
+    exact_time = apply_booking_scenario_exact_time_fill_collect_expectations(
+        {"trace_contains": [{"stage": "pending_question_interaction"}]},
+        tags=["time"],
+        text="Давайте на 19:00",
+        active_reply_type="time",
+    )
+    assert exact_time["reply_type"] == "name"
+    assert exact_time["trace_contains"] == [
+        {"stage": "question_contract", "expected_reply_type": "name"}
+    ]
+
+    partial_date = apply_booking_scenario_partial_date_fill_collect_expectations(
+        {"trace_contains": [{"stage": "pending_question_interaction"}]},
+        tags=["time"],
+        text="Давайте завтра",
+        active_reply_type="time",
+    )
+    assert partial_date["reply_type"] == "time"
+    assert partial_date["trace_contains"] == [
+        {"stage": "question_contract", "expected_reply_type": "time"}
+    ]
+
+
+def test_shared_booking_progress_helpers_shape_daypart_and_active_name_followups():
+    daypart = apply_booking_scenario_grounded_partial_date_daypart_fill_expectations(
+        {"trace_contains": [{"stage": "pending_question_interaction"}]},
+        original_tags=["mixed_fill_plus_question"],
+        tags=["time"],
+        text="Мне нужна информация о свободных слотах на утро.",
+        active_reply_type="time",
+        partial_date_anchor_active=True,
+    )
+
+    assert daypart["reply_type"] == "time"
+    assert daypart["trace_contains"] == [
+        {"stage": "question_contract", "expected_reply_type": "time"}
+    ]
+
+    followup = apply_booking_scenario_active_name_time_availability_followup_expectations(
+        {"trace_contains": [{"stage": "booking_interrupt", "decision": "info_reply"}]},
+        original_tags=["booking"],
+        tags=["booking"],
+        text="А есть ли свободные слоты на 15:00?",
+        active_reply_type="name",
+    )
+
+    assert followup["reply_type"] == "name"
+    assert followup["meta_any"]["pending_question_owner"] == [
+        "booking_time_availability_followup"
+    ]
+    assert any(
+        entry.get("decision") == "booking_time_availability_followup"
+        for entry in followup["trace_contains"]
+    )
+
+
+def test_shared_master_specialist_normalizers_retag_master_and_booking_paths():
+    assert booking_scenario_normalize_pending_question_tags(
+        "Какой мастер делает маникюр?",
+        ["ask_about_requested_slot"],
+    ) == ["master"]
+
+    normalized_tags, changed = booking_scenario_normalize_active_name_master_info_tags(
+        "Какие мастера доступны?",
+        ["booking"],
+        active_reply_type="name",
+    )
+    assert changed is True
+    assert normalized_tags == ["master"]
+
+    specialist_tags, specialist_changed = booking_scenario_normalize_active_time_specialist_master_tags(
+        "Можно к мастеру Алия?",
+        ["master"],
+        active_reply_type=None,
+    )
+    assert specialist_changed is True
+    assert specialist_tags == ["booking"]
+
+    time_master_tags, time_master_changed = booking_scenario_normalize_active_time_master_info_tags(
+        "Какие мастера есть?",
+        ["booking"],
+        active_reply_type="time",
+    )
+    assert time_master_changed is True
+    assert time_master_tags == ["master"]
+
+
+def test_shared_master_interrupt_helpers_shape_time_and_name_contracts():
+    pending_master_expect = apply_booking_scenario_pending_master_info_interrupt_expectations(
+        {},
+        original_tags=["ask_about_requested_slot"],
+        tags=["master"],
+        text="Какой мастер делает маникюр?",
+        active_reply_type="time",
+    )
+
+    assert pending_master_expect["reply_type"] == "time"
+    assert "master" in pending_master_expect["info_sections"]
+    assert pending_master_expect["meta_any"]["intent"] == ["master"]
+    assert pending_master_expect["meta_any"]["pending_question_target"] == ["time"]
+
+    active_name_expect = apply_booking_scenario_active_name_master_info_interrupt_expectations(
+        {},
+        original_tags=["booking"],
+        tags=["master"],
+        text="Какой мастер подойдет?",
+        active_reply_type="name",
+    )
+
+    assert active_name_expect["reply_type"] == "name"
+    assert "specialist" in active_name_expect["info_sections"]
+    assert active_name_expect["meta_any"]["pending_question_target"] == ["specialist"]
+    assert any(
+        entry.get("stage") == "booking_interrupt"
+        and entry.get("pending_question_target") == "specialist"
+        for entry in active_name_expect["trace_contains"]
+    )
+
+    active_time_expect = apply_booking_scenario_active_time_master_info_interrupt_expectations(
+        {},
+        original_tags=["booking"],
+        tags=["master"],
+        text="Какие мастера есть в субботу?",
+        active_reply_type="time",
+    )
+
+    assert active_time_expect["reply_type"] == "time"
+    assert active_time_expect["meta_any"]["pending_question_target"] == ["time"]
+    assert active_time_expect["meta_any"]["booking_interrupt_info"] == [True]
+
+
+def test_shared_specialist_followup_helpers_shape_availability_contracts():
+    followup_expect = apply_booking_scenario_pending_specialist_availability_followup_expectations(
+        {},
+        original_tags=["ask_about_requested_slot"],
+        tags=["master"],
+        text="Какой мастер свободен завтра?",
+        active_reply_type="time",
+    )
+
+    assert followup_expect["reply_type"] == "time"
+    assert followup_expect["meta_any"]["pending_question_target"] == ["specialist"]
+    assert followup_expect["meta_any"]["pending_question_interaction"] == [
+        "specialist_availability_followup"
+    ]
+    assert any(
+        entry.get("decision") == "booking_specialist_availability_followup"
+        and entry.get("pending_question_target") == "specialist"
+        for entry in followup_expect["trace_contains"]
+    )
+
+    transitioned_expect = apply_booking_scenario_grounded_time_specialist_availability_transition_expectations(
+        {},
+        original_tags=["slot_compare"],
+        tags=["master"],
+        text="Какой мастер свободен в это время?",
+        active_reply_type="time",
+    )
+
+    assert transitioned_expect["reply_type"] == "name"
+    assert transitioned_expect["meta_any"]["expected_reply_type"] == ["name"]
+    assert transitioned_expect["meta_any"]["pending_question_target"] == ["specialist"]
+
+
+def test_shared_active_time_specialist_followup_helper_shapes_booking_specialist_followup():
+    updated = apply_booking_scenario_active_time_specialist_followup_expectations(
+        {
+            "trace_contains": [{"stage": "booking_interrupt", "pending_question_target": "specialist"}],
+        },
+        tags=["booking"],
+        text="Можно к Алия?",
+        active_reply_type="name",
+    )
+
+    assert updated["reply_type"] == "name"
+    assert updated["meta_any"]["pending_question_target"] == ["specialist"]
+    assert updated["meta_any"]["pending_question_owner"] == ["booking_specialist_followup"]
+    assert any(
+        entry.get("decision") == "booking_specialist_followup"
+        and entry.get("active_question_relation") == "referent_followup"
+        for entry in updated["trace_contains"]
+    )
 
 
 def test_merge_expectations_drops_info_override_without_info_tags():
@@ -1864,8 +2487,8 @@ def test_sanitize_llm_turns_normalizes_grounded_partial_date_daypart_fill_to_tim
 
     expect = sanitized[2].get("expect") or {}
     assert sanitized[2]["tags"] == ["time"]
-    assert expect.get("reply_type") == "name"
-    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
+    assert expect.get("reply_type") == "time"
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
     assert (expect.get("meta_any") or {}).get("pending_question_act") is None
     assert (expect.get("meta_any") or {}).get("pending_question_target") is None
     assert not any(
@@ -1874,7 +2497,7 @@ def test_sanitize_llm_turns_normalizes_grounded_partial_date_daypart_fill_to_tim
     )
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("expected_reply_type") == "time"
         for entry in (expect.get("trace_contains") or [])
     )
 
@@ -2071,6 +2694,66 @@ def test_sanitize_llm_turns_keeps_named_specialist_followup_after_time_fill():
         and entry.get("expected_reply_type") == "name"
         for entry in (expect.get("trace_contains") or [])
     )
+
+
+def test_sanitize_llm_turns_rewrites_slot_compare_named_specialist_choice_to_time_followup():
+    turns = [
+        {
+            "kind": "text",
+            "text": "Мне нужно записаться на маникюр на завтра.",
+            "tags": ["booking"],
+            "expect": {"reply_type": "time"},
+        },
+        {
+            "kind": "text",
+            "text": "На какое время свободно?",
+            "tags": ["ask_about_requested_slot"],
+            "expect": {"reply_type": "time"},
+        },
+        {
+            "kind": "text",
+            "text": "А можно выбрать Айгерим?",
+            "tags": ["slot_compare"],
+            "expect": {
+                "reply_type": "name",
+                "info_sections": ["master", "specialist"],
+                "meta_any": {
+                    "pending_question_target": ["specialist"],
+                    "expected_reply_type": ["time"],
+                    "booking_interrupt_info": [True],
+                    "intent": ["master"],
+                },
+            },
+        },
+        {
+            "kind": "text",
+            "text": "Какова цена на маникюр?",
+            "tags": ["price"],
+            "expect": {},
+        },
+    ]
+
+    sanitized = _module._sanitize_llm_turns(turns, _module._build_context(random.Random(64)), random.Random(64))
+
+    specialist_turn = sanitized[2]
+    specialist_expect = specialist_turn.get("expect") or {}
+    assert specialist_turn["tags"] == ["booking"]
+    assert specialist_expect.get("reply_type") == "time"
+    assert specialist_expect.get("info_sections") == []
+    assert (specialist_expect.get("meta_any") or {}).get("pending_question_target") == ["specialist"]
+    assert (specialist_expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
+    assert any(
+        entry.get("stage") == "pending_question_interaction"
+        and entry.get("decision") == "booking_specialist_followup"
+        and entry.get("pending_question_target") == "specialist"
+        and entry.get("expected_reply_type") == "time"
+        for entry in (specialist_expect.get("trace_contains") or [])
+    )
+
+    price_expect = sanitized[3].get("expect") or {}
+    assert price_expect.get("reply_type") == "time"
+    assert "pricing" in (price_expect.get("info_sections") or [])
+    assert (price_expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
 
 
 def test_sanitize_llm_turns_named_specialist_preference_availability_keeps_generalized_followup():
@@ -3366,6 +4049,68 @@ def test_sanitize_llm_turns_keeps_generic_booking_service_choice_when_service_mi
 
     expect = sanitized[0].get("expect") or {}
     assert expect.get("reply_type") == "service_choice"
+    assert expect.get("action") == "booking_prompt"
+    assert (expect.get("meta") or {}).get("action") == "booking_prompt"
+    assert (expect.get("meta") or {}).get("expected_reply_type") == "service_choice"
+    assert (expect.get("meta_any") or {}).get("action") == ["booking_prompt"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["service_choice"]
+    assert (expect.get("trace_contains") or []) == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "service_choice",
+            "reason": "booking_prompt",
+        }
+    ]
+
+
+def test_sanitize_llm_turns_hardens_weekend_booking_service_followup_after_hours_interrupt():
+    ctx = _module._build_context(random.Random(148))
+    turns = [
+        {
+            "kind": "text",
+            "text": "Хочу записаться.",
+            "tags": ["booking"],
+            "expect": {"reply_type": "service_choice"},
+        },
+        {
+            "kind": "text",
+            "text": "А по выходным вы работаете?",
+            "tags": ["hours"],
+            "expect": {"info_sections": ["hours"], "expected_reply": True},
+        },
+        {
+            "kind": "text",
+            "text": "Можно записаться на выходные?",
+            "tags": ["booking"],
+            "expect": {"reply_type": "service_choice", "state": "bot_active", "expected_reply": True},
+        },
+    ]
+
+    sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(148))
+
+    expect = sanitized[2].get("expect") or {}
+    assert expect.get("reply_type") == "service_choice"
+    assert expect.get("action") == "booking_prompt"
+    assert expect.get("state") == "bot_active"
+    assert (expect.get("meta") or {}) == {
+        "action": "booking_prompt",
+        "source": "llm_policy_core",
+        "tool_action": "collect",
+        "expected_reply_type": "service_choice",
+        "expected_reply_reason": "booking_prompt",
+    }
+    assert (expect.get("meta_any") or {}).get("action") == ["booking_prompt"]
+    assert (expect.get("meta_any") or {}).get("source") == ["llm_policy_core"]
+    assert (expect.get("meta_any") or {}).get("tool_action") == ["collect"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["service_choice"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_reason") == ["booking_prompt"]
+    assert (expect.get("trace_contains") or []) == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "service_choice",
+            "reason": "booking_prompt",
+        }
+    ]
 
 
 def test_sanitize_llm_turns_retags_booking_tag_mixed_slot_followup_when_time_context_is_active():
@@ -3623,6 +4368,7 @@ def test_repair_post_coverage_orphan_pending_question_turns_rewrites_orphan_turn
         {
             "stage": "question_contract",
             "expected_reply_type": "service_choice",
+            "reason": "booking_prompt",
         }
     ]
 
@@ -4996,6 +5742,69 @@ def test_generate_template_dialog_reports_semantic_variation_metadata():
     assert dialog["semantic_variation_profile"] == "synonym"
     assert dialog["semantic_mutation_family"] == "synonym_surface"
     assert dialog["turns"]
+
+
+def test_select_templates_prefers_unique_templates_before_repeats():
+    selected, missing = _module._select_templates(
+        random.Random(73),
+        count=len(_module.SCENARIOS),
+        coverage=[],
+    )
+
+    assert missing == []
+    assert len({dialog["id"] for dialog in selected}) == len(_module.SCENARIOS)
+
+
+def test_select_templates_acceptance_batch_includes_weekend_service_followup_template():
+    selected, missing = _module._select_templates(
+        random.Random(79),
+        count=len(_module.SCENARIOS),
+        coverage=["booking", "info", "interrupt", "handoff"],
+    )
+
+    assert missing == []
+    assert "booking_weekend_service_followup" in {dialog["id"] for dialog in selected}
+
+
+def test_generate_template_dialog_weekend_service_followup_keeps_strong_service_choice_contract():
+    template = next(
+        item for item in _module.SCENARIOS if item["id"] == "booking_weekend_service_followup"
+    )
+    dialog = _module._generate_template_dialog(
+        random.Random(83),
+        template=template,
+        min_turns=12,
+        max_turns=12,
+        include_media=False,
+        media_mode="text",
+        media_kind="photo",
+        language_profile="ru",
+        semantic_variation_profile="canonical",
+        slot_format_profile="canonical",
+        surface_noise_profile="clean",
+    )
+
+    target_turn = next(
+        turn for turn in dialog["turns"] if turn.get("text") == "Можно записаться на выходные?"
+    )
+    expect = target_turn.get("expect") or {}
+
+    assert expect.get("reply_type") == "service_choice"
+    assert expect.get("action") == "booking_prompt"
+    assert (expect.get("meta") or {}) == {
+        "action": "booking_prompt",
+        "source": "llm_policy_core",
+        "tool_action": "collect",
+        "expected_reply_type": "service_choice",
+        "expected_reply_reason": "booking_prompt",
+    }
+    assert (expect.get("trace_contains") or []) == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "service_choice",
+            "reason": "booking_prompt",
+        }
+    ]
 
 
 def test_ensure_required_tags_adds_handoff_for_handoff_coverage():

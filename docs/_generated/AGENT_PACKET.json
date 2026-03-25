@@ -1,0 +1,653 @@
+{
+  "active_block_tp": "docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-reentry-initial-booking-invalid-schema-authority-reset-structural-implementation-a922.md",
+  "active_canon": "docs/ACTIVE_CANON.md",
+  "active_dec": "docs/DECISIONS/DEC-2026-03-15-consultant-core-controlled-demolition.md",
+  "active_master_block": "Consultant Core Pending Booking Reentry Initial Booking Invalid Schema Authority Reset Structural Implementation",
+  "active_master_tp": "docs/TASK_PACKAGES/TP-2026-03-15-consultant-core-controlled-demolition-master.md",
+  "current_runtime_cutover_status": {
+    "continuity": "session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback",
+    "proof_path": "response_guard_ast_excision_ops_helper_booking_scenario_expectation_helper_followup_rewrite_slot_normalization_post_coverage_repair_pending_question_contract_master_specialist_followup_booking_progress_and_management_stateful_helper_extraction_plus_in_script_sanitize_owner_cutover_to_llm_quality_contracts_black_box_proof_runtime_convergence",
+    "semantic_core": "wrapped_ingress_preflight_cache_secret_safe_runtime_loader_active_conversation_snapshot_service_referent_projection_active_booking_datetime_value_and_exact_time_token_lexical_intent_primitive_protective_lexical_confirmation_refusal_domain_router_bounded_controller_route_bounded_policy_core_handoff_text_only_style_reference_booking_verification_services_overview_location_parking_and_hours_and_pricing_fact_and_pricing_collect_and_duration_fact_and_duration_collect_and_active_service_gated_bookability_time_collect_and_active_name_specific_time_availability_followup_and_active_name_deictic_time_availability_followup_and_active_name_deictic_day_availability_followup_and_active_name_relative_date_availability_followup_and_active_name_relative_daypart_availability_followup_and_specialist_date_range_followup_and_grounded_specialist_transition_and_service_choice_specialist_weekend_followup_and_service_choice_specialist_weekday_followup_and_service_choice_specialist_day_followup_and_service_choice_specialist_daypart_followup_and_service_choice_specialist_exact_time_followup_and_promotions_and_promotions_rules_and_contact_and_master_query_fact_and_master_query_collect_policy_bridges_active_plus_turn_planner_safe_info_owner_cutover_for_contact_hours_promotions_and_promotions_rules_and_turn_planner_safe_catalog_fact_owner_cutover_for_services_overview_location_and_portfolio_ok_and_portfolio_not_found_and_turn_planner_safe_service_query_fact_owner_cutover_for_grounded_pricing_and_duration_and_turn_planner_safe_master_query_fact_owner_cutover_for_grounded_service_match_master_query_and_turn_planner_safe_master_query_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_master_query_service_not_found_collect_owner_cutover_for_grounded_service_not_found_and_turn_planner_safe_pricing_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_duration_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_booking_verification_fact_owner_cutover_for_safe_calendar_get_booking_ok_and_not_found_paths_and_turn_planner_safe_bookability_time_collect_owner_cutover_for_deterministic_missing_temporal_scope_booking_collect_and_turn_planner_safe_active_name_followup_family_owner_cutover_for_deterministic_specific_time_deictic_time_deictic_day_relative_date_and_relative_daypart_booking_followups_and_turn_planner_safe_explicit_handoff_owner_family_cutover_for_deterministic_explicit_human_request_and_frustration_handoff_turns_and_turn_planner_safe_greeting_owner_family_cutover_for_deterministic_greeting_thanks_and_ack_smalltalk_turns_and_turn_planner_safe_specialist_name_collect_owner_cutover_for_deterministic_specialist_name_collect_followup_and_turn_planner_safe_specialist_datetime_collect_owner_cutover_for_deterministic_specialist_date_range_datetime_collect_followup_and_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover_for_deterministic_service_choice_specialist_day_weekday_weekend_time_collect_followups_and_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover_for_deterministic_service_choice_specialist_prefilled_datetime_collect_followups_and_turn_planner_safe_booking_prompt_owner_cutover_for_bounded_active_booking_continuation_and_intent_queue_booking_entry_and_safe_llm_policy_core_collect_prompts_that_preserve_same_missing_slot_and_safe_llm_policy_core_initial_booking_prompt_for_service_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_to_datetime_booking_prompt_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_exact_datetime_to_name_booking_prompt_without_active_conversation_snapshot_and_turn_planner_safe_booking_prompt_owner_session_memory_expected_reply_restore_for_short_booking_replies_before_fallback_excluding_direct_booking_requests_and_turn_planner_safe_check_booking_prompt_owner_cutover_for_bounded_booking_verification_collect_reference_without_booking_reference_or_mixed_followup_envelopes_and_turn_planner_safe_specialist_followup_owner_cutover_for_bounded_named_specialist_followups_that_preserve_same_missing_slot_without_mixed_envelopes_and_turn_planner_safe_semantic_arbitration_owner_cutover_for_style_reference_portfolio_normalization_collect_to_info_interrupt_arbitration_complete_slot_booking_promotion_name_stage_booking_commit_booking_tool_hint_backfill_and_active_service_referent_duration_master_query_arbitration_and_safe_semantic_service_query_master_override_tool_reply_cutover_and_safe_semantic_service_query_services_overview_tool_reply_cutover_and_turn_planner_safe_semantic_service_query_fact_rescue_owner_cutover_for_critical_pending_invalid_schema_replay_and_turn_planner_safe_semantic_reschedule_guard_handoff_owner_cutover_for_misrouted_booking_reschedule_without_reference_and_turn_planner_safe_timeout_degraded_collect_reschedule_handoff_owner_cutover_for_timeout_degraded_collect_reschedule_without_booking_reference_and_turn_planner_safe_timeout_services_overview_fallback_owner_cutover_for_bounded_nonbooking_policy_timeout_services_overview_recovery_and_turn_planner_safe_timeout_active_name_time_collect_owner_cutover_for_bounded_timeout_active_name_specific_time_availability_followup_recovery_and_turn_planner_safe_timeout_specialist_followup_owner_cutover_for_bounded_timeout_specialist_followup_recovery_on_active_booking_snapshot_drift_paths_and_turn_planner_safe_semantic_needs_manager_and_risk_signal_handoff_owner_cutover_and_final_reasoning_core_fallback_removal_and_terminal_unresolved_owner_closure_on_main_path"
+  },
+  "legacy_sunset": {
+    "continuity_guard": {
+      "allowed_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py"
+      ],
+      "guarded_tokens": [
+        "expected_reply_type",
+        "expected_reply_reason",
+        "interaction_state",
+        "pending_resume"
+      ]
+    },
+    "legacy_authorities_to_remove": [
+      "expected_reply_type",
+      "expected_reply_reason",
+      "session_memory.interaction_state",
+      "pending_resume.semantic_fields",
+      "demo_runtime_aliases",
+      "scenario_semantic_repair",
+      "evaluator_semantic_inference"
+    ],
+    "proof_guard": {
+      "forbidden_runtime_imports": [
+        "ops.diagnose",
+        "scripts.booking_dialog_scenarios"
+      ],
+      "forbidden_test_ast_exec_tokens": [
+        "ast.parse(",
+        "exec(compile(",
+        "read_text("
+      ],
+      "forbidden_test_imports": [
+        "ops.diagnose",
+        "scripts.booking_dialog_scenarios"
+      ],
+      "forbidden_test_path_suffixes": [
+        "diagnose.py",
+        "booking_dialog_scenarios.py"
+      ],
+      "semantic_contract_tokens": [
+        "expected_reply_type",
+        "expected_reply_reason",
+        "pending_question_target",
+        "active_question_relation",
+        "interaction_owner",
+        "pending_question_contract",
+        "semantic rewrite",
+        "retag"
+      ]
+    },
+    "proof_only_files": [
+      "ops/diagnose.py",
+      "scripts/booking_dialog_scenarios.py"
+    ],
+    "sunset_files": [
+      {
+        "active_waiver": {
+          "allowed_executable_lines": [
+            "from app.services.timeout_owner_boundary_service import (",
+            "TimeoutOwnerBoundaryApplyOverrides,",
+            "TimeoutOwnerBoundaryRuntimeHooks,",
+            "apply_timeout_owner_boundary_resolution,",
+            ")",
+            "pending_timeout_boundary_result = apply_timeout_owner_boundary_resolution(",
+            "timeout_owner_boundary_result = apply_timeout_owner_boundary_resolution(",
+            "context=_get_conversation_context(conversation),",
+            "resolution=pending_timeout_boundary_resolution,",
+            "resolution=timeout_owner_boundary_resolution,",
+            "policy_core_mode=policy_core_mode,",
+            "policy_core_degrade_reason=policy_core_degrade_reason,",
+            "pending_question_contract=None,",
+            "pending_question_contract=timeout_pending_question_contract,",
+            "boundary_state_source=\"pending_handoff\",",
+            "boundary_state_source=\"booking_interrupt\",",
+            "overrides=TimeoutOwnerBoundaryApplyOverrides(",
+            "decision_meta_updates={",
+            "result_message_sent=\"Policy core timeout pending resume-boundary collect response sent\",",
+            "result_message_failed=\"Policy core timeout pending resume-boundary collect response failed\",",
+            "),",
+            "hooks=TimeoutOwnerBoundaryRuntimeHooks(",
+            "set_booking_context=_set_booking_context,",
+            "set_expected_reply_context=_set_expected_reply_context,",
+            "get_booking_context=_get_booking_context,",
+            "get_expected_reply_type=_get_expected_reply_type,",
+            "get_expected_reply_reason=_get_expected_reply_reason,",
+            "get_context_manager=_get_context_manager,",
+            "sync_canonical_dialog_state=_sync_canonical_dialog_state,",
+            "set_context_manager=_set_context_manager,",
+            "get_canonical_dialog_state=_get_canonical_dialog_state,",
+            "sync_session_memory_interaction_state=_sync_session_memory_interaction_state,",
+            "set_conversation_context=_set_conversation_context,",
+            "apply_policy_guard_override=_apply_policy_guard_override,",
+            "sync_policy_plan_audit=_sync_policy_plan_audit,",
+            "record_decision_trace=_record_decision_trace,",
+            "record_message_decision_meta=_record_message_decision_meta,",
+            "update_message_decision_metadata=_update_message_decision_metadata,",
+            "send_and_save=_send_and_save,",
+            "message=pending_timeout_boundary_result.result_message,",
+            "bot_response=pending_timeout_boundary_result.bot_response,",
+            "message=timeout_owner_boundary_result.result_message,",
+            "bot_response=timeout_owner_boundary_result.bot_response,",
+            "PendingResumeBoundaryRuntimeHooks as ResumeBoundaryRuntimeHooks,",
+            "ActiveHandoverReuseRuntimeHooks,",
+            "PendingEscalationNotificationRuntimeHooks,",
+            "_derive_pending_booking_resume_boundary_payload as _state_service_derive_pending_booking_resume_boundary_payload,",
+            "_derive_pending_resume_reason as _state_service_derive_pending_resume_reason,",
+            "_create_pending_escalation_with_notification as _state_service_create_pending_escalation_with_notification,",
+            "_resolve_pending_resume_boundary_activation as _resolve_resume_boundary_activation,",
+            "_resolve_pending_resume_session_memory_policy as _resolve_resume_session_memory_policy,",
+            "_reuse_active_handover as _state_service_reuse_active_handover,",
+            "_resolve_pending_timeout_resume_boundary_payload as _resolve_resume_timeout_boundary_payload,",
+            "return _state_service_derive_pending_resume_reason(context)",
+            "return _state_service_derive_pending_booking_resume_boundary_payload(",
+            "context, now=now, prompt_builder=_booking_prompt_for_expected_reply_type",
+            "return _state_service_reuse_active_handover(",
+            "def _create_pending_escalation_with_notification(",
+            "return _state_service_create_pending_escalation_with_notification(",
+            "user_message=user_message,",
+            "trigger_type=trigger_type,",
+            "trigger_value=trigger_value,",
+            "hooks=PendingEscalationNotificationRuntimeHooks(",
+            "escalate_to_pending=escalate_to_pending,",
+            "source=source,",
+            "intent=intent,",
+            "hooks=ActiveHandoverReuseRuntimeHooks(",
+            "get_active_handover=get_active_handover,",
+            "transition_state=transition_state,",
+            "send_telegram_notification=send_telegram_notification,",
+            "escalation_notification_result = _create_pending_escalation_with_notification(",
+            {
+              "if escalation_notification_result.ok": null
+            },
+            "handover = escalation_notification_result.handover",
+            "handover_reopened = escalation_notification_result.handover_reopened",
+            "telegram_sent = escalation_notification_result.telegram_sent",
+            "resume_boundary_activation = _resolve_resume_boundary_activation(",
+            "conversation=conversation,",
+            "saved_message=saved_message,",
+            "conversation_state=conversation.state,",
+            "prompt_builder=_booking_prompt_for_expected_reply_type,",
+            "is_handover_status_question=is_handover_status_question,",
+            "is_opt_out_message=is_opt_out_message,",
+            "hooks=ResumeBoundaryRuntimeHooks(",
+            "set_conversation_context=_set_conversation_context,",
+            "resume_boundary_active = resume_boundary_activation.boundary_active",
+            "resume_boundary_restored = resume_boundary_activation.boundary_restored",
+            "resume_session_memory_policy = _resolve_resume_session_memory_policy(",
+            "boundary_restored=resume_boundary_restored,",
+            {
+              "if resume_session_memory_policy.trace_payload is not None": null
+            },
+            "resume_session_memory_policy.trace_payload,",
+            {
+              "if saved_message and resume_session_memory_policy.decision_meta_updates is not None": null
+            },
+            "resume_session_memory_policy.decision_meta_updates,",
+            "session_memory_reset_reason = resume_session_memory_policy.reset_reason",
+            "resume_timeout_boundary_payload = _resolve_resume_timeout_boundary_payload(",
+            "required_expected_reply_type=EXPECTED_REPLY_TIME,",
+            "_resolve_resolved_handoff_resume_boundary_restore as _resolve_resolved_resume_boundary_restore,",
+            "resolved_resume_boundary_result = _resolve_resolved_resume_boundary_restore(",
+            "context = resolved_resume_boundary_result.context",
+            "resolved_handoff_resume_restored = resolved_resume_boundary_result.restored",
+            "pending_resume_synced = _sync_resume_context_on_handover_reuse(conversation)",
+            "from app.core import DialogStateService, TurnExecutor, TurnPlanner",
+            "tool_reply_owner_cutover = \"turn_executor.tool_reply_turn_outcome.v1\"",
+            "tool_reply_owner_execution = TurnExecutor().build_tool_reply_owner_execution(",
+            "tool_reply_decision = tool_reply_owner_execution.decision",
+            "tool_reply_payload = tool_reply_owner_execution.payload",
+            "tool_reply_decision = TurnPlanner().build_tool_reply_owner_decision(",
+            "payload=policy_payload,",
+            "default_intent=turn_outcome_intent,",
+            "reply_intent=reply_intent,",
+            "tool_action=policy_tool_action,",
+            "expected_reply_type=turn_outcome_expected_reply,",
+            "pending_question_tool_followup=pending_question_tool_followup,",
+            "pending_question_act=policy_pending_question_act,",
+            "collect_service_info_interrupt_active=collect_service_info_interrupt_active,",
+            "master_override_applied=master_override_applied,",
+            ")",
+            "tool_reply_dialog_state = DialogStateService().build_tool_reply_owner_state(",
+            "decision=tool_reply_decision,",
+            "expected_reply_type=turn_outcome_expected_reply,",
+            "expected_reply_reason=turn_outcome_expected_reason,",
+            "owner_cutover=tool_reply_owner_cutover,",
+            ")",
+            "tool_reply_payload = TurnExecutor().build_tool_reply_owner_cutover_payload(",
+            "decision=tool_reply_decision,",
+            "dialog_state=tool_reply_dialog_state,",
+            "text=bot_response,",
+            "owner_cutover=tool_reply_owner_cutover,",
+            "reply_source=reply_source,",
+            "reply_intent=reply_intent,",
+            "intent=turn_outcome_intent,",
+            "tool_action=policy_tool_action,",
+            "raw_tool_decision=tool_decision,",
+            "normalized_tool_decision=tool_decision_token,",
+            "followup_type=turn_outcome_expected_reply,",
+            "followup_reason=turn_outcome_expected_reason,",
+            "followup_prompt=booking_interrupt_prompt,",
+            "services_overview_followup=services_overview_followup,",
+            "conversation_state=conversation.state,",
+            "pending_question_tool_followup=pending_question_tool_followup,",
+            "pending_question_act=policy_pending_question_act,",
+            "pending_question_target=policy_pending_question_target,",
+            "collect_service_info_interrupt_active=collect_service_info_interrupt_active,",
+            "info_sections=list(info_sections) if isinstance(info_sections, list) else None,",
+            "saved_message_present=bool(saved_message),",
+            "master_override_meta=(",
+            "dict(master_override_meta) if isinstance(master_override_meta, dict) else None",
+            ")",
+            "artifact=tool_reply_payload.artifact,",
+            "trace_payload_override=tool_reply_payload.trace_payload_override,",
+            "extra_trace_payloads=tool_reply_payload.extra_trace_payloads,",
+            "extra_meta_updates=tool_reply_payload.extra_meta_updates,",
+            "DialogStateService().normalize_booking_payload(booking) or {}",
+            "collect_slot_values = (",
+            {
+              "service": "timeout_booking_service_query"
+            },
+            "DialogStateService().build_collect_owner_booking_payload(",
+            "existing_booking=booking_state_for_collect,",
+            "last_question=collect_slot,",
+            "slot_values=collect_slot_values,",
+            "context = DialogStateService().set_context_booking_payload(",
+            "booking_state_for_collect,",
+            "key=\"booking\",",
+            "tool_reply_guard_response = _maybe_apply_fact_guard(",
+            "decision_meta=tool_reply_guard_meta,",
+            "transport_status_token=last_transport_status,",
+            "transport_reason_token=last_transport_reason,",
+            "guard_response=tool_reply_guard_response,",
+            "policy_validation_boundary_hooks = PolicyValidationBoundaryRuntimeHooks(",
+            "get_clarify_attempt_state=_get_clarify_attempt_state,",
+            "record_context_manager_decision=_record_context_manager_decision,",
+            "handle_clarify_limit_escalation=_handle_clarify_limit_escalation,",
+            "register_clarify_attempt=_register_clarify_attempt,",
+            "return handle_policy_validation_boundary(",
+            "runtime_input=PolicyValidationBoundaryRuntimeInput(",
+            "mode=\"fact_guard\",",
+            "validation_error=guard_reason,",
+            "guard_reason=guard_reason,",
+            "trace_decision=f\"clarify_{guard_reason}\",",
+            "trace_source=source,",
+            "escalation_source=\"fact_guard\",",
+            "llm_policy_core_meta=None,",
+            "message_text=message_text,",
+            "db=db,",
+            "user=user,",
+            "allow_handover=allow_handover,",
+            "clarify_intent=FACT_GUARD_INTENT,",
+            "clarify_max_attempts=FACT_GUARD_MAX_ATTEMPTS,",
+            "fact_source=fact_source or None,",
+            "fact_evidence_refs=list(evidence_refs),",
+            "send_response=_send_response,",
+            "finalize_response=_finalize_bot_response,",
+            "**policy_validation_boundary_base,",
+            "hooks=policy_validation_boundary_hooks,",
+            "return reasoning_core_service._finalize_tool_reply_owner_execution(",
+            "conversation=conversation,",
+            "saved_message=saved_message,",
+            "owner_execution=tool_reply_owner_execution,",
+            "reply_intent=reply_intent,",
+            "maybe_apply_fact_guard=_maybe_apply_fact_guard,",
+            "guard_decision_meta=tool_reply_guard_meta,",
+            "allow_handover=routing.get(\"allow_handover_create\", False),",
+            "CANONICAL_DIALOG_STATE_KEY,",
+            "SERVICE_CARRYOVER_TTL_MESSAGES,",
+            "expected_reply_result = DialogStateService().build_expected_reply_context_sync_result(",
+            "context,",
+            "canonical_state_key=CANONICAL_DIALOG_STATE_KEY,",
+            "session_memory_key=SESSION_MEMORY_KEY,",
+            "re_entry_required_key=RE_ENTRY_REQUIRED_KEY,",
+            "service_carryover_key=SERVICE_CARRYOVER_KEY,",
+            "consult_context_key=CONSULT_CONTEXT_KEY,",
+            "session_memory_ttl_hours=SESSION_MEMORY_TTL_HOURS,",
+            "service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,",
+            "consult_default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,",
+            "context = expected_reply_result.context",
+            "normalized_expected_reply_type = expected_reply_result.expected_reply_type",
+            "normalized_expected_reply_reason = expected_reply_result.expected_reply_reason",
+            {
+              "if expected_reply_result.re_entry_cleared": null
+            },
+            {
+              "reason": "normalized_expected_reply_reason,"
+            },
+            {
+              "expected_reply_type": "normalized_expected_reply_type,"
+            },
+            {
+              "expected_reply_reason": "normalized_expected_reply_reason,"
+            },
+            "memory=expected_reply_result.question_memory or {},"
+          ],
+          "expiry_trigger": "remove once the post-waiver audit confirms no further frozen executable additions are required for the broader fact-guard family",
+          "id": "TP-2026-03-20-consultant-core-final-ingress-coordinator-broader-fact-guard-family-targeted-frozen-waiver-implementation-a922",
+          "opened_on": "2026-03-20",
+          "reason": "targeted frozen-waiver implementation deletes the old mixed fact-guard authority body in frozen `decision.py` by reducing `_maybe_apply_fact_guard(...)` to a thin owner-surface invocation into the existing policy-validation boundary service while preserving the injected callable contract for direct and deferred consumers",
+          "scope": "broader_fact_guard_family_targeted_frozen_waiver_owner_invocation_only"
+        },
+        "added_code_policy": "waiver_required",
+        "allowed_changes": [
+          "deletion",
+          "narrowing",
+          "compatibility_shim",
+          "architect_approved_blocker_fix"
+        ],
+        "path": "truffles-api/app/routers/webhook/decision.py",
+        "status": "frozen_for_new_semantics"
+      },
+      {
+        "active_waiver": {
+          "allowed_executable_lines": [
+            "from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks",
+            "hooks=ActiveHandoverReuseRuntimeHooks(",
+            "get_active_handover=legacy.get_active_handover,",
+            "transition_state=legacy.transition_state,",
+            "send_telegram_notification=legacy.send_telegram_notification,",
+            "record_decision_trace=legacy._record_decision_trace,",
+            "),"
+          ],
+          "expiry_trigger": "remove once the post-waiver rerun/audit proves no further frozen executable additions are required for this booking handover-reuse family",
+          "id": "TP-2026-03-19-consultant-core-acceptance-preflight-l2-frozen-booking-handover-reuse-targeted-frozen-waiver-implementation-a922",
+          "opened_on": "2026-03-19",
+          "reason": "targeted frozen-waiver implementation deletes the surviving `_reuse_active_handover(..., hooks)` caller drift in the exact five frozen booking contours while preserving the truthful owner contract and avoiding any wrapper/helper seam",
+          "scope": "booking_handover_reuse_exact_five_callsites_only"
+        },
+        "added_code_policy": "waiver_required",
+        "allowed_changes": [
+          "deletion",
+          "narrowing",
+          "compatibility_shim",
+          "architect_approved_blocker_fix"
+        ],
+        "path": "truffles-api/app/routers/webhook/booking.py",
+        "status": "frozen_for_new_semantics"
+      },
+      {
+        "active_waiver": {
+          "allowed_executable_lines": [
+            "from datetime import datetime",
+            "from functools import partial",
+            "from app.services.sla_runtime_service import resolve_pending_sla_violation",
+            "from app.services.state_service import (",
+            "ContinuityTransportDecision,",
+            "HandoverConfirmationRuntimeHooks,",
+            "PendingContinuityRuntimeHooks,",
+            "_handle_handover_confirmation_runtime,",
+            "_handle_pending_sla_runtime,",
+            "_resolve_pending_ack,",
+            "_resolve_pending_close,",
+            "_resolve_pending_no_handover_reset,",
+            ")",
+            "def _build_transport_webhook_response(",
+            {
+              "db": "Session,"
+            },
+            {
+              "conversation": "Conversation,"
+            },
+            {
+              "decision": "ContinuityTransportDecision,"
+            },
+            "send_and_save,",
+            {
+              ") -> WebhookResponse | None": null
+            },
+            {
+              "if not decision.handled": null
+            },
+            "return None",
+            "bot_response = None",
+            "result_message = decision.success_message or \"Handled\"",
+            {
+              "if isinstance(decision.bot_response, str)": null
+            },
+            "bot_response, sent = send_and_save(decision.bot_response)",
+            "result_message = decision.success_message if sent else decision.failure_message or result_message",
+            "db.commit()",
+            "return WebhookResponse(",
+            "success=True,",
+            "message=result_message,",
+            "conversation_id=conversation.id,",
+            "bot_response=bot_response,",
+            "from . import _legacy as legacy",
+            "decision = _handle_handover_confirmation_runtime(",
+            "db=db,",
+            "conversation=conversation,",
+            "user=user,",
+            "message_text=message_text,",
+            "now=now,",
+            "hooks=HandoverConfirmationRuntimeHooks(",
+            "get_conversation_context=_get_conversation_context,",
+            "get_handover_confirmation=_get_handover_confirmation,",
+            "is_handover_confirmation_active=_is_handover_confirmation_active,",
+            "set_handover_confirmation=_set_handover_confirmation,",
+            "set_conversation_context=_set_conversation_context,",
+            "reset_low_confidence_retry=_reset_low_confidence_retry,",
+            "classify_confirmation=classify_confirmation,",
+            "reuse_active_handover=legacy._reuse_active_handover,",
+            "escalate_to_pending=legacy.escalate_to_pending,",
+            "send_telegram_notification=legacy.send_telegram_notification,",
+            "record_escalation_metric=record_escalation_metric,",
+            "record_decision_trace=legacy._record_decision_trace,",
+            "msg_escalated=legacy.MSG_ESCALATED,",
+            "msg_ai_error=legacy.MSG_AI_ERROR,",
+            "msg_handover_declined=legacy.MSG_HANDOVER_DECLINED,",
+            "),",
+            "return _build_transport_webhook_response(",
+            "decision=decision,",
+            "send_and_save=send_and_save,",
+            "continuity_hooks = PendingContinuityRuntimeHooks(",
+            "get_conversation_context=legacy._get_conversation_context,",
+            "set_conversation_context=legacy._set_conversation_context,",
+            "transition_state=legacy.transition_state,",
+            "manager_resolve=partial(legacy.manager_resolve, db),",
+            "update_message_decision_metadata=legacy._update_message_decision_metadata,",
+            "_resolve_pending_no_handover_reset(",
+            "saved_message=saved_message,",
+            "router_pending_meta=router_pending_meta,",
+            "hooks=continuity_hooks,",
+            "decision=_resolve_pending_close(",
+            "handover=handover,",
+            "decision=_resolve_pending_ack(",
+            "msg_pending_ack=legacy.MSG_PENDING_ACK,",
+            "sla_decision = _handle_pending_sla_runtime(",
+            "guard_only_skip=guard_only_skip,",
+            "pending_sla_ping_minutes=legacy.PENDING_SLA_PING_MINUTES,",
+            "pending_sla_ping_sent_key=legacy.PENDING_SLA_PING_SENT_KEY,",
+            "msg_pending_wait=legacy.MSG_PENDING_WAIT,",
+            "msg_pending_sla_ping=legacy.MSG_PENDING_SLA_PING,",
+            "resolve_pending_sla_violation_fn=resolve_pending_sla_violation,",
+            {
+              "if sla_decision is not None": null
+            },
+            "decision=sla_decision,"
+          ],
+          "expiry_trigger": "remove once the broader continuity post-implementation audit confirms no further frozen executable additions are required for this family",
+          "id": "TP-2026-03-18-consultant-core-continuity-broader-collapse-targeted-frozen-waiver-implementation-a922",
+          "opened_on": "2026-03-18",
+          "reason": "targeted frozen-waiver implementation reduced the old pending no-handover reset / pending-close / pending-ack restore / pending-SLA mutation / handover-confirmation family to bounded state-service and dialog-state owner invocations while preserving transport send/commit in the wrapper",
+          "scope": "broader_pending_continuity_and_handover_confirmation_owner_invocations_only"
+        },
+        "added_code_policy": "waiver_required",
+        "allowed_changes": [
+          "deletion",
+          "narrowing",
+          "compatibility_shim",
+          "architect_approved_blocker_fix"
+        ],
+        "path": "truffles-api/app/routers/webhook/pending.py",
+        "status": "frozen_for_new_semantics"
+      }
+    ],
+    "version": "2026-03-15.v1"
+  },
+  "open_blockers": [
+    "`docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md` is now the active block. FACT: the touched pending booking family now restores booking collect continuity from centralized dialog-state resume payloads before terminal fallback is eligible.",
+    "`r49` remains the truthful closure baseline for this family. FACT: no new replay is admissible until the structural block is fully validated and canon is rebuilt.",
+    "one fresh replay is still required for closure, but only as `run_one_fresh_closure_replay_only_after_pending_booking_continuity_terminal_handoff_authority_reset_evidence`.",
+    "`truffles-api/app/services/reasoning_core.py` still carries explicit structural debt outside the touched family: `26` duplicate top-level function names across `144` top-level defs / `118` unique names. Broader duplicate cleanup remains deferred.",
+    "acceptance remains strict; no oracle/proof thresholds were weakened in this block.",
+    "final program acceptance remains open because the fresh green demo-salon canary still needs canonical acceptance evidence and broader multi-pack/open-world closure."
+  ],
+  "required_checks": [
+    "python3 scripts/build_agent_packet.py",
+    "python3 scripts/build_agent_packet.py --check",
+    "python3 scripts/semantic_bridge_growth_guard.py",
+    "python3 scripts/continuity_writer_guard.py",
+    "python3 scripts/legacy_freeze_guard.py",
+    "python3 scripts/arch_guard.py",
+    "pytest -q truffles-api/tests/architecture",
+    "git diff --check",
+    "SESSION_AGENT=a922 scripts/session_check.sh"
+  ],
+  "source_of_truth_map": {
+    "boundary_owner": {
+      "contract": "BoundaryOverride",
+      "current_primary_files": [
+        "truffles-api/app/routers/webhook/decision.py"
+      ],
+      "cutover_status": "legacy_boundary_mixed_with_frozen_tool_reply_guard_finalize_invocation_authority_plus_turn_executor_and_boundary_validator_block_degrade_and_owner_artifact_and_tool_reply_artifact_sidecar_payload_and_tool_reply_policy_payload_interaction_owner_and_guard_send_trace_orchestration_cutovers_done_plus_timeout_owner_boundary_application_and_policy_validation_and_timeout_degrade_retry_and_timeout_nonbooking_recovery_and_timeout_booking_specialist_and_invalid_schema_specialist_and_invalid_schema_service_grounded_booking_and_timeout_pending_slot_question_and_timeout_active_name_time_followup_and_timeout_services_overview_info_fallback_owner_cutovers_done_plus_reasoning_core_terminal_unresolved_boundary_owner_cutover_and_main_path_frozen_boundary_residuals_unreachable",
+      "target_primary_files": [
+        "contracts/runtime/boundary_override.v1.jsonschema",
+        "truffles-api/app/core/boundary_validator.py"
+      ]
+    },
+    "continuity_owner": {
+      "contract": "DialogState",
+      "current_primary_files": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py"
+      ],
+      "cutover_status": "session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback",
+      "target_primary_files": [
+        "contracts/runtime/dialog_state.v1.jsonschema",
+        "truffles-api/app/core/dialog_state_service.py"
+      ]
+    },
+    "execution_strategy": {
+      "current_nonnegotiable_next_move": "run_one_fresh_closure_replay_only_after_pending_booking_reentry_initial_booking_invalid_schema_authority_reset_evidence",
+      "forbidden_shortcuts": [
+        "new_generic_ingress_phrase_bridge_family",
+        "bridge_growth_counted_as_progress",
+        "beauty_only_green_as_architectural_convergence",
+        "proof_lane_progress_as_runtime_convergence_proxy"
+      ],
+      "mandatory_sequence": [
+        "freeze_generic_ingress_bridge_growth",
+        "richer_semantic_owner_cutover_via_turn_planner",
+        "single_continuity_writer_completion",
+        "boundary_owner_cutover_via_boundary_validator",
+        "proof_path_black_box_completion",
+        "multi_pack_acceptance_on_beauty_clinic_or_dental_generic_service",
+        "retire_legacy_decision_py_semantic_role"
+      ],
+      "mode": "owner_replacement_not_bridge_growth",
+      "operator_instruction_if_uncertain": [
+        "read the execution strategy lock in the generated AGENT_PACKET before choosing the next block",
+        "prefer owner cutover or governance guard work over any new hotspot bridge family",
+        "if a candidate block cannot delete or bypass an old authority seam, do not count it as valid progress"
+      ],
+      "progress_credit_rule": "new_bridge_without_old_authority_deletion_or_unreachability_is_not_progress"
+    },
+    "forbidden_semantic_files": [
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/app/routers/webhook/booking.py",
+      "truffles-api/app/routers/webhook/pending.py"
+    ],
+    "platform_evidence_requirement": {
+      "minimum_packs": 3,
+      "required_profiles": [
+        "beauty",
+        "clinic_or_dental",
+        "generic_service"
+      ]
+    },
+    "projection_only": {
+      "fields": [
+        "expected_reply_type",
+        "expected_reply_reason",
+        "session_memory.interaction_state",
+        "pending_resume.expected_reply_type",
+        "pending_resume.expected_reply_reason"
+      ]
+    },
+    "proof_only": {
+      "files": [
+        "ops/diagnose.py",
+        "scripts/booking_dialog_scenarios.py"
+      ]
+    },
+    "semantic_owner": {
+      "contract": "PolicyDecision",
+      "current_primary_files": [
+        "prompts/llm_policy_core.md",
+        "truffles-api/app/routers/webhook/decision.py"
+      ],
+      "cutover_status": "wrapped_ingress_preflight_cache_secret_safe_runtime_loader_active_conversation_snapshot_service_referent_projection_active_booking_datetime_value_and_exact_time_token_lexical_intent_primitive_protective_lexical_confirmation_refusal_domain_router_bounded_controller_route_bounded_policy_core_handoff_text_only_style_reference_booking_verification_services_overview_location_parking_and_hours_and_pricing_fact_and_pricing_collect_and_duration_fact_and_duration_collect_and_active_service_gated_bookability_time_collect_and_active_name_specific_time_availability_followup_and_active_name_deictic_time_availability_followup_and_active_name_deictic_day_availability_followup_and_active_name_relative_date_availability_followup_and_active_name_relative_daypart_availability_followup_and_specialist_date_range_followup_and_grounded_specialist_transition_and_service_choice_specialist_weekend_followup_and_service_choice_specialist_weekday_followup_and_service_choice_specialist_day_followup_and_service_choice_specialist_daypart_followup_and_service_choice_specialist_exact_time_followup_and_promotions_and_promotions_rules_and_contact_and_master_query_fact_and_master_query_collect_policy_bridges_active_plus_turn_planner_safe_info_owner_cutover_for_contact_hours_promotions_and_promotions_rules_and_turn_planner_safe_catalog_fact_owner_cutover_for_services_overview_location_and_portfolio_ok_and_portfolio_not_found_and_turn_planner_safe_service_query_fact_owner_cutover_for_grounded_pricing_and_duration_and_turn_planner_safe_master_query_fact_owner_cutover_for_grounded_service_match_master_query_and_turn_planner_safe_master_query_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_master_query_service_not_found_collect_owner_cutover_for_grounded_service_not_found_and_turn_planner_safe_pricing_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_duration_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_booking_verification_fact_owner_cutover_for_safe_calendar_get_booking_ok_and_not_found_paths_and_turn_planner_safe_bookability_time_collect_owner_cutover_for_deterministic_missing_temporal_scope_booking_collect_and_turn_planner_safe_active_name_followup_family_owner_cutover_for_deterministic_specific_time_deictic_time_deictic_day_relative_date_and_relative_daypart_booking_followups_and_turn_planner_safe_explicit_handoff_owner_family_cutover_for_deterministic_explicit_human_request_and_frustration_handoff_turns_and_turn_planner_safe_greeting_owner_family_cutover_for_deterministic_greeting_thanks_and_ack_smalltalk_turns_and_turn_planner_safe_specialist_name_collect_owner_cutover_for_deterministic_specialist_name_collect_followup_and_turn_planner_safe_specialist_datetime_collect_owner_cutover_for_deterministic_specialist_date_range_datetime_collect_followup_and_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover_for_deterministic_service_choice_specialist_day_weekday_weekend_time_collect_followups_and_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover_for_deterministic_service_choice_specialist_prefilled_datetime_collect_followups_and_turn_planner_safe_booking_prompt_owner_cutover_for_bounded_active_booking_continuation_and_intent_queue_booking_entry_and_safe_llm_policy_core_collect_prompts_that_preserve_same_missing_slot_and_safe_llm_policy_core_initial_booking_prompt_for_service_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_to_datetime_booking_prompt_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_exact_datetime_to_name_booking_prompt_without_active_conversation_snapshot_and_turn_planner_safe_booking_prompt_owner_session_memory_expected_reply_restore_for_short_booking_replies_before_fallback_excluding_direct_booking_requests_and_turn_planner_safe_check_booking_prompt_owner_cutover_for_bounded_booking_verification_collect_reference_without_booking_reference_or_mixed_followup_envelopes_and_turn_planner_safe_specialist_followup_owner_cutover_for_bounded_named_specialist_followups_that_preserve_same_missing_slot_without_mixed_envelopes_and_turn_planner_safe_semantic_arbitration_owner_cutover_for_style_reference_portfolio_normalization_collect_to_info_interrupt_arbitration_complete_slot_booking_promotion_name_stage_booking_commit_booking_tool_hint_backfill_and_active_service_referent_duration_master_query_arbitration_and_safe_semantic_service_query_master_override_tool_reply_cutover_and_safe_semantic_service_query_services_overview_tool_reply_cutover_and_turn_planner_safe_semantic_service_query_fact_rescue_owner_cutover_for_critical_pending_invalid_schema_replay_and_turn_planner_safe_semantic_reschedule_guard_handoff_owner_cutover_for_misrouted_booking_reschedule_without_reference_and_turn_planner_safe_timeout_degraded_collect_reschedule_handoff_owner_cutover_for_timeout_degraded_collect_reschedule_without_booking_reference_and_turn_planner_safe_timeout_services_overview_fallback_owner_cutover_for_bounded_nonbooking_policy_timeout_services_overview_recovery_and_turn_planner_safe_timeout_active_name_time_collect_owner_cutover_for_bounded_timeout_active_name_specific_time_availability_followup_recovery_and_turn_planner_safe_timeout_specialist_followup_owner_cutover_for_bounded_timeout_specialist_followup_recovery_on_active_booking_snapshot_drift_paths_and_turn_planner_safe_semantic_needs_manager_and_risk_signal_handoff_owner_cutover_and_final_reasoning_core_fallback_removal_and_terminal_unresolved_owner_closure_on_main_path",
+      "target_primary_files": [
+        "contracts/runtime/policy_decision.v1.jsonschema",
+        "truffles-api/app/core/turn_planner.py"
+      ]
+    },
+    "turn_result_contract": {
+      "contract": "TurnResult",
+      "target_primary_files": [
+        "contracts/runtime/turn_result.v1.jsonschema",
+        "truffles-api/app/core/turn_executor.py"
+      ]
+    }
+  },
+  "touch_list_allowed": [
+    "docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-booking-pending-handoff-authority-reset-structural-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-24-consultant-core-booking-pending-handoff-authority-reset-structural-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r44-handoff-miss-collect-prompt-oracle-parity-proof-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r44-handoff-miss-collect-prompt-oracle-parity-proof-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-final-acceptance-go-to-full-evidence-pack-family-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-final-acceptance-go-to-full-evidence-pack-family-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-generated-booking-info-divergence-canary-replay-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-generated-booking-info-divergence-canary-replay-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-proof-decision-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-proof-decision-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-contract-aligned-confirm-hook-proof-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-contract-aligned-confirm-hook-proof-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-canary-replay-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-canary-replay-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-decision-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-decision-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r6-allowlist-safe-preflight-fallback-proof-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r6-allowlist-safe-preflight-fallback-proof-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-decision-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-decision-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-canary-replay-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-canary-replay-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-decision-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-implementation-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-canary-replay-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-decision-a922.md",
+    "docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-decision-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-canary-replay-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-decision-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-implementation-a922.md",
+    "docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r14-session-reset-pending-ack-terminal-unresolved-runtime-implementation-a922.md",
+    "truffles-api/app/services/reasoning_core.py",
+    "truffles-api/tests/test_reasoning_core.py",
+    "ops/diagnose.py",
+    "truffles-api/tests/test_booking_quality_tool_evidence_gate.py",
+    "truffles-api/tests/test_booking_quality_jid_mode.py",
+    "docs/ACTIVE_PROGRAM.md",
+    "docs/SOURCE_OF_TRUTH.yaml",
+    "STATE.md",
+    "STRUCTURE.md",
+    "docs/SESSIONS/SESSION-2026-03-15-consultant-core-governance-lock-a922.md",
+    "docs/SESSION_INDEX.md",
+    "docs/_generated/AGENT_PACKET.md",
+    "docs/_generated/AGENT_PACKET.json",
+    "truffles-api/tests/architecture/test_arch_guard_packet.py"
+  ],
+  "touch_list_forbidden": [
+    "truffles-api/app/routers/webhook/decision.py",
+    "truffles-api/app/routers/webhook/booking.py",
+    "truffles-api/app/routers/webhook/pending.py"
+  ]
+}

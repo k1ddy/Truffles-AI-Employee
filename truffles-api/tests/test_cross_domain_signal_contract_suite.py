@@ -34,6 +34,12 @@ def test_cross_domain_contract_suite_info_booking_tool_registry(case):
         case["overview_negative"],
         client_slug=case["slug"],
     )
+    matched, portfolio_service_query = info_signal_service.detect_portfolio_policy_service_query(
+        case["portfolio_prompt"],
+        client_slug=case["slug"],
+    )
+    assert matched is True
+    assert portfolio_service_query is None
 
     assert (
         pack_runtime_service.get_pack_service_hint(
