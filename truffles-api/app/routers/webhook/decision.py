@@ -5737,34 +5737,6 @@ def _resolve_semantic_referent(
             )
             return resolution
 
-    canonical_state = _get_canonical_dialog_state(manager)
-    if referent_key == "service":
-        pending_question_contract = (
-            canonical_state.get("pending_question_contract")
-            if isinstance(canonical_state, dict)
-            else None
-        )
-        if isinstance(pending_question_contract, dict):
-            pending_slot = _normalize_semantic_followup_token(
-                pending_question_contract.get("slot")
-            )
-            pending_value = pending_question_contract.get("value")
-            if (
-                pending_slot == "service"
-                and isinstance(pending_value, str)
-                and pending_value.strip()
-            ):
-                resolution.update(
-                    {
-                        "decision": "resolved",
-                        "resolved_referent": pending_value.strip(),
-                        "referent_source": "pending_question_contract",
-                        "projection_source": "canonical_dialog_state",
-                        "canonical_state_owner": canonical_state.get("owner_id"),
-                    }
-                )
-                return resolution
-
     if referent_key == "service" and isinstance(booking_state, dict):
         booking_service = booking_state.get("service")
         if isinstance(booking_service, str) and booking_service.strip():

@@ -3801,20 +3801,15 @@ class DialogStateService:
         if not normalized_expected_reply_type:
             return None
 
-        payload: dict[str, Any] = {
-            "expected_reply_type": normalized_expected_reply_type,
-            "message_count": self._canonical_int(message_count),
-        }
         slot = _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(normalized_expected_reply_type)
-        if slot:
-            payload["slot"] = slot
-        normalized_reason = self._normalize_projection_token(reason)
-        if normalized_reason:
-            payload["reason"] = normalized_reason
-        normalized_value = self._normalize_projection_token(value)
-        if normalized_value:
-            payload["value"] = normalized_value
-        return payload
+        return self.project_pending_question_contract(
+            {
+                "expected_reply_type": normalized_expected_reply_type,
+                "reason": self._normalize_projection_token(reason),
+                "next_question": slot,
+                "open_questions": [slot] if slot else [],
+            }
+        )
 
     def set_canonical_pending_question_contract(
         self,
@@ -3844,23 +3839,7 @@ class DialogStateService:
     ) -> dict[str, Any] | None:
         if not isinstance(payload, dict):
             return None
-        cleaned: dict[str, Any] = {}
-        slot = self._normalize_projection_token(payload.get("slot"))
-        if slot in _CANONICAL_PENDING_SLOTS:
-            cleaned["slot"] = slot
-        expected_reply_type = self._normalize_projection_token(payload.get("expected_reply_type"))
-        if expected_reply_type:
-            cleaned["expected_reply_type"] = expected_reply_type
-        reason = self._normalize_projection_token(payload.get("reason"))
-        if reason:
-            cleaned["reason"] = reason
-        value = self._normalize_projection_token(payload.get("value"))
-        if value:
-            cleaned["value"] = value
-        cleaned["message_count"] = self._canonical_int(payload.get("message_count"))
-        if cleaned.get("slot") or cleaned.get("expected_reply_type"):
-            return cleaned
-        return None
+        return self.project_pending_question_contract(payload)
 
     def set_canonical_interaction_state(
         self,
@@ -3913,7 +3892,7 @@ class DialogStateService:
         normalized = self.normalize_context_manager_canonical_state(updated)
         pending_question_contract = normalized.get("pending_question_contract")
         if isinstance(pending_question_contract, dict):
-            resume_slot = self._normalize_projection_token(pending_question_contract.get("slot"))
+            resume_slot = self._normalize_projection_token(pending_question_contract.get("next_question"))
             question_reason = self._normalize_projection_token(pending_question_contract.get("reason"))
         else:
             normalized_expected_reply_type = self._normalize_projection_token(expected_reply_type)

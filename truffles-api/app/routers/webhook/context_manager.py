@@ -229,6 +229,11 @@ def _set_conversation_context(conversation: Conversation, context: dict) -> None
 def _get_expected_reply_type(context: dict) -> str | None:
     if not isinstance(context, dict):
         return None
+    pending_question_contract = _get_pending_question_contract(context)
+    if isinstance(pending_question_contract, dict):
+        expected_reply_type = pending_question_contract.get("expected_reply_type")
+        if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+            return expected_reply_type.strip()
     from . import _legacy as legacy
 
     projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
@@ -240,6 +245,11 @@ def _get_expected_reply_type(context: dict) -> str | None:
 def _get_expected_reply_reason(context: dict) -> str | None:
     if not isinstance(context, dict):
         return None
+    pending_question_contract = _get_pending_question_contract(context)
+    if isinstance(pending_question_contract, dict):
+        reason = pending_question_contract.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
     from . import _legacy as legacy
 
     projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
@@ -248,12 +258,56 @@ def _get_expected_reply_reason(context: dict) -> str | None:
     return projections.expected_reply_reason
 
 
+def _get_pending_question_contract(context: dict) -> dict[str, Any] | None:
+    if not isinstance(context, dict):
+        return None
+    from . import _legacy as legacy
+
+    canonical_state = _get_canonical_dialog_state(_get_context_manager(context))
+    pending_question_contract = (
+        canonical_state.get("pending_question_contract")
+        if isinstance(canonical_state, dict)
+        else None
+    )
+    projected = _DIALOG_STATE_SERVICE.project_pending_question_contract(pending_question_contract)
+    if projected:
+        if "expected_reply_type" not in projected:
+            projected = _DIALOG_STATE_SERVICE.project_pending_question_contract(
+                projected,
+                expected_reply_type=context.get(legacy.EXPECTED_REPLY_TYPE_KEY),
+            )
+        if "reason" not in projected:
+            projected = _DIALOG_STATE_SERVICE.project_pending_question_contract(
+                projected,
+                expected_reply_reason=context.get(legacy.EXPECTED_REPLY_REASON_KEY),
+            )
+        return projected
+    return _DIALOG_STATE_SERVICE.project_pending_question_contract(
+        None,
+        expected_reply_type=context.get(legacy.EXPECTED_REPLY_TYPE_KEY),
+        expected_reply_reason=context.get(legacy.EXPECTED_REPLY_REASON_KEY),
+    )
+
+
 def _set_expected_reply_type(context: dict, expected_reply_type: str | None) -> dict:
-    return _DIALOG_STATE_SERVICE.set_expected_reply_context_fields(
+    updated = _DIALOG_STATE_SERVICE.set_expected_reply_context_fields(
         context,
         expected_reply_type=expected_reply_type,
         expected_reply_reason=None,
     )
+    projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
+        expected_reply_type=expected_reply_type,
+    )
+    manager = _get_context_manager(updated)
+    canonical_state = _get_canonical_dialog_state(manager)
+    canonical_state = _DIALOG_STATE_SERVICE.set_canonical_pending_question_contract(
+        canonical_state,
+        expected_reply_type=projections.expected_reply_type,
+        reason=None,
+        message_count=0,
+    )
+    manager = _set_canonical_dialog_state(manager, canonical_state)
+    return _set_context_manager(updated, manager)
 
 
 def _get_re_entry_required(context: dict) -> dict | None:

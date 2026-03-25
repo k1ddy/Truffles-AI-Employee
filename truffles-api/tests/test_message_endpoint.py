@@ -28,8 +28,11 @@ from app.routers.webhook import _legacy as webhook_router
 from app.routers.webhook import booking as webhook_booking
 from app.routers.webhook import http as http_router
 from app.routers.webhook.context_manager import (
+    _get_expected_reply_reason,
+    _get_expected_reply_type,
     _is_asr_confirmation_active,
     _is_handover_confirmation_active,
+    _set_expected_reply_type,
 )
 from app.routers.webhook import guards as webhook_guards
 from app.routers.webhook import info as webhook_info
@@ -2429,6 +2432,12 @@ def test_canonical_dialog_state_syncs_interaction_state_from_policy_contract():
     )
 
     canonical_state = webhook_router._get_canonical_dialog_state(synced_manager)
+    assert canonical_state.get("pending_question_contract") == {
+        "expected_reply_type": "name",
+        "reason": "booking_followup",
+        "next_question": "name",
+        "open_questions": ["name"],
+    }
     interaction_state = canonical_state.get("interaction_state") or {}
 
     assert interaction_state == {
@@ -2449,6 +2458,50 @@ def test_canonical_dialog_state_syncs_interaction_state_from_policy_contract():
         },
         "degrade_reason": "policy_validation:slot_followup_recovered",
     }
+
+
+def test_context_manager_expected_reply_getters_prefer_canonical_question_contract():
+    context = {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
+        "expected_reply_reason": "booking_prompt",
+        "context_manager": {
+            "canonical_dialog_state": {
+                "pending_question_contract": {
+                    "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                    "reason": "booking_interrupt",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                }
+            }
+        },
+    }
+
+    assert _get_expected_reply_type(context) == webhook_router.EXPECTED_REPLY_TIME
+    assert _get_expected_reply_reason(context) == "booking_interrupt"
+
+    updated = _set_expected_reply_type(context, webhook_router.EXPECTED_REPLY_NAME)
+
+    assert _get_expected_reply_type(updated) == webhook_router.EXPECTED_REPLY_NAME
+    assert (
+        updated.get("context_manager", {})
+        .get("canonical_dialog_state", {})
+        .get("pending_question_contract")
+        == {
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+            "next_question": "name",
+            "open_questions": ["name"],
+        }
+    )
+
+    cleared = _set_expected_reply_type(updated, None)
+
+    assert _get_expected_reply_type(cleared) is None
+    assert (
+        cleared.get("context_manager", {})
+        .get("canonical_dialog_state", {})
+        .get("pending_question_contract")
+        is None
+    )
 
 
 

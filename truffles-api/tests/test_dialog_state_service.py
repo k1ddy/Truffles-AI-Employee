@@ -1700,7 +1700,12 @@ def test_dialog_state_service_normalizes_context_manager_canonical_state() -> No
     )
 
     assert state["current_referents"]["service"]["value"] == "Маникюр"
-    assert state["pending_question_contract"]["expected_reply_type"] == "time"
+    assert state["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "booking_prompt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
     assert state["interaction_state"]["interaction_target"] == "time"
     assert state["consult_state"]["questions"] == ["Что лучше?"]
 
@@ -1829,9 +1834,9 @@ def test_dialog_state_service_sets_canonical_pending_question_and_interaction_st
 
     assert state["pending_question_contract"] == {
         "expected_reply_type": "name",
-        "message_count": 6,
-        "slot": "name",
         "reason": "booking_followup",
+        "next_question": "name",
+        "open_questions": ["name"],
     }
     assert state["interaction_state"] == {
         "resume_slot": "name",
@@ -1875,9 +1880,9 @@ def test_dialog_state_service_syncs_canonical_question_contract_state_with_detac
 
     assert state["pending_question_contract"] == {
         "expected_reply_type": "name",
-        "message_count": 6,
-        "slot": "name",
         "reason": "booking_followup",
+        "next_question": "name",
+        "open_questions": ["name"],
     }
     assert state["interaction_state"] == {
         "resume_slot": "name",
@@ -1983,9 +1988,9 @@ def test_dialog_state_service_syncs_context_manager_expected_reply_state() -> No
     }
     assert state["pending_question_contract"] == {
         "expected_reply_type": "name",
-        "message_count": 7,
-        "slot": "name",
         "reason": "booking_followup",
+        "next_question": "name",
+        "open_questions": ["name"],
     }
     assert state["interaction_state"] == {
         "resume_slot": "name",
@@ -2076,9 +2081,9 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
     }
     assert state["pending_question_contract"] == {
         "expected_reply_type": "time",
-        "message_count": 8,
-        "slot": "datetime",
         "reason": "booking_prompt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
     }
     assert state["interaction_state"] == {
         "resume_slot": "datetime",
