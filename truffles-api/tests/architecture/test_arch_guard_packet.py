@@ -29,16 +29,16 @@ def test_build_agent_packet_and_top_level_consistency() -> None:
     assert packet["active_dec"].endswith("controlled-demolition.md")
     assert (
         packet["active_block_tp"]
-        == "docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-public-entrypoint-http-contract-and-message-endpoint-surface-reset-a922.md"
+        == "docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-behavioral-proof-lock-a922.md"
     )
     assert (
         packet["active_master_block"]
-        == "Consultant Core Public Entrypoint HTTP Contract And Message Endpoint Surface Reset"
+        == "Consultant Core Behavioral Proof Lock"
     )
     assert packet["source_of_truth_map"]["execution_strategy"]["mode"] == "owner_replacement_not_bridge_growth"
     assert (
         packet["source_of_truth_map"]["execution_strategy"]["current_nonnegotiable_next_move"]
-        == "reset_public_entrypoint_http_contract_and_message_endpoint_surface_before_acceptance"
+        == "open_bounded_truthful_worktree_runtime_planner_degrade_handoff_entry_blocker_before_any_new_behavioral_proof_chain"
     )
     assert "## Execution Strategy Lock" in markdown
     assert "new_generic_ingress_phrase_bridge_family" in markdown

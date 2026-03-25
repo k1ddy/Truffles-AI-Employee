@@ -6,12 +6,13 @@ Current objective:
 - replace multi-owner consultant runtime with one semantic core, one continuity store, and a black-box proof path
 
 Current block:
-- Consultant Core Policy Core Acceptance Replay
+- Consultant Core Behavioral Proof Lock
 
 Current progress unit:
-- deterministic acceptance preflight is green on the current worktree after resetting the stale webhook-package suites to the live acceptance surface: `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py` -> `187 passed`, `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_booking_chaos_dialogs.py` -> `1 passed`, `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_booking_quality_response_guard.py` -> `6 passed`, `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_demo_salon_eval.py` -> `6 passed`
-- the guarded replay command is currently blocked at chain bootstrap, not runtime semantics: `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-20260325-a922-phase-e ...` exits with `chain_start_requires_lock`, and `/tmp/booking_quality/a922-go2f-seed19/summary.json` is not a canonical acceptance lock (`semantic_valid=false`, no manual audit status)
-- the next honest move is to restore the Phase E acceptance chain/lock contract before any further guarded replay attempt
+- manual closure on the current runtime is green, but truthful behavioral proof is now blocked on the first required `L2` seed of the truthful worktree runtime, not on missing paperwork
+- fresh `L0/L1` evidence is green and the truthful local runtime is confirmed on `127.0.0.1:18190` with `git_commit == HEAD` and `test_mode_enabled=true`, but `/tmp/booking_quality/a922-l2-proof-seed7-20260325/summary.json` is `infra_valid=true`, `semantic_valid=false`, `manual_audit_status=done`, `stop_reason=signal_15`
+- the surfaced blocker family is concrete: simple booking/info entry on the truthful worktree runtime degrades into `planner_degrade -> HANDOFF/pending`, producing `wrong_action`, `expected_state_mismatch`, and `expected_reply_mismatch` at the start of seed `7`
+- the next honest move is to open one bounded blocker family for this truthful worktree-runtime `planner_degrade -> HANDOFF/pending` regression before any further behavioral-proof chain attempt
 - closed `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-continuity-writer-guard-and-owner-reset-a922.md` locally: `python3 scripts/continuity_writer_guard.py` is green after AST-aware write detection replaced the line-token heuristic and the remaining pending-resume writes were moved behind canonical helpers in `truffles-api/app/services/state_service.py`
 - the governance stack is green on the current worktree: `python3 scripts/arch_guard.py` -> `OK`, `python3 scripts/semantic_bridge_growth_guard.py` -> `OK`, `python3 scripts/legacy_freeze_guard.py` -> `OK`, `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture` -> `23 passed`, `SESSION_AGENT=a922 scripts/session_check.sh` -> `Session OK`, `git diff --check` -> `pass`
 - published `docs/REPORTS/artifacts/2026-03-25-consultant-core-policy-core-live-manual-closure-a922.md` and prepared `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-policy-core-acceptance-replay-a922.md`; live runtime health remains green on the current worktree lane (`eval_mode=livecheck`, `transport_send_mode=allowlist`, `outbox_worker_mode=off`, `danger_flags=[]`)
