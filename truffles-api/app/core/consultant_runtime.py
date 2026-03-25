@@ -977,6 +977,12 @@ class ConsultantRuntime:
             semantic_contract = dict(decision.meta.get("semantic_contract"))
         if semantic_contract:
             trace_event["semantic_contract"] = semantic_contract
+        if isinstance(execution.meta, dict) and isinstance(
+            execution.meta.get("tool_execution_projection"), dict
+        ):
+            trace_event["tool_execution_projection"] = dict(
+                execution.meta["tool_execution_projection"]
+            )
         context = dict(conversation.context or {})
         trace = context.get(_RUNTIME_TRACE_KEY)
         if not isinstance(trace, list):

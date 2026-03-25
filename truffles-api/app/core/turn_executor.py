@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -402,6 +403,11 @@ class TurnExecutor:
             service_name=service_name,
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
+        projected_tool_args, tool_execution_projection = self._build_tool_execution_projection(
+            decision=decision,
+            semantic_contract=semantic_contract,
+            service_name=service_name,
+        )
         fact_refs = {
             str(item).strip().casefold()
             for item in (
@@ -412,13 +418,11 @@ class TurnExecutor:
             if isinstance(item, str) and item.strip()
         }
         if decision.intent == "master_query" or "master" in fact_refs:
-            master_service = None
-            if isinstance(decision.tool_args, dict):
-                raw_master_service = decision.tool_args.get("service_query")
-                if isinstance(raw_master_service, str) and raw_master_service.strip():
-                    master_service = raw_master_service.strip()
-            if master_service is None:
-                master_service = service_name
+            master_service = self._resolve_fact_service_query(
+                decision=decision,
+                service_name=service_name,
+                semantic_contract=semantic_contract,
+            )
             master_resolution = resolve_master_intent(
                 message_text=query_text,
                 client_slug=client_slug,
@@ -458,15 +462,15 @@ class TurnExecutor:
             service_name=service_name,
         )
         if db is not None and branch_id is not None and is_tool_action(resolved_tool_action):
-            tool_args = dict(decision.tool_args) if isinstance(decision.tool_args, dict) else {}
             service_query = self._resolve_fact_service_query(
                 decision=decision,
                 service_name=service_name,
+                semantic_contract=semantic_contract,
             )
             tool_result = execute_tool_action(
                 db,
                 tool_action=resolved_tool_action,
-                tool_args=tool_args,
+                tool_args=projected_tool_args,
                 conversation_id=None,
                 branch_id=branch_id,
                 client_slug=client_slug,
@@ -481,6 +485,8 @@ class TurnExecutor:
                 tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
                 if resolved_tool_action != decision.tool_action:
                     tool_meta["resolved_tool_action"] = resolved_tool_action
+                if tool_execution_projection:
+                    tool_meta["tool_execution_projection"] = tool_execution_projection
                 tool_meta = self._attach_semantic_contract_meta(
                     tool_meta,
                     semantic_contract=semantic_contract,
@@ -546,6 +552,75 @@ class TurnExecutor:
             return None
         cleaned = value.strip().casefold()
         return cleaned or None
+
+    @staticmethod
+    def _normalize_execution_text(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @classmethod
+    def _looks_like_uuid(cls, value: Any) -> bool:
+        token = cls._normalize_execution_text(value)
+        if token is None:
+            return False
+        try:
+            UUID(token)
+        except (ValueError, TypeError):
+            return False
+        return True
+
+    @classmethod
+    def _semantic_referents(cls, semantic_contract: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+        referents = semantic_contract.get("referents") if isinstance(semantic_contract, dict) else None
+        return referents if isinstance(referents, dict) else {}
+
+    def _build_tool_execution_projection(
+        self,
+        *,
+        decision: PolicyDecision,
+        semantic_contract: dict[str, Any] | None,
+        service_name: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        projected_args = dict(decision.tool_args) if isinstance(decision.tool_args, dict) else {}
+        referents = self._semantic_referents(semantic_contract)
+        projection: dict[str, Any] = {"projection_source": "semantic_contract"}
+
+        service_payload = referents.get("service") if isinstance(referents.get("service"), dict) else {}
+        projected_service = self._normalize_execution_text(
+            service_payload.get("value")
+            or service_name
+            or projected_args.get("service_query")
+        )
+        if projected_service:
+            projected_args["service_query"] = projected_service
+            projection["service_query"] = projected_service
+
+        specialist_payload = (
+            referents.get("specialist")
+            if isinstance(referents.get("specialist"), dict)
+            else {}
+        )
+        projected_specialist_name = self._normalize_execution_text(
+            specialist_payload.get("value") or projected_args.get("specialist_name")
+        )
+        if projected_specialist_name:
+            projected_args["specialist_name"] = projected_specialist_name
+            projection["specialist_name"] = projected_specialist_name
+
+        projected_specialist_id = self._normalize_execution_text(
+            specialist_payload.get("entity_id") or projected_args.get("specialist_id")
+        )
+        if projected_specialist_id and self._looks_like_uuid(projected_specialist_id):
+            projected_args["specialist_id"] = projected_specialist_id
+            projection["specialist_id"] = projected_specialist_id
+        else:
+            projected_args.pop("specialist_id", None)
+
+        if len(projection) == 1:
+            return projected_args, {}
+        return projected_args, projection
 
     @staticmethod
     def _attach_semantic_contract_meta(
@@ -645,16 +720,18 @@ class TurnExecutor:
                 entity_type="booking",
                 source_ref="booking_state",
             )
-        if isinstance(service_name, str) and service_name.strip():
+        if "service" not in referents and isinstance(service_name, str) and service_name.strip():
             _remember("service", value=service_name, entity_type="service", source_ref="service_query")
         tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        _remember("service", value=tool_args.get("service_query"), entity_type="service", source_ref="tool_args")
-        _remember(
-            "specialist",
-            value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
-            entity_type="specialist",
-            source_ref="tool_args",
-        )
+        if "service" not in referents:
+            _remember("service", value=tool_args.get("service_query"), entity_type="service", source_ref="tool_args")
+        if "specialist" not in referents:
+            _remember(
+                "specialist",
+                value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
+                entity_type="specialist",
+                source_ref="tool_args",
+            )
         _remember("customer", value=tool_args.get("customer_name"), entity_type="customer", source_ref="tool_args")
         _remember("booking_ref", value=tool_args.get("appointment_id"), entity_type="booking", source_ref="tool_args")
 
@@ -675,7 +752,13 @@ class TurnExecutor:
         *,
         decision: PolicyDecision,
         service_name: str | None,
+        semantic_contract: dict[str, Any] | None = None,
     ) -> str | None:
+        referents = self._semantic_referents(semantic_contract)
+        service_payload = referents.get("service") if isinstance(referents.get("service"), dict) else {}
+        projected_referent = self._normalize_execution_text(service_payload.get("value"))
+        if projected_referent:
+            return projected_referent
         if isinstance(decision.tool_args, dict):
             raw_service_query = decision.tool_args.get("service_query")
             if isinstance(raw_service_query, str) and raw_service_query.strip():

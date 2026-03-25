@@ -2899,7 +2899,7 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
             "tool_action": "collect",
             "goal": "booking",
             "slots": {"service": "Маникюр"},
-            "tool_args": {"specialist_name": "Айгерим"},
+            "tool_args": {},
             "entity_refs": [
                 {
                     "entity_id": "spec:aigerim",
@@ -2914,6 +2914,20 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
                     "source_ref": "booking_state",
                 }
             ],
+            "referents": {
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                    "source_ref": "message",
+                },
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "booking_state",
+                },
+            },
             "next_question": "datetime",
             "open_questions": ["datetime"],
             "pending_question_target": "specialist",

@@ -417,6 +417,22 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
     nullable_string_enum = lambda values: {
         "anyOf": [{"type": "string", "enum": values}, {"type": "null"}]
     }
+    referent_payload_schema = {
+        "anyOf": [
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["value", "entity_id", "entity_type", "source_ref"],
+                "properties": {
+                    "value": nullable_string,
+                    "entity_id": nullable_string,
+                    "entity_type": nullable_string,
+                    "source_ref": nullable_string,
+                },
+            },
+            {"type": "null"},
+        ]
+    }
     schema = {
         "type": "object",
         "additionalProperties": False,
@@ -436,6 +452,7 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "reason",
             "goal",
             "entity_refs",
+            "referents",
             "subject_kind",
             "capability",
             "temporal_scope",
@@ -553,6 +570,18 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
                             ]
                         },
                     },
+                },
+            },
+            "referents": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["service", "specialist", "branch", "booking_ref", "customer"],
+                "properties": {
+                    "service": referent_payload_schema,
+                    "specialist": referent_payload_schema,
+                    "branch": referent_payload_schema,
+                    "booking_ref": referent_payload_schema,
+                    "customer": referent_payload_schema,
                 },
             },
             "subject_kind": nullable_string_enum(

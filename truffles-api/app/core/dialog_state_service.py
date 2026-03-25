@@ -629,6 +629,28 @@ class DialogStateService:
         _remember("booking_ref", existing_state.current_referents.booking)
         _remember("customer", existing_state.current_referents.customer)
 
+        decision_semantic_contract = (
+            dict(decision.meta.get("semantic_contract"))
+            if isinstance(decision.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        decision_referents = (
+            decision_semantic_contract.get("referents")
+            if isinstance(decision_semantic_contract.get("referents"), dict)
+            else {}
+        )
+        for referent_key, source_key in (
+            ("service", "service"),
+            ("specialist", "specialist"),
+            ("branch", "branch"),
+            ("booking_ref", "booking_ref"),
+            ("customer", "customer"),
+        ):
+            payload = decision_referents.get(referent_key)
+            if not isinstance(payload, dict):
+                continue
+            _remember(source_key, payload.get("value") or payload.get("entity_id"))
+
         for key, value in (existing_state.interaction_state.grounded_referents or {}).items():
             if key in {"service", "specialist", "branch", "booking_ref", "customer"}:
                 _remember(key, value)
@@ -648,7 +670,8 @@ class DialogStateService:
         _remember("customer", decision.slots.get("name"))
 
         tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        _remember("specialist", tool_args.get("specialist_name") or tool_args.get("specialist_id"))
+        if "specialist" not in grounded:
+            _remember("specialist", tool_args.get("specialist_name") or tool_args.get("specialist_id"))
         _remember("customer", tool_args.get("customer_name"))
         _remember("booking_ref", tool_args.get("appointment_id"))
 
@@ -797,6 +820,24 @@ class DialogStateService:
             for referent_key, value in grounded_referents.items():
                 _remember(referent_key, value=value, source_ref="runtime_grounding")
 
+        decision_contract = (
+            dict(decision.meta.get("semantic_contract"))
+            if isinstance(decision.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        decision_referents = decision_contract.get("referents")
+        if isinstance(decision_referents, dict):
+            for referent_key, payload in decision_referents.items():
+                if not isinstance(payload, dict):
+                    continue
+                _remember(
+                    referent_key,
+                    value=payload.get("value") or payload.get("entity_id"),
+                    entity_id=payload.get("entity_id"),
+                    entity_type=payload.get("entity_type"),
+                    source_ref=payload.get("source_ref"),
+                )
+
         if isinstance(booking_payload, dict):
             _remember("service", value=booking_payload.get("service"), source_ref="booking_state")
             _remember(
@@ -840,12 +881,14 @@ class DialogStateService:
         _remember("customer", value=slots.get("name"), source_ref="decision_slots")
 
         tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        _remember("service", value=tool_args.get("service_query"), source_ref="tool_args")
-        _remember(
-            "specialist",
-            value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
-            source_ref="tool_args",
-        )
+        if "service" not in referents:
+            _remember("service", value=tool_args.get("service_query"), source_ref="tool_args")
+        if "specialist" not in referents:
+            _remember(
+                "specialist",
+                value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
+                source_ref="tool_args",
+            )
         _remember("customer", value=tool_args.get("customer_name"), source_ref="tool_args")
         _remember("booking_ref", value=tool_args.get("appointment_id"), source_ref="tool_args")
 
@@ -1442,9 +1485,26 @@ class DialogStateService:
             )
         if isinstance(merged_booking, dict):
             tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
+            semantic_contract = (
+                dict(decision.meta.get("semantic_contract"))
+                if isinstance(decision.meta.get("semantic_contract"), dict)
+                else {}
+            )
+            semantic_referents = (
+                semantic_contract.get("referents")
+                if isinstance(semantic_contract.get("referents"), dict)
+                else {}
+            )
+            specialist_referent = (
+                semantic_referents.get("specialist")
+                if isinstance(semantic_referents.get("specialist"), dict)
+                else {}
+            )
             for specialist_key in ("specialist_name", "specialist_id"):
+                referent_field = "value" if specialist_key == "specialist_name" else "entity_id"
                 specialist_value = self._normalize_projection_token(
-                    execution_payload.get(specialist_key)
+                    specialist_referent.get(referent_field)
+                    or execution_payload.get(specialist_key)
                     or tool_args.get(specialist_key)
                     or merged_booking.get(specialist_key)
                 )

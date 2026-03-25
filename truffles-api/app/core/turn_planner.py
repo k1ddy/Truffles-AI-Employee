@@ -275,6 +275,9 @@ class TurnPlanner:
             value = self._normalize_token(payload.get(field_name))
             if value is not None:
                 contract[field_name] = value
+        referents = self._normalize_referents(payload.get("referents"))
+        if referents:
+            contract["referents"] = referents
         if entity_refs:
             contract["entity_refs"] = entity_refs
         return contract if len(contract) > 1 else None
@@ -559,6 +562,29 @@ class TurnPlanner:
                 continue
             seen.add(dedupe_key)
             normalized.append(entry)
+        return normalized
+
+    def _normalize_referents(self, value: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(value, dict):
+            return {}
+        normalized: dict[str, dict[str, Any]] = {}
+        allowed_keys = {"service", "specialist", "branch", "booking_ref", "customer"}
+        for raw_key, raw_payload in value.items():
+            referent_key = self._normalize_token(raw_key)
+            if referent_key not in allowed_keys or not isinstance(raw_payload, dict):
+                continue
+            entry: dict[str, Any] = {}
+            for source_key, target_key in (
+                ("value", "value"),
+                ("entity_id", "entity_id"),
+                ("entity_type", "entity_type"),
+                ("source_ref", "source_ref"),
+            ):
+                token = self._normalize_token(raw_payload.get(source_key))
+                if token:
+                    entry[target_key] = token
+            if entry:
+                normalized[referent_key] = entry
         return normalized
 
     def _normalize_planner_slots(self, value: Any) -> dict[str, str]:

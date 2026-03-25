@@ -10,7 +10,7 @@ LLM принимает решение по действию (action), но не 
 
 Ответ (JSON):
 ```json
-{"intent":"booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":"","date":"","start_at":"","duration_min":"","specialist_id":"","specialist_name":"","customer_name":"","customer_phone":"","appointment_id":"","end_at":"","reason":"","info_ref":"","info_refs":[]},"pack_refs":[],"slots":{"service":"","datetime":"","name":"","phone":""},"next_question":"service|datetime|name|phone|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other","entity_refs":[{"entity_id":"svc:manicure","entity_type":"service","value":"маникюр","source_ref":"carryover","confidence":1.0}],"subject_kind":"service|specialist|branch|booking|general","capability":"pricing|duration|location|hours|promotions|bookability|live_availability|booking_manage|consultation|portfolio|other","temporal_scope":"none|specific_time|day|weekday|weekend|date_range","resolution_mode":"direct|referent_followup|clarify_missing_subject|clarify_missing_time|policy_fact|live_calendar","pending_question_act":"fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question|","pending_question_target":"time|specialist|","active_question_relation":"fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question|referent_followup|generic_info_interrupt|specialist_availability_interrupt|specialist_availability_followup|tool_result_followup_specialist_missing|","resolver_id":"llm_policy_core","resolver_version":"v1"}
+{"intent":"booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":"","date":"","start_at":"","duration_min":"","specialist_id":"","specialist_name":"","customer_name":"","customer_phone":"","appointment_id":"","end_at":"","reason":"","info_ref":"","info_refs":[]},"pack_refs":[],"slots":{"service":"","datetime":"","name":"","phone":""},"next_question":"service|datetime|name|phone|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other","entity_refs":[{"entity_id":"svc:manicure","entity_type":"service","value":"маникюр","source_ref":"carryover","confidence":1.0}],"referents":{"service":{"value":"маникюр","entity_id":"svc:manicure","entity_type":"service","source_ref":"carryover"},"specialist":{"value":"Айгерим","entity_id":"spec:aigerim","entity_type":"specialist","source_ref":"carryover"},"branch":null,"booking_ref":null,"customer":null},"subject_kind":"service|specialist|branch|booking|general","capability":"pricing|duration|location|hours|promotions|bookability|live_availability|booking_manage|consultation|portfolio|other","temporal_scope":"none|specific_time|day|weekday|weekend|date_range","resolution_mode":"direct|referent_followup|clarify_missing_subject|clarify_missing_time|policy_fact|live_calendar","pending_question_act":"fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question|","pending_question_target":"time|specialist|","active_question_relation":"fill_requested_slot|ask_about_requested_slot|slot_constraint|slot_compare|mixed_fill_plus_question|referent_followup|generic_info_interrupt|specialist_availability_interrupt|specialist_availability_followup|tool_result_followup_specialist_missing|","resolver_id":"llm_policy_core","resolver_version":"v1"}
 ```
 
 Правила:
@@ -20,8 +20,10 @@ LLM принимает решение по действию (action), но не 
 - pack_refs только из allowed.info_refs или allowed.consult_refs.
 - slots и open_questions используют только ключи: service, datetime, name, phone.
 - `slots.name` и `next_question="name"` означают только имя клиента (`customer_name`), а не выбор мастера.
-- Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`. Для этого используй `entity_refs` и/или `tool_args.specialist_name`, а continuity выражай через `pending_question_target="specialist"` и `active_question_relation`.
+- Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`. Семантический источник истины для этого — `referents.specialist` и `entity_refs`; continuity выражай через `pending_question_target="specialist"` и `active_question_relation`.
+- `referents` — канонический semantic carrier для grounded entities: `service`, `specialist`, `branch`, `booking_ref`, `customer`. Если referent известен, заполни его object (`value`, `entity_id`, `entity_type`, `source_ref`). Если referent неизвестен — верни `null`.
 - entity_refs перечисляет grounded entity/referent hints, если они уже известны из диалога. Для каждого известного referent по возможности передавай не только `entity_id`/`entity_type`, но и human-readable `value`.
+- `tool_args.service_query`, `tool_args.specialist_name`, `tool_args.specialist_id` — это execution shadows, а не semantic source-of-truth. Если заполняешь их, они обязаны точно совпадать с `referents`.
 - `memory.profile.interaction_state` описывает активную booking continuity contract (`resume_slot`, `interaction_target`, `interaction_relation`, `grounded_referents`). Если она присутствует, это обязательный контекст, а не слабая подсказка.
 - `memory.profile.semantic_contract` — канонический semantic contract из предыдущего хода. Он содержит semantic axes и grounded referents/referent ids. Если он присутствует, сохраняй этот контракт согласованным с новым решением вместо lossy rewrite.
 - `memory.profile.pending_question_contract` — канонический active question contract. `next_question/open_questions` описывают какой slot еще собирается; `pending_question_act/pending_question_target/active_question_relation` описывают semantic relation пользователя к этому активному вопросу. Не смешивай slot names и semantic axes.
@@ -36,10 +38,10 @@ LLM принимает решение по действию (action), но не 
 - active_question_relation описывает явную relation row над активным `pending_question_contract`. Используй: fill_requested_slot, ask_about_requested_slot, slot_constraint, slot_compare, mixed_fill_plus_question, referent_followup, generic_info_interrupt, specialist_availability_interrupt, specialist_availability_followup, tool_result_followup_specialist_missing. Если хода над активным pending-question family нет — верни пустое значение.
 - Если во входе есть `memory.profile.current_referents`, `memory.profile.pending_question_contract` или `memory.profile.interaction_state`, используй их как grounded dialog context, а не как необязательные подсказки.
 - info: pack_refs = info-интенты (pricing/duration/location/hours/promotions).
-- info: для pricing/duration укажи tool_args.service_query (или slots.service). Если нет услуги → action=collect и next_question/service.
+- info: для pricing/duration semantic subject услуги укажи через `referents.service` (и/или `slots.service`, если услуга уже стала booking slot). Если нет услуги → action=collect и next_question/service.
 - master_query: используй только когда вопрос именно про мастеров по конкретной услуге/навыку
   (например: "какие мастера делают X", "кто лучше по X", "у кого опыт по X").
-- master_query: для fact обязательно укажи slots.service или tool_args.service_query.
+- master_query: для fact обязательно укажи semantic service subject через `referents.service` или `slots.service`.
 - master_query: если услуга не указана, НЕЛЬЗЯ давать фактический ответ про мастеров.
   В этом случае верни action=collect, tool_action=collect, next_question="service",
   open_questions=["service"].
@@ -56,11 +58,11 @@ LLM принимает решение по действию (action), но не 
   (включая условные вопросы "что если ... изменить время") трактуй как операционный booking flow,
   а не как consult/info.
 - calendar.list_slots: tool_args.date (YYYY-MM-DD) или start_at; можно передать specialist_id/duration_min.
-- calendar.book_slot: tool_args.start_at/end_at; можно передать specialist_id/service_query/customer_name.
+- calendar.book_slot: tool_args.start_at/end_at; service/specialist semantics держи в `referents`, а не в legacy carrier.
 - calendar.get_booking: tool_args.appointment_id (если нет — ищи по текущей записи).
 - calendar.reschedule: tool_args.appointment_id + start_at/end_at.
 - calendar.cancel: tool_args.appointment_id + reason.
-- catalog.service_query: tool_args.service_query (или slots.service) для длительности/цены/мастеров.
+- catalog.service_query: semantic service subject держи в `referents.service` (или `slots.service`, если это уже booking slot) для длительности/цены/мастеров.
 - catalog.location: без args, верни адрес/гео.
 - catalog.portfolio: без args, верни ссылку на работы.
 - collect: action=collect, next_question = недостающий слот.
@@ -92,7 +94,7 @@ LLM принимает решение по действию (action), но не 
   сохрани `next_question="datetime"` и `open_questions=["datetime"]`,
   выставь `pending_question_target="specialist"` и `active_question_relation="referent_followup"`,
   оставь `pending_question_act` пустым,
-  а имя мастера передай через `tool_args.specialist_name` и/или `entity_refs`.
+  а имя мастера передай через `referents.specialist` и `entity_refs`.
 - Если есть активный `pending_question_contract` по `datetime`, услуга уже известна и пользователь спрашивает,
   какой мастер/специалист свободен в явном временном диапазоне или дне
   (например, "Какой мастер свободен на этой неделе?", "Какой специалист свободен в пятницу?"),
@@ -138,7 +140,7 @@ LLM принимает решение по действию (action), но не 
   `subject_kind="specialist"`, `capability="bookability"`, `resolution_mode="referent_followup"`,
   `pending_question_target="specialist"`, `active_question_relation="referent_followup"`,
   оставь `pending_question_act` пустым,
-  а имя мастера передай через `tool_args.specialist_name` и/или `entity_refs`.
+  а имя мастера передай через `referents.specialist` и `entity_refs`.
   Это specialist follow-up над активным `name` collect; имя клиента все еще не заполнено.
 - handoff: action=handoff, tool_action=handoff, pack_refs пустой, needs_manager=true.
 - confidence 0.0–1.0; если сомневаешься, ставь низкую.

@@ -289,12 +289,26 @@ class TestPolicyCoreTimeoutRetry:
             "tool_action": "calendar.list_slots",
             "tool_args": {},
             "pack_refs": [],
+            "entity_refs": [],
+            "referents": {},
             "language": "ru",
             "confidence": 0.8,
             "reason": "ask_time",
             "goal": "booking",
             "slots": {},
+            "next_question": None,
             "open_questions": ["datetime"],
+            "needs_manager": False,
+            "risk_signals": [],
+            "subject_kind": None,
+            "capability": None,
+            "temporal_scope": None,
+            "resolution_mode": None,
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": None,
+            "resolver_id": None,
+            "resolver_version": None,
             "expected_reply_type": "time",
         }
 
@@ -305,7 +319,7 @@ class TestPolicyCoreTimeoutRetry:
             "action": "fact",
             "tool_action": "info",
             "tool_args": {},
-            "pack_refs": ["master"],
+            "pack_refs": [],
             "language": "ru",
             "confidence": 0.8,
             "reason": "master_lookup",
@@ -322,6 +336,63 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is False
         assert result["error"] == "invalid_schema"
+
+    def test_master_query_fact_with_referent_service_passes_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {},
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "master_lookup",
+            "goal": "info",
+            "slots": {"service": "", "datetime": "", "name": "", "phone": ""},
+            "next_question": None,
+            "open_questions": [],
+            "needs_manager": False,
+            "risk_signals": [],
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                    "value": "маникюр",
+                    "confidence": 0.94,
+                }
+            ],
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": "generic_info_interrupt",
+            "resolver_id": "master_lookup",
+            "resolver_version": "2026-03-25",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Кто делает маникюр?")
+
+        assert result["ok"] is True
+        assert result["payload"]["referents"]["service"] == {
+            "value": "маникюр",
+            "entity_id": "svc:manicure",
+            "entity_type": "service",
+            "source_ref": "message",
+        }
+        assert result["payload"]["tool_args"] == {}
 
     def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -720,6 +791,20 @@ class TestPolicyCoreTimeoutRetry:
                     {"entity_id": "svc:manicure", "entity_type": "service"},
                     {"entity_id": "spec:aigerim", "entity_type": "specialist"},
                 ],
+                "referents": {
+                    "service": {
+                        "value": "маникюр",
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "message",
+                    },
+                    "specialist": {
+                        "value": "Айгерим",
+                        "entity_id": "spec:aigerim",
+                        "entity_type": "specialist",
+                        "source_ref": "message",
+                    },
+                },
                 "subject_kind": "specialist",
                 "capability": "bookability",
                 "resolution_mode": "referent_followup",
@@ -739,7 +824,54 @@ class TestPolicyCoreTimeoutRetry:
         assert result["payload"]["pending_question_act"] is None
         assert result["payload"]["pending_question_target"] == "specialist"
         assert result["payload"]["active_question_relation"] == "referent_followup"
+        assert result["payload"]["referents"]["specialist"] == {
+            "value": "Айгерим",
+            "entity_id": "spec:aigerim",
+            "entity_type": "specialist",
+            "source_ref": "message",
+        }
         assert result["payload"]["tool_args"]["specialist_name"] == "Айгерим"
+
+    def test_policy_core_rejects_conflicting_service_shadow_against_canonical_referent(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "action": "fact",
+                "intent": "pricing",
+                "tool_action": "catalog.service_query",
+                "tool_args": {"service_query": "педикюр"},
+                "pack_refs": [],
+                "entity_refs": [
+                    {
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "message",
+                        "value": "маникюр",
+                        "confidence": 0.93,
+                    }
+                ],
+                "referents": {
+                    "service": {
+                        "value": "маникюр",
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "message",
+                    }
+                },
+                "subject_kind": "service",
+                "capability": "pricing",
+                "temporal_scope": "none",
+                "resolution_mode": "policy_fact",
+                "active_question_relation": "generic_info_interrupt",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Сколько стоит маникюр?")
+
+        assert result["ok"] is False
+        assert result["error"] == "invalid_schema"
 
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1014,8 +1146,10 @@ class TestPolicyCoreTimeoutRetry:
         assert "active_question_relation" in schema["required"]
         assert "resolver_id" in schema["required"]
         assert "resolver_version" in schema["required"]
+        assert "referents" in schema["required"]
         assert schema["properties"]["slots"]["required"] == ["service", "datetime", "name", "phone"]
         assert "entity_refs" in schema["properties"]
+        assert "referents" in schema["properties"]
         assert "subject_kind" in schema["properties"]
         assert "capability" in schema["properties"]
         assert "temporal_scope" in schema["properties"]
@@ -1025,6 +1159,14 @@ class TestPolicyCoreTimeoutRetry:
         assert "active_question_relation" in schema["properties"]
         assert "resolver_id" in schema["properties"]
         assert "resolver_version" in schema["properties"]
+        assert schema["properties"]["referents"]["required"] == [
+            "service",
+            "specialist",
+            "branch",
+            "booking_ref",
+            "customer",
+        ]
+        assert schema["properties"]["referents"]["additionalProperties"] is False
         assert schema["properties"]["tool_action"]["enum"] == ["calendar.book_slot"]
 
 

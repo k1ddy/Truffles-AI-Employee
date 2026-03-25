@@ -177,6 +177,13 @@ SEMANTIC_ACTIVE_QUESTION_RELATION_VALUES = {
     "specialist_availability_followup",
     "tool_result_followup_specialist_missing",
 }
+SEMANTIC_REFERENT_KEYS = {
+    "service",
+    "specialist",
+    "branch",
+    "booking_ref",
+    "customer",
+}
 
 
 def _is_supported_number_value(value: Any) -> bool:
@@ -365,6 +372,65 @@ def _normalize_entity_refs(value: Any) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _normalize_referent_payload(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("referents_invalid")
+    row: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("value", "value"),
+        ("entity_id", "entity_id"),
+        ("entity_type", "entity_type"),
+        ("source_ref", "source_ref"),
+    ):
+        raw_value = value.get(source_key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            row[target_key] = raw_value.strip()
+    if not row:
+        return {}
+    return row
+
+
+def _normalize_referents(value: Any) -> dict[str, dict[str, Any]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("referents_invalid")
+    cleaned: dict[str, dict[str, Any]] = {}
+    for key, raw_payload in value.items():
+        if not isinstance(key, str):
+            raise ValueError("referents_invalid")
+        referent_key = key.strip().casefold()
+        if referent_key not in SEMANTIC_REFERENT_KEYS:
+            raise ValueError("referents_invalid")
+        payload = _normalize_referent_payload(raw_payload)
+        if payload:
+            cleaned[referent_key] = payload
+    return cleaned
+
+
+def _referent_value(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("value")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    entity_id = payload.get("entity_id")
+    if isinstance(entity_id, str) and entity_id.strip():
+        return entity_id.strip()
+    return None
+
+
+def _referent_entity_id(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    entity_id = payload.get("entity_id")
+    if isinstance(entity_id, str) and entity_id.strip():
+        return entity_id.strip()
+    return None
+
+
 class DialogueControllerOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -513,6 +579,7 @@ class LlmPolicyCoreOutput(BaseModel):
     reason: str | None = None
     goal: str | None = None
     entity_refs: list[dict[str, Any]] = Field(default_factory=list)
+    referents: dict[str, dict[str, Any]] = Field(default_factory=dict)
     subject_kind: str | None = None
     capability: str | None = None
     temporal_scope: str | None = None
@@ -567,6 +634,11 @@ class LlmPolicyCoreOutput(BaseModel):
     @classmethod
     def _validate_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
         return _normalize_entity_refs(value)
+
+    @field_validator("referents", mode="before")
+    @classmethod
+    def _validate_referents(cls, value: Any) -> dict[str, dict[str, Any]]:
+        return _normalize_referents(value)
 
     @field_validator("subject_kind", mode="before")
     @classmethod
@@ -660,7 +732,8 @@ class LlmPolicyCoreOutput(BaseModel):
 
         slot_service = _normalize_master_service_value(self.slots.get("service"))
         arg_service = _normalize_master_service_value(self.tool_args.get("service_query"))
-        has_service_query = bool(slot_service or arg_service)
+        referent_service = _referent_value(self.referents.get("service"))
+        has_service_query = bool(slot_service or referent_service or arg_service)
 
         if self.action == "fact":
             if self.tool_action not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
@@ -679,6 +752,25 @@ class LlmPolicyCoreOutput(BaseModel):
             if not has_service_query and not collect_requires_service:
                 raise ValueError("master_query_collect_service_clarify_required")
             return self
+
+        return self
+
+    @model_validator(mode="after")
+    def _validate_tool_arg_shadow_consistency(self):
+        service_shadow = _normalize_master_service_value(self.tool_args.get("service_query"))
+        service_referent = _referent_value(self.referents.get("service"))
+        if service_shadow and service_referent and service_shadow != service_referent:
+            raise ValueError("tool_args_service_query_semantic_mismatch")
+
+        specialist_shadow = _normalize_master_service_value(self.tool_args.get("specialist_name"))
+        specialist_referent = _referent_value(self.referents.get("specialist"))
+        if specialist_shadow and specialist_referent and specialist_shadow != specialist_referent:
+            raise ValueError("tool_args_specialist_name_semantic_mismatch")
+
+        specialist_id_shadow = _normalize_master_service_value(self.tool_args.get("specialist_id"))
+        specialist_referent_id = _referent_entity_id(self.referents.get("specialist"))
+        if specialist_id_shadow and specialist_referent_id and specialist_id_shadow != specialist_referent_id:
+            raise ValueError("tool_args_specialist_id_semantic_mismatch")
 
         return self
 
