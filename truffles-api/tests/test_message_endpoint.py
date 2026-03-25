@@ -213,7 +213,7 @@ def _stub_generic_signal_lexicons():
         )
         stack.enter_context(
             patch(
-                "app.services.info_signal_service.get_signal_lexicon_list",
+                "app.routers.webhook.info.get_signal_lexicon_list",
                 side_effect=_stub,
             )
         )

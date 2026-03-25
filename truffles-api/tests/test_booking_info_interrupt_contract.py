@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import decision as decision_router
 from app.routers.webhook import info as info_router
-from app.services import info_signal_service
 from app.services import pack_runtime_neutral_adapter as neutral_adapter
 
 
@@ -163,14 +162,14 @@ def test_pack_runtime_neutral_duration_signal_accepts_vremya_na_service_phrase()
 
 
 def test_services_overview_signal_accepts_info_about_services_phrase():
-    assert info_signal_service.looks_like_services_overview_message(
+    assert info_router._looks_like_services_overview_message(
         "Могу я получить информацию о ваших услугах?",
         client_slug="demo_salon",
     )
 
 
 def test_promotions_signal_accepts_generic_statement():
-    assert info_signal_service.looks_like_promotions_policy_message(
+    assert info_router._looks_like_promotions_policy_message(
         "Я слышал, что у вас есть акции на маникюр.",
         client_slug="demo_salon",
     )

@@ -125,7 +125,6 @@
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/pack_query_backend_service.py` | Distributed pack-query backend adapter contract (runtime_local/shadow/primary) | Backend |
-| `truffles-api/app/services/info_signal_service.py` | Info/lexicon signal helpers (routing-neutral) | Backend |
 | `truffles-api/app/services/booking_signal_service.py` | Booking/date/time signal helpers (manifest-backed regex/tokens + lexicon) | Backend |
 | `truffles-api/app/services/booking_transition_owner.py` | Single-writer booking/profile transition owner (`tool outcome -> state/profile`) | Backend |
 | `truffles-api/app/services/signal_manifest_service.py` | Signal manifest runtime compiler/loader (schema validation + signature cache + version meta) | Backend |
