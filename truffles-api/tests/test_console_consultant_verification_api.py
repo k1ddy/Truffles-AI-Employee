@@ -336,7 +336,7 @@ async def test_run_consultant_verification_simulation_rolls_back_runtime_session
     async def _fake_handle(_payload, _db, **_kwargs):
         return SimpleNamespace(conversation_id=uuid4(), bot_response="ok", message="ok")
 
-    monkeypatch.setattr(verification_service.reasoning_core, "handle_webhook_payload", _fake_handle)
+    monkeypatch.setattr(verification_service.consultant_runtime, "handle_webhook_payload", _fake_handle)
     monkeypatch.setattr(
         verification_service,
         "_capture_runtime_result",
