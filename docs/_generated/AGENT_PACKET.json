@@ -1,8 +1,8 @@
 {
-  "active_block_tp": "docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-public-entrypoint-http-contract-and-message-endpoint-surface-reset-a922.md",
+  "active_block_tp": "docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-policy-core-acceptance-replay-a922.md",
   "active_canon": "docs/ACTIVE_CANON.md",
   "active_dec": "docs/DECISIONS/DEC-2026-03-15-consultant-core-controlled-demolition.md",
-  "active_master_block": "Consultant Core Public Entrypoint HTTP Contract And Message Endpoint Surface Reset",
+  "active_master_block": "Consultant Core Policy Core Acceptance Replay",
   "active_master_tp": "docs/TASK_PACKAGES/TP-2026-03-15-consultant-core-controlled-demolition-master.md",
   "current_runtime_cutover_status": {
     "continuity": "session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback",
