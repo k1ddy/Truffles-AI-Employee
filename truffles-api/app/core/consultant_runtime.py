@@ -651,21 +651,11 @@ class ConsultantRuntime:
                     profile["current_referents"] = current_referents
             profile["semantic_contract"] = semantic_contract
 
-        pending_contract: dict[str, Any] = {}
-        next_question = dialog_state.pending_question_contract.next_question
-        if isinstance(next_question, str) and next_question.strip():
-            pending_contract["slot"] = next_question.strip()
-        elif runtime_state.expected_reply_type:
-            pending_contract["slot"] = {
-                "service_choice": "service",
-                "time": "datetime",
-                "name": "name",
-                "phone": "phone",
-            }.get(runtime_state.expected_reply_type)
-        if runtime_state.expected_reply_type:
-            pending_contract["expected_reply_type"] = runtime_state.expected_reply_type
-        if runtime_state.expected_reply_reason:
-            pending_contract["reason"] = runtime_state.expected_reply_reason
+        pending_contract = self.dialog_state.project_pending_question_contract(
+            dialog_state.pending_question_contract,
+            expected_reply_type=runtime_state.expected_reply_type,
+            expected_reply_reason=runtime_state.expected_reply_reason,
+        ) or {}
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
 
@@ -941,9 +931,19 @@ class ConsultantRuntime:
             trace_event["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
             trace_event["expected_reply_reason"] = expected_reply_reason
+        pending_question_contract = self.dialog_state.project_pending_question_contract(
+            dialog_state.pending_question_contract,
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=expected_reply_reason,
+        ) or {}
+        if pending_question_contract:
+            trace_event["pending_question_contract"] = pending_question_contract
         pending_question_act = None
         pending_question_target = None
-        active_question_relation = decision.interaction.relation
+        active_question_relation = (
+            dialog_state.pending_question_contract.active_question_relation
+            or decision.interaction.relation
+        )
         question_contract_active = False
         if isinstance(execution.meta, dict):
             pending_question_act = execution.meta.get("pending_question_act")
@@ -957,8 +957,13 @@ class ConsultantRuntime:
             question_contract_active = question_contract_active or bool(
                 decision.meta.get("question_contract")
             )
+        if not pending_question_act:
+            pending_question_act = dialog_state.pending_question_contract.pending_question_act
         if not pending_question_target:
-            pending_question_target = decision.interaction.target
+            pending_question_target = (
+                dialog_state.pending_question_contract.pending_question_target
+                or decision.interaction.target
+            )
         if pending_question_target:
             trace_event["pending_question_target"] = pending_question_target
         if active_question_relation:
@@ -977,31 +982,35 @@ class ConsultantRuntime:
         if not isinstance(trace, list):
             trace = []
         if pending_question_act and expected_reply_type:
-            trace.append(
-                {
-                    "stage": "pending_question_interaction",
-                    "decision": pending_question_act,
-                    "state": getattr(conversation, "state", None),
-                    "source": contract_source,
-                    "pending_question_act": pending_question_act,
-                    "pending_question_target": pending_question_target or "time",
-                    "active_question_relation": active_question_relation or pending_question_act,
-                    "expected_reply_type": expected_reply_type,
-                }
-            )
+            interaction_entry = {
+                "stage": "pending_question_interaction",
+                "decision": pending_question_act,
+                "state": getattr(conversation, "state", None),
+                "source": contract_source,
+                "pending_question_act": pending_question_act,
+                "pending_question_target": pending_question_target or "time",
+                "active_question_relation": active_question_relation or pending_question_act,
+                "expected_reply_type": expected_reply_type,
+            }
+            if pending_question_contract:
+                interaction_entry["pending_question_contract"] = pending_question_contract
+            trace.append(interaction_entry)
         if question_contract_active and expected_reply_type:
-            trace.append(
-                {
-                    "stage": "question_contract",
-                    "decision": pending_question_act or contract_action,
-                    "state": getattr(conversation, "state", None),
-                    "source": contract_source,
-                    "expected_reply_type": expected_reply_type,
-                    "reason": expected_reply_reason,
-                    "pending_question_act": pending_question_act,
-                    "pending_question_target": pending_question_target or "time",
-                }
-            )
+            question_contract_entry = {
+                "stage": "question_contract",
+                "decision": pending_question_act or contract_action,
+                "state": getattr(conversation, "state", None),
+                "source": contract_source,
+                "expected_reply_type": expected_reply_type,
+                "reason": expected_reply_reason,
+                "pending_question_act": pending_question_act,
+                "pending_question_target": pending_question_target or "time",
+            }
+            if active_question_relation:
+                question_contract_entry["active_question_relation"] = active_question_relation
+            if pending_question_contract:
+                question_contract_entry["pending_question_contract"] = pending_question_contract
+            trace.append(question_contract_entry)
         trace.append(trace_event)
         context[_RUNTIME_TRACE_KEY] = trace[-20:]
         conversation.context = context
@@ -1021,6 +1030,8 @@ class ConsultantRuntime:
             decision_meta["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
             decision_meta["expected_reply_reason"] = expected_reply_reason
+        if pending_question_contract:
+            decision_meta["pending_question_contract"] = pending_question_contract
         if pending_question_target:
             decision_meta["pending_question_target"] = pending_question_target
         if active_question_relation:

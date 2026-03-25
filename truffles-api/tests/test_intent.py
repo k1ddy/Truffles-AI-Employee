@@ -577,9 +577,13 @@ class TestPolicyCoreTimeoutRetry:
                         "ignored": "skip",
                     },
                     "pending_question_contract": {
-                        "slot": "datetime",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
                         "expected_reply_type": "time",
                         "reason": "booking_followup",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
                         "value": "завтра после 15",
                         "ignored": "skip",
                     },
@@ -629,9 +633,13 @@ class TestPolicyCoreTimeoutRetry:
             "booking_ref": "ref-123",
         }
         assert memory_payload.get("profile", {}).get("pending_question_contract") == {
-            "slot": "datetime",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
             "expected_reply_type": "time",
             "reason": "booking_followup",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
             "value": "завтра после 15",
         }
         assert memory_payload.get("profile", {}).get("consult_state") == {
@@ -914,8 +922,12 @@ class TestPolicyCoreTimeoutRetry:
                 },
                 "pending_question_contract": {
                     "next_question": " time ",
+                    "open_questions": [" time ", " "],
                     "expected_reply_type": " time ",
                     "reason": " booking_followup ",
+                    "pending_question_act": " ask_about_requested_slot ",
+                    "pending_question_target": " time ",
+                    "active_question_relation": " ask_about_requested_slot ",
                 },
                 "interaction_state": {
                     "resume_slot": " datetime ",
@@ -942,9 +954,13 @@ class TestPolicyCoreTimeoutRetry:
                 "booking_ref": "BK-1",
             },
             "pending_question_contract": {
-                "slot": "datetime",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
                 "expected_reply_type": "time",
                 "reason": "booking_followup",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
             },
             "interaction_state": {
                 "resume_slot": "datetime",

@@ -38,6 +38,8 @@ class PendingQuestionContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_reply_type: str | None = None
+    reason: str | None = None
+    pending_question_act: str | None = None
     pending_question_target: str | None = None
     active_question_relation: str | None = None
     next_question: str | None = None
@@ -205,13 +207,7 @@ class TurnPlanner:
             payload.get("active_question_relation")
         )
         capability = self._normalize_token(payload.get("capability"))
-        pending_question = PendingQuestionContract(
-            expected_reply_type=self._normalize_token(payload.get("expected_reply_type")),
-            pending_question_target=self._normalize_token(payload.get("pending_question_target")),
-            active_question_relation=self._normalize_token(payload.get("active_question_relation")),
-            next_question=self._normalize_token(payload.get("next_question")),
-            open_questions=self._normalize_list(payload.get("open_questions")),
-        )
+        pending_question = self._build_pending_question_contract(payload)
         meta = {
             "planner_source": "turn_planner",
             "synthetic_policy_decision": True,
@@ -456,6 +452,35 @@ class TurnPlanner:
             interaction_owner=interaction_owner,
             interaction_relation=interaction_relation,
             source="llm_policy_core",
+        )
+
+    def _build_pending_question_contract(
+        self,
+        payload: dict[str, Any],
+    ) -> PendingQuestionContract:
+        expected_reply_type = self._normalize_token(payload.get("expected_reply_type"))
+        pending_question_act = self._normalize_token(payload.get("pending_question_act"))
+        pending_question_target = self._normalize_token(payload.get("pending_question_target"))
+        active_question_relation = self._normalize_token(payload.get("active_question_relation"))
+        next_question = self._normalize_token(payload.get("next_question"))
+        open_questions = self._normalize_list(payload.get("open_questions"))
+        contract_active = bool(
+            expected_reply_type
+            or pending_question_act
+            or pending_question_target
+            or active_question_relation
+            or next_question
+            or open_questions
+        )
+        reason = self._normalize_token(payload.get("reason")) if contract_active else None
+        return PendingQuestionContract(
+            expected_reply_type=expected_reply_type,
+            reason=reason,
+            pending_question_act=pending_question_act,
+            pending_question_target=pending_question_target,
+            active_question_relation=active_question_relation,
+            next_question=next_question,
+            open_questions=open_questions,
         )
 
     @classmethod

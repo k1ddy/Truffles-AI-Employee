@@ -1370,12 +1370,34 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     pending_question_contract = profile.get("pending_question_contract")
     if isinstance(pending_question_contract, dict):
         cleaned_pending: dict[str, Any] = {}
-        slot = pending_question_contract.get("slot") or pending_question_contract.get("next_question")
-        if isinstance(slot, str) and slot.strip():
-            slot_token = slot.strip().casefold()
+        next_question = pending_question_contract.get("next_question") or pending_question_contract.get("slot")
+        if isinstance(next_question, str) and next_question.strip():
+            slot_token = next_question.strip().casefold()
             slot_token = {"time": "datetime", "date": "datetime"}.get(slot_token, slot_token)
             if slot_token in {"service", "datetime", "name", "phone"}:
-                cleaned_pending["slot"] = slot_token
+                cleaned_pending["next_question"] = slot_token
+        open_questions = pending_question_contract.get("open_questions")
+        if isinstance(open_questions, list):
+            cleaned_questions: list[str] = []
+            seen_questions: set[str] = set()
+            for raw_question in open_questions:
+                if len(cleaned_questions) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                    break
+                if not isinstance(raw_question, str) or not raw_question.strip():
+                    continue
+                question_token = raw_question.strip().casefold()
+                question_token = {"time": "datetime", "date": "datetime"}.get(
+                    question_token,
+                    question_token,
+                )
+                if question_token not in {"service", "datetime", "name", "phone"}:
+                    continue
+                if question_token in seen_questions:
+                    continue
+                cleaned_questions.append(question_token)
+                seen_questions.add(question_token)
+            if cleaned_questions:
+                cleaned_pending["open_questions"] = cleaned_questions
         pending_expected_reply_type = pending_question_contract.get("expected_reply_type")
         if (
             isinstance(pending_expected_reply_type, str)
@@ -1389,6 +1411,38 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             cleaned_pending["reason"] = " ".join(reason.split())[
                 :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
             ]
+        pending_question_act = pending_question_contract.get("pending_question_act")
+        if isinstance(pending_question_act, str) and pending_question_act.strip():
+            act_token = pending_question_act.strip().casefold()
+            if act_token in {
+                "fill_requested_slot",
+                "ask_about_requested_slot",
+                "slot_constraint",
+                "slot_compare",
+                "mixed_fill_plus_question",
+            }:
+                cleaned_pending["pending_question_act"] = act_token
+        pending_question_target = pending_question_contract.get("pending_question_target")
+        if isinstance(pending_question_target, str) and pending_question_target.strip():
+            target_token = pending_question_target.strip().casefold()
+            if target_token in {"time", "specialist"}:
+                cleaned_pending["pending_question_target"] = target_token
+        active_question_relation = pending_question_contract.get("active_question_relation")
+        if isinstance(active_question_relation, str) and active_question_relation.strip():
+            relation_token = active_question_relation.strip().casefold()
+            if relation_token in {
+                "fill_requested_slot",
+                "ask_about_requested_slot",
+                "slot_constraint",
+                "slot_compare",
+                "mixed_fill_plus_question",
+                "referent_followup",
+                "generic_info_interrupt",
+                "specialist_availability_interrupt",
+                "specialist_availability_followup",
+                "tool_result_followup_specialist_missing",
+            }:
+                cleaned_pending["active_question_relation"] = relation_token
         value = pending_question_contract.get("value")
         if isinstance(value, str) and value.strip():
             cleaned_pending["value"] = " ".join(value.split())[

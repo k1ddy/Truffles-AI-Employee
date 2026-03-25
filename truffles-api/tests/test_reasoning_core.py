@@ -263,7 +263,9 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
                     },
                     "pending_question_contract": {
                         "next_question": "service",
+                        "open_questions": ["service"],
                         "expected_reply_type": "service_choice",
+                        "reason": "collect:service",
                         "pending_question_target": "specialist",
                         "active_question_relation": "referent_followup",
                     },
@@ -322,9 +324,12 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
             "specialist": "Айгерим",
         },
         "pending_question_contract": {
-            "slot": "service",
+            "next_question": "service",
+            "open_questions": ["service"],
             "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
             "reason": "collect:service",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
         },
         "semantic_contract": {
             "contract_version": "semantic_contract.v1",

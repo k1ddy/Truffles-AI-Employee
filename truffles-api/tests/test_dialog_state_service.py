@@ -101,6 +101,15 @@ def test_dialog_state_service_projects_expected_reply_fields_without_mutating_ot
     assert projections.session_memory_interaction_state.interaction_owner == "question_contract"
 
 
+def test_dialog_state_service_omits_empty_pending_question_contract_projection() -> None:
+    service = DialogStateService()
+    dialog_state = service.normalize({})
+
+    projected = service.project_pending_question_contract(dialog_state.pending_question_contract)
+
+    assert projected is None
+
+
 def test_dialog_state_service_builds_collect_owner_state() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {
@@ -126,10 +135,13 @@ def test_dialog_state_service_builds_collect_owner_state() -> None:
     )
 
     assert state.pending_question_contract.expected_reply_type == "service_choice"
-    assert state.pending_question_contract.pending_question_target == "service"
+    assert state.pending_question_contract.reason == "service_clarify"
+    assert state.pending_question_contract.pending_question_act is None
+    assert state.pending_question_contract.pending_question_target is None
     assert state.pending_question_contract.next_question == "service"
     assert state.pending_question_contract.open_questions == ["service"]
     assert state.interaction_state.resume_slot == "service"
+    assert state.interaction_state.interaction_target is None
     assert state.interaction_state.interaction_owner == "turn_planner.safe_master_query_collect.v1"
     assert state.interaction_state.grounded_referents == {"branch": "almaty-center"}
     assert state.current_referents.branch == "almaty-center"
@@ -163,10 +175,13 @@ def test_dialog_state_service_builds_booking_prompt_owner_state() -> None:
     )
 
     assert state.pending_question_contract.expected_reply_type == "time"
-    assert state.pending_question_contract.pending_question_target == "datetime"
+    assert state.pending_question_contract.reason == "booking_prompt"
+    assert state.pending_question_contract.pending_question_act is None
+    assert state.pending_question_contract.pending_question_target is None
     assert state.pending_question_contract.next_question == "datetime"
     assert state.pending_question_contract.open_questions == ["datetime"]
     assert state.interaction_state.resume_slot == "datetime"
+    assert state.interaction_state.interaction_target is None
     assert state.interaction_state.interaction_owner == "turn_planner.safe_booking_prompt_owner.v1"
     assert state.current_referents.service == "Маникюр"
     assert state.projections.expected_reply_type == "time"
@@ -2635,6 +2650,8 @@ def test_dialog_state_service_preserves_active_booking_contract_across_fact_inte
     runtime_payload = updated["consultant_runtime"]
     assert runtime_payload["expected_reply_type"] == "time"
     assert runtime_payload["expected_reply_reason"] == "collect:datetime"
+    assert dialog_state.pending_question_contract.reason == "collect:datetime"
+    assert dialog_state.pending_question_contract.pending_question_act is None
     assert dialog_state.pending_question_contract.pending_question_target == "time"
     assert dialog_state.pending_question_contract.active_question_relation == "ask_about_requested_slot"
     assert dialog_state.pending_question_contract.next_question == "datetime"
@@ -2645,6 +2662,30 @@ def test_dialog_state_service_preserves_active_booking_contract_across_fact_inte
     }
     assert dialog_state.current_referents.specialist == "Айгерим"
     assert booking_payload["service"] == "Маникюр"
+
+
+def test_dialog_state_service_omits_empty_pending_question_contract_in_runtime_payload() -> None:
+    service = DialogStateService()
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta={"info_sections": ["hours"]},
+        now=datetime(2026, 3, 25, 12, 18, tzinfo=timezone.utc),
+    )
+
+    assert dialog_state.pending_question_contract.next_question is None
+    assert "pending_question_contract" not in updated["consultant_runtime"]
 
 
 def test_dialog_state_service_persists_specialist_followup_referent_on_collect() -> None:
@@ -2708,6 +2749,8 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
 
     runtime_payload = updated["consultant_runtime"]
     assert runtime_payload["expected_reply_type"] == "time"
+    assert dialog_state.pending_question_contract.reason == "collect:datetime"
+    assert dialog_state.pending_question_contract.pending_question_act is None
     assert dialog_state.pending_question_contract.pending_question_target == "specialist"
     assert dialog_state.pending_question_contract.active_question_relation == "referent_followup"
     assert dialog_state.pending_question_contract.next_question == "datetime"

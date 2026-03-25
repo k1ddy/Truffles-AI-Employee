@@ -298,6 +298,7 @@ class TurnExecutor:
             decision,
             booking_state=merged_slots,
         )
+        pending_question_contract = self._build_execution_pending_question_contract(decision)
         next_slot = (
             self._normalize_booking_slot(decision.pending_question_contract.next_question)
             or self._first_missing_booking_slot(merged_slots)
@@ -342,12 +343,14 @@ class TurnExecutor:
                         "alternate_datetime": candidate_datetime,
                         },
                         semantic_contract=semantic_contract,
+                        pending_question_contract=pending_question_contract,
                     ),
                 )
         prompt = prompt_map.get(next_slot or "", "Подскажите, пожалуйста, следующий удобный слот.")
         meta: dict[str, Any] = self._attach_semantic_contract_meta(
             {"slot_values": merged_slots},
             semantic_contract=semantic_contract,
+            pending_question_contract=pending_question_contract,
         )
         if next_slot:
             meta["next_slot"] = next_slot
@@ -398,6 +401,7 @@ class TurnExecutor:
             booking_state=merged_slots,
             service_name=service_name,
         )
+        pending_question_contract = self._build_execution_pending_question_contract(decision)
         fact_refs = {
             str(item).strip().casefold()
             for item in (
@@ -444,6 +448,7 @@ class TurnExecutor:
                     meta=self._attach_semantic_contract_meta(
                         master_meta,
                         semantic_contract=semantic_contract,
+                        pending_question_contract=pending_question_contract,
                     ),
                     request_handoff=master_reply.action == "escalate",
                 )
@@ -479,6 +484,7 @@ class TurnExecutor:
                 tool_meta = self._attach_semantic_contract_meta(
                     tool_meta,
                     semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
                 )
                 return RuntimeExecutionResult(
                     text=tool_result.response_text.strip(),
@@ -518,6 +524,7 @@ class TurnExecutor:
                 meta=self._attach_semantic_contract_meta(
                     pack_meta,
                     semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
                 ),
                 request_handoff=request_handoff,
             )
@@ -529,6 +536,7 @@ class TurnExecutor:
             meta=self._attach_semantic_contract_meta(
                 {"fact_fallback": True},
                 semantic_contract=semantic_contract,
+                pending_question_contract=pending_question_contract,
             ),
         )
 
@@ -544,11 +552,22 @@ class TurnExecutor:
         meta: dict[str, Any] | None,
         *,
         semantic_contract: dict[str, Any] | None,
+        pending_question_contract: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = dict(meta) if isinstance(meta, dict) else {}
         if isinstance(semantic_contract, dict) and semantic_contract:
             payload["semantic_contract"] = semantic_contract
+        if isinstance(pending_question_contract, dict) and pending_question_contract:
+            payload["pending_question_contract"] = pending_question_contract
         return payload
+
+    @staticmethod
+    def _build_execution_pending_question_contract(
+        decision: PolicyDecision,
+    ) -> dict[str, Any] | None:
+        return DialogStateService().project_pending_question_contract(
+            decision.pending_question_contract,
+        )
 
     def _build_execution_semantic_contract(
         self,
@@ -703,6 +722,7 @@ class TurnExecutor:
             booking_state=merged_slots,
             service_name=merged_slots.get("service"),
         )
+        pending_question_contract = self._build_execution_pending_question_contract(decision)
         missing_slot = self._first_missing_booking_slot(merged_slots)
         if missing_slot is not None:
             prompt = self._BOOKING_PROMPTS.get(missing_slot, self._BOOKING_PROMPTS["service"])
@@ -713,6 +733,7 @@ class TurnExecutor:
                 meta=self._attach_semantic_contract_meta(
                     {"slot_values": merged_slots, "booking_incomplete": True},
                     semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
                 ),
             )
 
@@ -724,6 +745,7 @@ class TurnExecutor:
                 meta=self._attach_semantic_contract_meta(
                     {"slot_values": merged_slots},
                     semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
                 ),
                 request_handoff=True,
             )
@@ -737,6 +759,7 @@ class TurnExecutor:
                 meta=self._attach_semantic_contract_meta(
                     {"slot_values": merged_slots, "booking_incomplete": True},
                     semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
                 ),
             )
 
@@ -772,6 +795,7 @@ class TurnExecutor:
                     "booking_incomplete": True,
                     },
                     semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
                 ),
             )
         confirmation_text = (
@@ -790,6 +814,7 @@ class TurnExecutor:
                 "datetime": merged_slots.get("datetime"),
                 },
                 semantic_contract=semantic_contract,
+                pending_question_contract=pending_question_contract,
             ),
             clear_booking=True,
         )

@@ -81,6 +81,8 @@ def _policy_payload() -> dict:
         },
         "pending_question_contract": {
             "expected_reply_type": "time",
+            "reason": "booking_time_availability_followup",
+            "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
             "active_question_relation": "ask_about_requested_slot",
             "next_question": "datetime",
@@ -102,6 +104,8 @@ def _dialog_state_payload() -> dict:
         },
         "pending_question_contract": {
             "expected_reply_type": "time",
+            "reason": "booking_time_availability_followup",
+            "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
             "active_question_relation": "ask_about_requested_slot",
             "next_question": "datetime",
@@ -284,9 +288,13 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
             "customer": "Марина",
         },
         "pending_question_contract": {
-            "slot": "datetime",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
             "expected_reply_type": "time",
             "reason": "collect:datetime",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
         },
         "interaction_state": {
             "resume_slot": "time",
@@ -1838,11 +1846,36 @@ def test_consultant_runtime_records_question_contract_trace_entries() -> None:
     assert any(
         entry.get("stage") == "question_contract"
         and entry.get("expected_reply_type") == "time"
+        and entry.get("pending_question_contract", {}).get("next_question") == "datetime"
         for entry in trace
     )
     decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
     assert decision_meta.get("pending_question_act") == "slot_constraint"
     assert decision_meta.get("question_contract") is True
+    assert decision_meta.get("pending_question_contract") == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "pending_question_act": "slot_constraint",
+        "pending_question_target": "time",
+        "active_question_relation": "slot_constraint",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
+def test_turn_executor_omits_empty_pending_question_contract_from_execution_meta() -> None:
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    assert TurnExecutor._build_execution_pending_question_contract(decision) is None
 
 
 def test_consultant_runtime_records_referent_followup_axes_in_trace_and_meta() -> None:
@@ -1899,6 +1932,14 @@ def test_consultant_runtime_records_referent_followup_axes_in_trace_and_meta() -
     decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
     assert decision_meta.get("pending_question_target") == "specialist"
     assert decision_meta.get("active_question_relation") == "referent_followup"
+    assert decision_meta.get("pending_question_contract") == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "pending_question_target": "specialist",
+        "active_question_relation": "referent_followup",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
 
 
 def test_consultant_runtime_finalizes_booking_commit_as_terminal_fact() -> None:

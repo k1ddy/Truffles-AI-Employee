@@ -311,11 +311,14 @@ class DialogStateService:
         interaction_target = (
             self._normalize_projection_token(decision.interaction.target)
             or self._normalize_projection_token(pending_contract.pending_question_target)
-            or next_question
         )
         interaction_relation = (
             self._normalize_projection_token(decision.interaction.relation)
             or self._normalize_projection_token(pending_contract.active_question_relation)
+        )
+        pending_question_act = (
+            self._normalize_projection_token(pending_contract.pending_question_act)
+            or self._normalize_projection_token(decision.meta.get("pending_question_act"))
         )
         interaction_owner = self.build_interaction_owner(
             explicit_owner=decision.interaction.owner,
@@ -358,14 +361,20 @@ class DialogStateService:
         }
         if owner_cutover:
             meta["owner_cutover"] = owner_cutover
+        pending_question_payload = self.project_pending_question_contract(
+            pending_contract,
+            expected_reply_type=expected_reply_token,
+            expected_reply_reason=reason_token,
+            pending_question_act=pending_question_act,
+            pending_question_target=interaction_target,
+            active_question_relation=interaction_relation,
+            next_question=next_question,
+            open_questions=open_questions,
+        )
         return DialogState(
             current_referents=CurrentReferents(**current_referents),
-            pending_question_contract=PendingQuestionContract(
-                expected_reply_type=expected_reply_token,
-                pending_question_target=interaction_target,
-                active_question_relation=interaction_relation,
-                next_question=next_question,
-                open_questions=open_questions,
+            pending_question_contract=PendingQuestionContract.model_validate(
+                pending_question_payload or {}
             ),
             interaction_state=interaction_state,
             projections=DialogStateProjections(
@@ -400,6 +409,89 @@ class DialogStateService:
                 }
             }
         )
+
+    def project_pending_question_contract(
+        self,
+        contract: PendingQuestionContract | dict[str, Any] | None,
+        *,
+        expected_reply_type: str | None = None,
+        expected_reply_reason: str | None = None,
+        pending_question_act: str | None = None,
+        pending_question_target: str | None = None,
+        active_question_relation: str | None = None,
+        next_question: str | None = None,
+        open_questions: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any] | None:
+        base_payload: dict[str, Any]
+        if isinstance(contract, PendingQuestionContract):
+            base_payload = contract.model_dump(mode="json", exclude_none=True)
+        elif isinstance(contract, dict):
+            base_payload = dict(contract)
+        else:
+            base_payload = {}
+        normalized_next_question = self._normalize_projection_token(
+            next_question
+            if next_question is not None
+            else base_payload.get("next_question") or base_payload.get("slot")
+        )
+        normalized_open_questions = [
+            token
+            for token in (
+                self._normalize_projection_token(item)
+                for item in (
+                    open_questions
+                    if isinstance(open_questions, (list, tuple))
+                    else base_payload.get("open_questions", ())
+                )
+            )
+            if token
+        ]
+        if not normalized_open_questions and normalized_next_question:
+            normalized_open_questions = [normalized_next_question]
+        normalized_expected_reply_type = self._normalize_projection_token(
+            expected_reply_type if expected_reply_type is not None else base_payload.get("expected_reply_type")
+        )
+        if not normalized_expected_reply_type and normalized_next_question:
+            normalized_expected_reply_type = {
+                "service": "service_choice",
+                "datetime": "time",
+                "name": "name",
+                "phone": "phone",
+            }.get(normalized_next_question)
+        normalized_reason = self._normalize_projection_token(
+            expected_reply_reason if expected_reply_reason is not None else base_payload.get("reason")
+        )
+        normalized_pending_question_act = self._normalize_projection_token(
+            pending_question_act
+            if pending_question_act is not None
+            else base_payload.get("pending_question_act")
+        )
+        normalized_pending_question_target = self._normalize_projection_token(
+            pending_question_target
+            if pending_question_target is not None
+            else base_payload.get("pending_question_target")
+        )
+        normalized_active_question_relation = self._normalize_projection_token(
+            active_question_relation
+            if active_question_relation is not None
+            else base_payload.get("active_question_relation")
+        )
+        payload: dict[str, Any] = {}
+        if normalized_expected_reply_type:
+            payload["expected_reply_type"] = normalized_expected_reply_type
+        if normalized_reason:
+            payload["reason"] = normalized_reason
+        if normalized_pending_question_act:
+            payload["pending_question_act"] = normalized_pending_question_act
+        if normalized_pending_question_target:
+            payload["pending_question_target"] = normalized_pending_question_target
+        if normalized_active_question_relation:
+            payload["active_question_relation"] = normalized_active_question_relation
+        if normalized_next_question:
+            payload["next_question"] = normalized_next_question
+        if normalized_open_questions:
+            payload["open_questions"] = normalized_open_questions
+        return payload or None
 
     def project_legacy_fields(self, state: DialogState) -> dict[str, Any]:
         projections = self.project_expected_reply_projections(state.projections)
@@ -760,6 +852,7 @@ class DialogStateService:
             self._normalize_projection_token(base_state.interaction_state.interaction_relation)
             or self._normalize_projection_token(base_pending.active_question_relation)
         )
+        pending_question_act = self._normalize_projection_token(base_pending.pending_question_act)
         interaction_owner = (
             self._normalize_projection_token(base_state.interaction_state.interaction_owner)
             or self.build_interaction_owner(
@@ -779,14 +872,20 @@ class DialogStateService:
             interaction_owner=interaction_owner,
             grounded_referents=dict(grounded_referents or {}),
         )
+        pending_question_payload = self.project_pending_question_contract(
+            base_pending,
+            expected_reply_type=expected_reply_token,
+            expected_reply_reason=reason_token,
+            pending_question_act=pending_question_act,
+            pending_question_target=interaction_target,
+            active_question_relation=interaction_relation,
+            next_question=next_question,
+            open_questions=open_questions,
+        )
         return DialogState(
             current_referents=self._current_referents_from_grounded_referents(grounded_referents),
-            pending_question_contract=PendingQuestionContract(
-                expected_reply_type=expected_reply_token,
-                pending_question_target=interaction_target,
-                active_question_relation=interaction_relation,
-                next_question=next_question,
-                open_questions=open_questions,
+            pending_question_contract=PendingQuestionContract.model_validate(
+                pending_question_payload or {}
             ),
             interaction_state=interaction_state,
             projections=DialogStateProjections(
@@ -1124,42 +1223,62 @@ class DialogStateService:
         booking_payload = self.normalize_booking_payload(runtime_payload.get("booking"))
         if booking_payload is None:
             booking_payload = self.normalize_booking_payload(working_context.get("booking"))
-        pending_contract = runtime_payload.get("pending_question_contract")
-        if not isinstance(pending_contract, dict):
-            pending_contract = {}
-        expected_reply_type = self.project_expected_reply_projections(
+        pending_contract = self.project_pending_question_contract(
+            runtime_payload.get("pending_question_contract"),
             expected_reply_type=runtime_payload.get("expected_reply_type")
             or working_context.get("expected_reply_type"),
             expected_reply_reason=runtime_payload.get("expected_reply_reason")
             or working_context.get("expected_reply_reason"),
-        ).expected_reply_type
-        expected_reply_reason = self.project_expected_reply_projections(
-            expected_reply_type=expected_reply_type,
-            expected_reply_reason=runtime_payload.get("expected_reply_reason")
+        ) or {}
+        expected_projections = self.project_expected_reply_projections(
+            expected_reply_type=pending_contract.get("expected_reply_type")
+            or runtime_payload.get("expected_reply_type")
+            or working_context.get("expected_reply_type"),
+            expected_reply_reason=pending_contract.get("reason")
+            or runtime_payload.get("expected_reply_reason")
             or working_context.get("expected_reply_reason"),
-        ).expected_reply_reason
+        )
+        expected_reply_type = expected_projections.expected_reply_type
+        expected_reply_reason = expected_projections.expected_reply_reason
         current_goal = self._normalize_projection_token(
             runtime_payload.get("current_goal") or working_context.get("current_goal")
         )
 
         dialog_state_payload = runtime_payload.get("dialog_state")
         if not isinstance(dialog_state_payload, dict):
-            fallback_next_question = _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(
-                expected_reply_type or ""
+            fallback_next_question = (
+                pending_contract.get("next_question")
+                or _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(expected_reply_type or "")
             )
             dialog_state_payload = {
                 "current_referents": {
                     "service": booking_payload.get("service") if isinstance(booking_payload, dict) else None,
                 },
-                "pending_question_contract": {
-                    "expected_reply_type": expected_reply_type,
-                    "next_question": fallback_next_question,
-                },
+                "pending_question_contract": (
+                    pending_contract
+                    or {
+                        "expected_reply_type": expected_reply_type,
+                        "reason": expected_reply_reason,
+                        "next_question": fallback_next_question,
+                        "open_questions": [fallback_next_question] if fallback_next_question else [],
+                    }
+                ),
                 "interaction_state": {
                     "interaction_owner": "consultant_runtime",
                 },
             }
         dialog_state = self.normalize(dialog_state_payload)
+        dialog_pending_contract = self.project_pending_question_contract(
+            dialog_state.pending_question_contract,
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=expected_reply_reason,
+        ) or {}
+        projections = self.project_expected_reply_projections(
+            expected_reply_type=dialog_pending_contract.get("expected_reply_type") or expected_reply_type,
+            expected_reply_reason=dialog_pending_contract.get("reason") or expected_reply_reason,
+        )
+        expected_reply_type = projections.expected_reply_type
+        expected_reply_reason = projections.expected_reply_reason
 
         if not booking_payload and working_context.get("pending_resume"):
             restored = self.restore_pending_resume_payload(
@@ -1332,14 +1451,16 @@ class DialogStateService:
         if semantic_contract:
             dialog_state.meta["semantic_contract"] = semantic_contract
 
+        pending_question_contract = self.project_pending_question_contract(
+            dialog_state.pending_question_contract,
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=expected_reply_reason,
+        )
         runtime_payload = {
             "schema_version": "consultant_runtime.v1",
             "dialog_state": dialog_state.model_dump(mode="json", exclude_none=True),
             "booking": merged_booking,
-            "pending_question_contract": dialog_state.pending_question_contract.model_dump(
-                mode="json",
-                exclude_none=True,
-            ),
+            "pending_question_contract": pending_question_contract,
             "expected_reply_type": expected_reply_type,
             "expected_reply_reason": expected_reply_reason,
             "current_goal": current_goal,

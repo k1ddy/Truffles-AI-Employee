@@ -73,6 +73,8 @@
       "additionalProperties": false,
       "required": [
         "expected_reply_type",
+        "reason",
+        "pending_question_act",
         "pending_question_target",
         "active_question_relation",
         "next_question",
@@ -80,6 +82,12 @@
       ],
       "properties": {
         "expected_reply_type": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "reason": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "pending_question_act": {
           "$ref": "#/$defs/nullableToken"
         },
         "pending_question_target": {

@@ -268,13 +268,36 @@ def resolve_llm_booking_prompt_candidate(
         for referent_key, raw_value in referent_map.items():
             if isinstance(raw_value, str) and raw_value.strip():
                 runtime_current_referents[referent_key] = raw_value.strip()
-    runtime_pending_question_contract: dict[str, str] = {}
+    runtime_pending_question_contract: dict[str, Any] = {}
     if loaded_dialog_state is not None:
         next_question = loaded_dialog_state.pending_question_contract.next_question
         if isinstance(next_question, str) and next_question.strip():
-            runtime_pending_question_contract["slot"] = next_question.strip()
+            runtime_pending_question_contract["next_question"] = next_question.strip()
+        open_questions = [
+            item.strip()
+            for item in loaded_dialog_state.pending_question_contract.open_questions
+            if isinstance(item, str) and item.strip()
+        ]
+        if open_questions:
+            runtime_pending_question_contract["open_questions"] = open_questions
+        pending_question_act = loaded_dialog_state.pending_question_contract.pending_question_act
+        if isinstance(pending_question_act, str) and pending_question_act.strip():
+            runtime_pending_question_contract["pending_question_act"] = pending_question_act.strip()
+        pending_question_target = loaded_dialog_state.pending_question_contract.pending_question_target
+        if isinstance(pending_question_target, str) and pending_question_target.strip():
+            runtime_pending_question_contract["pending_question_target"] = (
+                pending_question_target.strip()
+            )
+        active_question_relation = loaded_dialog_state.pending_question_contract.active_question_relation
+        if isinstance(active_question_relation, str) and active_question_relation.strip():
+            runtime_pending_question_contract["active_question_relation"] = (
+                active_question_relation.strip()
+            )
+        question_reason = loaded_dialog_state.pending_question_contract.reason
+        if isinstance(question_reason, str) and question_reason.strip():
+            runtime_pending_question_contract["reason"] = question_reason.strip()
     if (
-        "slot" not in runtime_pending_question_contract
+        "next_question" not in runtime_pending_question_contract
         and isinstance(runtime_expected_reply_type, str)
         and runtime_expected_reply_type.strip()
     ):
@@ -285,12 +308,17 @@ def resolve_llm_booking_prompt_candidate(
             decision_router.EXPECTED_REPLY_PHONE: "phone",
         }.get(runtime_expected_reply_type.strip())
         if projected_slot:
-            runtime_pending_question_contract["slot"] = projected_slot
+            runtime_pending_question_contract["next_question"] = projected_slot
+            runtime_pending_question_contract.setdefault("open_questions", [projected_slot])
     if isinstance(runtime_expected_reply_type, str) and runtime_expected_reply_type.strip():
         runtime_pending_question_contract["expected_reply_type"] = (
             runtime_expected_reply_type.strip()
         )
-    if isinstance(runtime_expected_reply_reason, str) and runtime_expected_reply_reason.strip():
+    if (
+        "reason" not in runtime_pending_question_contract
+        and isinstance(runtime_expected_reply_reason, str)
+        and runtime_expected_reply_reason.strip()
+    ):
         runtime_pending_question_contract["reason"] = runtime_expected_reply_reason.strip()
 
     policy_memory_profile = None
@@ -303,7 +331,7 @@ def resolve_llm_booking_prompt_candidate(
         decision_router.EXPECTED_REPLY_SERVICE,
         decision_router.EXPECTED_REPLY_TIME,
         decision_router.EXPECTED_REPLY_NAME,
-    } or active_slots or runtime_current_referents or runtime_semantic_contract:
+    } or active_slots or runtime_current_referents or runtime_pending_question_contract or runtime_semantic_contract:
         policy_memory_profile = {}
         if reply_slot in {
             decision_router.EXPECTED_REPLY_SERVICE,
