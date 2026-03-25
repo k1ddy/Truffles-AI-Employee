@@ -360,11 +360,21 @@ def _build_conversation_snapshot(
     context = conversation.context if isinstance(conversation.context, dict) else {}
     dialog_state_service = DialogStateService()
     now = datetime.now(timezone.utc)
+    context_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
+        context,
+        session_memory_key="__disabled_session_memory__",
+    )
     expected_reply = dialog_state_service.project_expected_reply_projections(
-        **{
-            _EXPECTED_REPLY_TYPE_FIELD: context.get(_EXPECTED_REPLY_TYPE_FIELD),
-            _EXPECTED_REPLY_REASON_FIELD: context.get(_EXPECTED_REPLY_REASON_FIELD),
-        }
+        expected_reply_type=(
+            context_pending_question_contract.get(_EXPECTED_REPLY_TYPE_FIELD)
+            if isinstance(context_pending_question_contract, dict)
+            else context.get(_EXPECTED_REPLY_TYPE_FIELD)
+        ),
+        expected_reply_reason=(
+            context_pending_question_contract.get("reason")
+            if isinstance(context_pending_question_contract, dict)
+            else context.get(_EXPECTED_REPLY_REASON_FIELD)
+        ),
     ).model_dump()
     booking_state = dict(context.get("booking") or {}) if isinstance(context.get("booking"), dict) else {}
     booking_active = bool(booking_state.get("active"))

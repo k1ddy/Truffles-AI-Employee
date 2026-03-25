@@ -2983,6 +2983,70 @@ def test_expected_reply_contract_prefers_session_memory_pending_question_contrac
     assert meta.get("session_memory_expected_reply_reason") == "booking_interrupt"
 
 
+def test_expected_reply_contract_prefers_canonical_context_question_contract_over_stale_projection() -> None:
+    from app.routers.webhook import decision as decision_router
+
+    now = datetime.now(timezone.utc)
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    conversation = SimpleNamespace(
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+            "expected_reply_reason": "stale_projection",
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                        "reason": "booking_interrupt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    }
+                },
+            },
+            "booking": {"active": True, "last_question": "datetime"},
+        },
+        state=ConversationState.BOT_ACTIVE.value,
+    )
+    trace_calls: list[dict[str, object]] = []
+
+    with patch(
+        "app.routers.webhook._legacy._record_decision_trace",
+        side_effect=lambda conv, trace: trace_calls.append(dict(trace)),
+    ), patch(
+        "app.routers.webhook.decision._match_expected_reply_candidates",
+        return_value=(False, None, []),
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply",
+        return_value={"ok": False, "payload": {}, "error": "no_match", "raw": None},
+    ):
+        state = decision_router._apply_expected_reply_contract(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text="Мне нужен менеджер",
+            batch_messages=["Мне нужен менеджер"],
+            context=conversation.context,
+            context_manager=conversation.context.get("context_manager") or {},
+            now=now,
+            current_goal="booking",
+            class_carryover=None,
+            message_count=1,
+            policy_type=None,
+            policy_pack=None,
+            client_slug="demo_salon",
+        )
+
+    assert state.expected_reply_type is None
+    assert any(
+        trace.get("stage") == "question_contract"
+        and trace.get("decision") == "bypass"
+        and trace.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+        for trace in trace_calls
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("expected_reply_bypassed") == "human_request"
+
+
 def test_should_block_expected_reply_time_for_question_without_datetime():
     from app.routers.webhook import decision as decision_router
 

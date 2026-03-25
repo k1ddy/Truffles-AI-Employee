@@ -527,6 +527,41 @@ def test_build_conversation_snapshot_uses_routing_matrix_and_projection_bridge()
     assert snapshot.service_referent is None
 
 
+def test_build_conversation_snapshot_prefers_canonical_question_contract_over_stale_projection() -> None:
+    conversation = Conversation(
+        id=UUID("00000000-0000-0000-0000-000000000144"),
+        client_id=UUID("00000000-0000-0000-0000-000000000145"),
+        user_id=UUID("00000000-0000-0000-0000-000000000146"),
+        channel="whatsapp",
+        status="active",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        state="bot_active",
+        bot_status="active",
+        branch_id=None,
+        context={
+            "expected_reply_type": " name ",
+            "expected_reply_reason": " stale_projection ",
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                },
+            },
+            "booking": {"active": True, "datetime": "2026-02-12 17:45"},
+        },
+    )
+
+    snapshot = reasoning_core._build_conversation_snapshot(conversation)
+
+    assert snapshot.reply_slot == "time"
+    assert snapshot.resume_reason == "booking_interrupt"
+
+
 def test_build_conversation_snapshot_projects_service_referent_from_canonical_state() -> None:
     conversation = Conversation(
         id=UUID("00000000-0000-0000-0000-000000000240"),

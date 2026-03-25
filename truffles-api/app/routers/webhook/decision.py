@@ -1240,13 +1240,26 @@ def _apply_expected_reply_contract(
 ) -> ExpectedReplyState:
     from . import _legacy as legacy
 
-    expected_reply_type = legacy._get_expected_reply_type(context)
-    expected_reply_reason = legacy._get_expected_reply_reason(context)
+    dialog_state_service = DialogStateService()
+    context_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
+        context,
+        session_memory_key="__disabled_session_memory__",
+    )
+    expected_reply_type = (
+        context_pending_question_contract.get("expected_reply_type")
+        if isinstance(context_pending_question_contract, dict)
+        else legacy._get_expected_reply_type(context)
+    )
+    expected_reply_reason = (
+        context_pending_question_contract.get("reason")
+        if isinstance(context_pending_question_contract, dict)
+        else legacy._get_expected_reply_reason(context)
+    )
     intent_queue = legacy._get_intent_queue(context)
     session_memory = legacy._get_session_memory(context)
     re_entry_required = legacy._is_re_entry_required(context)
     memory_expected_reply_type = None
-    memory_pending_question_contract = DialogStateService().project_session_memory_pending_question_contract(
+    memory_pending_question_contract = dialog_state_service.project_session_memory_pending_question_contract(
         session_memory
     )
     memory_expected_reply_reason = (
