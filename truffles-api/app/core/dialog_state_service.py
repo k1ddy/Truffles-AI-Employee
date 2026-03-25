@@ -414,6 +414,172 @@ class DialogStateService:
             },
         }
 
+    def _current_referents_from_grounded_referents(
+        self,
+        grounded_referents: dict[str, str] | None,
+    ) -> CurrentReferents:
+        grounded = grounded_referents if isinstance(grounded_referents, dict) else {}
+        return CurrentReferents(
+            service=self._normalize_projection_token(grounded.get("service")),
+            specialist=self._normalize_projection_token(grounded.get("specialist")),
+            branch=self._normalize_projection_token(grounded.get("branch")),
+            booking=self._normalize_projection_token(grounded.get("booking_ref")),
+            customer=self._normalize_projection_token(grounded.get("customer")),
+        )
+
+    def _build_runtime_grounded_referents(
+        self,
+        *,
+        existing_state: DialogState,
+        booking_payload: dict[str, Any] | None,
+        decision: PolicyDecision,
+        execution_payload: dict[str, Any] | None,
+    ) -> dict[str, str]:
+        grounded: dict[str, str] = {}
+
+        def _remember(key: str, value: Any) -> None:
+            normalized = self._normalize_projection_token(value)
+            if normalized:
+                grounded[key] = normalized
+
+        _remember("service", existing_state.current_referents.service)
+        _remember("specialist", existing_state.current_referents.specialist)
+        _remember("branch", existing_state.current_referents.branch)
+        _remember("booking_ref", existing_state.current_referents.booking)
+        _remember("customer", existing_state.current_referents.customer)
+
+        for key, value in (existing_state.interaction_state.grounded_referents or {}).items():
+            if key in {"service", "specialist", "branch", "booking_ref", "customer"}:
+                _remember(key, value)
+
+        if isinstance(booking_payload, dict):
+            _remember("service", booking_payload.get("service"))
+            _remember("specialist", booking_payload.get("specialist_name") or booking_payload.get("specialist_id"))
+            _remember(
+                "booking_ref",
+                booking_payload.get("appointment_id")
+                or booking_payload.get("reference_id")
+                or booking_payload.get("booking_id"),
+            )
+            _remember("customer", booking_payload.get("name"))
+
+        _remember("service", decision.slots.get("service"))
+        _remember("customer", decision.slots.get("name"))
+
+        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
+        _remember("specialist", tool_args.get("specialist_name") or tool_args.get("specialist_id"))
+        _remember("customer", tool_args.get("customer_name"))
+        _remember("booking_ref", tool_args.get("appointment_id"))
+
+        entity_type_map = {
+            "service": "service",
+            "specialist": "specialist",
+            "branch": "branch",
+            "booking": "booking_ref",
+            "booking_ref": "booking_ref",
+            "customer": "customer",
+        }
+        raw_entity_refs = decision.meta.get("entity_refs") if isinstance(decision.meta, dict) else None
+        if isinstance(raw_entity_refs, list):
+            for row in raw_entity_refs:
+                if not isinstance(row, dict):
+                    continue
+                target_key = entity_type_map.get(
+                    self._normalize_projection_token(row.get("entity_type")) or ""
+                )
+                if not target_key:
+                    continue
+                _remember(target_key, row.get("entity_id"))
+
+        if isinstance(execution_payload, dict):
+            _remember("specialist", execution_payload.get("specialist_name") or execution_payload.get("specialist_id"))
+            _remember(
+                "booking_ref",
+                execution_payload.get("appointment_id")
+                or execution_payload.get("reference_id")
+                or execution_payload.get("booking_id"),
+            )
+            _remember("customer", execution_payload.get("customer_name"))
+
+        return grounded
+
+    def _build_booking_followup_dialog_state(
+        self,
+        *,
+        base_state: DialogState,
+        decision: PolicyDecision,
+        expected_reply_type: str,
+        expected_reply_reason: str | None,
+        grounded_referents: dict[str, str] | None,
+    ) -> DialogState:
+        expected_reply_token = self._normalize_projection_token(expected_reply_type)
+        if not expected_reply_token:
+            raise ValueError("expected_reply_type_invalid")
+
+        reason_token = self._normalize_projection_token(expected_reply_reason)
+        base_pending = base_state.pending_question_contract
+        next_question = self._normalize_projection_token(base_pending.next_question) or (
+            _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(expected_reply_token)
+        )
+        open_questions = [
+            token
+            for token in (
+                self._normalize_projection_token(item)
+                for item in base_pending.open_questions
+            )
+            if token
+        ]
+        if not open_questions and next_question:
+            open_questions = [next_question]
+
+        interaction_target = (
+            self._normalize_projection_token(base_state.interaction_state.interaction_target)
+            or self._normalize_projection_token(base_pending.pending_question_target)
+        )
+        interaction_relation = (
+            self._normalize_projection_token(base_state.interaction_state.interaction_relation)
+            or self._normalize_projection_token(base_pending.active_question_relation)
+        )
+        interaction_owner = (
+            self._normalize_projection_token(base_state.interaction_state.interaction_owner)
+            or self.build_interaction_owner(
+                explicit_owner=decision.interaction.owner,
+                interaction_relation=interaction_relation,
+                question_reason=reason_token,
+            )
+        )
+        interaction_state = InteractionState(
+            resume_slot=(
+                self._normalize_projection_token(base_state.interaction_state.resume_slot)
+                or _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(expected_reply_token)
+                or next_question
+            ),
+            interaction_target=interaction_target,
+            interaction_relation=interaction_relation,
+            interaction_owner=interaction_owner,
+            grounded_referents=dict(grounded_referents or {}),
+        )
+        return DialogState(
+            current_referents=self._current_referents_from_grounded_referents(grounded_referents),
+            pending_question_contract=PendingQuestionContract(
+                expected_reply_type=expected_reply_token,
+                pending_question_target=interaction_target,
+                active_question_relation=interaction_relation,
+                next_question=next_question,
+                open_questions=open_questions,
+            ),
+            interaction_state=interaction_state,
+            projections=DialogStateProjections(
+                expected_reply_type=expected_reply_token,
+                expected_reply_reason=reason_token,
+                session_memory_interaction_state=interaction_state,
+            ),
+            meta={
+                "writer": "dialog_state_service",
+                "owner_replacement_cutover": True,
+            },
+        )
+
     def project_expected_reply_projections(
         self,
         projections: DialogStateProjections | None = None,
@@ -758,13 +924,16 @@ class DialogStateService:
 
         dialog_state_payload = runtime_payload.get("dialog_state")
         if not isinstance(dialog_state_payload, dict):
+            fallback_next_question = _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(
+                expected_reply_type or ""
+            )
             dialog_state_payload = {
                 "current_referents": {
                     "service": booking_payload.get("service") if isinstance(booking_payload, dict) else None,
                 },
                 "pending_question_contract": {
                     "expected_reply_type": expected_reply_type,
-                    "next_question": expected_reply_type,
+                    "next_question": fallback_next_question,
                 },
                 "interaction_state": {
                     "interaction_owner": "consultant_runtime",
@@ -843,6 +1012,21 @@ class DialogStateService:
                 or "service",
                 slot_values=slot_values,
             )
+        if isinstance(merged_booking, dict):
+            tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
+            for specialist_key in ("specialist_name", "specialist_id"):
+                specialist_value = self._normalize_projection_token(
+                    execution_payload.get(specialist_key)
+                    or tool_args.get(specialist_key)
+                    or merged_booking.get(specialist_key)
+                )
+                if specialist_value:
+                    merged_booking[specialist_key] = specialist_value
+            customer_name = self._normalize_projection_token(
+                execution_payload.get("customer_name") or tool_args.get("customer_name")
+            )
+            if customer_name and not merged_booking.get("name"):
+                merged_booking["name"] = customer_name
 
         expected_reply_type = None
         expected_reply_reason = None
@@ -872,42 +1056,52 @@ class DialogStateService:
             expected_reply_reason = projections.expected_reply_reason
             current_goal = "booking"
 
-        dialog_state = DialogState(
-            current_referents=CurrentReferents(
-                service=merged_booking.get("service") if isinstance(merged_booking, dict) else None,
-                booking=execution_payload.get("appointment_id"),
-            ),
-            pending_question_contract=PendingQuestionContract(
+        grounded_referents = self._build_runtime_grounded_referents(
+            existing_state=loaded["dialog_state"],
+            booking_payload=merged_booking,
+            decision=decision,
+            execution_payload=execution_payload,
+        )
+
+        if expected_reply_type and decision.outcome == "COLLECT":
+            dialog_state = self.build_collect_owner_state(
+                decision=decision,
                 expected_reply_type=expected_reply_type,
-                next_question=self._normalize_projection_token(
-                    execution_payload.get("next_slot")
-                    or decision.pending_question_contract.next_question
-                ),
-                open_questions=[
-                    item
-                    for item in [
-                        self._normalize_projection_token(
-                            execution_payload.get("next_slot")
-                            or decision.pending_question_contract.next_question
-                        )
-                    ]
-                    if item
-                ],
-            ),
-            interaction_state=InteractionState(
+                expected_reply_reason=expected_reply_reason,
+                grounded_referents=grounded_referents,
+            )
+            dialog_state.meta["current_goal"] = current_goal
+        elif expected_reply_type and current_goal == "booking":
+            dialog_state = self._build_booking_followup_dialog_state(
+                base_state=loaded["dialog_state"],
+                decision=decision,
+                expected_reply_type=expected_reply_type,
+                expected_reply_reason=expected_reply_reason,
+                grounded_referents=grounded_referents,
+            )
+            dialog_state.meta["current_goal"] = current_goal
+        else:
+            interaction_state = InteractionState(
                 interaction_owner=decision.interaction.owner,
                 interaction_target=decision.interaction.target,
                 interaction_relation=decision.interaction.relation,
-            ),
-            projections=DialogStateProjections(
-                expected_reply_type=expected_reply_type,
-                expected_reply_reason=expected_reply_reason,
-            ),
-            meta={
-                "writer": "dialog_state_service",
-                "current_goal": current_goal,
-            },
-        )
+                grounded_referents=grounded_referents,
+            )
+            dialog_state = DialogState(
+                current_referents=self._current_referents_from_grounded_referents(
+                    grounded_referents
+                ),
+                interaction_state=interaction_state,
+                projections=DialogStateProjections(
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_reason=expected_reply_reason,
+                    session_memory_interaction_state=interaction_state,
+                ),
+                meta={
+                    "writer": "dialog_state_service",
+                    "current_goal": current_goal,
+                },
+            )
 
         runtime_payload = {
             "schema_version": "consultant_runtime.v1",

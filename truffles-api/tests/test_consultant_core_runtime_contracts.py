@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker, RefResolver
@@ -183,6 +184,147 @@ def _turn_result_payload() -> dict:
             "stages": ["planner", "boundary", "executor", "realizer"],
         },
     }
+
+
+def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_core() -> None:
+    runtime = ConsultantRuntime()
+    captured: dict[str, object] = {}
+
+    def _fake_plan(**kwargs):
+        captured.update(kwargs)
+        return TurnPlanner().build_from_policy_override(
+            {
+                "intent": "booking",
+                "action": "collect",
+                "tool_action": "collect",
+                "goal": "booking",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            interaction_owner="llm_policy_core_booking",
+            interaction_relation="fill_requested_slot",
+            source="llm_policy_core",
+        )
+
+    runtime.planner.plan = _fake_plan
+    runtime._build_memory_summary = lambda *_args, **_kwargs: "user: test"
+    state = DialogState.model_validate(_dialog_state_payload())
+    state.current_referents.specialist = "Айгерим"
+    state.current_referents.customer = "Марина"
+    state.interaction_state.grounded_referents = {
+        "service": "manicure",
+        "specialist": "Айгерим",
+        "customer": "Марина",
+    }
+
+    decision, override = runtime._plan_turn(
+        db=None,
+        payload=SimpleNamespace(
+            client_slug="demo_salon",
+            body=SimpleNamespace(message="Можно выбрать Айгерим?"),
+        ),
+        prepared=SimpleNamespace(
+            conversation=SimpleNamespace(state="bot_active"),
+            branch_id=uuid4(),
+        ),
+        runtime_state=SimpleNamespace(
+            dialog_state=state,
+            booking_state={"service": "manicure", "active": True},
+            expected_reply_type="time",
+            expected_reply_reason="collect:datetime",
+            current_goal="booking",
+        ),
+    )
+
+    memory_profile = captured["memory_profile"]
+    assert memory_profile == {
+        "active_goal": "booking",
+        "expected_reply_type": "time",
+        "active_slots": ["service"],
+        "current_referents": {
+            "service": "manicure",
+            "specialist": "Айгерим",
+            "branch": "almaty-center",
+            "customer": "Марина",
+        },
+        "pending_question_contract": {
+            "slot": "datetime",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+        },
+        "interaction_state": {
+            "resume_slot": "time",
+            "interaction_target": "time",
+            "interaction_relation": "ask_about_requested_slot",
+            "interaction_owner": "booking_time_followup",
+            "grounded_referents": {
+                "service": "manicure",
+                "specialist": "Айгерим",
+                "customer": "Марина",
+            },
+        },
+    }
+    assert decision.interaction.owner == "llm_policy_core_booking"
+    assert override is None
+
+
+def test_consultant_runtime_plan_turn_prefills_grounded_service_for_policy_core(
+) -> None:
+    runtime = ConsultantRuntime()
+    captured: dict[str, object] = {}
+
+    def _fake_plan(**kwargs):
+        captured.update(kwargs)
+        return TurnPlanner().build_from_policy_override(
+            {
+                "intent": "booking",
+                "action": "collect",
+                "tool_action": "collect",
+                "goal": "booking",
+                "slots": {"service": "маникюр"},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            interaction_owner="llm_policy_core_booking",
+            interaction_relation="fill_requested_slot",
+            source="llm_policy_core",
+        )
+
+    runtime.planner.plan = _fake_plan
+    runtime._build_memory_summary = lambda *_args, **_kwargs: "user: test"
+    state = DialogState.model_validate(_dialog_state_payload())
+    state.current_referents.service = None
+
+    with patch(
+        "app.core.consultant_runtime.semantic_service_match",
+        return_value=None,
+    ), patch(
+        "app.core.consultant_runtime.get_pack_service_hint",
+        return_value="маникюр",
+    ):
+        decision, override = runtime._plan_turn(
+            db=None,
+            payload=SimpleNamespace(
+                client_slug="demo_salon",
+                body=SimpleNamespace(message="Хотел бы записаться на маникюр."),
+            ),
+            prepared=SimpleNamespace(
+                conversation=SimpleNamespace(state="bot_active"),
+                branch_id=uuid4(),
+            ),
+            runtime_state=SimpleNamespace(
+                dialog_state=state,
+                booking_state={},
+                expected_reply_type=None,
+                expected_reply_reason=None,
+                current_goal=None,
+            ),
+        )
+
+    assert captured["booking_state"] == {"service": "маникюр"}
+    assert captured["memory_profile"]["current_referents"]["service"] == "маникюр"
+    assert decision.pending_question_contract.next_question == "datetime"
+    assert override is None
 
 
 def _build_boundary_turn_result(
@@ -1629,6 +1771,62 @@ def test_consultant_runtime_records_question_contract_trace_entries() -> None:
     decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
     assert decision_meta.get("pending_question_act") == "slot_constraint"
     assert decision_meta.get("question_contract") is True
+
+
+def test_consultant_runtime_records_referent_followup_axes_in_trace_and_meta() -> None:
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_args": {"specialist_name": "Айгерим"},
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "goal": "booking",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="referent_followup",
+        source="llm_policy_core",
+    )
+    execution_meta = {
+        "slot_values": {"service": "Маникюр"},
+        "next_slot": "datetime",
+    }
+    now = datetime.now(timezone.utc)
+    _, dialog_state, _ = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution_meta,
+        now=now,
+    )
+    runtime = ConsultantRuntime()
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="collect", tool_decision="datetime", meta=execution_meta)
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="collect"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("pending_question_target") == "specialist"
+        and entry.get("active_question_relation") == "referent_followup"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta.get("pending_question_target") == "specialist"
+    assert decision_meta.get("active_question_relation") == "referent_followup"
 
 
 def test_consultant_runtime_finalizes_booking_commit_as_terminal_fact() -> None:

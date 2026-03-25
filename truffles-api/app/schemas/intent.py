@@ -148,12 +148,18 @@ SEMANTIC_RESOLUTION_MODE_VALUES = {
     "policy_fact",
     "live_calendar",
 }
+SEMANTIC_RESOLUTION_MODE_ALIASES = {
+    "collect": "direct",
+}
 SEMANTIC_PENDING_QUESTION_ACT_VALUES = {
     "fill_requested_slot",
     "ask_about_requested_slot",
     "slot_constraint",
     "slot_compare",
     "mixed_fill_plus_question",
+}
+SEMANTIC_PENDING_QUESTION_ACT_ALIASES = {
+    "referent_followup": None,
 }
 SEMANTIC_PENDING_QUESTION_TARGET_VALUES = {
     "time",
@@ -292,11 +298,14 @@ def _normalize_optional_semantic_token(
     *,
     field: str,
     allowed: set[str],
+    aliases: dict[str, str | None] | None = None,
 ) -> str | None:
     cleaned = _normalize_optional_string(value, field=field)
     if cleaned is None:
         return None
     token = cleaned.casefold()
+    if aliases and token in aliases:
+        return aliases[token]
     if token not in allowed:
         raise ValueError(f"{field}_invalid")
     return token
@@ -586,6 +595,7 @@ class LlmPolicyCoreOutput(BaseModel):
             value,
             field="resolution_mode",
             allowed=SEMANTIC_RESOLUTION_MODE_VALUES,
+            aliases=SEMANTIC_RESOLUTION_MODE_ALIASES,
         )
 
     @field_validator("pending_question_act", mode="before")
@@ -595,6 +605,7 @@ class LlmPolicyCoreOutput(BaseModel):
             value,
             field="pending_question_act",
             allowed=SEMANTIC_PENDING_QUESTION_ACT_VALUES,
+            aliases=SEMANTIC_PENDING_QUESTION_ACT_ALIASES,
         )
 
     @field_validator("pending_question_target", mode="before")

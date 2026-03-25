@@ -45,6 +45,7 @@ from app.services.knowledge_runtime import (
     should_allow_truth_fallback,
 )
 from app.services.message_service import save_message
+from app.services.pack_runtime_service import get_pack_service_hint, semantic_service_match
 from app.services.state_machine import ConversationState
 from app.services.state_service import apply_simulation_context, transition_state
 
@@ -551,23 +552,30 @@ class ConsultantRuntime:
             return decision, override
 
         recent_summary = self._build_memory_summary(db, prepared.conversation)
-        memory_profile = {
-            "conversation_state": prepared.conversation.state,
-            "branch_id": str(prepared.branch_id) if prepared.branch_id else None,
-        }
-        if runtime_state.booking_state:
-            memory_profile["booking_slots"] = dict(runtime_state.booking_state)
-        if runtime_state.expected_reply_type:
-            memory_profile["expected_reply_type"] = runtime_state.expected_reply_type
+        grounded_service = self._resolve_explicit_service_grounding(
+            payload.body.message,
+            client_slug=payload.client_slug,
+            branch_id=prepared.branch_id,
+        )
+        grounded_booking_state = dict(runtime_state.booking_state or {})
+        if grounded_service and not (
+            isinstance(grounded_booking_state.get("service"), str)
+            and grounded_booking_state.get("service", "").strip()
+        ):
+            grounded_booking_state["service"] = grounded_service
+        memory_profile = self._build_policy_core_memory_profile(
+            runtime_state,
+            grounded_service=grounded_service,
+        )
         decision = self.planner.plan(
             message_text=payload.body.message,
             client_slug=payload.client_slug,
             expected_reply_type=runtime_state.expected_reply_type,
             expected_reply_reason=runtime_state.expected_reply_reason,
             current_goal=runtime_state.current_goal,
-            booking_state=runtime_state.booking_state,
+            booking_state=grounded_booking_state,
             memory_summary=recent_summary,
-            memory_profile={k: v for k, v in memory_profile.items() if v is not None},
+            memory_profile=memory_profile,
         )
         override = None
         if decision.outcome not in _RUNTIME_ALLOWED_OUTCOMES:
@@ -584,6 +592,113 @@ class ConsultantRuntime:
                 trace_message="planner_degrade",
             )
         return decision, override
+
+    def _build_policy_core_memory_profile(
+        self,
+        runtime_state: LoadedRuntimeState,
+        *,
+        grounded_service: str | None = None,
+    ) -> dict[str, Any]:
+        profile: dict[str, Any] = {}
+        if runtime_state.current_goal:
+            profile["active_goal"] = runtime_state.current_goal
+        if runtime_state.expected_reply_type:
+            profile["expected_reply_type"] = runtime_state.expected_reply_type
+
+        active_slots = [
+            slot_key
+            for slot_key in ("service", "datetime", "name", "phone")
+            if isinstance(runtime_state.booking_state.get(slot_key), str)
+            and runtime_state.booking_state.get(slot_key, "").strip()
+        ]
+        if active_slots:
+            profile["active_slots"] = active_slots
+
+        dialog_state = runtime_state.dialog_state
+        current_referents: dict[str, str] = {}
+        referent_map = {
+            "service": dialog_state.current_referents.service,
+            "specialist": dialog_state.current_referents.specialist,
+            "branch": dialog_state.current_referents.branch,
+            "booking_ref": dialog_state.current_referents.booking,
+            "customer": dialog_state.current_referents.customer,
+        }
+        for key, raw_value in referent_map.items():
+            if isinstance(raw_value, str) and raw_value.strip():
+                current_referents[key] = raw_value.strip()
+        if grounded_service and "service" not in current_referents:
+            current_referents["service"] = grounded_service
+        if current_referents:
+            profile["current_referents"] = current_referents
+
+        pending_contract: dict[str, Any] = {}
+        next_question = dialog_state.pending_question_contract.next_question
+        if isinstance(next_question, str) and next_question.strip():
+            pending_contract["slot"] = next_question.strip()
+        elif runtime_state.expected_reply_type:
+            pending_contract["slot"] = {
+                "service_choice": "service",
+                "time": "datetime",
+                "name": "name",
+                "phone": "phone",
+            }.get(runtime_state.expected_reply_type)
+        if runtime_state.expected_reply_type:
+            pending_contract["expected_reply_type"] = runtime_state.expected_reply_type
+        if runtime_state.expected_reply_reason:
+            pending_contract["reason"] = runtime_state.expected_reply_reason
+        if pending_contract:
+            profile["pending_question_contract"] = pending_contract
+
+        interaction_state: dict[str, Any] = {}
+        if dialog_state.interaction_state.resume_slot:
+            interaction_state["resume_slot"] = dialog_state.interaction_state.resume_slot
+        if dialog_state.interaction_state.interaction_target:
+            interaction_state["interaction_target"] = (
+                dialog_state.interaction_state.interaction_target
+            )
+        if dialog_state.interaction_state.interaction_relation:
+            interaction_state["interaction_relation"] = (
+                dialog_state.interaction_state.interaction_relation
+            )
+        if dialog_state.interaction_state.interaction_owner:
+            interaction_state["interaction_owner"] = dialog_state.interaction_state.interaction_owner
+        grounded_referents = dict(dialog_state.interaction_state.grounded_referents or {})
+        if not grounded_referents:
+            grounded_referents = dict(current_referents)
+        if grounded_referents:
+            interaction_state["grounded_referents"] = grounded_referents
+        if interaction_state:
+            profile["interaction_state"] = interaction_state
+
+        return profile
+
+    @staticmethod
+    def _resolve_explicit_service_grounding(
+        message_text: str | None,
+        *,
+        client_slug: str | None,
+        branch_id: UUID | None,
+    ) -> str | None:
+        if not isinstance(message_text, str) or not message_text.strip():
+            return None
+        match = semantic_service_match(
+            message_text,
+            client_slug,
+            branch_id=str(branch_id) if branch_id else None,
+        )
+        if match and getattr(match, "action", None) == "match":
+            canonical_name = getattr(match, "canonical_name", None)
+            if isinstance(canonical_name, str) and canonical_name.strip():
+                return canonical_name.strip()
+        fallback = get_pack_service_hint(
+            message_text,
+            client_slug=client_slug,
+            branch_id=str(branch_id) if branch_id else None,
+        )
+        if not isinstance(fallback, str):
+            return None
+        cleaned = fallback.strip()
+        return cleaned or None
 
     def _execute_turn(
         self,
@@ -824,6 +939,10 @@ class ConsultantRuntime:
             )
         if not pending_question_target:
             pending_question_target = decision.interaction.target
+        if pending_question_target:
+            trace_event["pending_question_target"] = pending_question_target
+        if active_question_relation:
+            trace_event["active_question_relation"] = active_question_relation
         context = dict(conversation.context or {})
         trace = context.get(_RUNTIME_TRACE_KEY)
         if not isinstance(trace, list):
@@ -873,6 +992,10 @@ class ConsultantRuntime:
             decision_meta["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
             decision_meta["expected_reply_reason"] = expected_reply_reason
+        if pending_question_target:
+            decision_meta["pending_question_target"] = pending_question_target
+        if active_question_relation:
+            decision_meta["active_question_relation"] = active_question_relation
         if contract_source != decision.source:
             decision_meta["source_detail"] = decision.source
         if isinstance(execution.meta, dict):

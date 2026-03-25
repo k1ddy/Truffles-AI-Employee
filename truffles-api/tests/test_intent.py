@@ -15,6 +15,7 @@ from app.services.intent_service import (
     _build_service_query_hint_response_format,
     _build_specialist_hint_response_format,
     _load_policy_core_prompt,
+    _normalize_policy_core_memory_profile,
     classify_intent,
     classify_domain_with_scores,
     extract_customer_name_hint_llm,
@@ -435,6 +436,10 @@ class TestPolicyCoreTimeoutRetry:
             "app.services.intent_service.POLICY_CORE_RETRY_ON_TRANSIENT",
             "1",
         )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
+            "",
+        )
 
         payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
@@ -669,6 +674,65 @@ class TestPolicyCoreTimeoutRetry:
         assert result["payload"]["pending_question_target"] == "time"
         assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
 
+    def test_policy_core_normalizes_collect_resolution_mode_to_direct(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "resolution_mode": "collect",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Хотел бы записаться на маникюр.",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["resolution_mode"] == "direct"
+
+    def test_policy_core_drops_relation_token_from_pending_question_act(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "tool_args": {"specialist_name": "Айгерим"},
+                "entity_refs": [
+                    {"entity_id": "svc:manicure", "entity_type": "service"},
+                    {"entity_id": "spec:aigerim", "entity_type": "specialist"},
+                ],
+                "subject_kind": "specialist",
+                "capability": "bookability",
+                "resolution_mode": "referent_followup",
+                "pending_question_act": "referent_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Можно выбрать Айгерим?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["pending_question_act"] is None
+        assert result["payload"]["pending_question_target"] == "specialist"
+        assert result["payload"]["active_question_relation"] == "referent_followup"
+        assert result["payload"]["tool_args"]["specialist_name"] == "Айгерим"
+
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = self._policy_payload()
@@ -827,6 +891,73 @@ class TestPolicyCoreTimeoutRetry:
         assert '`next_question="name"`' in prompt
         assert '`subject_kind="booking"`' in prompt
         assert "alternate-time availability follow-up" in prompt
+
+    def test_policy_core_prompt_keeps_customer_name_distinct_from_specialist_preference(self):
+        prompt = _load_policy_core_prompt()
+
+        assert "`slots.name` и `next_question=\"name\"` означают только имя клиента" in prompt
+        assert "Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`." in prompt
+        assert "`memory.profile.interaction_state`" in prompt
+        assert "`tool_args.specialist_name`" in prompt
+
+    def test_policy_core_memory_profile_keeps_interaction_state_and_customer_referent(self):
+        normalized = _normalize_policy_core_memory_profile(
+            {
+                "active_goal": " booking ",
+                "expected_reply_type": " time ",
+                "active_slots": [" service ", " datetime ", " phone "],
+                "current_referents": {
+                    "service": " Маникюр ",
+                    "specialist": " Айгерим ",
+                    "customer": " Марина ",
+                    "booking_ref": " BK-1 ",
+                },
+                "pending_question_contract": {
+                    "next_question": " time ",
+                    "expected_reply_type": " time ",
+                    "reason": " booking_followup ",
+                },
+                "interaction_state": {
+                    "resume_slot": " datetime ",
+                    "interaction_target": " specialist ",
+                    "interaction_relation": " referent_followup ",
+                    "interaction_owner": " llm_policy_core_booking ",
+                    "grounded_referents": {
+                        "service": " Маникюр ",
+                        "specialist": " Айгерим ",
+                        "customer": " Марина ",
+                    },
+                },
+            }
+        )
+
+        assert normalized == {
+            "active_goal": "booking",
+            "expected_reply_type": "time",
+            "active_slots": ["service", "datetime", "phone"],
+            "current_referents": {
+                "service": "Маникюр",
+                "specialist": "Айгерим",
+                "customer": "Марина",
+                "booking_ref": "BK-1",
+            },
+            "pending_question_contract": {
+                "slot": "datetime",
+                "expected_reply_type": "time",
+                "reason": "booking_followup",
+            },
+            "interaction_state": {
+                "resume_slot": "datetime",
+                "interaction_target": "specialist",
+                "interaction_relation": "referent_followup",
+                "interaction_owner": "llm_policy_core_booking",
+                "grounded_referents": {
+                    "service": "Маникюр",
+                    "specialist": "Айгерим",
+                    "customer": "Марина",
+                },
+            },
+        }
 
     def test_retries_without_response_format_when_provider_rejects_it(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")

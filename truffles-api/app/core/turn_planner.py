@@ -234,6 +234,9 @@ class TurnPlanner:
             value = payload.get(key)
             if value is not None:
                 meta[key] = value
+        entity_refs = payload.get("entity_refs")
+        if isinstance(entity_refs, list):
+            meta["entity_refs"] = list(entity_refs)
         return PolicyDecision(
             outcome=outcome,
             action=action,

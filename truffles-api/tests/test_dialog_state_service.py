@@ -2544,3 +2544,166 @@ def test_dialog_state_service_merges_fact_interrupt_slots_into_active_booking() 
     assert runtime_payload["expected_reply_reason"] == "collect:service"
     assert dialog_state.current_referents.service == "Наращивание полигелем"
     assert booking_payload["service"] == "Наращивание полигелем"
+
+
+def test_dialog_state_service_preserves_active_booking_contract_across_fact_interrupt() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 25, 12, 15, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "current_referents": {
+                    "service": "Маникюр",
+                    "specialist": "Айгерим",
+                    "branch": None,
+                    "booking": None,
+                    "customer": None,
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "interaction_state": {
+                    "resume_slot": "datetime",
+                    "interaction_target": "time",
+                    "interaction_relation": "ask_about_requested_slot",
+                    "interaction_owner": "booking_time_followup",
+                    "grounded_referents": {
+                        "service": "Маникюр",
+                        "specialist": "Айгерим",
+                    },
+                    "confirmation_state": None,
+                    "degrade_reason": None,
+                },
+                "projections": {
+                    "expected_reply_type": "time",
+                    "expected_reply_reason": "collect:datetime",
+                    "session_memory_interaction_state": {
+                        "resume_slot": "datetime",
+                        "interaction_target": "time",
+                        "interaction_relation": "ask_about_requested_slot",
+                        "interaction_owner": "booking_time_followup",
+                        "grounded_referents": {
+                            "service": "Маникюр",
+                            "specialist": "Айгерим",
+                        },
+                        "confirmation_state": None,
+                        "degrade_reason": None,
+                    },
+                },
+                "meta": {"writer": "dialog_state_service", "current_goal": "booking"},
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-03-29T19:00:00+00:00",
+                "last_question": "datetime",
+            },
+            "expected_reply_type": "time",
+            "expected_reply_reason": "collect:datetime",
+            "current_goal": "booking",
+        }
+    }
+    decision = planner.build_from_policy_override(
+        {
+            "action": "fact",
+            "intent": "duration",
+            "tool_action": "catalog.service_query",
+            "slots": {"service": "Маникюр"},
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={
+            "slot_values": {"service": "Маникюр"},
+            "info_sections": ["duration"],
+        },
+        now=now,
+    )
+
+    runtime_payload = updated["consultant_runtime"]
+    assert runtime_payload["expected_reply_type"] == "time"
+    assert runtime_payload["expected_reply_reason"] == "collect:datetime"
+    assert dialog_state.pending_question_contract.pending_question_target == "time"
+    assert dialog_state.pending_question_contract.active_question_relation == "ask_about_requested_slot"
+    assert dialog_state.pending_question_contract.next_question == "datetime"
+    assert dialog_state.interaction_state.interaction_owner == "booking_time_followup"
+    assert dialog_state.interaction_state.grounded_referents == {
+        "service": "Маникюр",
+        "specialist": "Айгерим",
+    }
+    assert dialog_state.current_referents.specialist == "Айгерим"
+    assert booking_payload["service"] == "Маникюр"
+
+
+def test_dialog_state_service_persists_specialist_followup_referent_on_collect() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 25, 12, 20, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+            "expected_reply_type": "time",
+            "expected_reply_reason": "collect:datetime",
+            "current_goal": "booking",
+        }
+    }
+    decision = planner.build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "slots": {"service": "Маникюр"},
+            "tool_args": {"specialist_name": "Айгерим"},
+            "entity_refs": [
+                {
+                    "entity_id": "Айгерим",
+                    "entity_type": "specialist",
+                    "source_ref": "message",
+                }
+            ],
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "resolution_mode": "referent_followup",
+            "subject_kind": "specialist",
+            "capability": "bookability",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="referent_followup",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"slot_values": {"service": "Маникюр"}, "next_slot": "datetime"},
+        now=now,
+    )
+
+    runtime_payload = updated["consultant_runtime"]
+    assert runtime_payload["expected_reply_type"] == "time"
+    assert dialog_state.pending_question_contract.pending_question_target == "specialist"
+    assert dialog_state.pending_question_contract.active_question_relation == "referent_followup"
+    assert dialog_state.pending_question_contract.next_question == "datetime"
+    assert dialog_state.current_referents.specialist == "Айгерим"
+    assert dialog_state.interaction_state.grounded_referents["specialist"] == "Айгерим"
+    assert booking_payload["specialist_name"] == "Айгерим"

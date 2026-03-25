@@ -1157,7 +1157,7 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             if not isinstance(raw_slot, str):
                 continue
             slot = raw_slot.strip().casefold()
-            if slot not in {"service", "datetime", "name"}:
+            if slot not in {"service", "datetime", "name", "phone"}:
                 continue
             if slot in seen_slots:
                 continue
@@ -1214,7 +1214,7 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     current_referents = profile.get("current_referents")
     if isinstance(current_referents, dict):
         cleaned_referents: dict[str, str] = {}
-        for key in ("service", "specialist", "branch", "booking_ref"):
+        for key in ("service", "specialist", "branch", "booking_ref", "customer"):
             value = current_referents.get(key)
             if isinstance(value, str) and value.strip():
                 cleaned_referents[key] = " ".join(value.split())[
@@ -1225,9 +1225,10 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     pending_question_contract = profile.get("pending_question_contract")
     if isinstance(pending_question_contract, dict):
         cleaned_pending: dict[str, Any] = {}
-        slot = pending_question_contract.get("slot")
+        slot = pending_question_contract.get("slot") or pending_question_contract.get("next_question")
         if isinstance(slot, str) and slot.strip():
             slot_token = slot.strip().casefold()
+            slot_token = {"time": "datetime", "date": "datetime"}.get(slot_token, slot_token)
             if slot_token in {"service", "datetime", "name", "phone"}:
                 cleaned_pending["slot"] = slot_token
         pending_expected_reply_type = pending_question_contract.get("expected_reply_type")
@@ -1250,6 +1251,52 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             ]
         if cleaned_pending:
             normalized["pending_question_contract"] = cleaned_pending
+    interaction_state = profile.get("interaction_state")
+    if isinstance(interaction_state, dict):
+        cleaned_interaction: dict[str, Any] = {}
+        for field_name in ("resume_slot", "interaction_target", "interaction_relation"):
+            raw_value = interaction_state.get(field_name)
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                continue
+            token = raw_value.strip().casefold()
+            if field_name == "resume_slot":
+                token = {"time": "datetime", "date": "datetime"}.get(token, token)
+                if token not in {"service", "datetime", "name", "phone"}:
+                    continue
+            elif field_name == "interaction_target":
+                if token not in {"time", "specialist"}:
+                    continue
+            elif field_name == "interaction_relation":
+                if token not in {
+                    "fill_requested_slot",
+                    "ask_about_requested_slot",
+                    "slot_constraint",
+                    "slot_compare",
+                    "mixed_fill_plus_question",
+                    "referent_followup",
+                    "generic_info_interrupt",
+                    "specialist_availability_interrupt",
+                    "specialist_availability_followup",
+                    "tool_result_followup_specialist_missing",
+                }:
+                    continue
+            cleaned_interaction[field_name] = token
+        interaction_owner = interaction_state.get("interaction_owner")
+        if isinstance(interaction_owner, str) and interaction_owner.strip():
+            cleaned_interaction["interaction_owner"] = interaction_owner.strip()[:80]
+        grounded_referents = interaction_state.get("grounded_referents")
+        if isinstance(grounded_referents, dict):
+            cleaned_grounded: dict[str, str] = {}
+            for key in ("service", "specialist", "branch", "booking_ref", "customer"):
+                value = grounded_referents.get(key)
+                if isinstance(value, str) and value.strip():
+                    cleaned_grounded[key] = " ".join(value.split())[
+                        :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                    ]
+            if cleaned_grounded:
+                cleaned_interaction["grounded_referents"] = cleaned_grounded
+        if cleaned_interaction:
+            normalized["interaction_state"] = cleaned_interaction
     consult_state = profile.get("consult_state")
     if isinstance(consult_state, dict):
         cleaned_consult_state: dict[str, Any] = {}
