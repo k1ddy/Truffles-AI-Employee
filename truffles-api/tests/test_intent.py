@@ -978,13 +978,27 @@ class TestPolicyCoreTimeoutRetry:
         assert isinstance(first_kwargs.get("response_format"), dict)
         assert "response_format" not in second_kwargs or second_kwargs.get("response_format") is None
 
-    def test_policy_core_response_format_is_provider_compatible_and_keeps_dynamic_objects(self):
+    def test_policy_core_response_format_is_strict_and_canonical(self):
         response_format = _build_policy_core_response_format(["calendar.book_slot"])
-        assert response_format["json_schema"]["strict"] is False
+        assert response_format["json_schema"]["strict"] is True
         schema = response_format["json_schema"]["schema"]
         assert schema["type"] == "object"
-        assert schema["properties"]["tool_args"]["additionalProperties"] is True
-        assert schema["properties"]["slots"]["additionalProperties"] == {"type": "string"}
+        assert schema["properties"]["tool_args"]["additionalProperties"] is False
+        assert schema["properties"]["slots"]["additionalProperties"] is False
+        assert "next_question" in schema["required"]
+        assert "reason" in schema["required"]
+        assert "goal" in schema["required"]
+        assert "entity_refs" in schema["required"]
+        assert "subject_kind" in schema["required"]
+        assert "capability" in schema["required"]
+        assert "temporal_scope" in schema["required"]
+        assert "resolution_mode" in schema["required"]
+        assert "pending_question_act" in schema["required"]
+        assert "pending_question_target" in schema["required"]
+        assert "active_question_relation" in schema["required"]
+        assert "resolver_id" in schema["required"]
+        assert "resolver_version" in schema["required"]
+        assert schema["properties"]["slots"]["required"] == ["service", "datetime", "name", "phone"]
         assert "entity_refs" in schema["properties"]
         assert "subject_kind" in schema["properties"]
         assert "capability" in schema["properties"]
@@ -995,8 +1009,7 @@ class TestPolicyCoreTimeoutRetry:
         assert "active_question_relation" in schema["properties"]
         assert "resolver_id" in schema["properties"]
         assert "resolver_version" in schema["properties"]
-        for keyword in ("allOf", "oneOf", "anyOf", "not", "enum"):
-            assert keyword not in schema
+        assert schema["properties"]["tool_action"]["enum"] == ["calendar.book_slot"]
 
 
 class TestPolicyCoreErrorClassification:

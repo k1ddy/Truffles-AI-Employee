@@ -350,6 +350,13 @@ def _normalize_entity_refs(value: Any) -> list[dict[str, Any]]:
         source_ref = item.get("source_ref")
         if isinstance(source_ref, str) and source_ref.strip():
             row["source_ref"] = source_ref.strip()
+        entity_value = item.get("value")
+        if not isinstance(entity_value, str) or not entity_value.strip():
+            fallback_value = item.get("label")
+            if isinstance(fallback_value, str) and fallback_value.strip():
+                entity_value = fallback_value
+        if isinstance(entity_value, str) and entity_value.strip():
+            row["value"] = entity_value.strip()
         confidence = item.get("confidence")
         if isinstance(confidence, (int, float)):
             row["confidence"] = max(0.0, min(float(confidence), 1.0))

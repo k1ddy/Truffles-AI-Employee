@@ -413,6 +413,10 @@ def _policy_core_uses_response_format(error: Exception) -> bool:
 
 
 def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[str, Any]:
+    nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    nullable_string_enum = lambda values: {
+        "anyOf": [{"type": "string", "enum": values}, {"type": "null"}]
+    }
     schema = {
         "type": "object",
         "additionalProperties": False,
@@ -423,58 +427,199 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "tool_args",
             "pack_refs",
             "slots",
+            "next_question",
             "open_questions",
             "needs_manager",
             "risk_signals",
+            "language",
             "confidence",
+            "reason",
+            "goal",
+            "entity_refs",
+            "subject_kind",
+            "capability",
+            "temporal_scope",
+            "resolution_mode",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+            "resolver_id",
+            "resolver_version",
         ],
         "properties": {
-            "intent": {"type": "string", "minLength": 1},
+            "intent": {
+                "type": "string",
+                "enum": [
+                    "booking",
+                    "pricing",
+                    "duration",
+                    "location",
+                    "hours",
+                    "master_query",
+                    "consult",
+                    "greeting",
+                    "out_of_domain",
+                    "other",
+                ],
+            },
             "action": {"type": "string", "enum": ["fact", "collect", "handoff"]},
             "tool_action": {"type": "string", "enum": allowed_tool_actions},
-            "tool_args": {"type": "object", "additionalProperties": True},
+            "tool_args": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "service_query",
+                    "consult_question",
+                    "date",
+                    "start_at",
+                    "duration_min",
+                    "specialist_id",
+                    "specialist_name",
+                    "customer_name",
+                    "customer_phone",
+                    "appointment_id",
+                    "end_at",
+                    "reason",
+                    "info_ref",
+                    "info_refs",
+                ],
+                "properties": {
+                    "service_query": nullable_string,
+                    "consult_question": nullable_string,
+                    "date": nullable_string,
+                    "start_at": nullable_string,
+                    "duration_min": {
+                        "anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]
+                    },
+                    "specialist_id": nullable_string,
+                    "specialist_name": nullable_string,
+                    "customer_name": nullable_string,
+                    "customer_phone": nullable_string,
+                    "appointment_id": nullable_string,
+                    "end_at": nullable_string,
+                    "reason": nullable_string,
+                    "info_ref": nullable_string,
+                    "info_refs": {
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "null"},
+                        ]
+                    },
+                },
+            },
             "pack_refs": {"type": "array", "items": {"type": "string"}},
             "slots": {
                 "type": "object",
-                "additionalProperties": {"type": "string"},
+                "additionalProperties": False,
+                "required": ["service", "datetime", "name", "phone"],
+                "properties": {
+                    "service": nullable_string,
+                    "datetime": nullable_string,
+                    "name": nullable_string,
+                    "phone": nullable_string,
+                },
             },
-            "next_question": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "next_question": nullable_string_enum(["service", "datetime", "name", "phone"]),
             "open_questions": {"type": "array", "items": {"type": "string"}},
             "needs_manager": {"type": "boolean"},
             "risk_signals": {"type": "array", "items": {"type": "string"}},
-            "language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "language": nullable_string_enum(["ru", "kk", "mix"]),
             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-            "reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "goal": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "reason": nullable_string,
+            "goal": nullable_string_enum(
+                ["booking", "info", "consult", "greeting", "out_of_domain", "other"]
+            ),
             "entity_refs": {
                 "type": "array",
                 "items": {
-                    "anyOf": [
-                        {"type": "string"},
-                        {"type": "object", "additionalProperties": True},
-                    ]
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "entity_id",
+                        "entity_type",
+                        "source_ref",
+                        "value",
+                        "confidence",
+                    ],
+                    "properties": {
+                        "entity_id": nullable_string,
+                        "entity_type": nullable_string,
+                        "source_ref": nullable_string,
+                        "value": nullable_string,
+                        "confidence": {
+                            "anyOf": [
+                                {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
                 },
             },
-            "subject_kind": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "capability": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "temporal_scope": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "resolution_mode": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "pending_question_act": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "pending_question_target": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "active_question_relation": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "resolver_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "resolver_version": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "subject_kind": nullable_string_enum(
+                ["service", "specialist", "branch", "booking", "general"]
+            ),
+            "capability": nullable_string_enum(
+                [
+                    "pricing",
+                    "duration",
+                    "location",
+                    "hours",
+                    "promotions",
+                    "bookability",
+                    "live_availability",
+                    "booking_manage",
+                    "consultation",
+                    "portfolio",
+                    "other",
+                ]
+            ),
+            "temporal_scope": nullable_string_enum(
+                ["none", "specific_time", "day", "weekday", "weekend", "date_range"]
+            ),
+            "resolution_mode": nullable_string_enum(
+                [
+                    "direct",
+                    "referent_followup",
+                    "clarify_missing_subject",
+                    "clarify_missing_time",
+                    "ask_about_requested_slot",
+                    "policy_fact",
+                    "live_calendar",
+                ]
+            ),
+            "pending_question_act": nullable_string_enum(
+                [
+                    "fill_requested_slot",
+                    "ask_about_requested_slot",
+                    "slot_constraint",
+                    "slot_compare",
+                    "mixed_fill_plus_question",
+                ]
+            ),
+            "pending_question_target": nullable_string_enum(["time", "specialist"]),
+            "active_question_relation": nullable_string_enum(
+                [
+                    "fill_requested_slot",
+                    "ask_about_requested_slot",
+                    "slot_constraint",
+                    "slot_compare",
+                    "mixed_fill_plus_question",
+                    "referent_followup",
+                    "generic_info_interrupt",
+                    "specialist_availability_interrupt",
+                    "specialist_availability_followup",
+                    "tool_result_followup_specialist_missing",
+                ]
+            ),
+            "resolver_id": nullable_string,
+            "resolver_version": nullable_string,
         },
     }
     return {
         "type": "json_schema",
         "json_schema": {
             "name": "llm_policy_core_output",
-            # Keep provider schema transport-compatible; semantic conditional rules such as
-            # master_query service requirements are enforced later by validate_llm_policy_core_output().
-            # tool_args/slots are intentionally open-ended and validated later by contract validators.
-            # strict=False keeps schema guidance without forcing hard-fail on dynamic nested objects.
-            "strict": False,
+            "strict": True,
             "schema": schema,
         },
     }
@@ -1297,6 +1442,123 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
                 cleaned_interaction["grounded_referents"] = cleaned_grounded
         if cleaned_interaction:
             normalized["interaction_state"] = cleaned_interaction
+    semantic_contract = profile.get("semantic_contract")
+    if isinstance(semantic_contract, dict):
+        cleaned_contract: dict[str, Any] = {}
+        for field_name, allowed in (
+            ("subject_kind", {"service", "specialist", "branch", "booking", "general"}),
+            (
+                "capability",
+                {
+                    "pricing",
+                    "duration",
+                    "location",
+                    "hours",
+                    "promotions",
+                    "bookability",
+                    "live_availability",
+                    "booking_manage",
+                    "consultation",
+                    "portfolio",
+                    "other",
+                },
+            ),
+            ("temporal_scope", {"none", "specific_time", "day", "weekday", "weekend", "date_range"}),
+            (
+                "resolution_mode",
+                {
+                    "direct",
+                    "referent_followup",
+                    "clarify_missing_subject",
+                    "clarify_missing_time",
+                    "ask_about_requested_slot",
+                    "policy_fact",
+                    "live_calendar",
+                },
+            ),
+            (
+                "pending_question_act",
+                {
+                    "fill_requested_slot",
+                    "ask_about_requested_slot",
+                    "slot_constraint",
+                    "slot_compare",
+                    "mixed_fill_plus_question",
+                },
+            ),
+            ("pending_question_target", {"time", "specialist"}),
+            (
+                "active_question_relation",
+                {
+                    "fill_requested_slot",
+                    "ask_about_requested_slot",
+                    "slot_constraint",
+                    "slot_compare",
+                    "mixed_fill_plus_question",
+                    "referent_followup",
+                    "generic_info_interrupt",
+                    "specialist_availability_interrupt",
+                    "specialist_availability_followup",
+                    "tool_result_followup_specialist_missing",
+                },
+            ),
+        ):
+            value = semantic_contract.get(field_name)
+            if isinstance(value, str) and value.strip():
+                token = value.strip().casefold()
+                if token in allowed:
+                    cleaned_contract[field_name] = token
+        raw_entity_refs = semantic_contract.get("entity_refs")
+        if isinstance(raw_entity_refs, list):
+            cleaned_entity_refs: list[dict[str, Any]] = []
+            for raw_row in raw_entity_refs[:POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS]:
+                if not isinstance(raw_row, dict):
+                    continue
+                row: dict[str, Any] = {}
+                for source_key, target_key in (
+                    ("entity_id", "entity_id"),
+                    ("entity_type", "entity_type"),
+                    ("source_ref", "source_ref"),
+                    ("value", "value"),
+                ):
+                    raw_value = raw_row.get(source_key)
+                    if isinstance(raw_value, str) and raw_value.strip():
+                        row[target_key] = " ".join(raw_value.split())[
+                            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                        ]
+                confidence = raw_row.get("confidence")
+                if isinstance(confidence, (int, float)):
+                    row["confidence"] = max(0.0, min(float(confidence), 1.0))
+                if row:
+                    cleaned_entity_refs.append(row)
+            if cleaned_entity_refs:
+                cleaned_contract["entity_refs"] = cleaned_entity_refs
+        referents = semantic_contract.get("referents")
+        if isinstance(referents, dict):
+            cleaned_referents: dict[str, dict[str, Any]] = {}
+            for referent_key in ("service", "specialist", "branch", "booking_ref", "customer"):
+                raw_payload = referents.get(referent_key)
+                if not isinstance(raw_payload, dict):
+                    continue
+                row: dict[str, Any] = {}
+                for source_key, target_key in (
+                    ("value", "value"),
+                    ("entity_id", "entity_id"),
+                    ("entity_type", "entity_type"),
+                    ("source_ref", "source_ref"),
+                ):
+                    raw_value = raw_payload.get(source_key)
+                    if isinstance(raw_value, str) and raw_value.strip():
+                        row[target_key] = " ".join(raw_value.split())[
+                            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                        ]
+                if row:
+                    cleaned_referents[referent_key] = row
+            if cleaned_referents:
+                cleaned_contract["referents"] = cleaned_referents
+        if cleaned_contract:
+            cleaned_contract["contract_version"] = "semantic_contract.v1"
+            normalized["semantic_contract"] = cleaned_contract
     consult_state = profile.get("consult_state")
     if isinstance(consult_state, dict):
         cleaned_consult_state: dict[str, Any] = {}
@@ -2688,6 +2950,14 @@ def route_llm_policy_core(
 
     contract, schema_error = validate_llm_policy_core_output(payload)
     if schema_error:
+        result["error"] = "invalid_schema"
+        return result
+    allowed_pack_refs = {
+        ref.strip()
+        for ref in list(info_refs or []) + list(consult_refs or [])
+        if isinstance(ref, str) and ref.strip()
+    }
+    if any(ref not in allowed_pack_refs for ref in contract.pack_refs):
         result["error"] = "invalid_schema"
         return result
 

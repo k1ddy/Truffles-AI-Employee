@@ -489,7 +489,7 @@ class DialogStateService:
                 )
                 if not target_key:
                     continue
-                _remember(target_key, row.get("entity_id"))
+                _remember(target_key, row.get("value") or row.get("entity_id"))
 
         if isinstance(execution_payload, dict):
             _remember("specialist", execution_payload.get("specialist_name") or execution_payload.get("specialist_id"))
@@ -502,6 +502,226 @@ class DialogStateService:
             _remember("customer", execution_payload.get("customer_name"))
 
         return grounded
+
+    def _build_runtime_semantic_contract(
+        self,
+        *,
+        existing_state: DialogState,
+        booking_payload: dict[str, Any] | None,
+        decision: PolicyDecision,
+        execution_payload: dict[str, Any] | None,
+        grounded_referents: dict[str, str] | None,
+    ) -> dict[str, Any] | None:
+        existing_contract = (
+            dict(existing_state.meta.get("semantic_contract"))
+            if isinstance(existing_state.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        decision_contract = (
+            dict(decision.meta.get("semantic_contract"))
+            if isinstance(decision.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        contract: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
+        for source in (existing_contract, decision_contract):
+            for key in (
+                "subject_kind",
+                "capability",
+                "temporal_scope",
+                "resolution_mode",
+                "pending_question_act",
+                "pending_question_target",
+                "active_question_relation",
+            ):
+                value = self._normalize_projection_token(source.get(key))
+                if value:
+                    contract[key] = value
+
+        entity_refs = self._normalize_semantic_entity_refs(
+            decision_contract.get("entity_refs") or existing_contract.get("entity_refs")
+        )
+        if entity_refs:
+            contract["entity_refs"] = entity_refs
+
+        referents = self._build_semantic_referents(
+            existing_contract=existing_contract,
+            entity_refs=entity_refs,
+            grounded_referents=grounded_referents,
+            booking_payload=booking_payload,
+            decision=decision,
+            execution_payload=execution_payload,
+        )
+        if referents:
+            contract["referents"] = referents
+        return contract if len(contract) > 1 else None
+
+    def _build_semantic_referents(
+        self,
+        *,
+        existing_contract: dict[str, Any],
+        entity_refs: list[dict[str, Any]],
+        grounded_referents: dict[str, str] | None,
+        booking_payload: dict[str, Any] | None,
+        decision: PolicyDecision,
+        execution_payload: dict[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        referents: dict[str, dict[str, Any]] = {}
+
+        def _remember(
+            referent_key: str,
+            *,
+            value: Any = None,
+            entity_id: Any = None,
+            entity_type: Any = None,
+            source_ref: Any = None,
+        ) -> None:
+            if referent_key not in {"service", "specialist", "branch", "booking_ref", "customer"}:
+                return
+            payload = dict(referents.get(referent_key) or {})
+            previous_value = payload.get("value")
+            previous_entity_id = payload.get("entity_id")
+            normalized_value = self._normalize_projection_token(value)
+            if normalized_value:
+                payload["value"] = normalized_value
+            normalized_entity_id = self._normalize_projection_token(entity_id)
+            if normalized_entity_id:
+                payload["entity_id"] = normalized_entity_id
+            normalized_entity_type = self._normalize_projection_token(entity_type)
+            if normalized_entity_type:
+                payload["entity_type"] = normalized_entity_type
+            normalized_source_ref = self._normalize_projection_token(source_ref)
+            source_changed = (
+                ("source_ref" not in payload)
+                or (normalized_value is not None and normalized_value != previous_value)
+                or (normalized_entity_id is not None and normalized_entity_id != previous_entity_id)
+            )
+            if normalized_source_ref and (normalized_value or normalized_entity_id) and source_changed:
+                payload["source_ref"] = normalized_source_ref
+            if payload:
+                referents[referent_key] = payload
+
+        existing_referents = existing_contract.get("referents")
+        if isinstance(existing_referents, dict):
+            for referent_key, payload in existing_referents.items():
+                if isinstance(payload, dict):
+                    _remember(
+                        referent_key,
+                        value=payload.get("value"),
+                        entity_id=payload.get("entity_id"),
+                        entity_type=payload.get("entity_type"),
+                        source_ref=payload.get("source_ref"),
+                    )
+
+        if isinstance(grounded_referents, dict):
+            for referent_key, value in grounded_referents.items():
+                _remember(referent_key, value=value, source_ref="runtime_grounding")
+
+        if isinstance(booking_payload, dict):
+            _remember("service", value=booking_payload.get("service"), source_ref="booking_state")
+            _remember(
+                "specialist",
+                value=booking_payload.get("specialist_name") or booking_payload.get("specialist_id"),
+                source_ref="booking_state",
+            )
+            _remember("customer", value=booking_payload.get("name"), source_ref="booking_state")
+            _remember(
+                "booking_ref",
+                value=booking_payload.get("appointment_id")
+                or booking_payload.get("reference_id")
+                or booking_payload.get("booking_id"),
+                source_ref="booking_state",
+            )
+
+        for row in entity_refs:
+            if not isinstance(row, dict):
+                continue
+            entity_type = self._normalize_projection_token(row.get("entity_type"))
+            referent_key = {
+                "service": "service",
+                "specialist": "specialist",
+                "branch": "branch",
+                "booking": "booking_ref",
+                "booking_ref": "booking_ref",
+                "customer": "customer",
+            }.get(entity_type or "")
+            if not referent_key:
+                continue
+            _remember(
+                referent_key,
+                value=row.get("value") or row.get("entity_id"),
+                entity_id=row.get("entity_id"),
+                entity_type=entity_type,
+                source_ref=row.get("source_ref"),
+            )
+
+        slots = decision.slots if isinstance(decision.slots, dict) else {}
+        _remember("service", value=slots.get("service"), source_ref="decision_slots")
+        _remember("customer", value=slots.get("name"), source_ref="decision_slots")
+
+        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
+        _remember("service", value=tool_args.get("service_query"), source_ref="tool_args")
+        _remember(
+            "specialist",
+            value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
+            source_ref="tool_args",
+        )
+        _remember("customer", value=tool_args.get("customer_name"), source_ref="tool_args")
+        _remember("booking_ref", value=tool_args.get("appointment_id"), source_ref="tool_args")
+
+        if isinstance(execution_payload, dict):
+            _remember(
+                "specialist",
+                value=execution_payload.get("specialist_name") or execution_payload.get("specialist_id"),
+                source_ref="execution",
+            )
+            _remember("customer", value=execution_payload.get("customer_name"), source_ref="execution")
+            _remember(
+                "booking_ref",
+                value=execution_payload.get("appointment_id")
+                or execution_payload.get("reference_id")
+                or execution_payload.get("booking_id"),
+                source_ref="execution",
+            )
+
+        return referents
+
+    def _normalize_semantic_entity_refs(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        cleaned: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            payload: dict[str, Any] = {}
+            entity_id = self._normalize_projection_token(item.get("entity_id") or item.get("id"))
+            entity_type = self._normalize_projection_token(item.get("entity_type") or item.get("type"))
+            source_ref = self._normalize_projection_token(item.get("source_ref"))
+            entity_value = self._normalize_projection_token(item.get("value") or item.get("label"))
+            if entity_id:
+                payload["entity_id"] = entity_id
+            if entity_type:
+                payload["entity_type"] = entity_type
+            if source_ref:
+                payload["source_ref"] = source_ref
+            if entity_value:
+                payload["value"] = entity_value
+            confidence = item.get("confidence")
+            if isinstance(confidence, (int, float)):
+                payload["confidence"] = max(0.0, min(float(confidence), 1.0))
+            if not payload:
+                continue
+            fingerprint = (
+                str(payload.get("entity_id") or ""),
+                str(payload.get("entity_type") or ""),
+                str(payload.get("source_ref") or ""),
+                str(payload.get("value") or ""),
+            )
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            cleaned.append(payload)
+        return cleaned
 
     def _build_booking_followup_dialog_state(
         self,
@@ -1062,6 +1282,13 @@ class DialogStateService:
             decision=decision,
             execution_payload=execution_payload,
         )
+        semantic_contract = self._build_runtime_semantic_contract(
+            existing_state=loaded["dialog_state"],
+            booking_payload=merged_booking,
+            decision=decision,
+            execution_payload=execution_payload,
+            grounded_referents=grounded_referents,
+        )
 
         if expected_reply_type and decision.outcome == "COLLECT":
             dialog_state = self.build_collect_owner_state(
@@ -1102,6 +1329,8 @@ class DialogStateService:
                     "current_goal": current_goal,
                 },
             )
+        if semantic_contract:
+            dialog_state.meta["semantic_contract"] = semantic_contract
 
         runtime_payload = {
             "schema_version": "consultant_runtime.v1",
@@ -1114,6 +1343,7 @@ class DialogStateService:
             "expected_reply_type": expected_reply_type,
             "expected_reply_reason": expected_reply_reason,
             "current_goal": current_goal,
+            "semantic_contract": semantic_contract,
             "updated_at": now.isoformat(),
         }
         runtime_payload = {

@@ -216,6 +216,42 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
         "specialist": "Айгерим",
         "customer": "Марина",
     }
+    state.meta["semantic_contract"] = {
+        "contract_version": "semantic_contract.v1",
+        "subject_kind": "specialist",
+        "capability": "bookability",
+        "resolution_mode": "referent_followup",
+        "pending_question_target": "specialist",
+        "active_question_relation": "referent_followup",
+        "entity_refs": [
+            {
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "value": "manicure",
+                "source_ref": "carryover",
+            },
+            {
+                "entity_id": "spec:aigerim",
+                "entity_type": "specialist",
+                "value": "Айгерим",
+                "source_ref": "carryover",
+            },
+        ],
+        "referents": {
+            "service": {
+                "value": "manicure",
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "source_ref": "carryover",
+            },
+            "specialist": {
+                "value": "Айгерим",
+                "entity_id": "spec:aigerim",
+                "entity_type": "specialist",
+                "source_ref": "carryover",
+            },
+        },
+    }
 
     decision, override = runtime._plan_turn(
         db=None,
@@ -261,6 +297,42 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
                 "service": "manicure",
                 "specialist": "Айгерим",
                 "customer": "Марина",
+            },
+        },
+        "semantic_contract": {
+            "contract_version": "semantic_contract.v1",
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "referent_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "value": "manicure",
+                    "source_ref": "carryover",
+                },
+                {
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                    "value": "Айгерим",
+                    "source_ref": "carryover",
+                },
+            ],
+            "referents": {
+                "service": {
+                    "value": "manicure",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                },
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                    "source_ref": "carryover",
+                },
             },
         },
     }

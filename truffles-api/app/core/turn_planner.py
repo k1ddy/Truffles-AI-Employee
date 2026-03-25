@@ -234,9 +234,12 @@ class TurnPlanner:
             value = payload.get(key)
             if value is not None:
                 meta[key] = value
-        entity_refs = payload.get("entity_refs")
-        if isinstance(entity_refs, list):
-            meta["entity_refs"] = list(entity_refs)
+        entity_refs = self._normalize_entity_refs(payload.get("entity_refs"))
+        if entity_refs:
+            meta["entity_refs"] = entity_refs
+        semantic_contract = self._build_semantic_contract_payload(payload, entity_refs=entity_refs)
+        if semantic_contract:
+            meta["semantic_contract"] = semantic_contract
         return PolicyDecision(
             outcome=outcome,
             action=action,
@@ -256,6 +259,29 @@ class TurnPlanner:
             pending_question_contract=pending_question,
             meta=meta,
         )
+
+    def _build_semantic_contract_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        entity_refs: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        contract: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
+        for field_name in (
+            "subject_kind",
+            "capability",
+            "temporal_scope",
+            "resolution_mode",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+        ):
+            value = self._normalize_token(payload.get(field_name))
+            if value is not None:
+                contract[field_name] = value
+        if entity_refs:
+            contract["entity_refs"] = entity_refs
+        return contract if len(contract) > 1 else None
 
     def build_tool_reply_owner_decision(
         self,
@@ -462,6 +488,53 @@ class TurnPlanner:
     @staticmethod
     def _normalize_dict(value: Any) -> dict[str, Any]:
         return dict(value) if isinstance(value, dict) else {}
+
+    def _normalize_entity_refs(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in value:
+            entry: dict[str, Any] = {}
+            if isinstance(item, dict):
+                entity_id = self._normalize_token(item.get("entity_id")) or self._normalize_token(
+                    item.get("id")
+                )
+                entity_type = self._normalize_token(item.get("entity_type")) or self._normalize_token(
+                    item.get("type")
+                )
+                source_ref = self._normalize_token(item.get("source_ref"))
+                value_token = self._normalize_token(item.get("value")) or self._normalize_token(
+                    item.get("label")
+                )
+                if entity_id:
+                    entry["entity_id"] = entity_id
+                if entity_type:
+                    entry["entity_type"] = entity_type
+                if source_ref:
+                    entry["source_ref"] = source_ref
+                if value_token:
+                    entry["value"] = value_token
+                confidence = item.get("confidence")
+                if isinstance(confidence, (int, float)):
+                    entry["confidence"] = max(0.0, min(float(confidence), 1.0))
+            elif isinstance(item, str):
+                entity_id = self._normalize_token(item)
+                if entity_id:
+                    entry["entity_id"] = entity_id
+            if not entry:
+                continue
+            dedupe_key = (
+                str(entry.get("entity_id") or ""),
+                str(entry.get("entity_type") or ""),
+                str(entry.get("source_ref") or ""),
+                str(entry.get("value") or ""),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            normalized.append(entry)
+        return normalized
 
     def _normalize_planner_slots(self, value: Any) -> dict[str, str]:
         normalized = self._normalize_string_dict(value)

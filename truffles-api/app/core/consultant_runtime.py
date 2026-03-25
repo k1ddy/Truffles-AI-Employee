@@ -631,6 +631,26 @@ class ConsultantRuntime:
         if current_referents:
             profile["current_referents"] = current_referents
 
+        semantic_contract = (
+            dict(dialog_state.meta.get("semantic_contract"))
+            if isinstance(dialog_state.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        if semantic_contract:
+            semantic_referents = semantic_contract.get("referents")
+            if isinstance(semantic_referents, dict):
+                for referent_key, payload in semantic_referents.items():
+                    if referent_key in current_referents:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    referent_value = payload.get("value")
+                    if isinstance(referent_value, str) and referent_value.strip():
+                        current_referents[referent_key] = referent_value.strip()
+                if current_referents:
+                    profile["current_referents"] = current_referents
+            profile["semantic_contract"] = semantic_contract
+
         pending_contract: dict[str, Any] = {}
         next_question = dialog_state.pending_question_contract.next_question
         if isinstance(next_question, str) and next_question.strip():
@@ -943,6 +963,15 @@ class ConsultantRuntime:
             trace_event["pending_question_target"] = pending_question_target
         if active_question_relation:
             trace_event["active_question_relation"] = active_question_relation
+        semantic_contract = (
+            dict(dialog_state.meta.get("semantic_contract"))
+            if isinstance(dialog_state.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        if not semantic_contract and isinstance(decision.meta.get("semantic_contract"), dict):
+            semantic_contract = dict(decision.meta.get("semantic_contract"))
+        if semantic_contract:
+            trace_event["semantic_contract"] = semantic_contract
         context = dict(conversation.context or {})
         trace = context.get(_RUNTIME_TRACE_KEY)
         if not isinstance(trace, list):
@@ -996,6 +1025,8 @@ class ConsultantRuntime:
             decision_meta["pending_question_target"] = pending_question_target
         if active_question_relation:
             decision_meta["active_question_relation"] = active_question_relation
+        if semantic_contract:
+            decision_meta["semantic_contract"] = semantic_contract
         if contract_source != decision.source:
             decision_meta["source_detail"] = decision.source
         if isinstance(execution.meta, dict):

@@ -156,6 +156,7 @@ class MemoryContract(BaseModel):
     unanswered_questions: Optional[list[str]] = None
     current_referents: Optional[dict[str, str]] = None
     pending_question_contract: Optional[dict[str, Any]] = None
+    semantic_contract: Optional[dict[str, Any]] = None
     consult_state: Optional[dict[str, Any]] = None
 
 

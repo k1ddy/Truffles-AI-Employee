@@ -294,6 +294,10 @@ class TurnExecutor:
         booking_state: dict[str, Any] | None,
     ) -> RuntimeExecutionResult:
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
+        semantic_contract = self._build_execution_semantic_contract(
+            decision,
+            booking_state=merged_slots,
+        )
         next_slot = (
             self._normalize_booking_slot(decision.pending_question_contract.next_question)
             or self._first_missing_booking_slot(merged_slots)
@@ -328,17 +332,23 @@ class TurnExecutor:
                     text=prompt,
                     tool_action=decision.tool_action,
                     tool_decision="slot_constraint",
-                    meta={
+                    meta=self._attach_semantic_contract_meta(
+                        {
                         "slot_values": merged_slots,
                         "next_slot": next_slot,
                         "pending_question_act": "slot_constraint",
                         "pending_question_target": "time",
                         "question_contract": True,
                         "alternate_datetime": candidate_datetime,
-                    },
+                        },
+                        semantic_contract=semantic_contract,
+                    ),
                 )
         prompt = prompt_map.get(next_slot or "", "Подскажите, пожалуйста, следующий удобный слот.")
-        meta: dict[str, Any] = {"slot_values": merged_slots}
+        meta: dict[str, Any] = self._attach_semantic_contract_meta(
+            {"slot_values": merged_slots},
+            semantic_contract=semantic_contract,
+        )
         if next_slot:
             meta["next_slot"] = next_slot
         return RuntimeExecutionResult(
@@ -383,6 +393,11 @@ class TurnExecutor:
         query_text = (message_text or "").strip()
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
         service_name = merged_slots.get("service")
+        semantic_contract = self._build_execution_semantic_contract(
+            decision,
+            booking_state=merged_slots,
+            service_name=service_name,
+        )
         fact_refs = {
             str(item).strip().casefold()
             for item in (
@@ -426,7 +441,10 @@ class TurnExecutor:
                     text=master_reply.response.strip(),
                     tool_action=decision.tool_action,
                     tool_decision=master_reply.intent or "master",
-                    meta=master_meta,
+                    meta=self._attach_semantic_contract_meta(
+                        master_meta,
+                        semantic_contract=semantic_contract,
+                    ),
                     request_handoff=master_reply.action == "escalate",
                 )
         resolved_tool_action = self._resolve_fact_tool_action(
@@ -452,11 +470,16 @@ class TurnExecutor:
                 message_text=query_text,
                 expected_reply_type=None,
                 now=now,
+                semantic_contract=semantic_contract,
             )
             if tool_result.handled and isinstance(tool_result.response_text, str) and tool_result.response_text.strip():
                 tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
                 if resolved_tool_action != decision.tool_action:
                     tool_meta["resolved_tool_action"] = resolved_tool_action
+                tool_meta = self._attach_semantic_contract_meta(
+                    tool_meta,
+                    semantic_contract=semantic_contract,
+                )
                 return RuntimeExecutionResult(
                     text=tool_result.response_text.strip(),
                     tool_action=resolved_tool_action,
@@ -492,7 +515,10 @@ class TurnExecutor:
                 text=pack_decision.response.strip(),
                 tool_action=decision.tool_action,
                 tool_decision=pack_decision.intent or pack_decision.action,
-                meta=pack_meta,
+                meta=self._attach_semantic_contract_meta(
+                    pack_meta,
+                    semantic_contract=semantic_contract,
+                ),
                 request_handoff=request_handoff,
             )
         fallback_text = (message_text or "").strip() or "Я уточню это для вас."
@@ -500,7 +526,10 @@ class TurnExecutor:
             text=fallback_text,
             tool_action=decision.tool_action,
             tool_decision="passthrough",
-            meta={"fact_fallback": True},
+            meta=self._attach_semantic_contract_meta(
+                {"fact_fallback": True},
+                semantic_contract=semantic_contract,
+            ),
         )
 
     @staticmethod
@@ -509,6 +538,110 @@ class TurnExecutor:
             return None
         cleaned = value.strip().casefold()
         return cleaned or None
+
+    @staticmethod
+    def _attach_semantic_contract_meta(
+        meta: dict[str, Any] | None,
+        *,
+        semantic_contract: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = dict(meta) if isinstance(meta, dict) else {}
+        if isinstance(semantic_contract, dict) and semantic_contract:
+            payload["semantic_contract"] = semantic_contract
+        return payload
+
+    def _build_execution_semantic_contract(
+        self,
+        decision: PolicyDecision,
+        *,
+        booking_state: dict[str, Any] | None,
+        service_name: str | None = None,
+    ) -> dict[str, Any] | None:
+        base_contract = (
+            dict(decision.meta.get("semantic_contract"))
+            if isinstance(decision.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        if not base_contract:
+            return None
+        contract = dict(base_contract)
+        contract["contract_version"] = "semantic_contract.v1"
+        referents = dict(contract.get("referents") or {})
+
+        def _remember(
+            referent_key: str,
+            *,
+            value: Any = None,
+            entity_type: str | None = None,
+            source_ref: str | None = None,
+        ) -> None:
+            if referent_key not in {"service", "specialist", "branch", "booking_ref", "customer"}:
+                return
+            payload = dict(referents.get(referent_key) or {})
+            if isinstance(value, str) and value.strip():
+                payload["value"] = value.strip()
+            if entity_type:
+                payload.setdefault("entity_type", entity_type)
+            if source_ref:
+                payload.setdefault("source_ref", source_ref)
+            if payload:
+                referents[referent_key] = payload
+
+        if isinstance(contract.get("entity_refs"), list):
+            for row in contract["entity_refs"]:
+                if not isinstance(row, dict):
+                    continue
+                entity_type = self._normalize_fact_hint(row.get("entity_type"))
+                referent_key = {
+                    "service": "service",
+                    "specialist": "specialist",
+                    "branch": "branch",
+                    "booking": "booking_ref",
+                    "booking_ref": "booking_ref",
+                    "customer": "customer",
+                }.get(entity_type or "")
+                if not referent_key:
+                    continue
+                _remember(
+                    referent_key,
+                    value=row.get("value") or row.get("entity_id"),
+                    entity_type=entity_type,
+                    source_ref=row.get("source_ref"),
+                )
+                if isinstance(row.get("entity_id"), str) and row.get("entity_id").strip():
+                    referents.setdefault(referent_key, {})["entity_id"] = row["entity_id"].strip()
+
+        if isinstance(booking_state, dict):
+            _remember("service", value=booking_state.get("service"), entity_type="service", source_ref="booking_state")
+            _remember(
+                "specialist",
+                value=booking_state.get("specialist_name") or booking_state.get("specialist_id"),
+                entity_type="specialist",
+                source_ref="booking_state",
+            )
+            _remember("customer", value=booking_state.get("name"), entity_type="customer", source_ref="booking_state")
+            _remember(
+                "booking_ref",
+                value=booking_state.get("appointment_id") or booking_state.get("reference_id"),
+                entity_type="booking",
+                source_ref="booking_state",
+            )
+        if isinstance(service_name, str) and service_name.strip():
+            _remember("service", value=service_name, entity_type="service", source_ref="service_query")
+        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
+        _remember("service", value=tool_args.get("service_query"), entity_type="service", source_ref="tool_args")
+        _remember(
+            "specialist",
+            value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
+            entity_type="specialist",
+            source_ref="tool_args",
+        )
+        _remember("customer", value=tool_args.get("customer_name"), entity_type="customer", source_ref="tool_args")
+        _remember("booking_ref", value=tool_args.get("appointment_id"), entity_type="booking", source_ref="tool_args")
+
+        if referents:
+            contract["referents"] = referents
+        return contract
 
     def _resolve_fact_info_sections(self, fact_refs: set[str]) -> list[str] | None:
         sections: list[str] = []
@@ -565,6 +698,11 @@ class TurnExecutor:
         from app.services.appointment_service import AppointmentConflictError, SchedulingService
 
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
+        semantic_contract = self._build_execution_semantic_contract(
+            decision,
+            booking_state=merged_slots,
+            service_name=merged_slots.get("service"),
+        )
         missing_slot = self._first_missing_booking_slot(merged_slots)
         if missing_slot is not None:
             prompt = self._BOOKING_PROMPTS.get(missing_slot, self._BOOKING_PROMPTS["service"])
@@ -572,7 +710,10 @@ class TurnExecutor:
                 text=prompt,
                 tool_action="collect",
                 tool_decision=missing_slot,
-                meta={"slot_values": merged_slots, "booking_incomplete": True},
+                meta=self._attach_semantic_contract_meta(
+                    {"slot_values": merged_slots, "booking_incomplete": True},
+                    semantic_contract=semantic_contract,
+                ),
             )
 
         if branch_id is None:
@@ -580,7 +721,10 @@ class TurnExecutor:
                 text="Чтобы завершить запись, мне нужен активный филиал. Передаю диалог менеджеру.",
                 tool_action="handoff",
                 tool_decision="branch_missing",
-                meta={"slot_values": merged_slots},
+                meta=self._attach_semantic_contract_meta(
+                    {"slot_values": merged_slots},
+                    semantic_contract=semantic_contract,
+                ),
                 request_handoff=True,
             )
 
@@ -590,7 +734,10 @@ class TurnExecutor:
                 text=self._BOOKING_PROMPTS["datetime"],
                 tool_action="collect",
                 tool_decision="datetime_invalid",
-                meta={"slot_values": merged_slots, "booking_incomplete": True},
+                meta=self._attach_semantic_contract_meta(
+                    {"slot_values": merged_slots, "booking_incomplete": True},
+                    semantic_contract=semantic_contract,
+                ),
             )
 
         duration_minutes = self._resolve_duration_minutes(db, branch_id=branch_id, service_name=merged_slots["service"])
@@ -618,11 +765,14 @@ class TurnExecutor:
                 text="Это время уже занято. Подскажите другую дату и время, пожалуйста.",
                 tool_action="collect",
                 tool_decision="datetime_conflict",
-                meta={
+                meta=self._attach_semantic_contract_meta(
+                    {
                     "slot_values": merged_slots,
                     "next_slot": "datetime",
                     "booking_incomplete": True,
-                },
+                    },
+                    semantic_contract=semantic_contract,
+                ),
             )
         confirmation_text = (
             f"Готово, записал вас на {merged_slots['service']} "
@@ -632,12 +782,15 @@ class TurnExecutor:
             text=confirmation_text,
             tool_action="calendar.book_slot",
             tool_decision="ok",
-            meta={
+            meta=self._attach_semantic_contract_meta(
+                {
                 "slot_values": merged_slots,
                 "appointment_id": str(appointment.id),
                 "service": merged_slots.get("service"),
                 "datetime": merged_slots.get("datetime"),
-            },
+                },
+                semantic_contract=semantic_contract,
+            ),
             clear_booking=True,
         )
 

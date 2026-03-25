@@ -136,6 +136,30 @@ def _with_provider_health_meta(
     return decision_meta, trace
 
 
+def _service_query_from_semantic_contract(semantic_contract: dict[str, Any] | None) -> str | None:
+    if not isinstance(semantic_contract, dict):
+        return None
+    referents = semantic_contract.get("referents")
+    if isinstance(referents, dict):
+        service_payload = referents.get("service")
+        if isinstance(service_payload, dict):
+            service_value = service_payload.get("value")
+            if isinstance(service_value, str) and service_value.strip():
+                return service_value.strip()
+    entity_refs = semantic_contract.get("entity_refs")
+    if isinstance(entity_refs, list):
+        for row in entity_refs:
+            if not isinstance(row, dict):
+                continue
+            entity_type = str(row.get("entity_type") or "").strip().casefold()
+            if entity_type != "service":
+                continue
+            service_value = row.get("value") or row.get("label")
+            if isinstance(service_value, str) and service_value.strip():
+                return service_value.strip()
+    return None
+
+
 def _normalize_tool_policy_tokens(raw_tokens: Any) -> list[str]:
     if not isinstance(raw_tokens, list):
         return []
@@ -1278,6 +1302,7 @@ def execute_tool_action(
     user_phone: str | None = None,
     user_phone_source: str | None = None,
     user_remote_jid: str | None = None,
+    semantic_contract: dict[str, Any] | None = None,
 ) -> ToolExecutionResult:
     if tool_action not in TOOL_ACTIONS:
         return ToolExecutionResult(
@@ -1288,6 +1313,9 @@ def execute_tool_action(
             decision_meta={},
             trace={},
         )
+
+    if not service_query:
+        service_query = _service_query_from_semantic_contract(semantic_contract)
 
     tool_args_error, tool_args_field = _validate_tool_args_contract(
         tool_action=tool_action,

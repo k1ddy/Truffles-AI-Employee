@@ -2674,9 +2674,16 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
             "tool_args": {"specialist_name": "Айгерим"},
             "entity_refs": [
                 {
-                    "entity_id": "Айгерим",
+                    "entity_id": "spec:aigerim",
                     "entity_type": "specialist",
+                    "value": "Айгерим",
                     "source_ref": "message",
+                },
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "value": "Маникюр",
+                    "source_ref": "booking_state",
                 }
             ],
             "next_question": "datetime",
@@ -2707,3 +2714,20 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
     assert dialog_state.current_referents.specialist == "Айгерим"
     assert dialog_state.interaction_state.grounded_referents["specialist"] == "Айгерим"
     assert booking_payload["specialist_name"] == "Айгерим"
+    semantic_contract = runtime_payload["semantic_contract"]
+    assert semantic_contract["subject_kind"] == "specialist"
+    assert semantic_contract["capability"] == "bookability"
+    assert semantic_contract["pending_question_target"] == "specialist"
+    assert semantic_contract["active_question_relation"] == "referent_followup"
+    assert semantic_contract["referents"]["service"] == {
+        "value": "Маникюр",
+        "entity_id": "svc:manicure",
+        "entity_type": "service",
+        "source_ref": "booking_state",
+    }
+    assert semantic_contract["referents"]["specialist"] == {
+        "value": "Айгерим",
+        "entity_id": "spec:aigerim",
+        "entity_type": "specialist",
+        "source_ref": "message",
+    }
