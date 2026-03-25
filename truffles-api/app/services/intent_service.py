@@ -45,10 +45,6 @@ _DIALOGUE_CONTROLLER_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar
     "dialogue_controller_override",
     default=None,
 )
-_POLICY_CORE_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
-    "policy_core_override",
-    default=None,
-)
 
 
 def _log_timing(
@@ -2017,97 +2013,6 @@ def _resolve_dialogue_controller_override(message: str | None) -> dict[str, obje
     return resolved
 
 
-def _copy_policy_core_override(
-    override: dict[str, object] | None,
-) -> dict[str, object] | None:
-    if not isinstance(override, dict):
-        return None
-    copied = dict(override)
-    for list_key in ("pack_refs", "open_questions", "risk_signals"):
-        raw_value = copied.get(list_key)
-        if isinstance(raw_value, list):
-            copied[list_key] = list(raw_value)
-    raw_entity_refs = copied.get("entity_refs")
-    if isinstance(raw_entity_refs, list):
-        copied["entity_refs"] = [
-            dict(item) if isinstance(item, dict) else item for item in raw_entity_refs
-        ]
-    for dict_key in ("tool_args", "slots"):
-        raw_value = copied.get(dict_key)
-        if isinstance(raw_value, dict):
-            copied[dict_key] = dict(raw_value)
-    return copied
-
-
-def get_policy_core_override() -> dict[str, object] | None:
-    return _copy_policy_core_override(_POLICY_CORE_OVERRIDE.get())
-
-
-@contextmanager
-def use_policy_core_override(override: dict[str, object] | None) -> Iterator[None]:
-    copied = _copy_policy_core_override(override)
-    if copied is None:
-        yield
-        return
-
-    token = _POLICY_CORE_OVERRIDE.set(copied)
-    try:
-        yield
-    finally:
-        _POLICY_CORE_OVERRIDE.reset(token)
-
-
-def _resolve_policy_core_override(message: str | None) -> dict[str, Any] | None:
-    override = _copy_policy_core_override(_POLICY_CORE_OVERRIDE.get())
-    if override is None:
-        return None
-
-    normalized = normalize_for_matching(message)
-    override_text = override.get("normalized_text")
-    if not isinstance(override_text, str) or override_text != normalized:
-        return None
-
-    candidate = {
-        "intent": override.get("intent"),
-        "action": override.get("action"),
-        "tool_action": override.get("tool_action"),
-        "tool_args": dict(override.get("tool_args") or {})
-        if isinstance(override.get("tool_args"), dict)
-        else {},
-        "pack_refs": list(override.get("pack_refs") or [])
-        if isinstance(override.get("pack_refs"), list)
-        else [],
-        "slots": dict(override.get("slots") or {}) if isinstance(override.get("slots"), dict) else {},
-        "next_question": override.get("next_question"),
-        "open_questions": list(override.get("open_questions") or [])
-        if isinstance(override.get("open_questions"), list)
-        else [],
-        "needs_manager": bool(override.get("needs_manager")),
-        "risk_signals": list(override.get("risk_signals") or [])
-        if isinstance(override.get("risk_signals"), list)
-        else [],
-        "confidence": override.get("confidence"),
-        "reason": override.get("reason"),
-        "goal": override.get("goal"),
-        "entity_refs": list(override.get("entity_refs") or [])
-        if isinstance(override.get("entity_refs"), list)
-        else [],
-        "subject_kind": override.get("subject_kind"),
-        "capability": override.get("capability"),
-        "temporal_scope": override.get("temporal_scope"),
-        "resolution_mode": override.get("resolution_mode"),
-        "pending_question_act": override.get("pending_question_act"),
-        "pending_question_target": override.get("pending_question_target"),
-        "active_question_relation": override.get("active_question_relation"),
-        "resolver_id": override.get("resolver_id"),
-        "resolver_version": override.get("resolver_version"),
-    }
-    contract, schema_error = validate_llm_policy_core_output(candidate)
-    if schema_error:
-        return None
-    return contract.model_dump()
-
-
 def route_dialogue_controller(
     message: str,
     *,
@@ -2518,11 +2423,6 @@ def route_llm_policy_core(
     normalized = (message or "").strip()
     if not normalized:
         result["error"] = "empty_message"
-        return result
-    policy_override = _resolve_policy_core_override(message)
-    if policy_override is not None:
-        result["ok"] = True
-        result["payload"] = policy_override
         return result
     prompt = _load_policy_core_prompt()
     if not prompt:

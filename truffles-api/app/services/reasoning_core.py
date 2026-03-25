@@ -88,7 +88,6 @@ from app.services.intent_service import (
     use_dialogue_controller_override,
     use_domain_routing_override,
     use_intent_semantic_override,
-    use_policy_core_override,
 )
 from app.services.knowledge_runtime import (
     build_runtime_truth,
@@ -3718,7 +3717,6 @@ async def _try_handle_turn_planner_safe_session_reset_only_delegate(
         stack.enter_context(use_intent_semantic_override(None))
         stack.enter_context(use_dialogue_controller_override(None))
         stack.enter_context(use_domain_routing_override(None))
-        stack.enter_context(use_policy_core_override(None))
         return await decision_router._handle_webhook_payload(
             payload,
             db,

@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 from unittest.mock import patch
@@ -26,7 +27,6 @@ from app.services.intent_service import (
     get_dialogue_controller_override,
     get_domain_routing_override,
     get_intent_semantic_override,
-    get_policy_core_override,
     extract_service_query_hint_llm,
     interpret_expected_reply,
     is_frustration_message,
@@ -39,7 +39,6 @@ from app.services.intent_service import (
     use_dialogue_controller_override,
     use_domain_routing_override,
     use_intent_semantic_override,
-    use_policy_core_override,
 )
 
 
@@ -2303,62 +2302,20 @@ class TestDialogueControllerBudget:
 
 
 class TestPolicyCoreOverride:
-    def test_route_llm_policy_core_uses_override_without_llm(self, monkeypatch):
+    def test_route_llm_policy_core_no_longer_contains_override_short_circuit(self):
+        source = inspect.getsource(route_llm_policy_core)
+
+        assert "_resolve_policy_core_override" not in source
+
+    def test_route_llm_policy_core_returns_no_api_key_without_override_escape(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "")
-        override = {
-            "normalized_text": "хочу поговорить с менеджером",
-            "intent": "human_request",
-            "action": "handoff",
-            "tool_action": "handoff",
-            "tool_args": {},
-            "pack_refs": [],
-            "slots": {},
-            "open_questions": [],
-            "needs_manager": True,
-            "risk_signals": [],
-            "confidence": 0.98,
-            "reason": "ingress_explicit_human_request",
-            "goal": "handoff",
-            "entity_refs": [],
-            "resolver_id": "consultant_core_ingress_override",
-            "resolver_version": "2026-03-16",
-        }
-        with use_policy_core_override(override):
-            with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-                result = route_llm_policy_core("Хочу поговорить с менеджером")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            result = route_llm_policy_core("Хочу поговорить с менеджером")
 
-        assert result["ok"] is True
-        assert result["error"] is None
+        assert result["ok"] is False
+        assert result["error"] == "no_api_key"
         assert result["attempted"] is False
-        assert result["payload"]["intent"] == "human_request"
-        assert result["payload"]["action"] == "handoff"
-        assert result["payload"]["tool_action"] == "handoff"
-        assert result["payload"]["needs_manager"] is True
         mock_llm.assert_not_called()
-
-    def test_policy_core_override_resets_after_context_exit(self):
-        override = {
-            "normalized_text": "хочу поговорить с менеджером",
-            "intent": "human_request",
-            "action": "handoff",
-            "tool_action": "handoff",
-            "tool_args": {},
-            "pack_refs": [],
-            "slots": {},
-            "open_questions": [],
-            "needs_manager": True,
-            "risk_signals": [],
-            "confidence": 0.98,
-            "reason": "ingress_explicit_human_request",
-            "goal": "handoff",
-            "entity_refs": [],
-            "resolver_id": "consultant_core_ingress_override",
-            "resolver_version": "2026-03-16",
-        }
-        with use_policy_core_override(override):
-            assert get_policy_core_override() is not None
-
-        assert get_policy_core_override() is None
 
 
 class TestDialogueControllerSchema:
