@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 from datetime import datetime, timezone
@@ -20,11 +21,9 @@ from app.services.ai_service import (
     detect_multi_intent,
     detect_refusal_flags,
     generate_ai_response,
-    get_intent_signal_override,
     get_conversation_history,
     get_system_prompt,
     is_greeting_message,
-    use_intent_signal_override,
 )
 from app.services.intent_service import hybrid_retrieve_knowledge
 from app.services.result import Result
@@ -38,77 +37,10 @@ def _disable_hierarchical_memory_by_default(monkeypatch):
     monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 320)
 
 
-class TestIntentSignalOverride:
-    def test_override_matches_exact_normalized_text(self):
-        override = {
-            "normalized_text": "маникюр",
-            "is_greeting": True,
-            "is_thanks": False,
-            "is_ack": False,
-            "is_low_signal": False,
-            "is_status_question": False,
-        }
-
-        with use_intent_signal_override(override):
-            assert get_intent_signal_override() == override
-            assert is_greeting_message("Маникюр") is True
-            assert is_greeting_message("педикюр") is False
-
-    def test_override_resets_after_context_exit(self):
-        with use_intent_signal_override(
-            {
-                "normalized_text": "маникюр",
-                "is_greeting": True,
-                "is_thanks": False,
-                "is_ack": False,
-                "is_low_signal": False,
-                "is_status_question": False,
-            }
-        ):
-            assert get_intent_signal_override() is not None
-
-        assert get_intent_signal_override() is None
-        assert is_greeting_message("маникюр") is False
-
-    def test_confirmation_and_refusal_use_override(self):
-        override = {
-            "normalized_text": "не хочу оставлять телефон",
-            "is_greeting": False,
-            "is_thanks": False,
-            "is_ack": False,
-            "is_low_signal": False,
-            "is_status_question": False,
-            "confirmation_decision": "no",
-            "refusal_flags": {"name": False, "phone": True},
-        }
-
-        with use_intent_signal_override(override):
-            assert classify_confirmation("Не хочу оставлять телефон") == "no"
-            assert detect_refusal_flags("Не хочу оставлять телефон") == {
-                "name": False,
-                "phone": True,
-            }
-
-    def test_confirmation_and_refusal_reset_after_context_exit(self):
-        with use_intent_signal_override(
-            {
-                "normalized_text": "маникюр",
-                "is_greeting": False,
-                "is_thanks": False,
-                "is_ack": False,
-                "is_low_signal": False,
-                "is_status_question": False,
-                "confirmation_decision": "yes",
-                "refusal_flags": {"name": False, "phone": True},
-            }
-        ):
-            assert classify_confirmation("Маникюр") == "yes"
-
-        assert classify_confirmation("Маникюр") == "unknown"
-        assert detect_refusal_flags("Маникюр") == {
-            "name": False,
-            "phone": False,
-        }
+def test_ai_signal_helpers_no_longer_contain_override_short_circuit():
+    assert "_resolve_intent_signal_override" not in inspect.getsource(ai_service.is_greeting_message)
+    assert "_resolve_intent_signal_override" not in inspect.getsource(ai_service.classify_confirmation)
+    assert "_resolve_intent_signal_override" not in inspect.getsource(ai_service.detect_refusal_flags)
 
 
 class TestKnowledgeConfidenceThreshold:

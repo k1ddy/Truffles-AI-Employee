@@ -18,9 +18,6 @@ from app.services.intent_service import (
     classify_intent,
     classify_domain_with_scores,
     extract_customer_name_hint_llm,
-    get_dialogue_controller_override,
-    get_domain_routing_override,
-    get_intent_semantic_override,
     extract_service_query_hint_llm,
     interpret_expected_reply,
     is_frustration_message,
@@ -30,9 +27,6 @@ from app.services.intent_service import (
     route_dialogue_controller,
     route_llm_policy_core,
     should_escalate,
-    use_dialogue_controller_override,
-    use_domain_routing_override,
-    use_intent_semantic_override,
 )
 
 
@@ -115,78 +109,11 @@ class TestHumanRequestHeuristics:
         assert is_human_request_message("сколько стоит маникюр?") is False
 
 
-class TestIntentSemanticOverride:
-    def test_override_matches_exact_normalized_text(self):
-        override = {
-            "normalized_text": "сколько стоит маникюр",
-            "is_human_request": True,
-            "intent": Intent.HUMAN_REQUEST.value,
-        }
+def test_classify_intent_no_longer_contains_override_short_circuit():
+    source = inspect.getsource(classify_intent)
 
-        with use_intent_semantic_override(override):
-            assert get_intent_semantic_override() == override
-            assert is_human_request_message("Сколько стоит маникюр") is True
-            assert is_human_request_message("когда свободно") is False
-
-    def test_override_resets_after_context_exit(self):
-        with use_intent_semantic_override(
-            {
-                "normalized_text": "сколько стоит маникюр",
-                "is_human_request": True,
-                "intent": Intent.HUMAN_REQUEST.value,
-            }
-        ):
-            assert get_intent_semantic_override() is not None
-
-        assert get_intent_semantic_override() is None
-        assert is_human_request_message("сколько стоит маникюр") is False
-
-    def test_classify_intent_uses_override_without_llm(self):
-        override = {
-            "normalized_text": "сколько стоит маникюр",
-            "is_human_request": False,
-            "intent": Intent.GREETING.value,
-        }
-
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            with use_intent_semantic_override(override):
-                assert classify_intent("Сколько стоит маникюр") == Intent.GREETING
-
-        mock_llm.assert_not_called()
-
-    def test_protective_flags_use_override_without_heuristic_match(self):
-        override = {
-            "normalized_text": "останови ответы",
-            "is_opt_out": True,
-            "is_frustration": False,
-            "is_human_request": False,
-            "intent": Intent.REJECTION.value,
-        }
-
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            with use_intent_semantic_override(override):
-                assert is_opt_out_message("Останови ответы") is True
-                assert is_frustration_message("Останови ответы") is False
-                assert classify_intent("Останови ответы") == Intent.REJECTION
-
-        mock_llm.assert_not_called()
-
-    def test_frustration_flag_uses_override_without_heuristic_match(self):
-        override = {
-            "normalized_text": "это уже сломано",
-            "is_opt_out": False,
-            "is_frustration": True,
-            "is_human_request": False,
-            "intent": Intent.FRUSTRATION.value,
-        }
-
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            with use_intent_semantic_override(override):
-                assert is_opt_out_message("Это уже сломано") is False
-                assert is_frustration_message("Это уже сломано") is True
-                assert classify_intent("Это уже сломано") == Intent.FRUSTRATION
-
-        mock_llm.assert_not_called()
+    assert "_resolve_override_intent" not in source
+    assert "_resolve_intent_override_flag" not in source
 
 
 class TestOptOutHeuristics:
@@ -224,41 +151,8 @@ class TestDialogueControllerOffline:
         mock_llm.assert_not_called()
 
 
-class TestDialogueControllerOverride:
-    def test_route_dialogue_controller_uses_override_without_llm(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        override = {
-            "normalized_text": "привет",
-            "class": "greeting",
-            "goal": "greeting",
-            "intents": ["greeting"],
-            "confidence": 0.95,
-            "reason": "ingress_lexical_greeting",
-        }
-        with use_dialogue_controller_override(override):
-            with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-                result = route_dialogue_controller("Привет")
-
-        assert result["ok"] is True
-        assert result["error"] is None
-        assert result["payload"]["class"] == "greeting"
-        assert result["payload"]["goal"] == "greeting"
-        assert result["payload"]["controller_error"] == "none"
-        mock_llm.assert_not_called()
-
-    def test_dialogue_controller_override_resets_after_context_exit(self):
-        override = {
-            "normalized_text": "привет",
-            "class": "greeting",
-            "goal": "greeting",
-            "intents": ["greeting"],
-            "confidence": 0.95,
-            "reason": "ingress_lexical_greeting",
-        }
-        with use_dialogue_controller_override(override):
-            assert get_dialogue_controller_override() is not None
-
-        assert get_dialogue_controller_override() is None
+def test_route_dialogue_controller_no_longer_contains_override_short_circuit():
+    assert "_resolve_dialogue_controller_override" not in inspect.getsource(route_dialogue_controller)
 
 
 class TestDialogueControllerBudget:
@@ -273,6 +167,10 @@ class TestDialogueControllerBudget:
         payload = result["payload"]
         assert payload["controller_error"] == "deadline_exceeded"
         mock_llm.assert_not_called()
+
+
+def test_classify_domain_with_scores_no_longer_contains_override_short_circuit():
+    assert "_resolve_domain_routing_override" not in inspect.getsource(classify_domain_with_scores)
 
 
 class TestPolicyCoreOverride:

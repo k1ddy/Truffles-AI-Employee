@@ -3,11 +3,9 @@ import math
 import os
 import re
 import time
-from contextlib import contextmanager
-from contextvars import ContextVar
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Tuple
+from typing import Any, Iterable, Tuple
 
 import httpx
 
@@ -33,18 +31,6 @@ from app.services.ai_service import (
 from app.services.knowledge_service import QDRANT_COLLECTION as KNOWLEDGE_QDRANT_COLLECTION
 
 logger = get_logger("intent_service")
-_INTENT_SEMANTIC_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
-    "intent_semantic_override",
-    default=None,
-)
-_DOMAIN_ROUTING_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
-    "domain_routing_override",
-    default=None,
-)
-_DIALOGUE_CONTROLLER_OVERRIDE: ContextVar[dict[str, object] | None] = ContextVar(
-    "dialogue_controller_override",
-    default=None,
-)
 
 
 def _log_timing(
@@ -1710,9 +1696,6 @@ FRUSTRATION_PATTERNS = (
 
 
 def is_human_request_message(message: str) -> bool:
-    override_value = _resolve_intent_override_flag(message, "is_human_request")
-    if override_value is not None:
-        return override_value
     normalized = normalize_for_matching(message)
     if not normalized:
         return False
@@ -1720,9 +1703,6 @@ def is_human_request_message(message: str) -> bool:
 
 
 def is_opt_out_message(message: str) -> bool:
-    override_value = _resolve_intent_override_flag(message, "is_opt_out")
-    if override_value is not None:
-        return override_value
     normalized = normalize_for_matching(message)
     if not normalized:
         return False
@@ -1732,9 +1712,6 @@ def is_opt_out_message(message: str) -> bool:
 
 
 def is_frustration_message(message: str) -> bool:
-    override_value = _resolve_intent_override_flag(message, "is_frustration")
-    if override_value is not None:
-        return override_value
     normalized = normalize_for_matching(message)
     if not normalized:
         return False
@@ -1744,10 +1721,6 @@ def is_frustration_message(message: str) -> bool:
 def classify_intent(message: str, *, timing_context: dict | None = None) -> Intent:
     """Classify user message intent using LLM."""
     try:
-        override_intent = _resolve_override_intent(message)
-        if override_intent is not None:
-            return override_intent
-
         if is_opt_out_message(message):
             return Intent.REJECTION
 
@@ -1826,193 +1799,6 @@ def classify_intent(message: str, *, timing_context: dict | None = None) -> Inte
         return Intent.OTHER
 
 
-def get_intent_semantic_override() -> dict[str, object] | None:
-    override = _INTENT_SEMANTIC_OVERRIDE.get()
-    if not isinstance(override, dict):
-        return None
-    return dict(override)
-
-
-@contextmanager
-def use_intent_semantic_override(override: dict[str, object] | None) -> Iterator[None]:
-    if not isinstance(override, dict):
-        yield
-        return
-
-    token = _INTENT_SEMANTIC_OVERRIDE.set(dict(override))
-    try:
-        yield
-    finally:
-        _INTENT_SEMANTIC_OVERRIDE.reset(token)
-
-
-def _resolve_intent_semantic_override(message: str | None) -> dict[str, object] | None:
-    override = _INTENT_SEMANTIC_OVERRIDE.get()
-    if not isinstance(override, dict):
-        return None
-    normalized = normalize_for_matching(message)
-    override_text = override.get("normalized_text")
-    if not isinstance(override_text, str) or override_text != normalized:
-        return None
-    return override
-
-
-def _resolve_intent_override_flag(message: str | None, field: str) -> bool | None:
-    override = _resolve_intent_semantic_override(message)
-    if override is None:
-        return None
-    value = override.get(field)
-    if isinstance(value, bool):
-        return value
-    return None
-
-
-def _resolve_override_intent(message: str | None) -> Intent | None:
-    override = _resolve_intent_semantic_override(message)
-    if override is None:
-        return None
-    token = override.get("intent")
-    if not isinstance(token, str):
-        return None
-    try:
-        return Intent(token)
-    except ValueError:
-        return None
-
-
-def get_domain_routing_override() -> dict[str, object] | None:
-    override = _DOMAIN_ROUTING_OVERRIDE.get()
-    if not isinstance(override, dict):
-        return None
-    return dict(override)
-
-
-@contextmanager
-def use_domain_routing_override(override: dict[str, object] | None) -> Iterator[None]:
-    if not isinstance(override, dict):
-        yield
-        return
-
-    token = _DOMAIN_ROUTING_OVERRIDE.set(dict(override))
-    try:
-        yield
-    finally:
-        _DOMAIN_ROUTING_OVERRIDE.reset(token)
-
-
-def _resolve_domain_routing_override(text: str | None) -> tuple[DomainIntent, float, float, dict] | None:
-    override = _DOMAIN_ROUTING_OVERRIDE.get()
-    if not isinstance(override, dict):
-        return None
-    normalized = _normalize_text(text or "")
-    override_text = override.get("normalized_text")
-    if not isinstance(override_text, str) or override_text != normalized:
-        return None
-    raw_domain_intent = override.get("domain_intent")
-    if not isinstance(raw_domain_intent, str):
-        return None
-    try:
-        domain_intent = DomainIntent(raw_domain_intent)
-    except ValueError:
-        return None
-    in_score = override.get("in_score")
-    out_score = override.get("out_score")
-    meta = override.get("meta")
-    return (
-        domain_intent,
-        float(in_score) if isinstance(in_score, (int, float)) else 0.0,
-        float(out_score) if isinstance(out_score, (int, float)) else 0.0,
-        dict(meta) if isinstance(meta, dict) else {},
-    )
-
-
-def _copy_dialogue_controller_override(
-    override: dict[str, object] | None,
-) -> dict[str, object] | None:
-    if not isinstance(override, dict):
-        return None
-    copied = dict(override)
-    for list_key in ("intents", "followups", "safety_flags"):
-        raw_value = copied.get(list_key)
-        if isinstance(raw_value, list):
-            copied[list_key] = list(raw_value)
-    raw_slots = copied.get("slots")
-    if isinstance(raw_slots, dict):
-        copied["slots"] = dict(raw_slots)
-    raw_carryover = copied.get("carryover")
-    if isinstance(raw_carryover, dict):
-        copied["carryover"] = dict(raw_carryover)
-    return copied
-
-
-def get_dialogue_controller_override() -> dict[str, object] | None:
-    return _copy_dialogue_controller_override(_DIALOGUE_CONTROLLER_OVERRIDE.get())
-
-
-@contextmanager
-def use_dialogue_controller_override(override: dict[str, object] | None) -> Iterator[None]:
-    copied = _copy_dialogue_controller_override(override)
-    if copied is None:
-        yield
-        return
-
-    token = _DIALOGUE_CONTROLLER_OVERRIDE.set(copied)
-    try:
-        yield
-    finally:
-        _DIALOGUE_CONTROLLER_OVERRIDE.reset(token)
-
-
-def _resolve_dialogue_controller_override(message: str | None) -> dict[str, object] | None:
-    override = _copy_dialogue_controller_override(_DIALOGUE_CONTROLLER_OVERRIDE.get())
-    if override is None:
-        return None
-    normalized = normalize_for_matching(message)
-    override_text = override.get("normalized_text")
-    if not isinstance(override_text, str) or override_text != normalized:
-        return None
-
-    controller_class = _clean_controller_class(override.get("class"))
-    if controller_class is None:
-        return None
-    goal = _clean_controller_goal(override.get("goal")) or controller_class
-    if goal not in CONTROLLER_ALLOWED_GOALS:
-        return None
-
-    intents = _clean_controller_intents(override.get("intents"))
-    if not intents:
-        intents = [controller_class]
-    slots = dict(override.get("slots") or {}) if isinstance(override.get("slots"), dict) else {}
-    slots["service_query"] = _clean_controller_service_query(slots.get("service_query"))
-    followups = _clean_controller_followups(override.get("followups"))
-    safety_flags = _clean_controller_safety_flags(override.get("safety_flags"))
-    confidence = override.get("confidence")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(confidence, 1.0))
-    reason = override.get("reason")
-    if not isinstance(reason, str):
-        reason = ""
-
-    resolved = {
-        "normalized_text": normalized,
-        "class": controller_class,
-        "goal": goal,
-        "intents": intents,
-        "slots": slots,
-        "followups": followups,
-        "safety_flags": safety_flags,
-        "confidence": confidence,
-        "reason": reason,
-    }
-    carryover = override.get("carryover")
-    if isinstance(carryover, dict):
-        resolved["carryover"] = dict(carryover)
-    return resolved
-
-
 def route_dialogue_controller(
     message: str,
     *,
@@ -2082,27 +1868,6 @@ def route_dialogue_controller(
     if not normalized:
         result["error"] = "empty_message"
         result["payload"] = _build_payload(controller_error="empty_message")
-        return result
-    controller_override = _resolve_dialogue_controller_override(message)
-    if controller_override is not None:
-        carryover_payload = controller_override.get("carryover")
-        if not isinstance(carryover_payload, dict):
-            carryover_payload = carryover_input
-        result["ok"] = True
-        result["payload"] = _build_payload(
-            controller_class=controller_override["class"],
-            goal=controller_override["goal"],
-            intents=controller_override.get("intents"),
-            slots=controller_override.get("slots"),
-            followups=controller_override.get("followups"),
-            safety_flags=controller_override.get("safety_flags"),
-            confidence=float(controller_override.get("confidence") or 0.0),
-            reason=str(controller_override.get("reason") or ""),
-            carryover_payload=carryover_payload,
-            controller_llm_ms=0.0,
-            controller_error="none",
-            controller_retry_flag=False,
-        )
         return result
     prompt = _load_controller_prompt()
     if not prompt:
@@ -3119,10 +2884,6 @@ def classify_domain_with_scores(
     Classify message domain using per-client anchors (no network calls).
     Returns (domain_intent, in_score, out_score, meta).
     """
-    override = _resolve_domain_routing_override(text)
-    if override is not None:
-        return override
-
     config = _get_domain_router_config(client_config)
     anchors_in = _ensure_list(config.get("anchors_in"))
     anchors_out = _ensure_list(config.get("anchors_out"))

@@ -65,7 +65,6 @@ from app.services.ai_service import (
     is_acknowledgement_message,
     is_greeting_message,
     is_thanks_message,
-    use_intent_signal_override,
 )
 from app.services.booking_signal_service import extract_time_token
 from app.services.capabilities_runtime import (
@@ -84,9 +83,6 @@ from app.services.intent_service import (
     extract_service_query_hint_llm,
     extract_specialist_hint_llm,
     route_llm_policy_core,
-    use_dialogue_controller_override,
-    use_domain_routing_override,
-    use_intent_semantic_override,
 )
 from app.services.knowledge_runtime import (
     build_runtime_truth,
@@ -3766,10 +3762,6 @@ async def _try_handle_turn_planner_safe_session_reset_only_delegate(
         return None
 
     with ExitStack() as stack:
-        stack.enter_context(use_intent_signal_override(None))
-        stack.enter_context(use_intent_semantic_override(None))
-        stack.enter_context(use_dialogue_controller_override(None))
-        stack.enter_context(use_domain_routing_override(None))
         return await decision_router._handle_webhook_payload(
             payload,
             db,
