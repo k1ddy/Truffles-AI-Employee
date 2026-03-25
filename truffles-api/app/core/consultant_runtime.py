@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -248,6 +249,8 @@ class ConsultantRuntime:
                 conversation_id=prepared.conversation.id,
                 bot_response=reply.text,
             )
+        except HTTPException:
+            raise
         except Exception as exc:  # pragma: no cover - runtime safety net
             logger.exception(
                 "Consultant runtime failed",

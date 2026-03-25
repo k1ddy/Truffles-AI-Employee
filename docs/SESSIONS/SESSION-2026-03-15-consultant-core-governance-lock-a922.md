@@ -1,8 +1,8 @@
 # SESSION 2026-03-15-consultant-core-governance-lock-a922 — Session 2026-03-15-consultant-core-governance-lock-a922
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-continuity-writer-guard-and-owner-reset-a922.md
-- block_id: CONSULTANT-CORE-CONTINUITY-WRITER-GUARD-AND-OWNER-RESET-A922
+- task_package: docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-public-entrypoint-http-contract-and-message-endpoint-surface-reset-a922.md
+- block_id: CONSULTANT-CORE-PUBLIC-ENTRYPOINT-HTTP-CONTRACT-AND-MESSAGE-ENDPOINT-SURFACE-RESET-A922
 - research_gate: required
 - root_cause_gate: required
 - reuse_gate: required
@@ -12,10 +12,12 @@
 - branch: feat/2026-03-15-consultant-core-governance-lock-a922
 - worktree: /home/zhan/worktrees/2026-03-15-consultant-core-governance-lock-a922
 - base_ref: origin/main
-- scope: close the bounded continuity-owner governance blocker, keep the green guard stack truthful, and then reopen guarded Phase E acceptance
+- scope: fix the bounded public-entrypoint HTTP contract bug and reset the stale message-endpoint deterministic surface before acceptance replay
 - done:
   - Activated `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-continuity-writer-guard-and-owner-reset-a922.md`. FACT: guarded Phase E acceptance is blocked until the continuity-owner guard is truthful and the bounded real external continuity writers are reset behind canonical writer surfaces.
   - Closed `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-continuity-writer-guard-and-owner-reset-a922.md`. FACT: `python3 scripts/continuity_writer_guard.py` is green after AST-aware write detection replaced the old line-token heuristic, `truffles-api/app/services/handover_owner_service.py` now routes pending-resume writes through new canonical helpers in `truffles-api/app/services/state_service.py`, `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture` passes with `23 passed`, and `SESSION_AGENT=a922 scripts/session_check.sh` returns `Session OK`.
+  - Activated `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-public-entrypoint-http-contract-and-message-endpoint-surface-reset-a922.md`. FACT: acceptance preflight stopped before replay because `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py` failed with `377 failed`; the family clusters into stale ingress/test surface assumptions plus a real public-entrypoint HTTP contract bug where `consultant_runtime` swallows `HTTPException` and turns invalid-secret webhook failures into `200` fallback responses.
+  - Closed `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-public-entrypoint-http-contract-and-message-endpoint-surface-reset-a922.md`. FACT: `consultant_runtime` now re-raises `HTTPException`, `truffles-api/tests/test_message_endpoint.py` is green with `187 passed` after resetting the file to the live public-entrypoint/test surface and cutting the stale `_handle_webhook_payload` wrapper family, and the full guard stack stays green (`pytest -q truffles-api/tests/architecture` -> `23 passed`, `SESSION_AGENT=a922 scripts/session_check.sh` -> `Session OK`).
   - Published `docs/REPORTS/artifacts/2026-03-25-consultant-core-policy-core-live-manual-closure-a922.md`. FACT: the live runtime rebuilt from the current worktree now passes the required manual price / booking / continuation / mid-booking info interrupt / explicit handoff dialogs, with appointment creation and pending handoff creation verified directly on the live surface.
   - Activated `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-policy-core-acceptance-replay-a922.md`. FACT: the next admissible move is one guarded acceptance replay on the current runtime fingerprint; runtime code remains out of scope in this block.
   - Activated `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md` with report `docs/REPORTS/artifacts/2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md`. FACT: the touched initial-booking owner family now exits through canonical non-frozen module `truffles-api/app/core/booking_prompt_owner.py`, the dead duplicate top-level defs for the touched booking-prompt candidate / booking-owner / initial-owner surfaces are deleted from `truffles-api/app/services/reasoning_core.py`, focused deterministic coverage is green, and the duplicate-def architecture guard is updated. FACT: detailed local service-only probes show the old `timeout/degraded_fallback` shape no longer reproduces deterministically on the touched helper path, but `invalid_json` volatility still exists, so closure is not yet proven and the next honest move is `rerun_consultant_core_demo_salon_seed19_r46_initial_booking_owner_reset_canary_replay_to_completion`.

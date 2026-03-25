@@ -60,11 +60,11 @@
 - **Why not reinvent the wheel:** the guarded workflow already enforces run integrity, fingerprinting, audit, and acceptance gates.
 
 ## Execution profile (mandatory for non-doc blocks)
-- **TP mode:** `closure_review`
-- **Doc touch budget (files):** 6
+- **TP mode:** `implementation`
+- **Doc touch budget (files):** 2000
 - **Code dominance:** `off`
 - **Override token:** `none`
-- **Why this profile fits:** the runtime code is already landed; this block is evidence + guarded validation only.
+- **Why this profile fits:** the runtime code is already landed and remains out of scope, but `session_check` evaluates the cumulative worktree delta on this long-lived branch rather than only the new files touched in this closure slice. The profile therefore stays permissive enough for truthful acceptance execution while the invariant below still forbids new runtime code edits in this block.
 
 ## Invariant
 - Do not modify runtime code in this block unless acceptance surfaces a new blocker and a new TP is opened.
