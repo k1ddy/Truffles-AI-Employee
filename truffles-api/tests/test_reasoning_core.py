@@ -188,6 +188,179 @@ def test_reasoning_core_pending_invalid_schema_reactivation_keeps_booking_prompt
     assert policy_core_calls[0]["current_goal"] == "booking"
 
 
+def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_memory_profile() -> None:
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="На какое время лучше записаться?",
+            metadata=WebhookMetadata(
+                remoteJid="77000000044@s.whatsapp.net",
+                messageId="msg-pending-booking-reactivation-canonical-runtime",
+            ),
+        ),
+    )
+    policy_core_calls: list[dict[str, object]] = []
+
+    def _route_llm_policy_core(_message_text: str, **kwargs):
+        policy_core_calls.append(dict(kwargs))
+        return {
+            "ok": True,
+            "payload": {
+                "intent": "booking",
+                "action": "collect",
+                "tool_action": "collect",
+                "tool_args": {},
+                "goal": "booking",
+                "reason": "booking_prompt",
+                "next_question": "service",
+                "open_questions": ["service"],
+                "slots": {"service": "", "datetime": "20:00", "name": ""},
+                "entity_refs": [],
+                "capability": "bookability",
+                "subject_kind": "booking",
+                "temporal_scope": "general",
+                "resolution_mode": "clarify_missing_service",
+                "pending_question_act": None,
+                "pending_question_target": None,
+                "active_question_relation": None,
+                "needs_manager": False,
+                "pack_refs": [],
+                "risk_signals": [],
+            },
+        }
+
+    candidate = resolve_pending_booking_reactivation_candidate(
+        payload=payload,
+        message_text=payload.body.message,
+        booking_state={},
+        context={
+            "pending_resume": {
+                "context_manager": {"current_goal": "booking"},
+                "booking": {
+                    "active": True,
+                    "datetime": "20:00",
+                    "last_question": "service",
+                },
+                "session_memory": {
+                    "active_goal": "booking",
+                    "last_question_type": decision_router.EXPECTED_REPLY_SERVICE,
+                },
+            },
+            "consultant_runtime": {
+                "schema_version": "consultant_runtime.v1",
+                "booking": {
+                    "active": True,
+                    "datetime": "20:00",
+                    "last_question": "service",
+                },
+                "expected_reply_type": "service_choice",
+                "expected_reply_reason": "collect:service",
+                "current_goal": "booking",
+                "dialog_state": {
+                    "current_referents": {
+                        "service": "Маникюр",
+                        "specialist": "Айгерим",
+                    },
+                    "pending_question_contract": {
+                        "next_question": "service",
+                        "expected_reply_type": "service_choice",
+                        "pending_question_target": "specialist",
+                        "active_question_relation": "referent_followup",
+                    },
+                    "interaction_state": {"interaction_owner": "booking_time_followup"},
+                    "meta": {
+                        "semantic_contract": {
+                            "contract_version": "semantic_contract.v1",
+                            "subject_kind": "specialist",
+                            "capability": "bookability",
+                            "resolution_mode": "referent_followup",
+                            "pending_question_target": "specialist",
+                            "active_question_relation": "referent_followup",
+                            "entity_refs": [
+                                {
+                                    "entity_id": "svc:manicure",
+                                    "entity_type": "service",
+                                    "value": "Маникюр",
+                                },
+                                {
+                                    "entity_id": "spec:aigerim",
+                                    "entity_type": "specialist",
+                                    "value": "Айгерим",
+                                },
+                            ],
+                            "referents": {
+                                "service": {
+                                    "value": "Маникюр",
+                                    "entity_id": "svc:manicure",
+                                    "entity_type": "service",
+                                },
+                                "specialist": {
+                                    "value": "Айгерим",
+                                    "entity_id": "spec:aigerim",
+                                    "entity_type": "specialist",
+                                },
+                            },
+                        }
+                    },
+                },
+            },
+        },
+        now=datetime(2026, 3, 24, 7, 20, tzinfo=timezone.utc),
+        route_llm_policy_core_fn=_route_llm_policy_core,
+        initial_booking_policy_core_max_tokens=160,
+    )
+
+    assert candidate is not None
+    assert candidate["collect_slot"] == "service"
+    assert candidate["slot_values"] == {"datetime": "20:00"}
+    assert len(policy_core_calls) == 1
+    assert policy_core_calls[0]["memory_profile"] == {
+        "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
+        "active_slots": ["datetime"],
+        "current_referents": {
+            "service": "Маникюр",
+            "specialist": "Айгерим",
+        },
+        "pending_question_contract": {
+            "slot": "service",
+            "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
+            "reason": "collect:service",
+        },
+        "semantic_contract": {
+            "contract_version": "semantic_contract.v1",
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "referent_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "value": "Маникюр",
+                },
+                {
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                    "value": "Айгерим",
+                },
+            ],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                },
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                },
+            },
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_run_reasoning_core_delegates_to_handle_webhook_payload(monkeypatch) -> None:
     payload = WebhookRequest(body=WebhookBody(message="hi"))

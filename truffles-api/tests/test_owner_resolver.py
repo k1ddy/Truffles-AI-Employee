@@ -1,8 +1,11 @@
 from app.services.owner_resolver import (
     TimeoutOwnerBoundaryInput,
+    build_semantic_contract_view,
     build_owner_resolution_input,
+    extract_specialist_preference,
     resolve_interaction_owner,
     resolve_timeout_owner_boundary,
+    should_preserve_specialist_followup_owner,
 )
 
 
@@ -159,3 +162,81 @@ def test_timeout_owner_boundary_uses_resume_contract_when_other_sources_missing(
     assert resolution.expected_reply_type == "time"
     assert resolution.missing_slot == "datetime"
     assert resolution.filled_slots == ()
+
+
+def test_build_semantic_contract_view_prefers_canonical_specialist_referent() -> None:
+    semantic_view = build_semantic_contract_view(
+        semantic_contract={
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "referent_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "referents": {
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                }
+            },
+            "entity_refs": [
+                {
+                    "entity_id": "spec:other",
+                    "entity_type": "specialist",
+                    "value": "Другой мастер",
+                }
+            ],
+        },
+        tool_args={"specialist_name": "Старое имя"},
+        subject_kind="service",
+        capability="pricing",
+    )
+
+    assert semantic_view.subject_kind == "specialist"
+    assert semantic_view.capability == "bookability"
+    assert semantic_view.resolution_mode == "referent_followup"
+    assert semantic_view.pending_question_target == "specialist"
+    assert semantic_view.active_question_relation == "referent_followup"
+    assert semantic_view.specialist_name == "Айгерим"
+    assert semantic_view.specialist_id is None
+
+
+def test_specialist_followup_owner_preserves_canonical_referent_followup_contract() -> None:
+    specialist_name, specialist_id = extract_specialist_preference(
+        semantic_contract={
+            "referents": {
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                }
+            }
+        }
+    )
+    semantic_view = build_semantic_contract_view(
+        semantic_contract={
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "referent_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "referents": {
+                "specialist": {
+                    "value": specialist_name,
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                }
+            },
+        },
+        tool_args={
+            "specialist_name": specialist_name,
+            "specialist_id": specialist_id,
+        },
+    )
+
+    assert should_preserve_specialist_followup_owner(
+        semantic_view=semantic_view,
+        policy_goal="booking",
+        policy_collect_slot=None,
+        expected_reply_type="time",
+    )

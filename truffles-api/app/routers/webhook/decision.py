@@ -417,7 +417,13 @@ from app.services.message_service import generate_bot_response, save_message, se
 from app.services.outbox_service import build_inbound_message_id
 from app.services.owner_resolver import (
     build_owner_resolution_input,
+    build_semantic_contract_view,
+    extract_specialist_preference,
     resolve_interaction_owner,
+    should_preserve_active_name_time_availability_followup_owner,
+    should_preserve_service_choice_specialist_availability_followup_owner,
+    should_preserve_specialist_availability_followup_owner,
+    should_preserve_specialist_followup_owner,
 )
 from app.services.timeout_owner_boundary_service import (
     TimeoutOwnerBoundaryApplyOverrides,
@@ -6408,18 +6414,10 @@ def _normalize_specialist_tool_args(tool_args: dict[str, Any] | None) -> None:
 
 
 def _decode_semantic_specialist_entity_id(entity_id: Any) -> tuple[str | None, str | None]:
-    if not isinstance(entity_id, str) or not entity_id.strip():
-        return None, None
-    token = entity_id.strip()
-    prefix, separator, raw_value = token.partition(":")
-    if separator and prefix.strip().casefold() in {"master", "specialist"}:
-        token = raw_value.strip()
-    specialist_uuid = _coerce_uuid(token)
-    if specialist_uuid:
-        return None, str(specialist_uuid)
-    if token:
-        return token, None
-    return None, None
+    specialist_name, specialist_id = extract_specialist_preference(
+        entity_refs=[{"entity_id": entity_id, "entity_type": "specialist"}],
+    )
+    return specialist_name, specialist_id
 
 
 def _extract_semantic_specialist_preference(
@@ -6427,37 +6425,10 @@ def _extract_semantic_specialist_preference(
     tool_args: dict[str, Any] | None,
     entity_refs: list[dict[str, Any]] | None,
 ) -> tuple[str | None, str | None]:
-    specialist_name = None
-    specialist_id = None
-    if isinstance(tool_args, dict):
-        raw_name = tool_args.get("specialist_name")
-        if isinstance(raw_name, str) and raw_name.strip():
-            specialist_name = raw_name.strip()
-        raw_id = tool_args.get("specialist_id")
-        if isinstance(raw_id, str) and raw_id.strip():
-            normalized_uuid = _coerce_uuid(raw_id.strip())
-            if normalized_uuid:
-                specialist_id = str(normalized_uuid)
-            elif specialist_name is None:
-                specialist_name = raw_id.strip()
-    if specialist_name is not None or specialist_id is not None:
-        return specialist_name, specialist_id
-    if not isinstance(entity_refs, list):
-        return None, None
-    for ref in entity_refs:
-        if not isinstance(ref, dict):
-            continue
-        entity_type = ref.get("entity_type")
-        if not isinstance(entity_type, str) or entity_type.strip().casefold() not in {
-            "specialist",
-            "master",
-        }:
-            continue
-        candidate_name, candidate_id = _decode_semantic_specialist_entity_id(ref.get("entity_id"))
-        if candidate_name is None and candidate_id is None:
-            continue
-        return candidate_name, candidate_id
-    return None, None
+    return extract_specialist_preference(
+        tool_args=tool_args,
+        entity_refs=entity_refs,
+    )
 
 
 def _should_preserve_specialist_followup_owner(
@@ -6473,265 +6444,24 @@ def _should_preserve_specialist_followup_owner(
     specialist_name: str | None,
     specialist_id: str | None,
 ) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
+    semantic_view = build_semantic_contract_view(
+        entity_refs=[],
+        subject_kind=policy_subject_kind,
+        capability=policy_capability,
+        resolution_mode=policy_resolution_mode,
+        pending_question_target=policy_pending_question_target,
+        active_question_relation=policy_active_question_relation,
+        tool_args={
+            "specialist_name": specialist_name,
+            "specialist_id": specialist_id,
+        },
     )
-    normalized_target = (
-        policy_pending_question_target.strip().casefold()
-        if isinstance(policy_pending_question_target, str) and policy_pending_question_target.strip()
-        else None
+    return should_preserve_specialist_followup_owner(
+        semantic_view=semantic_view,
+        policy_goal=policy_goal,
+        policy_collect_slot=policy_collect_slot,
+        expected_reply_type=expected_reply_type,
     )
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
-    )
-    if normalized_goal != "booking":
-        return False
-    relation_token = _normalize_active_question_relation(policy_active_question_relation)
-    if relation_token not in {None, "referent_followup"}:
-        return False
-    if normalized_target == "specialist":
-        if specialist_name or specialist_id:
-            return True
-        if normalized_collect_slot not in {None, "datetime"}:
-            return False
-        if expected_reply_type != EXPECTED_REPLY_TIME:
-            return False
-        return _normalize_semantic_followup_token(policy_resolution_mode) == "referent_followup"
-    if normalized_target is not None:
-        return False
-    if normalized_collect_slot not in {None, "datetime"}:
-        return False
-    if expected_reply_type != EXPECTED_REPLY_TIME:
-        return False
-    if normalized_subject != "specialist" or normalized_capability != "bookability":
-        return False
-    return bool(specialist_name or specialist_id)
-
-
-def _should_preserve_generic_specialist_choice_followup_owner(
-    *,
-    policy_goal: str | None,
-    policy_collect_slot: str | None,
-    policy_pending_question_target: str | None,
-    policy_subject_kind: str | None,
-    policy_capability: str | None,
-    policy_resolution_mode: str | None,
-    policy_active_question_relation: str | None,
-    expected_reply_type: str | None,
-    specialist_name: str | None,
-    specialist_id: str | None,
-    message_text: str | None,
-    client_slug: str | None,
-    service_query: str | None,
-) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
-    )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
-    )
-    normalized_target = _normalize_pending_question_target(policy_pending_question_target)
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    relation_token = _normalize_active_question_relation(policy_active_question_relation)
-    if normalized_goal != "booking":
-        return False
-    if expected_reply_type != EXPECTED_REPLY_TIME:
-        return False
-    if normalized_collect_slot != "name":
-        return False
-    if normalized_target not in {None, "specialist"}:
-        return False
-    if normalized_subject != "specialist" or normalized_capability != "bookability":
-        return False
-    if _normalize_semantic_followup_token(policy_resolution_mode) != "referent_followup":
-        return False
-    if relation_token not in {None, "referent_followup"}:
-        return False
-    if specialist_name or specialist_id:
-        return False
-    master_resolution = resolve_master_intent(
-        message_text=message_text,
-        client_slug=client_slug,
-        service_query=service_query,
-        intent_decomp=None,
-        force_master_intent=False,
-    )
-    if master_resolution.explicit:
-        choice_signals = {
-            _normalize_text(signal)
-            for signal in (master_resolution.matched_signals or [])
-            if isinstance(signal, str) and signal.strip()
-        }
-        if not (choice_signals & {"выбрать", "подобрать"}):
-            return False
-    return _is_question_like_message(message_text)
-
-
-def _should_interrupt_generic_master_info_specialist_followup(
-    *,
-    policy_goal: str | None,
-    policy_collect_slot: str | None,
-    policy_pending_question_target: str | None,
-    policy_subject_kind: str | None,
-    policy_capability: str | None,
-    policy_resolution_mode: str | None,
-    policy_active_question_relation: str | None,
-    expected_reply_type: str | None,
-    specialist_name: str | None,
-    specialist_id: str | None,
-    message_text: str | None,
-    client_slug: str | None,
-    service_query: str | None,
-) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
-    )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
-    )
-    normalized_target = _normalize_pending_question_target(policy_pending_question_target)
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    relation_token = _normalize_active_question_relation(policy_active_question_relation)
-    if normalized_goal != "booking":
-        return False
-    if expected_reply_type != EXPECTED_REPLY_TIME:
-        return False
-    if normalized_collect_slot != "datetime":
-        return False
-    if normalized_target != "specialist":
-        return False
-    if normalized_subject != "specialist" or normalized_capability != "bookability":
-        return False
-    if _normalize_semantic_followup_token(policy_resolution_mode) != "referent_followup":
-        return False
-    if relation_token not in {None, "referent_followup"}:
-        return False
-    if specialist_name or specialist_id:
-        return False
-    if not _is_question_like_message(message_text):
-        return False
-    master_resolution = resolve_master_intent(
-        message_text=message_text,
-        client_slug=client_slug,
-        service_query=service_query,
-        intent_decomp=None,
-        force_master_intent=False,
-    )
-    if not master_resolution.explicit:
-        return False
-    if master_resolution.reason in {"named_question_signal", "person_named_question_signal"}:
-        return False
-    # Generic choose-specialist questions still need a factual master interrupt
-    # answer before the active time collect resumes.
-    return True
-
-
-def _should_recover_active_name_specialist_followup(
-    *,
-    policy_goal: str | None,
-    policy_tool_action: str | None,
-    policy_collect_slot: str | None,
-    policy_subject_kind: str | None,
-    policy_capability: str | None,
-    expected_reply_type: str | None,
-    specialist_name: str | None,
-    specialist_id: str | None,
-    customer_name_candidate: str | None,
-    explicit_customer_name_provided: bool,
-) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
-    )
-    normalized_tool_action = (
-        policy_tool_action.strip().casefold()
-        if isinstance(policy_tool_action, str) and policy_tool_action.strip()
-        else None
-    )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
-    )
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    if normalized_goal != "booking":
-        return False
-    if expected_reply_type != EXPECTED_REPLY_NAME:
-        return False
-    if normalized_tool_action != BOOK_SLOT_TOOL_ACTION:
-        return False
-    if normalized_collect_slot not in {None, "name"}:
-        return False
-    if normalized_subject != "specialist" or normalized_capability != "bookability":
-        return False
-    if not (specialist_name or specialist_id):
-        return False
-    if explicit_customer_name_provided:
-        return False
-    normalized_customer_name = (
-        normalize_for_matching(customer_name_candidate)
-        if isinstance(customer_name_candidate, str) and customer_name_candidate.strip()
-        else None
-    )
-    specialist_name_token = specialist_name or specialist_id
-    normalized_specialist_name = (
-        normalize_for_matching(specialist_name_token)
-        if isinstance(specialist_name_token, str) and specialist_name_token.strip()
-        else None
-    )
-    if normalized_customer_name and normalized_specialist_name:
-        return normalized_customer_name == normalized_specialist_name
-    return normalized_customer_name is None
 
 
 def _should_preserve_specialist_availability_followup_owner(
@@ -6744,59 +6474,18 @@ def _should_preserve_specialist_availability_followup_owner(
     policy_temporal_scope: str | None,
     policy_active_question_relation: str | None,
 ) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
+    semantic_view = build_semantic_contract_view(
+        subject_kind=policy_subject_kind,
+        capability=policy_capability,
+        temporal_scope=policy_temporal_scope,
+        pending_question_target=policy_pending_question_target,
+        active_question_relation=policy_active_question_relation,
     )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
+    return should_preserve_specialist_availability_followup_owner(
+        semantic_view=semantic_view,
+        policy_goal=policy_goal,
+        policy_collect_slot=policy_collect_slot,
     )
-    normalized_target = (
-        policy_pending_question_target.strip().casefold()
-        if isinstance(policy_pending_question_target, str) and policy_pending_question_target.strip()
-        else None
-    )
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    normalized_temporal_scope = (
-        policy_temporal_scope.strip().casefold()
-        if isinstance(policy_temporal_scope, str) and policy_temporal_scope.strip()
-        else None
-    )
-    relation_token = _normalize_active_question_relation(policy_active_question_relation)
-    if normalized_goal != "booking":
-        return False
-    if normalized_collect_slot == "name":
-        if normalized_temporal_scope not in {"specific_time", "day", "weekday", "weekend"}:
-            return False
-    elif normalized_collect_slot not in {None, "datetime"}:
-        return False
-    if normalized_target != "specialist":
-        return False
-    if normalized_subject not in {None, "specialist"}:
-        return False
-    if normalized_capability not in {None, "live_availability", "bookability"}:
-        return False
-    if normalized_temporal_scope not in {
-        "specific_time",
-        "day",
-        "weekday",
-        "weekend",
-        "date_range",
-    }:
-        return False
-    return relation_token == "specialist_availability_followup"
 
 
 def _should_preserve_service_choice_specialist_availability_followup_owner(
@@ -6812,58 +6501,21 @@ def _should_preserve_service_choice_specialist_availability_followup_owner(
     policy_temporal_scope: str | None,
     policy_active_question_relation: str | None,
 ) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
+    semantic_view = build_semantic_contract_view(
+        subject_kind=policy_subject_kind,
+        capability=policy_capability,
+        temporal_scope=policy_temporal_scope,
+        resolution_mode=policy_resolution_mode,
+        pending_question_act=policy_pending_question_act,
+        pending_question_target=policy_pending_question_target,
+        active_question_relation=policy_active_question_relation,
     )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
+    return should_preserve_service_choice_specialist_availability_followup_owner(
+        semantic_view=semantic_view,
+        policy_goal=policy_goal,
+        policy_collect_slot=policy_collect_slot,
+        expected_reply_type=expected_reply_type,
     )
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    normalized_resolution_mode = (
-        policy_resolution_mode.strip().casefold()
-        if isinstance(policy_resolution_mode, str) and policy_resolution_mode.strip()
-        else None
-    )
-    normalized_temporal_scope = (
-        policy_temporal_scope.strip().casefold()
-        if isinstance(policy_temporal_scope, str) and policy_temporal_scope.strip()
-        else None
-    )
-    pending_question_act = _normalize_pending_question_act(policy_pending_question_act)
-    pending_question_target = _normalize_pending_question_target(policy_pending_question_target)
-    relation_token = _normalize_active_question_relation(policy_active_question_relation)
-    if normalized_goal != "info":
-        return False
-    if normalized_collect_slot != "datetime":
-        return False
-    if expected_reply_type != EXPECTED_REPLY_SERVICE:
-        return False
-    if pending_question_act != "ask_about_requested_slot":
-        return False
-    if pending_question_target != "specialist":
-        return False
-    if normalized_subject not in {None, "specialist"}:
-        return False
-    if normalized_capability != "live_availability":
-        return False
-    if normalized_temporal_scope not in {"specific_time", "day", "weekday", "weekend"}:
-        return False
-    if relation_token not in {None, "ask_about_requested_slot"}:
-        return False
-    return normalized_resolution_mode == "clarify_missing_time"
 
 
 def _should_preserve_active_name_time_availability_followup_owner(
@@ -6879,56 +6531,21 @@ def _should_preserve_active_name_time_availability_followup_owner(
     policy_temporal_scope: str | None,
     policy_active_question_relation: str | None,
 ) -> bool:
-    normalized_goal = (
-        policy_goal.strip().casefold()
-        if isinstance(policy_goal, str) and policy_goal.strip()
-        else None
+    semantic_view = build_semantic_contract_view(
+        subject_kind=policy_subject_kind,
+        capability=policy_capability,
+        temporal_scope=policy_temporal_scope,
+        resolution_mode=policy_resolution_mode,
+        pending_question_act=policy_pending_question_act,
+        pending_question_target=policy_pending_question_target,
+        active_question_relation=policy_active_question_relation,
     )
-    normalized_collect_slot = (
-        policy_collect_slot.strip().casefold()
-        if isinstance(policy_collect_slot, str) and policy_collect_slot.strip()
-        else None
+    return should_preserve_active_name_time_availability_followup_owner(
+        semantic_view=semantic_view,
+        policy_goal=policy_goal,
+        policy_collect_slot=policy_collect_slot,
+        expected_reply_type=expected_reply_type,
     )
-    normalized_subject = (
-        policy_subject_kind.strip().casefold()
-        if isinstance(policy_subject_kind, str) and policy_subject_kind.strip()
-        else None
-    )
-    normalized_capability = (
-        policy_capability.strip().casefold()
-        if isinstance(policy_capability, str) and policy_capability.strip()
-        else None
-    )
-    normalized_resolution_mode = (
-        policy_resolution_mode.strip().casefold()
-        if isinstance(policy_resolution_mode, str) and policy_resolution_mode.strip()
-        else None
-    )
-    normalized_temporal_scope = (
-        policy_temporal_scope.strip().casefold()
-        if isinstance(policy_temporal_scope, str) and policy_temporal_scope.strip()
-        else None
-    )
-    pending_question_act = _normalize_pending_question_act(policy_pending_question_act)
-    pending_question_target = _normalize_pending_question_target(policy_pending_question_target)
-    relation_token = _normalize_active_question_relation(policy_active_question_relation)
-    if normalized_goal != "booking" or normalized_collect_slot != "name":
-        return False
-    if expected_reply_type != EXPECTED_REPLY_NAME:
-        return False
-    if normalized_subject not in {None, "time", "booking"}:
-        return False
-    if normalized_capability not in {None, "live_availability", "bookability"}:
-        return False
-    if normalized_temporal_scope != "specific_time":
-        return False
-    if pending_question_act == "ask_about_requested_slot" and pending_question_target == "time":
-        return relation_token in {None, "ask_about_requested_slot"}
-    if pending_question_act is not None or pending_question_target is not None:
-        return False
-    if relation_token not in {None, "ask_about_requested_slot"}:
-        return False
-    return normalized_resolution_mode == "referent_followup"
 
 
 def _should_preserve_active_time_slot_question_owner(

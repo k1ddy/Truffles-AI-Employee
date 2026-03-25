@@ -3,8 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable
 
+from app.core.dialog_state_service import DialogStateService
 from app.routers.webhook import decision as decision_router
 from app.schemas.webhook import WebhookRequest
+from app.services.owner_resolver import (
+    build_semantic_contract_view,
+    extract_specialist_preference,
+    should_preserve_active_name_time_availability_followup_owner,
+    should_preserve_service_choice_specialist_availability_followup_owner,
+    should_preserve_specialist_availability_followup_owner,
+    should_preserve_specialist_followup_owner,
+)
 from app.services.policy_validation_boundary_service import (
     build_policy_validation_booking_recovery,
 )
@@ -236,6 +245,54 @@ def resolve_llm_booking_prompt_candidate(
         if isinstance(summary_text, str) and summary_text.strip():
             policy_memory_summary = summary_text.strip()
 
+    loaded_runtime = DialogStateService().load_runtime_payload(context)
+    loaded_dialog_state = loaded_runtime.get("dialog_state")
+    runtime_expected_reply_type = loaded_runtime.get("expected_reply_type")
+    runtime_expected_reply_reason = loaded_runtime.get("expected_reply_reason")
+    runtime_semantic_contract = (
+        dict(loaded_dialog_state.meta.get("semantic_contract"))
+        if loaded_dialog_state is not None
+        and isinstance(getattr(loaded_dialog_state, "meta", None), dict)
+        and isinstance(loaded_dialog_state.meta.get("semantic_contract"), dict)
+        else None
+    )
+    runtime_current_referents: dict[str, str] = {}
+    if loaded_dialog_state is not None:
+        referent_map = {
+            "service": loaded_dialog_state.current_referents.service,
+            "specialist": loaded_dialog_state.current_referents.specialist,
+            "branch": loaded_dialog_state.current_referents.branch,
+            "booking_ref": loaded_dialog_state.current_referents.booking,
+            "customer": loaded_dialog_state.current_referents.customer,
+        }
+        for referent_key, raw_value in referent_map.items():
+            if isinstance(raw_value, str) and raw_value.strip():
+                runtime_current_referents[referent_key] = raw_value.strip()
+    runtime_pending_question_contract: dict[str, str] = {}
+    if loaded_dialog_state is not None:
+        next_question = loaded_dialog_state.pending_question_contract.next_question
+        if isinstance(next_question, str) and next_question.strip():
+            runtime_pending_question_contract["slot"] = next_question.strip()
+    if (
+        "slot" not in runtime_pending_question_contract
+        and isinstance(runtime_expected_reply_type, str)
+        and runtime_expected_reply_type.strip()
+    ):
+        projected_slot = {
+            decision_router.EXPECTED_REPLY_SERVICE: "service",
+            decision_router.EXPECTED_REPLY_TIME: "datetime",
+            decision_router.EXPECTED_REPLY_NAME: "name",
+            decision_router.EXPECTED_REPLY_PHONE: "phone",
+        }.get(runtime_expected_reply_type.strip())
+        if projected_slot:
+            runtime_pending_question_contract["slot"] = projected_slot
+    if isinstance(runtime_expected_reply_type, str) and runtime_expected_reply_type.strip():
+        runtime_pending_question_contract["expected_reply_type"] = (
+            runtime_expected_reply_type.strip()
+        )
+    if isinstance(runtime_expected_reply_reason, str) and runtime_expected_reply_reason.strip():
+        runtime_pending_question_contract["reason"] = runtime_expected_reply_reason.strip()
+
     policy_memory_profile = None
     active_slots = decision_router._collect_policy_active_slots(
         primary_slot_state=policy_slot_state,
@@ -246,7 +303,7 @@ def resolve_llm_booking_prompt_candidate(
         decision_router.EXPECTED_REPLY_SERVICE,
         decision_router.EXPECTED_REPLY_TIME,
         decision_router.EXPECTED_REPLY_NAME,
-    } or active_slots:
+    } or active_slots or runtime_current_referents or runtime_semantic_contract:
         policy_memory_profile = {}
         if reply_slot in {
             decision_router.EXPECTED_REPLY_SERVICE,
@@ -256,6 +313,12 @@ def resolve_llm_booking_prompt_candidate(
             policy_memory_profile["expected_reply_type"] = reply_slot
         if active_slots:
             policy_memory_profile["active_slots"] = active_slots
+        if runtime_current_referents:
+            policy_memory_profile["current_referents"] = runtime_current_referents
+        if runtime_pending_question_contract:
+            policy_memory_profile["pending_question_contract"] = runtime_pending_question_contract
+        if runtime_semantic_contract:
+            policy_memory_profile["semantic_contract"] = runtime_semantic_contract
 
     consult_refs, _ = decision_router._collect_plan_consult_refs(payload.client_slug)
     policy_info_refs = [] if fresh_initial_booking_entry else sorted(decision_router.INFO_INTENTS)
@@ -352,13 +415,6 @@ def resolve_llm_booking_prompt_candidate(
         if set(open_questions) != {collect_slot}:
             return None
 
-        capability = _normalize_token(policy_payload.get("capability"))
-        resolution_mode = _normalize_token(policy_payload.get("resolution_mode"))
-        subject_kind = _normalize_token(policy_payload.get("subject_kind"))
-        active_relation = _normalize_token(policy_payload.get("active_question_relation"))
-        pending_target = _normalize_token(policy_payload.get("pending_question_target"))
-        pending_act = _normalize_token(policy_payload.get("pending_question_act"))
-        temporal_scope = _normalize_token(policy_payload.get("temporal_scope"))
         raw_tool_args = policy_payload.get("tool_args")
         if raw_tool_args is not None and not isinstance(raw_tool_args, dict):
             return None
@@ -372,57 +428,46 @@ def resolve_llm_booking_prompt_candidate(
         raw_entity_refs = policy_payload.get("entity_refs")
         if raw_entity_refs is not None and not isinstance(raw_entity_refs, (list, tuple)):
             return None
-        specialist_name, specialist_id = decision_router._extract_semantic_specialist_preference(
+        semantic_view = build_semantic_contract_view(
             tool_args=policy_tool_args,
-            entity_refs=raw_entity_refs,
+            entity_refs=list(raw_entity_refs or ()),
+            subject_kind=policy_payload.get("subject_kind"),
+            capability=policy_payload.get("capability"),
+            temporal_scope=policy_payload.get("temporal_scope"),
+            resolution_mode=policy_payload.get("resolution_mode"),
+            pending_question_act=policy_payload.get("pending_question_act"),
+            pending_question_target=policy_payload.get("pending_question_target"),
+            active_question_relation=policy_payload.get("active_question_relation"),
+        )
+        specialist_name, specialist_id = extract_specialist_preference(
+            tool_args=policy_tool_args,
+            entity_refs=list(raw_entity_refs or ()),
         )
         clear_service_hint = bool(specialist_name or specialist_id)
-        if decision_router._should_preserve_specialist_availability_followup_owner(
+        if should_preserve_specialist_availability_followup_owner(
+            semantic_view=semantic_view,
             policy_goal=policy_goal,
             policy_collect_slot=collect_slot,
-            policy_pending_question_target=pending_target,
-            policy_subject_kind=subject_kind,
-            policy_capability=capability,
-            policy_temporal_scope=temporal_scope,
-            policy_active_question_relation=active_relation,
         ):
             return None
-        if decision_router._should_preserve_service_choice_specialist_availability_followup_owner(
+        if should_preserve_service_choice_specialist_availability_followup_owner(
+            semantic_view=semantic_view,
             policy_goal=policy_goal,
             policy_collect_slot=collect_slot,
-            policy_resolution_mode=resolution_mode,
-            policy_pending_question_act=pending_act,
-            policy_pending_question_target=pending_target,
-            policy_subject_kind=subject_kind,
-            policy_capability=capability,
-            policy_temporal_scope=temporal_scope,
-            policy_active_question_relation=active_relation,
             expected_reply_type=reply_slot,
         ):
             return None
-        if decision_router._should_preserve_active_name_time_availability_followup_owner(
+        if should_preserve_active_name_time_availability_followup_owner(
+            semantic_view=semantic_view,
             policy_goal=policy_goal,
             policy_collect_slot=collect_slot,
-            policy_resolution_mode=resolution_mode,
-            policy_pending_question_act=pending_act,
-            policy_pending_question_target=pending_target,
-            policy_subject_kind=subject_kind,
-            policy_capability=capability,
-            policy_temporal_scope=temporal_scope,
-            policy_active_question_relation=active_relation,
             expected_reply_type=reply_slot,
         ):
             return None
-        if decision_router._should_preserve_specialist_followup_owner(
+        if should_preserve_specialist_followup_owner(
+            semantic_view=semantic_view,
             policy_goal=policy_goal,
             policy_collect_slot=collect_slot,
-            policy_pending_question_target=pending_target,
-            policy_subject_kind=subject_kind,
-            policy_capability=capability,
-            policy_resolution_mode=resolution_mode,
-            policy_active_question_relation=active_relation,
-            specialist_name=specialist_name,
-            specialist_id=specialist_id,
             expected_reply_type=reply_slot,
         ):
             return None
@@ -480,8 +525,8 @@ def resolve_llm_booking_prompt_candidate(
             "merged_slot_values": _build_booking_prompt_slot_values(recovered_booking_state),
             "specialist_name": specialist_name,
             "specialist_id": specialist_id,
-            "active_question_relation": active_relation or "referent_followup",
-            "pending_question_act": pending_act,
+            "active_question_relation": semantic_view.active_question_relation or "referent_followup",
+            "pending_question_act": semantic_view.pending_question_act,
             "clear_service_hint": clear_service_hint,
         }
 
