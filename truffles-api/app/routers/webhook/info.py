@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
+from app.core import DialogStateService
 from app.routers.webhook.runtime_primitives import (
     BOOKING_CTA_SERVICE_INTENTS,
     INFO_ANCHOR_GROUPS,
@@ -2185,6 +2186,10 @@ def _handle_truth_gate_fallback(
                         reason="truth_gate_off_topic_override",
                         now=now,
                     )
+                    pending_question_contract = DialogStateService().project_context_pending_question_contract(
+                        context,
+                        session_memory_key="__disabled_session_memory__",
+                    )
                     override_meta = (
                         dict(decision.meta)
                         if isinstance(getattr(decision, "meta", None), dict)
@@ -2196,6 +2201,8 @@ def _handle_truth_gate_fallback(
                             "expected_reply_guard": "truth_gate_off_topic_override",
                         }
                     )
+                    if pending_question_contract:
+                        override_meta["pending_question_contract"] = pending_question_contract
                     if isinstance(expected_reply_matched, bool):
                         override_meta["expected_reply_matched"] = expected_reply_matched
                     decision = PackDecision(
@@ -2205,15 +2212,15 @@ def _handle_truth_gate_fallback(
                         meta=override_meta,
                     )
                     bot_response = decision.response
-                    legacy._record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "truth_gate",
-                            "decision": "expected_reply_override",
-                            "expected_reply_type": expected_reply_type,
-                            "expected_reply_matched": expected_reply_matched,
-                        },
-                    )
+                    trace_payload = {
+                        "stage": "truth_gate",
+                        "decision": "expected_reply_override",
+                        "expected_reply_type": expected_reply_type,
+                        "expected_reply_matched": expected_reply_matched,
+                    }
+                    if pending_question_contract:
+                        trace_payload["pending_question_contract"] = pending_question_contract
+                    legacy._record_decision_trace(conversation, trace_payload)
             context_manager = legacy._get_context_manager(context)
             class_carryover = legacy._get_class_carryover(
                 context_manager,

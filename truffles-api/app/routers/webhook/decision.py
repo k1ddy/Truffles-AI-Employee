@@ -759,6 +759,30 @@ def is_handover_status_question(text: str) -> bool:
     return bool(keywords) and any(k in normalized for k in keywords)
 
 
+def _project_pending_question_evidence(
+    dialog_state_service: DialogStateService,
+    *,
+    contract: dict[str, Any] | None,
+    expected_reply_type: str | None = None,
+    expected_reply_reason: str | None = None,
+    pending_question_act: str | None = None,
+    pending_question_target: str | None = None,
+    active_question_relation: str | None = None,
+    next_question: str | None = None,
+    open_questions: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any] | None:
+    return dialog_state_service.project_pending_question_contract(
+        contract,
+        expected_reply_type=expected_reply_type,
+        expected_reply_reason=expected_reply_reason,
+        pending_question_act=pending_question_act,
+        pending_question_target=pending_question_target,
+        active_question_relation=active_question_relation,
+        next_question=next_question,
+        open_questions=open_questions,
+    )
+
+
 def _should_block_expected_reply_by_info(
     *,
     expected_reply_type: str | None,
@@ -1255,6 +1279,16 @@ def _apply_expected_reply_contract(
         if isinstance(context_pending_question_contract, dict)
         else legacy._get_expected_reply_reason(context)
     )
+    active_pending_question_contract = _project_pending_question_evidence(
+        dialog_state_service,
+        contract=(
+            context_pending_question_contract
+            if isinstance(context_pending_question_contract, dict)
+            else None
+        ),
+        expected_reply_type=expected_reply_type,
+        expected_reply_reason=expected_reply_reason,
+    )
     intent_queue = legacy._get_intent_queue(context)
     session_memory = legacy._get_session_memory(context)
     re_entry_required = legacy._is_re_entry_required(context)
@@ -1306,19 +1340,34 @@ def _apply_expected_reply_contract(
             memory_expected_reply_type = last_question_type
             if not expected_reply_reason and memory_expected_reply_reason:
                 expected_reply_reason = memory_expected_reply_reason
+            active_pending_question_contract = _project_pending_question_evidence(
+                dialog_state_service,
+                contract=(
+                    memory_pending_question_contract
+                    if isinstance(memory_pending_question_contract, dict)
+                    else None
+                ),
+                expected_reply_type=last_question_type,
+                expected_reply_reason=memory_expected_reply_reason,
+            )
+            fallback_trace = {
+                "stage": "session_memory",
+                "decision": "expected_reply_fallback",
+                "expected_reply_type": last_question_type,
+                "expected_reply_reason": memory_expected_reply_reason,
+            }
+            if active_pending_question_contract:
+                fallback_trace["pending_question_contract"] = active_pending_question_contract
             legacy._record_decision_trace(
                 conversation,
-                {
-                    "stage": "session_memory",
-                    "decision": "expected_reply_fallback",
-                    "expected_reply_type": last_question_type,
-                    "expected_reply_reason": memory_expected_reply_reason,
-                },
+                fallback_trace,
             )
             if saved_message:
                 updates = {"session_memory_expected_reply": last_question_type}
                 if memory_expected_reply_reason:
                     updates["session_memory_expected_reply_reason"] = memory_expected_reply_reason
+                if active_pending_question_contract:
+                    updates["session_memory_pending_question_contract"] = active_pending_question_contract
                 legacy._update_message_decision_metadata(saved_message, updates)
 
     expected_reply_matched: bool | None = None
@@ -1354,15 +1403,15 @@ def _apply_expected_reply_contract(
             now=now,
         )
         legacy._set_conversation_context(conversation, context)
-        legacy._record_decision_trace(
-            conversation,
-            {
-                "stage": "question_contract",
-                "decision": "bypass",
-                "expected_reply_type": expected_reply_type,
-                "expected_reply_bypassed": "human_request",
-            },
-        )
+        bypass_trace = {
+            "stage": "question_contract",
+            "decision": "bypass",
+            "expected_reply_type": expected_reply_type,
+            "expected_reply_bypassed": "human_request",
+        }
+        if active_pending_question_contract:
+            bypass_trace["pending_question_contract"] = active_pending_question_contract
+        legacy._record_decision_trace(conversation, bypass_trace)
         if memory_cleared:
             legacy._record_session_memory_update(
                 conversation,
@@ -1371,15 +1420,15 @@ def _apply_expected_reply_contract(
                 reason="expected_reply_bypass",
             )
         if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "expected_reply_type": None,
-                    "expected_reply_matched": False,
-                    "expected_reply_bypassed": "human_request",
-                    "session_memory_expected_reply_cleared": memory_cleared,
-                },
-            )
+            bypass_updates = {
+                "expected_reply_type": None,
+                "expected_reply_matched": False,
+                "expected_reply_bypassed": "human_request",
+                "session_memory_expected_reply_cleared": memory_cleared,
+            }
+            if active_pending_question_contract:
+                bypass_updates["pending_question_contract"] = active_pending_question_contract
+            legacy._update_message_decision_metadata(saved_message, bypass_updates)
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
         return ExpectedReplyState(
@@ -1411,15 +1460,15 @@ def _apply_expected_reply_contract(
             now=now,
         )
         legacy._set_conversation_context(conversation, context)
-        legacy._record_decision_trace(
-            conversation,
-            {
-                "stage": "question_contract",
-                "decision": "bypass",
-                "expected_reply_type": expected_reply_type,
-                "expected_reply_bypassed": "booking_verification",
-            },
-        )
+        bypass_trace = {
+            "stage": "question_contract",
+            "decision": "bypass",
+            "expected_reply_type": expected_reply_type,
+            "expected_reply_bypassed": "booking_verification",
+        }
+        if active_pending_question_contract:
+            bypass_trace["pending_question_contract"] = active_pending_question_contract
+        legacy._record_decision_trace(conversation, bypass_trace)
         if memory_cleared:
             legacy._record_session_memory_update(
                 conversation,
@@ -1428,15 +1477,15 @@ def _apply_expected_reply_contract(
                 reason="expected_reply_bypass",
             )
         if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "expected_reply_type": None,
-                    "expected_reply_matched": False,
-                    "expected_reply_bypassed": "booking_verification",
-                    "session_memory_expected_reply_cleared": memory_cleared,
-                },
-            )
+            bypass_updates = {
+                "expected_reply_type": None,
+                "expected_reply_matched": False,
+                "expected_reply_bypassed": "booking_verification",
+                "session_memory_expected_reply_cleared": memory_cleared,
+            }
+            if active_pending_question_contract:
+                bypass_updates["pending_question_contract"] = active_pending_question_contract
+            legacy._update_message_decision_metadata(saved_message, bypass_updates)
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
         return ExpectedReplyState(
@@ -1892,37 +1941,59 @@ def _apply_expected_reply_contract(
             )
         )
         if pending_question_slot_constraint:
-            current_expected_reply = legacy._get_expected_reply_type(
-                legacy._get_conversation_context(conversation)
+            current_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
+                legacy._get_conversation_context(conversation),
+                session_memory_key="__disabled_session_memory__",
             )
+            current_expected_reply = (
+                current_pending_question_contract.get("expected_reply_type")
+                if isinstance(current_pending_question_contract, dict)
+                else legacy._get_expected_reply_type(legacy._get_conversation_context(conversation))
+            )
+            interaction_pending_question_contract = _project_pending_question_evidence(
+                dialog_state_service,
+                contract=(
+                    current_pending_question_contract
+                    if isinstance(current_pending_question_contract, dict)
+                    else active_pending_question_contract
+                ),
+                expected_reply_type=current_expected_reply or expected_reply_type,
+                pending_question_act="slot_constraint",
+                pending_question_target="time",
+            )
+            interaction_trace = {
+                "stage": "pending_question_interaction",
+                "decision": "slot_constraint",
+                "state": conversation.state,
+                "source": "question_contract",
+                "pending_question_act": "slot_constraint",
+                "pending_question_target": "time",
+                "expected_reply_type": current_expected_reply or expected_reply_type,
+            }
+            if interaction_pending_question_contract:
+                interaction_trace["pending_question_contract"] = interaction_pending_question_contract
             _record_decision_trace(
                 conversation,
-                {
-                    "stage": "pending_question_interaction",
-                    "decision": "slot_constraint",
-                    "state": conversation.state,
-                    "source": "question_contract",
-                    "pending_question_act": "slot_constraint",
-                    "pending_question_target": "time",
-                    "expected_reply_type": current_expected_reply or expected_reply_type,
-                },
+                interaction_trace,
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_question_act": "slot_constraint",
-                        "pending_question_target": "time",
-                        "pending_question_interaction": "slot_constraint",
-                        "pending_question_owner": "question_contract",
-                    },
-                )
+                interaction_updates = {
+                    "pending_question_act": "slot_constraint",
+                    "pending_question_target": "time",
+                    "pending_question_interaction": "slot_constraint",
+                    "pending_question_owner": "question_contract",
+                }
+                if interaction_pending_question_contract:
+                    interaction_updates["pending_question_contract"] = interaction_pending_question_contract
+                legacy._update_message_decision_metadata(saved_message, interaction_updates)
         trace_payload = {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
             "expected_reply_type": expected_reply_type,
             "value": value,
         }
+        if active_pending_question_contract:
+            trace_payload["pending_question_contract"] = active_pending_question_contract
         if expected_reply_shortcircuit:
             trace_payload["expected_reply_shortcircuit"] = True
         if expected_reply_blocked_by_info:
@@ -1944,6 +2015,8 @@ def _apply_expected_reply_contract(
                 "expected_reply_matched": matched,
                 "expected_reply_value": value,
             }
+            if active_pending_question_contract:
+                updates["pending_question_contract"] = active_pending_question_contract
             if expected_reply_shortcircuit:
                 updates["expected_reply_shortcircuit"] = True
             if expected_reply_blocked_by_info:
@@ -2109,12 +2182,23 @@ def _run_intent_decomposition(
             "decision": "skipped",
             "reason": intent_decomp_skipped_reason,
         }
+        intent_decomp_pending_question_contract = _project_pending_question_evidence(
+            DialogStateService(),
+            contract=None,
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=expected_reply_reason,
+        )
         if isinstance(expected_reply_type, str) and expected_reply_type.strip():
             meta_updates["intent_decomp_expected_reply_type"] = expected_reply_type.strip()
             trace_payload["expected_reply_type"] = expected_reply_type.strip()
         if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
             meta_updates["intent_decomp_expected_reply_reason"] = expected_reply_reason.strip()
             trace_payload["expected_reply_reason"] = expected_reply_reason.strip()
+        if intent_decomp_pending_question_contract:
+            meta_updates["intent_decomp_pending_question_contract"] = (
+                intent_decomp_pending_question_contract
+            )
+            trace_payload["pending_question_contract"] = intent_decomp_pending_question_contract
         if saved_message:
             legacy._update_message_decision_metadata(saved_message, meta_updates)
         legacy._record_decision_trace(conversation, trace_payload)

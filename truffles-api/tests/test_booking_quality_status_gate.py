@@ -3963,6 +3963,44 @@ def test_resume_contract_meta_trace_fallback_accepts_session_memory_question_set
     )
 
 
+def test_resume_contract_meta_trace_fallback_accepts_canonical_question_contract_trace():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_resume_contract_meta_trace_fallback"]
+
+    assert (
+        helper(
+            meta={
+                "action": "reply",
+                "source": "consultant_core_runtime",
+                "intent": "promotions",
+                "info_sections": ["promotions"],
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+            },
+            trace_entries=[
+                {
+                    "stage": "question_contract",
+                    "decision": "matched",
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "reason": "collect:datetime",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    },
+                }
+            ],
+            expected_info_sections=["promo", "promotion"],
+            expected_reply_type="time",
+            actual_expected_reply_type="time",
+        )
+        is True
+    )
+
+
 def test_catalog_service_answer_sidecar_fallback_accepts_truth_fallback_answer():
     ns = _load_quality_helpers()
     helper = ns["_llm_quality_has_catalog_service_answer_sidecar_fallback"]

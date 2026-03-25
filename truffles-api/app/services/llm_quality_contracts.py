@@ -513,6 +513,22 @@ def _normalize_lower_token(value: Any) -> str:
     return normalized.lower() if isinstance(normalized, str) else ""
 
 
+def _payload_pending_question_contract(payload: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if not isinstance(payload, Mapping):
+        return None
+    candidate = payload.get("pending_question_contract")
+    return candidate if isinstance(candidate, Mapping) else None
+
+
+def _payload_expected_reply_kind(payload: Mapping[str, Any] | None) -> str:
+    pending_question_contract = _payload_pending_question_contract(payload)
+    if isinstance(pending_question_contract, Mapping):
+        reply_kind = _normalize_lower_token(pending_question_contract.get("expected_reply_type"))
+        if reply_kind:
+            return reply_kind
+    return _normalize_lower_token(payload.get("expected_reply_type") if isinstance(payload, Mapping) else None)
+
+
 def _iter_booking_progress_payloads(
     meta: Mapping[str, Any] | None,
     trace_entries: list[Any] | None,
@@ -535,7 +551,7 @@ def _collect_booking_progress_reply_kind(
     trace_entries: list[Any] | None,
 ) -> str:
     for payload in _iter_booking_progress_payloads(meta, trace_entries):
-        token = _normalize_lower_token(payload.get("expected_reply_type"))
+        token = _payload_expected_reply_kind(payload)
         if token in CHAOS_BOOKING_REPLY_TYPES:
             return token
     return ""
@@ -555,7 +571,7 @@ def _has_booking_progress_pending_question_contract(
             if _normalize_lower_token(payload.get(key)) in _PENDING_QUESTION_TAGS:
                 saw_act = True
                 break
-        if _normalize_lower_token(payload.get("expected_reply_type")) == reply_kind:
+        if _payload_expected_reply_kind(payload) == reply_kind:
             saw_reply_kind = True
     return saw_act and saw_reply_kind
 
@@ -598,7 +614,7 @@ def build_booking_progress_info_inference_context(
 def extract_booking_prompt_kind(context: Mapping[str, Any] | None) -> str:
     if not isinstance(context, Mapping):
         return ""
-    reply_kind = _normalize_lower_token(context.get("expected_reply_type"))
+    reply_kind = _payload_expected_reply_kind(context)
     if reply_kind in CHAOS_BOOKING_REPLY_TYPES:
         return reply_kind
     return ""
@@ -619,17 +635,17 @@ def _collect_resume_contract_reply_kind(
     expected_trace_contains: list[Any] | None,
 ) -> str:
     candidates = [
-        (meta or {}).get("expected_reply_type") if isinstance(meta, Mapping) else None,
+        _payload_expected_reply_kind(meta),
     ]
     if isinstance(expected_meta_contains, Mapping):
-        candidates.append(expected_meta_contains.get("expected_reply_type"))
+        candidates.append(_payload_expected_reply_kind(expected_meta_contains))
     if isinstance(expected_trace_contains, list):
         for item in expected_trace_contains:
             if not isinstance(item, Mapping):
                 continue
             if item.get("stage") != "question_contract":
                 continue
-            candidates.append(item.get("expected_reply_type"))
+            candidates.append(_payload_expected_reply_kind(item))
     candidates.append(_collect_booking_progress_reply_kind(meta, trace_entries))
     for candidate in candidates:
         if isinstance(candidate, list):
@@ -657,15 +673,8 @@ def _trace_has_session_memory_question_set(
             continue
         if _normalize_lower_token(entry.get("decision")) != "update":
             continue
-        pending_question_contract = (
-            entry.get("pending_question_contract")
-            if isinstance(entry.get("pending_question_contract"), Mapping)
-            else None
-        )
-        entry_reply_kind = _normalize_lower_token(
-            pending_question_contract.get("expected_reply_type")
-            if isinstance(pending_question_contract, Mapping)
-            else entry.get("last_question_type")
+        entry_reply_kind = _payload_expected_reply_kind(entry) or _normalize_lower_token(
+            entry.get("last_question_type")
         )
         if entry_reply_kind != reply_kind:
             continue
@@ -739,12 +748,20 @@ def has_resume_meta_trace_allowance(
         expected_trace_contains=expected_trace_contains,
     )
     if reply_kind in CHAOS_BOOKING_REPLY_TYPES:
-        expected_contract_trace = {
-            "stage": "question_contract",
-            "expected_reply_type": reply_kind,
-        }
         expected_trace_items = expected_trace_contains or []
-        if expected_contract_trace in expected_trace_items:
+        if any(
+            isinstance(item, Mapping)
+            and _normalize_lower_token(item.get("stage")) == "question_contract"
+            and _payload_expected_reply_kind(item) == reply_kind
+            for item in expected_trace_items
+        ):
+            return True
+        if any(
+            isinstance(entry, Mapping)
+            and _normalize_lower_token(entry.get("stage")) == "question_contract"
+            and _payload_expected_reply_kind(entry) == reply_kind
+            for entry in trace_entries or []
+        ):
             return True
         if _trace_has_session_memory_question_set(trace_entries, reply_kind=reply_kind):
             return True

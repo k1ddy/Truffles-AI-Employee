@@ -2391,6 +2391,163 @@ def test_consultant_runtime_records_tool_execution_projection_in_trace_and_meta(
     }
 
 
+def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_question_contracts() -> None:
+    expected_service_referent = {
+        "value": "Маникюр",
+        "entity_id": "svc:manicure",
+        "entity_type": "service",
+        "source_ref": "message",
+    }
+    expected_specialist_referent = {
+        "value": "Айгерим",
+        "entity_id": "spec:aigerim",
+        "entity_type": "specialist",
+        "source_ref": "message",
+    }
+    expected_pending_question_contract = {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "pending_question_target": "specialist",
+        "active_question_relation": "referent_followup",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    expected_tool_execution_projection = {
+        "projection_source": "semantic_contract",
+        "service_query": "Маникюр",
+        "specialist_name": "Айгерим",
+    }
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.check_availability",
+            "tool_args": {},
+            "entity_refs": [
+                {
+                    "entity_id": expected_service_referent["entity_id"],
+                    "entity_type": expected_service_referent["entity_type"],
+                    "value": expected_service_referent["value"],
+                    "source_ref": expected_service_referent["source_ref"],
+                },
+                {
+                    "entity_id": expected_specialist_referent["entity_id"],
+                    "entity_type": expected_specialist_referent["entity_type"],
+                    "value": expected_specialist_referent["value"],
+                    "source_ref": expected_specialist_referent["source_ref"],
+                },
+            ],
+            "referents": {
+                "service": dict(expected_service_referent),
+                "specialist": dict(expected_specialist_referent),
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "policy_collect",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "goal": "booking",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="referent_followup",
+        source="llm_policy_core",
+    )
+    execution_meta = {
+        "next_slot": "datetime",
+        "tool_execution_projection": dict(expected_tool_execution_projection),
+        "semantic_contract": {
+            "contract_version": "semantic_contract.v1",
+            "referents": {
+                "service": dict(expected_service_referent),
+                "specialist": dict(expected_specialist_referent),
+            },
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "label": "Маникюр",
+                    "value": "Маникюр",
+                    "source_ref": "message",
+                },
+                {
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                    "label": "Айгерим",
+                    "value": "Айгерим",
+                    "source_ref": "message",
+                },
+            ],
+            "grounding_provenance": {
+                "pack_id": "demo_salon",
+                "pack_version": "2026-03-25",
+                "resolver_id": "pack_query_engine",
+                "resolver_version": "2026-03-25",
+            },
+        },
+    }
+
+    now = datetime.now(timezone.utc)
+    updated, dialog_state, _ = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution_meta,
+        now=now,
+    )
+    runtime_payload = updated["consultant_runtime"]
+    assert runtime_payload["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert runtime_payload["semantic_contract"]["referents"]["specialist"] == expected_specialist_referent
+    assert runtime_payload["semantic_contract"]["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "resolver_id": "pack_query_engine",
+        "resolver_version": "2026-03-25",
+    }
+    assert runtime_payload["pending_question_contract"] == expected_pending_question_contract
+    assert runtime_payload["expected_reply_type"] == "time"
+
+    runtime = ConsultantRuntime()
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(
+        tool_action="calendar.check_availability",
+        tool_decision="specialist_followup",
+        meta=execution_meta,
+    )
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="collect"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("semantic_contract", {}).get("referents", {}).get("service")
+        == expected_service_referent
+        and entry.get("semantic_contract", {}).get("grounding_provenance", {}).get("pack_id")
+        == "demo_salon"
+        and entry.get("pending_question_contract") == expected_pending_question_contract
+        and entry.get("tool_execution_projection") == expected_tool_execution_projection
+        and entry.get("expected_reply_type") == "time"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert decision_meta["semantic_contract"]["referents"]["specialist"] == expected_specialist_referent
+    assert decision_meta["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
+    assert decision_meta["pending_question_contract"] == expected_pending_question_contract
+    assert decision_meta["tool_execution_projection"] == expected_tool_execution_projection
+    assert decision_meta["expected_reply_type"] == "time"
+
+
 def test_consultant_runtime_finalizes_booking_commit_as_terminal_fact() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {

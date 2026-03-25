@@ -1832,6 +1832,25 @@ def test_truth_gate_off_topic_handles_simplenamespace_message_metadata():
     assert webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC in (response.bot_response or "")
     decision_meta = saved_message.message_metadata.get("decision_meta", {})
     assert decision_meta.get("expected_reply_guard") == "truth_gate_off_topic_override"
+    assert decision_meta.get("pending_question_contract") == {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
+        "reason": "truth_gate_off_topic_override",
+        "next_question": "service",
+        "open_questions": ["service"],
+    }
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "truth_gate"
+        and entry.get("decision") == "expected_reply_override"
+        and entry.get("pending_question_contract") == {
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
+            "reason": "truth_gate_off_topic_override",
+            "next_question": "service",
+            "open_questions": ["service"],
+        }
+        for entry in trace
+        if isinstance(entry, dict)
+    )
 
 
 def test_strict_ood_sets_out_of_domain_without_in_signals():
@@ -2981,6 +3000,12 @@ def test_expected_reply_contract_prefers_session_memory_pending_question_contrac
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("session_memory_expected_reply") == webhook_router.EXPECTED_REPLY_TIME
     assert meta.get("session_memory_expected_reply_reason") == "booking_interrupt"
+    assert meta.get("session_memory_pending_question_contract") == {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
 
 
 def test_expected_reply_contract_prefers_canonical_context_question_contract_over_stale_projection() -> None:
@@ -3041,10 +3066,22 @@ def test_expected_reply_contract_prefers_canonical_context_question_contract_ove
         trace.get("stage") == "question_contract"
         and trace.get("decision") == "bypass"
         and trace.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+        and trace.get("pending_question_contract") == {
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "reason": "booking_interrupt",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
         for trace in trace_calls
     )
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_bypassed") == "human_request"
+    assert meta.get("pending_question_contract") == {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
 
 
 def test_should_block_expected_reply_time_for_question_without_datetime():
@@ -3512,11 +3549,19 @@ def test_llm_policy_core_booking_expected_reply_turn_skips_intent_decomp(monkeyp
     assert meta.get("intent_decomp_skipped_reason") == "booking_expected_reply_turn"
     assert meta.get("intent_decomp_expected_reply_type") == webhook_router.EXPECTED_REPLY_NAME
     assert meta.get("intent_decomp_expected_reply_reason") == "booking_prompt"
+    assert meta.get("intent_decomp_pending_question_contract") == {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+        "reason": "booking_prompt",
+    }
     trace = conversation.context.get("decision_trace", [])
     assert any(
         entry.get("stage") == "intent_decomposition"
         and entry.get("decision") == "skipped"
         and entry.get("reason") == "booking_expected_reply_turn"
+        and entry.get("pending_question_contract") == {
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+            "reason": "booking_prompt",
+        }
         for entry in trace
         if isinstance(entry, dict)
     )
