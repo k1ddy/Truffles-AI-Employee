@@ -29,6 +29,7 @@ from app.services.learned_response_service import (
 from app.services.learning_service import get_client_slug
 from app.services.message_service import save_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.runtime_mode_service import should_use_outbox_send
 from app.services.state_service import is_simulation_context
 from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
@@ -146,12 +147,6 @@ def _update_media_metadata(message, updates: dict) -> None:
     media_meta.update(updates)
     metadata["media"] = media_meta
     message.message_metadata = metadata
-
-
-def _is_env_enabled(value: Optional[str], default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _extract_signed_url_expires_at(signed_url: str) -> Optional[str]:
@@ -704,7 +699,7 @@ async def process_console_media_upload(
         db.commit()
         return saved_message, "failed", "instance_id_not_found"
 
-    use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+    use_outbox_send = should_use_outbox_send(os.environ)
     if use_outbox_send:
         now = datetime.now(timezone.utc)
         outbox_idempotency_key = idempotency_key or build_inbound_message_id(
@@ -964,7 +959,7 @@ def process_manager_media(
     )
     if not instance_id:
         return False, "Instance ID not found", took_handover, handover
-    use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+    use_outbox_send = should_use_outbox_send(os.environ)
     if use_outbox_send:
         now = datetime.now(timezone.utc)
         idempotency_key = build_inbound_message_id(

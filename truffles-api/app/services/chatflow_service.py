@@ -15,6 +15,11 @@ from app.logging_config import get_logger, record_delivery_failure
 from app.models import Branch, Client, Conversation, User
 from app.services.alert_service import alert_critical, alert_error
 from app.services.provider_error_policy import classify_provider_error, provider_error_retryable
+from app.services.runtime_mode_service import (
+    get_outbound_allowlist,
+    get_transport_send_mode,
+    should_block_outbound,
+)
 
 logger = get_logger("chatflow_service")
 
@@ -24,26 +29,6 @@ CHATFLOW_MEDIA_BASE_URL = os.environ.get("CHATFLOW_MEDIA_BASE_URL", "https://app
 MEDIA_SIGNING_SECRET = os.environ.get("MEDIA_SIGNING_SECRET")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 MEDIA_URL_TTL_SECONDS = int(os.environ.get("MEDIA_URL_TTL_SECONDS", "3600"))
-TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
-OUTBOUND_ALLOWLIST_JIDS = {
-    jid.strip()
-    for jid in os.environ.get("OUTBOUND_ALLOWLIST_JIDS", "").split(",")
-    if jid.strip()
-}
-
-
-def _get_test_mode() -> bool:
-    raw = os.environ.get("TEST_MODE")
-    if raw is None:
-        return TEST_MODE
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _get_outbound_allowlist() -> set[str]:
-    raw = os.environ.get("OUTBOUND_ALLOWLIST_JIDS")
-    if raw is None:
-        return OUTBOUND_ALLOWLIST_JIDS
-    return {jid.strip() for jid in raw.split(",") if jid.strip()}
 
 
 def _get_chatflow_token() -> str | None:
@@ -89,18 +74,17 @@ def _parse_chatflow_success(response: httpx.Response) -> tuple[bool, str]:
 
 
 def _should_skip_outbound(remote_jid: str, *, action: str) -> bool:
-    if not _get_test_mode():
+    blocked, reason = should_block_outbound(remote_jid, env=os.environ)
+    if not blocked:
         return False
-    jid = (remote_jid or "").strip()
-    allowlist = _get_outbound_allowlist()
-    if jid and jid in allowlist:
-        return False
-    allowlist_value = ",".join(sorted(allowlist)) or "<empty>"
+    allowlist_value = ",".join(sorted(get_outbound_allowlist(os.environ))) or "<empty>"
     logger.warning(
-        "Outbound guard: TEST_MODE enabled, SKIP %s to jid=%s (allowlist=%s)",
+        "Outbound guard: transport_send_mode=%s, SKIP %s to jid=%s (allowlist=%s, reason=%s)",
+        get_transport_send_mode(os.environ),
         action,
-        jid or "<missing>",
+        (remote_jid or "").strip() or "<missing>",
         allowlist_value,
+        reason,
     )
     return True
 
@@ -156,7 +140,7 @@ def send_whatsapp_message(
 ) -> bool:
     """Send message via ChatFlow API."""
     if _should_skip_outbound(remote_jid, action="message"):
-        record_delivery_failure(None, source="chatflow", provider="chatflow", reason="test_mode_guard")
+        record_delivery_failure(None, source="chatflow", provider="chatflow", reason="transport_mode_guard")
         return False
 
     token = _get_chatflow_token()
@@ -432,12 +416,12 @@ def send_message_safe(
     """
     if _should_skip_outbound(remote_jid, action="message"):
         if record_metrics:
-            record_delivery_failure(None, source="chatflow", provider="chatflow", reason="test_mode_guard")
+            record_delivery_failure(None, source="chatflow", provider="chatflow", reason="transport_mode_guard")
         return Err(IntegrationError(
             code=ErrorCodes.CHATFLOW_ERROR,
-            message="Outbound blocked by TEST_MODE guard",
+            message="Outbound blocked by transport mode guard",
             service="chatflow",
-            context={"remote_jid": remote_jid, "reason": "test_mode_guard"},
+            context={"remote_jid": remote_jid, "reason": "transport_mode_guard"},
         ))
 
     token = _get_chatflow_token()

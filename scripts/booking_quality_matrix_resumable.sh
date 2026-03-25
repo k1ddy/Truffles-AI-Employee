@@ -465,7 +465,8 @@ run_step() {
     mkdir -p "$output"
 
     set +e
-    TEST_MODE=1 python3 ops/diagnose.py llm-quality "$@" --run-id "$run_id" --output-dir "$output"
+    EVAL_MODE=local TRANSPORT_SEND_MODE=off OUTBOX_WORKER_MODE=off \
+      python3 ops/diagnose.py llm-quality "$@" --run-id "$run_id" --output-dir "$output"
     local rc=$?
     set -e
 

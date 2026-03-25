@@ -11,6 +11,7 @@ from app.services.metrics_daily_service import (
     run_metrics_daily_snapshot,
 )
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+from app.services.runtime_mode_service import get_outbox_worker_mode, is_outbox_worker_enabled
 from app.services.runtime_safety import assert_outbox_worker_startup_safe
 
 setup_logging()
@@ -132,8 +133,12 @@ def _get_metrics_daily_run_at(now: datetime, run_hour: int, run_minute: int) -> 
 
 async def run_worker():
     # 0. Check enabled flag
-    if not _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=True):
-        logger.info("Outbox Worker disabled via OUTBOX_WORKER_ENABLED")
+    outbox_worker_mode = get_outbox_worker_mode()
+    if not is_outbox_worker_enabled():
+        logger.info(
+            "Outbox Worker disabled by runtime mode",
+            extra={"context": {"outbox_worker_mode": outbox_worker_mode}},
+        )
         while True:
             await asyncio.sleep(60)
 

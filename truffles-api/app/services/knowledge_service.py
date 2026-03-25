@@ -10,6 +10,7 @@ import httpx
 from app.logging_config import get_logger, record_bge_time
 from app.schemas.consult import ConsultTopic
 from app.services.alert_service import alert_warning
+from app.services.runtime_mode_service import is_nonprod_eval_mode
 
 logger = get_logger("knowledge_service")
 
@@ -44,10 +45,9 @@ def _log_timing(
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION")
 if not QDRANT_COLLECTION:
-    QDRANT_COLLECTION = "truffles_knowledge_ci" if TEST_MODE else "truffles_knowledge"
+    QDRANT_COLLECTION = "truffles_knowledge_ci" if is_nonprod_eval_mode(os.environ) else "truffles_knowledge"
 BGE_M3_URL = os.environ.get("BGE_M3_URL", "http://bge-m3:80/embed")
 BGE_M3_TIMEOUT_SECONDS = float(os.environ.get("BGE_M3_TIMEOUT_SECONDS", "5.0"))
 BGE_M3_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("BGE_M3_CONNECT_TIMEOUT_SECONDS", "1.5"))

@@ -9590,7 +9590,10 @@ def _llm_quality_build_replay_command(args, scenarios_path, count):
         cmd.append("--skip-outbox")
     if args.max_failures > 0:
         cmd.extend(["--max-failures", str(args.max_failures)])
-    return "TEST_MODE=1 " + " ".join(shlex.quote(part) for part in cmd)
+    return (
+        "EVAL_MODE=local TRANSPORT_SEND_MODE=off OUTBOX_WORKER_MODE=off "
+        + " ".join(shlex.quote(part) for part in cmd)
+    )
 
 
 def _llm_quality_write_brief(path, summary):
@@ -15414,11 +15417,39 @@ def _select_cases(cases, case_ids):
         raise SystemExit(f"webhook-fuzz: unknown case_ids: {', '.join(missing)}")
     return [case_map[case_id] for case_id in requested], requested
 
-def _resolve_test_mode(container_name):
-    value = os.environ.get("TEST_MODE")
+def _resolve_eval_mode(container_name):
+    value = os.environ.get("EVAL_MODE")
     if (value is None or value == "") and container_name:
-        value = _resolve_env_from_container(container_name, "TEST_MODE")
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+        value = _resolve_env_from_container(container_name, "EVAL_MODE")
+    normalized = str(value or "").strip().lower()
+    if normalized in {"local", "livecheck", "acceptance", "prod"}:
+        return normalized
+
+    legacy = os.environ.get("TEST_MODE")
+    if (legacy is None or legacy == "") and container_name:
+        legacy = _resolve_env_from_container(container_name, "TEST_MODE")
+    if str(legacy or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return "local"
+    return "prod"
+
+
+def _resolve_transport_send_mode(container_name):
+    value = os.environ.get("TRANSPORT_SEND_MODE")
+    if (value is None or value == "") and container_name:
+        value = _resolve_env_from_container(container_name, "TRANSPORT_SEND_MODE")
+    normalized = str(value or "").strip().lower()
+    if normalized in {"off", "allowlist", "prod"}:
+        return normalized
+    eval_mode = _resolve_eval_mode(container_name)
+    if eval_mode == "livecheck":
+        return "allowlist"
+    if eval_mode != "prod":
+        return "off"
+    return "prod"
+
+
+def _resolve_test_mode(container_name):
+    return _resolve_eval_mode(container_name) != "prod"
 
 def _resolve_db_user_simple():
     env_user = os.environ.get("DB_USER")
@@ -22069,15 +22100,15 @@ def _run_webhook_fuzz(args):
         or os.environ.get("CHATFLOW_INSTANCE_ID")
         or os.environ.get("INSTANCE_ID")
     )
-    test_mode_enabled = _resolve_test_mode(container_name)
+    eval_mode = _resolve_eval_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
     selected_cases, requested_case_ids = _select_cases(WEBHOOK_FUZZ_CASES, args.case_ids)
     if selected_cases is None:
         selected_cases = _pick_fuzz_cases(WEBHOOK_FUZZ_CASES, args.count, rng)
         requested_case_ids = []
 
-    if mode == "logic" and not test_mode_enabled:
-        raise SystemExit("webhook-fuzz: TEST_MODE disabled; logic mode is blocked for safety")
+    if mode == "logic" and eval_mode == "prod":
+        raise SystemExit("webhook-fuzz: EVAL_MODE must be non-prod; logic mode is blocked for safety")
 
     remote_jid = None
     if mode == "state":
@@ -25105,12 +25136,16 @@ def _run_livecheck_auto(args):
         raise SystemExit(
             f"livecheck-auto: client_slug {client_slug} not allowed; expected {SAFE_ALLOWLIST_CLIENT_SLUG}"
         )
-    test_mode_enabled = _resolve_test_mode(container_name)
+    eval_mode = _resolve_eval_mode(container_name)
+    transport_send_mode = _resolve_transport_send_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
     if not allowlist_jids:
         raise SystemExit("livecheck-auto: allowlist-jids is empty")
-    if not test_mode_enabled:
-        raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
+    if transport_send_mode != "allowlist":
+        raise SystemExit(
+            "livecheck-auto: TRANSPORT_SEND_MODE must resolve to allowlist; "
+            f"got {transport_send_mode} (eval_mode={eval_mode})"
+        )
     allow_non_allowlist = bool(args.allow_non_allowlist)
 
     db_user = _resolve_db_user_simple()
@@ -29053,6 +29088,9 @@ else:
 
 if status == "running":
     env_checks = [
+        ("EVAL_MODE", True),
+        ("TRANSPORT_SEND_MODE", True),
+        ("OUTBOX_WORKER_MODE", True),
         ("TEST_MODE", True),
         ("OUTBOUND_ALLOWLIST_JIDS", True),
         ("OUTBOX_WORKER_ENABLED", True),

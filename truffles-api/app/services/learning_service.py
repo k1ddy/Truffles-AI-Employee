@@ -19,10 +19,9 @@ from app.services.knowledge_service import (
     QDRANT_HOST,
     get_embedding,
 )
+from app.services.runtime_mode_service import is_nonprod_eval_mode
 
 logger = get_logger("learning_service")
-
-TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 MAX_KNOWLEDGE_TEXT_LENGTH = 2000
 MIN_QUESTION_LENGTH = 5
@@ -406,9 +405,9 @@ def add_to_knowledge(
         )
         return None
 
-    if TEST_MODE and not (QDRANT_COLLECTION or "").endswith("_ci"):
+    if is_nonprod_eval_mode(os.environ) and not (QDRANT_COLLECTION or "").endswith("_ci"):
         logger.warning(
-            "Learning blocked: TEST_MODE requires _ci collection",
+            "Learning blocked: non-prod eval requires _ci collection",
             extra={
                 "context": {
                     "client_slug": client_slug,
@@ -629,9 +628,9 @@ def add_learned_response_to_knowledge(
         )
         return None
 
-    if TEST_MODE and not (QDRANT_COLLECTION or "").endswith("_ci"):
+    if is_nonprod_eval_mode(os.environ) and not (QDRANT_COLLECTION or "").endswith("_ci"):
         logger.warning(
-            "Learning blocked: TEST_MODE requires _ci collection",
+            "Learning blocked: non-prod eval requires _ci collection",
             extra={
                 "context": {
                     "client_slug": client_slug,

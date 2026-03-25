@@ -14,6 +14,7 @@ from app.services.handover_context_service import (
     build_handover_messages,
     get_recent_conversation_messages,
 )
+from app.services.runtime_mode_service import is_local_eval_mode
 from app.services.state_machine import ConversationState, is_transition_allowed
 
 logger = get_logger("state_service")
@@ -343,7 +344,7 @@ def _simulation_allowlist() -> set[str]:
 
 
 def _is_simulation_allowed(metadata, *, allow_internal_source: bool = False) -> bool:
-    if _is_env_enabled(os.environ.get("TEST_MODE"), default=False):
+    if is_local_eval_mode(os.environ):
         return True
     if allow_internal_source:
         return True

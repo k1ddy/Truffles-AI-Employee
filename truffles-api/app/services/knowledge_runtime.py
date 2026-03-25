@@ -9,6 +9,7 @@ from uuid import UUID
 
 from app.services.knowledge_registry_service import get_current_published
 from app.services.pack_compiler_service import extract_compiled_artifacts
+from app.services.runtime_mode_service import is_nonprod_eval_mode
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ def _is_env_enabled(value: str | None, default: bool = False) -> bool:
 def _is_dev_or_test_runtime() -> bool:
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return True
-    if _is_env_enabled(os.environ.get("TEST_MODE"), default=False):
+    if is_nonprod_eval_mode(os.environ):
         return True
     if _is_env_enabled(os.environ.get("DEBUG"), default=False):
         return True

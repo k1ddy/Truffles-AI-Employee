@@ -19,6 +19,7 @@ from app.services.knowledge_runtime import get_runtime_truth
 from app.services.knowledge_service import get_embedding
 from app.services.pack_compiler_service import compile_pack_payload
 from app.services.pack_runtime_types import PackDecision as DemoSalonDecision
+from app.services.runtime_mode_service import is_nonprod_eval_mode
 
 _KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _DEFAULT_CLIENT_SLUG = "demo_salon"
@@ -66,8 +67,7 @@ logger = get_logger("demo_salon_knowledge")
 
 
 def _use_local_embeddings() -> bool:
-    value = str(os.environ.get("TEST_MODE", "")).strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    return is_nonprod_eval_mode(os.environ)
 
 
 @dataclass(frozen=True)

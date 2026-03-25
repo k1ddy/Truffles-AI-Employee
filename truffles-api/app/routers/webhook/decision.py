@@ -9212,7 +9212,9 @@ async def _handle_webhook_payload(
                 branch_id=conversation.branch_id if conversation else None,
                 remote_jid=remote_jid,
             )
-            use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+            from app.services.runtime_mode_service import should_use_outbox_send
+
+            use_outbox_send = should_use_outbox_send(os.environ)
             transport_adapter = resolve_transport_adapter()
             transport_request = TransportSendRequest(
                 remote_jid=remote_jid,

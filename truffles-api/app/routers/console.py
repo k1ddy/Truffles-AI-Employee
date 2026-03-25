@@ -70,6 +70,7 @@ from app.models import (
     ToolRegistryEntry,
     User,
 )
+from app.services.runtime_mode_service import should_use_outbox_send
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
@@ -14232,7 +14233,7 @@ async def send_manager_message(
             )
             if not instance_id:
                 delivery_error = "instance_id_not_found"
-            elif _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False):
+            elif should_use_outbox_send(os.environ):
                 outbox_idempotency_key = idempotency_key or build_inbound_message_id(
                     None,
                     remote_jid,
@@ -14506,7 +14507,7 @@ async def send_outreach_message(
     now_utc = datetime.now(timezone.utc)
 
     try:
-        if _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False):
+        if should_use_outbox_send(os.environ):
             outbox_idempotency_key = idempotency_key or build_inbound_message_id(
                 None,
                 remote_jid,
