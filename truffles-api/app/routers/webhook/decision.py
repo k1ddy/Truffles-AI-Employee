@@ -196,6 +196,7 @@ from app.routers.webhook.info import (
     _handle_truth_gate_fallback,
     _is_short_reply,
     _looks_like_info_query,
+    _looks_like_services_overview_message,
     _tokenize_for_matching,
 )
 from app.routers.webhook.media import (
@@ -6207,13 +6208,7 @@ def _resolve_active_time_collect_service_info_interrupt_query(
     if not effective_service_query:
         return None
 
-    try:
-        from app.services.info_signal_service import looks_like_services_overview_message
-    except Exception:
-        looks_like_services_overview_message = None
-    if not looks_like_services_overview_message:
-        return None
-    if not looks_like_services_overview_message(message_text, client_slug=client_slug):
+    if not _looks_like_services_overview_message(message_text, client_slug=client_slug):
         return None
 
     return effective_service_query

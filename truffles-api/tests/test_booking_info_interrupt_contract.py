@@ -196,14 +196,13 @@ def test_booking_detect_info_calls_pass_client_slug():
     assert all(_call_has_keyword(call, "client_slug") for call in calls)
 
 
-def test_decision_recomputes_batch_non_booking_message_after_debounce():
+def test_decision_no_longer_recomputes_batch_non_booking_message_after_debounce():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
     )
     calls = _named_calls(source_path, "_select_last_non_booking_message")
 
-    assert len(calls) >= 2
-    assert any(getattr(call, "lineno", 0) >= 6338 for call in calls)
+    assert calls == []
 
 
 def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
@@ -271,11 +270,10 @@ def test_info_classifier_detects_location_question_where_salon_phrase():
     assert isinstance(signals, dict) and signals.get("location") is True
 
 
-def test_decision_recomputes_expected_reply_block_after_debounce():
+def test_decision_expected_reply_block_check_is_localized_to_single_contract_site():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
     )
     calls = _named_calls(source_path, "_should_block_expected_reply_by_info")
 
-    assert calls
-    assert any(getattr(call, "lineno", 0) >= 6338 for call in calls)
+    assert len(calls) == 1

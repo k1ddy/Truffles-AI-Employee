@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,53 +25,16 @@ from app.services.expected_reply_contract import (
     should_override_truth_gate_off_topic_contract,
     truth_gate_expected_reply_prompt_contract,
 )
-from app.services.info_signal_service import (
-    anchor_group_hit as _anchor_group_hit,
-)
-from app.services.info_signal_service import (
-    count_anchor_hits as _count_anchor_hits,
-)
-from app.services.info_signal_service import (
-    is_short_reply as _is_short_reply_impl,
-)
-from app.services.info_signal_service import (
-    looks_like_promotions_policy_message as _looks_like_promotions_policy_message,
-)
-from app.services.info_signal_service import (
-    looks_like_promotions_rules_policy_message as _looks_like_promotions_rules_policy_message,
-)
-from app.services.info_signal_service import (
-    looks_like_hours_policy_message as _looks_like_hours_policy_message,
-)
-from app.services.info_signal_service import (
-    normalized_contains_any as _normalized_contains_any,
-)
-from app.services.info_signal_service import (
-    signal_any_match as _signal_any_match,
-)
-from app.services.info_signal_service import (
-    signal_pair_match as _signal_pair_match,
-)
-from app.services.info_signal_service import (
-    system_any_match as _system_any_match,
-)
-from app.services.info_signal_service import (
-    system_any_match_multi as _system_any_match_multi,
-)
-from app.services.info_signal_service import (
-    tokenize_for_matching as _tokenize_for_matching,
-)
-from app.services.info_signal_service import (
-    tokens_have_prefixes as _tokens_have_prefixes,
-)
 from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.pack_runtime_service import (
+    _detect_promotion_intent,
     _build_fact_meta,
     _has_contact_signal,
     _has_duration_signal,
     _has_guest_waiting_signal,
     _has_parking_signal,
     _has_price_signal,
+    _normalize_text,
     build_info_combined_reply,
     build_master_reply_from_pack,
     compose_multi_truth_reply,
@@ -78,10 +42,13 @@ from app.services.pack_runtime_service import (
     format_reply_from_truth,
     get_pack_decision,
     get_pack_service_hint,
+    get_signal_lexicon_list,
+    get_system_lexicon_list,
     load_yaml_truth,
     phrase_match_intent,
     resolve_master_intent,
 )
+from app.services.signal_manifest_service import get_info_regex_pattern
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -89,10 +56,241 @@ if TYPE_CHECKING:
     from app.models import Conversation, Message, User
 
 
+_TOKENIZE_WORD_RE = get_info_regex_pattern("tokenize_word_pattern") or re.compile(r"\w+")
+
+
+def _tokenize_for_matching(normalized: str) -> list[str]:
+    return _TOKENIZE_WORD_RE.findall(normalized)
+
+
+def _normalized_contains_any(normalized: str, phrases: tuple[str, ...] | list[str]) -> bool:
+    if not normalized:
+        return False
+    return any(phrase and phrase in normalized for phrase in phrases)
+
+
+def _signal_phrase_list(client_slug: str | None, *keys: str) -> list[str]:
+    phrases: list[str] = []
+    for key in keys:
+        for phrase in get_signal_lexicon_list(client_slug, key):
+            token = phrase.strip() if isinstance(phrase, str) else ""
+            if token and token not in phrases:
+                phrases.append(token)
+    return phrases
+
+
+def _signal_any_match(normalized: str, client_slug: str | None, *keys: str) -> bool:
+    return bool(keys) and _normalized_contains_any(normalized, _signal_phrase_list(client_slug, *keys))
+
+
+def _signal_all_match(normalized: str, client_slug: str | None, key: str) -> bool:
+    phrases = _signal_phrase_list(client_slug, key)
+    return bool(phrases) and all(phrase in normalized for phrase in phrases)
+
+
+def _signal_pair_match(
+    normalized: str,
+    client_slug: str | None,
+    key_a: str,
+    key_b: str,
+) -> bool:
+    phrases_a = _signal_phrase_list(client_slug, key_a)
+    phrases_b = _signal_phrase_list(client_slug, key_b)
+    return bool(phrases_a and phrases_b) and _normalized_contains_any(
+        normalized, phrases_a
+    ) and _normalized_contains_any(normalized, phrases_b)
+
+
+def _system_any_match(normalized: str, key: str) -> bool:
+    phrases = get_system_lexicon_list(key)
+    return bool(phrases) and _normalized_contains_any(normalized, phrases)
+
+
+def _system_any_match_multi(normalized: str, *keys: str) -> bool:
+    return any(_system_any_match(normalized, key) for key in keys)
+
+
+def _has_token_prefix(tokens: list[str], prefix: str) -> bool:
+    return any(token.startswith(prefix) for token in tokens)
+
+
+def _tokens_have_prefixes(tokens: list[str], prefixes: tuple[str, ...]) -> bool:
+    return any(_has_token_prefix(tokens, prefix) for prefix in prefixes)
+
+
+def _has_anchor_prefix(tokens: list[str], prefix: str) -> bool:
+    if len(prefix) <= 2:
+        return any(token == prefix for token in tokens)
+    return any(token.startswith(prefix) for token in tokens)
+
+
+def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:
+    return all(_has_anchor_prefix(tokens, prefix) for prefix in group)
+
+
+def _count_anchor_hits(tokens: list[str], groups: list[tuple[str, ...]]) -> int:
+    return sum(1 for group in groups if _anchor_group_hit(tokens, group))
+
+
 def _is_short_reply(message_text: str | None) -> bool:
     if not message_text:
         return False
-    return _is_short_reply_impl(message_text, max_tokens=SESSION_MEMORY_SHORT_TOKENS)
+    normalized = _normalize_text(message_text)
+    if not normalized:
+        return False
+    tokens = _tokenize_for_matching(normalized)
+    return 0 < len(tokens) <= SESSION_MEMORY_SHORT_TOKENS
+
+
+def _looks_like_services_overview_message(
+    text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in ("акци", "скидк", "промо")) and not any(
+        marker in normalized for marker in ("услуг", "процед", "сервис")
+    ):
+        return False
+    markers = get_signal_lexicon_list(client_slug, "services_overview_phrases")
+    if not markers:
+        markers = get_system_lexicon_list("services_overview_phrases")
+    if bool(markers and _normalized_contains_any(normalized, markers)):
+        return True
+    return bool(
+        ("информац" in normalized or "какие" in normalized or "что у вас" in normalized)
+        and any(marker in normalized for marker in ("услуг", "процед", "сервис"))
+    )
+
+
+def _detect_location_policy_pack_refs(
+    text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> tuple[str, ...]:
+    if not isinstance(text, str) or not text.strip():
+        return ()
+    normalized = _normalize_text(text)
+    if not normalized:
+        return ()
+    tokens = _tokenize_for_matching(normalized)
+    question_like = "?" in text or _tokens_have_prefixes(tokens, ("где",))
+    parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
+    location_signal = parking_signal or _signal_any_match(
+        normalized, client_slug, "location_keywords", "location_phrases"
+    )
+    if (
+        question_like
+        and _tokens_have_prefixes(tokens, ("где",))
+        and _signal_any_match(normalized, client_slug, "location_question_scope_terms")
+    ):
+        location_signal = True
+    if not location_signal and not parking_signal:
+        return ()
+    refs: list[str] = []
+    if location_signal:
+        refs.append("location")
+    if parking_signal:
+        refs.append("parking")
+    return tuple(refs)
+
+
+def _looks_like_hours_policy_message(
+    text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if _has_parking_signal(normalized, client_slug=client_slug):
+        return False
+    if _signal_any_match(
+        normalized,
+        client_slug,
+        "location_keywords",
+        "location_phrases",
+        "location_question_scope_terms",
+    ):
+        return False
+    if _signal_any_match(normalized, client_slug, "hours_question_phrases", "hours_keywords"):
+        return True
+    return _signal_any_match(normalized, client_slug, "info_hours_stems") and _signal_any_match(
+        normalized,
+        client_slug,
+        "info_time_markers",
+        "hours_question_time_phrases",
+        "hours_question_work_verbs",
+        "hours_question_work_singular",
+    )
+
+
+def _looks_like_promotions_policy_message(
+    text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if _signal_any_match(normalized, client_slug, "promotions_stacking_phrases"):
+        return False
+    if _signal_all_match(normalized, client_slug, "promotions_stacking_terms"):
+        return False
+    if _detect_location_policy_pack_refs(text, client_slug=client_slug):
+        return False
+    if _looks_like_hours_policy_message(text, client_slug=client_slug):
+        return False
+    if _has_price_signal(normalized, text, client_slug=client_slug):
+        return False
+    if _has_duration_signal(normalized, text, client_slug=client_slug):
+        return False
+    if _detect_promotion_intent(normalized, client_slug=client_slug) is not None:
+        return True
+    if any(marker in normalized for marker in ("акци", "скидк", "промо")):
+        return True
+    if _looks_like_services_overview_message(text, client_slug=client_slug):
+        return False
+    from app.routers.webhook.policy import _looks_like_promotions_request
+
+    return _looks_like_promotions_request(text, client_slug=client_slug)
+
+
+def _looks_like_promotions_rules_policy_message(
+    text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if _looks_like_services_overview_message(text, client_slug=client_slug):
+        return False
+    if _detect_location_policy_pack_refs(text, client_slug=client_slug):
+        return False
+    if _looks_like_hours_policy_message(text, client_slug=client_slug):
+        return False
+    if _has_price_signal(normalized, text, client_slug=client_slug):
+        return False
+    if _has_duration_signal(normalized, text, client_slug=client_slug):
+        return False
+    if get_pack_service_hint(text, client_slug=client_slug):
+        return False
+    return _signal_any_match(normalized, client_slug, "promotions_stacking_phrases") or _signal_all_match(
+        normalized,
+        client_slug,
+        "promotions_stacking_terms",
+    )
 
 
 def _detect_info_anchor_hits(tokens: list[str]) -> dict[str, int]:
@@ -308,17 +506,30 @@ def _detect_info_class_intents(
             message_text,
             client_slug=client_slug,
         )
+        promotions_request_like = _looks_like_promotions_request(
+            message_text,
+            client_slug=client_slug,
+        )
+        promotions_service_mention_rescue = bool(
+            promotions_request_like
+            and get_pack_service_hint(message_text, client_slug=client_slug)
+        )
         if (
             not promotions_signal
-            and _looks_like_promotions_request(
-                message_text,
-                client_slug=client_slug,
-            )
+            and promotions_request_like
             and not price_signal
             and not duration_signal
             and not hours_signal
         ):
             promotions_signal = True
+            meta["promotions_request_rescue"] = True
+        elif (
+            promotions_signal
+            and promotions_service_mention_rescue
+            and not price_signal
+            and not duration_signal
+            and not hours_signal
+        ):
             meta["promotions_request_rescue"] = True
         if promotions_signal:
             intents.add("promotions")

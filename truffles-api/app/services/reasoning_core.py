@@ -6683,11 +6683,10 @@ async def _try_handle_turn_planner_safe_booking_prompt_owner_cutover(
                 has_explicit_date_signal,
                 normalize_resolved_datetime_value,
             )
-            from app.services.info_signal_service import signal_any_match
 
             normalized_interrupt_text = decision_router.normalize_for_matching(message_text)
             suppress_generic_info_interrupt = bool(
-                signal_any_match(
+                info_router._signal_any_match(
                     normalized_interrupt_text,
                     payload.client_slug,
                     "booking_request",
