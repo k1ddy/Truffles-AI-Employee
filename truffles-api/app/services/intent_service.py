@@ -1316,11 +1316,6 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     active_goal = profile.get("active_goal")
     if isinstance(active_goal, str) and active_goal.strip():
         normalized["active_goal"] = active_goal.strip().casefold()
-    expected_reply_type = profile.get("expected_reply_type")
-    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
-        expected_reply_type = expected_reply_type.strip().casefold()
-        if expected_reply_type in {"service_choice", "time", "name", "phone"}:
-            normalized["expected_reply_type"] = expected_reply_type
     active_slots = profile.get("active_slots")
     if isinstance(active_slots, list):
         cleaned_slots: list[str] = []

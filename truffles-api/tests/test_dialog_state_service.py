@@ -552,7 +552,6 @@ def test_dialog_state_service_normalizes_session_memory_payload() -> None:
         "last_updated": "2026-03-16T15:00:00+00:00",
         "last_updated_at": "2026-03-16T15:05:00+00:00",
         "active_goal": "booking",
-        "last_question_type": "time",
         "ttl": 7,
         "ttl_hours": 24,
         "goal_stack": ["info", "booking", "consult"],
@@ -2255,9 +2254,14 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
                 "source": "llm_slot",
             },
         },
-        "last_question_type": "time",
         "unanswered_questions": ["time"],
         "goal_stack": ["booking"],
+        "pending_question_contract": {
+            "expected_reply_type": "time",
+            "reason": "booking_prompt",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
         "last_updated_at": now.isoformat(),
         "ttl_hours": 24,
     }
@@ -2288,6 +2292,39 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
     assert result.context["session_memory"] == result.question_memory
     assert context["expected_reply_type"] == " old "
     assert context["re_entry_required"]["required"] is True
+
+
+def test_dialog_state_service_load_runtime_payload_reprojects_stale_expected_reply_fields() -> None:
+    service = DialogStateService()
+
+    loaded = service.load_runtime_payload(
+        {
+            "consultant_runtime": {
+                "schema_version": "consultant_runtime.v1",
+                "expected_reply_type": "name",
+                "expected_reply_reason": "stale_projection",
+                "dialog_state": {
+                    "schema_version": "dialog_state.v1",
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "reason": "collect:datetime",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    },
+                    "projections": {
+                        "expected_reply_type": "name",
+                        "expected_reply_reason": "stale_projection",
+                    },
+                },
+                "current_goal": "booking",
+            }
+        }
+    )
+
+    assert loaded["expected_reply_type"] == "time"
+    assert loaded["expected_reply_reason"] == "collect:datetime"
+    assert loaded["dialog_state"].projections.expected_reply_type == "time"
+    assert loaded["dialog_state"].projections.expected_reply_reason == "collect:datetime"
 
 
 def test_dialog_state_service_normalizes_low_confidence_retry_count() -> None:

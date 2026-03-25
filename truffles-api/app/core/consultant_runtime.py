@@ -602,8 +602,6 @@ class ConsultantRuntime:
         profile: dict[str, Any] = {}
         if runtime_state.current_goal:
             profile["active_goal"] = runtime_state.current_goal
-        if runtime_state.expected_reply_type:
-            profile["expected_reply_type"] = runtime_state.expected_reply_type
 
         active_slots = [
             slot_key
@@ -651,7 +649,7 @@ class ConsultantRuntime:
                     profile["current_referents"] = current_referents
             profile["semantic_contract"] = semantic_contract
 
-        pending_contract = self.dialog_state.project_pending_question_contract(
+        pending_contract = self.dialog_state.project_pending_question_contract_with_projection_fallback(
             dialog_state.pending_question_contract,
             expected_reply_type=runtime_state.expected_reply_type,
             expected_reply_reason=runtime_state.expected_reply_reason,
@@ -912,8 +910,13 @@ class ConsultantRuntime:
             turn_result=turn_result,
         )
         contract_source = self._derive_contract_source(decision)
-        expected_reply_type = dialog_state.projections.expected_reply_type
-        expected_reply_reason = dialog_state.projections.expected_reply_reason
+        pending_question_contract = self.dialog_state.project_pending_question_contract_with_projection_fallback(
+            dialog_state.pending_question_contract,
+            expected_reply_type=dialog_state.projections.expected_reply_type,
+            expected_reply_reason=dialog_state.projections.expected_reply_reason,
+        ) or {}
+        expected_reply_type = pending_question_contract.get("expected_reply_type")
+        expected_reply_reason = pending_question_contract.get("reason")
         trace_event = {
             "stage": _RUNTIME_ENTRYPOINT_NAME,
             "decision": contract_action,
@@ -931,11 +934,6 @@ class ConsultantRuntime:
             trace_event["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
             trace_event["expected_reply_reason"] = expected_reply_reason
-        pending_question_contract = self.dialog_state.project_pending_question_contract(
-            dialog_state.pending_question_contract,
-            expected_reply_type=expected_reply_type,
-            expected_reply_reason=expected_reply_reason,
-        ) or {}
         if pending_question_contract:
             trace_event["pending_question_contract"] = pending_question_contract
         pending_question_act = None
@@ -1080,7 +1078,12 @@ class ConsultantRuntime:
             if isinstance(dialog_state.meta, dict)
             else None
         )
-        expected_reply_type = dialog_state.projections.expected_reply_type
+        pending_question_contract = self.dialog_state.project_pending_question_contract_with_projection_fallback(
+            dialog_state.pending_question_contract,
+            expected_reply_type=dialog_state.projections.expected_reply_type,
+            expected_reply_reason=dialog_state.projections.expected_reply_reason,
+        ) or {}
+        expected_reply_type = pending_question_contract.get("expected_reply_type")
         if (
             execution.tool_action == "calendar.book_slot"
             and execution.tool_decision == "ok"

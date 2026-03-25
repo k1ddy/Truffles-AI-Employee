@@ -560,6 +560,30 @@ class DialogStateService:
             expected_reply_reason=projections.expected_reply_reason,
         )
 
+    def project_pending_question_contract_with_projection_fallback(
+        self,
+        contract: PendingQuestionContract | dict[str, Any] | None,
+        *,
+        expected_reply_type: str | None = None,
+        expected_reply_reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        projected = self.project_pending_question_contract(contract)
+        if projected is not None:
+            return self.project_pending_question_contract(
+                projected,
+                expected_reply_type=(
+                    None if projected.get("expected_reply_type") else expected_reply_type
+                ),
+                expected_reply_reason=(
+                    None if projected.get("reason") else expected_reply_reason
+                ),
+            )
+        return self.project_pending_question_contract(
+            None,
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=expected_reply_reason,
+        )
+
     def set_context_manager_pending_question_contract(
         self,
         manager: dict[str, Any] | None,
@@ -1142,6 +1166,21 @@ class DialogStateService:
             updated.pop("expected_reply_reason", None)
         return updated
 
+    def sync_session_memory_pending_question_contract(
+        self,
+        memory: dict[str, Any] | None,
+        *,
+        pending_question_contract: dict[str, Any] | PendingQuestionContract | None,
+    ) -> dict[str, Any]:
+        updated = deepcopy(memory) if isinstance(memory, dict) else {}
+        projected = self.project_pending_question_contract(pending_question_contract)
+        if projected:
+            updated["pending_question_contract"] = projected
+            updated.pop("last_question_type", None)
+        else:
+            updated.pop("pending_question_contract", None)
+        return updated
+
     def update_session_memory_on_question(
         self,
         memory: dict[str, Any] | None,
@@ -1423,7 +1462,7 @@ class DialogStateService:
         booking_payload = self.normalize_booking_payload(runtime_payload.get("booking"))
         if booking_payload is None:
             booking_payload = self.normalize_booking_payload(working_context.get("booking"))
-        pending_contract = self.project_pending_question_contract(
+        pending_contract = self.project_pending_question_contract_with_projection_fallback(
             runtime_payload.get("pending_question_contract"),
             expected_reply_type=runtime_payload.get("expected_reply_type")
             or working_context.get("expected_reply_type"),
@@ -1468,14 +1507,23 @@ class DialogStateService:
                 },
             }
         dialog_state = self.normalize(dialog_state_payload)
-        dialog_pending_contract = self.project_pending_question_contract(
+        dialog_pending_contract = self.project_pending_question_contract_with_projection_fallback(
             dialog_state.pending_question_contract,
             expected_reply_type=expected_reply_type,
             expected_reply_reason=expected_reply_reason,
         ) or {}
         projections = self.project_expected_reply_projections(
+            dialog_state.projections,
             expected_reply_type=dialog_pending_contract.get("expected_reply_type") or expected_reply_type,
             expected_reply_reason=dialog_pending_contract.get("reason") or expected_reply_reason,
+        )
+        dialog_state = dialog_state.model_copy(
+            update={
+                "pending_question_contract": PendingQuestionContract.model_validate(
+                    dialog_pending_contract
+                ),
+                "projections": projections,
+            }
         )
         expected_reply_type = projections.expected_reply_type
         expected_reply_reason = projections.expected_reply_reason
@@ -1604,9 +1652,17 @@ class DialogStateService:
                 expected_reply_reason = f"collect:{next_slot}"
             current_goal = "booking"
         elif merged_booking:
+            existing_pending_question_contract = (
+                self.project_pending_question_contract_with_projection_fallback(
+                    loaded["dialog_state"].pending_question_contract,
+                    expected_reply_type=loaded.get("expected_reply_type"),
+                    expected_reply_reason=loaded.get("expected_reply_reason"),
+                )
+                or {}
+            )
             projections = self.project_expected_reply_projections(
-                expected_reply_type=loaded.get("expected_reply_type"),
-                expected_reply_reason=loaded.get("expected_reply_reason"),
+                expected_reply_type=existing_pending_question_contract.get("expected_reply_type"),
+                expected_reply_reason=existing_pending_question_contract.get("reason"),
             )
             expected_reply_type = projections.expected_reply_type
             expected_reply_reason = projections.expected_reply_reason
@@ -2091,6 +2147,23 @@ class DialogStateService:
             canonical_state_key=canonical_state_key,
             session_memory_key=session_memory_key,
         )
+        if pending_question_contract is not None:
+            session_memory_payload = self.sync_session_memory_pending_question_contract(
+                question_memory
+                if isinstance(question_memory, dict)
+                else (
+                    updated.get(session_memory_key)
+                    if isinstance(updated.get(session_memory_key), dict)
+                    else None
+                ),
+                pending_question_contract=pending_question_contract,
+            )
+            question_memory = session_memory_payload
+            updated = self.set_context_session_memory(
+                updated,
+                session_memory_payload,
+                key=session_memory_key,
+            )
 
         return ExpectedReplyContextSyncResult(
             context=updated,
@@ -2237,8 +2310,7 @@ class DialogStateService:
         pending_question_contract = self.project_session_memory_pending_question_contract(normalized)
         if pending_question_contract is not None:
             normalized["pending_question_contract"] = pending_question_contract
-            if not self._normalize_projection_token(normalized.get("last_question_type")):
-                normalized["last_question_type"] = pending_question_contract.get("expected_reply_type")
+            normalized.pop("last_question_type", None)
         else:
             normalized.pop("pending_question_contract", None)
 

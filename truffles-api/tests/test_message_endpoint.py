@@ -5309,7 +5309,10 @@ def test_reuse_active_handover_captures_interaction_state_in_pending_resume():
     assert snapshot.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
     assert snapshot.get("expected_reply_reason") == "booking_prompt"
     assert snapshot.get("booking", {}).get("service") == "Стрижка"
-    assert snapshot.get("session_memory", {}).get("last_question_type") == "time"
+    assert snapshot.get("session_memory", {}).get("last_question_type") is None
+    assert snapshot.get("session_memory", {}).get("pending_question_contract") == {
+        "expected_reply_type": "time"
+    }
     assert snapshot.get("session_memory", {}).get("interaction_state", {}).get("resume_slot") == "datetime"
     assert (
         snapshot.get("context_manager", {})

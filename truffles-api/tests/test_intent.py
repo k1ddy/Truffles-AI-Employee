@@ -693,7 +693,7 @@ class TestPolicyCoreTimeoutRetry:
         assert len(memory_payload.get("summary")) <= 360
         assert memory_payload.get("profile", {}).get("consent_status") == "granted"
         assert memory_payload.get("profile", {}).get("active_goal") == "booking"
-        assert memory_payload.get("profile", {}).get("expected_reply_type") == "time"
+        assert "expected_reply_type" not in (memory_payload.get("profile") or {})
         assert memory_payload.get("profile", {}).get("active_slots") == ["service", "datetime"]
         assert memory_payload.get("profile", {}).get("stored_keys") == [
             "preferred_master",
@@ -1077,7 +1077,6 @@ class TestPolicyCoreTimeoutRetry:
 
         assert normalized == {
             "active_goal": "booking",
-            "expected_reply_type": "time",
             "active_slots": ["service", "datetime", "phone"],
             "current_referents": {
                 "service": "Маникюр",

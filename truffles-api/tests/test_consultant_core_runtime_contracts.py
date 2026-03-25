@@ -279,7 +279,6 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
     memory_profile = captured["memory_profile"]
     assert memory_profile == {
         "active_goal": "booking",
-        "expected_reply_type": "time",
         "active_slots": ["service"],
         "current_referents": {
             "service": "manicure",
@@ -291,7 +290,7 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
             "next_question": "datetime",
             "open_questions": ["datetime"],
             "expected_reply_type": "time",
-            "reason": "collect:datetime",
+            "reason": "booking_time_availability_followup",
             "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
             "active_question_relation": "ask_about_requested_slot",
@@ -2130,6 +2129,69 @@ def test_consultant_runtime_records_question_contract_trace_entries() -> None:
         "pending_question_act": "slot_constraint",
         "pending_question_target": "time",
         "active_question_relation": "slot_constraint",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
+def test_consultant_runtime_trace_prefers_canonical_question_contract_over_stale_projection() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "goal": "booking",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="fill_requested_slot",
+        source="llm_policy_core",
+    )
+    dialog_state = DialogState.model_validate(
+        {
+            "pending_question_contract": {
+                "expected_reply_type": "time",
+                "reason": "collect:datetime",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            "projections": {
+                "expected_reply_type": "name",
+                "expected_reply_reason": "stale_projection",
+            },
+            "meta": {"current_goal": "booking"},
+        }
+    )
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="collect", tool_decision="datetime", meta={})
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="collect"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("expected_reply_type") == "time"
+        and entry.get("expected_reply_reason") == "collect:datetime"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta.get("expected_reply_type") == "time"
+    assert decision_meta.get("expected_reply_reason") == "collect:datetime"
+    assert decision_meta.get("pending_question_contract") == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
     }
