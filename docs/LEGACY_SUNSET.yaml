@@ -396,8 +396,6 @@ proof_guard:
     - exec(compile(
     - read_text(
   semantic_contract_tokens:
-    - expected_reply_type
-    - expected_reply_reason
     - pending_question_target
     - active_question_relation
     - interaction_owner

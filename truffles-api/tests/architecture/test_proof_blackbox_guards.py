@@ -36,7 +36,7 @@ def write_config(repo: Path) -> dict:
             "forbidden_test_imports": ["ops.diagnose", "scripts.booking_dialog_scenarios"],
             "forbidden_test_path_suffixes": ["diagnose.py", "booking_dialog_scenarios.py"],
             "forbidden_test_ast_exec_tokens": ["ast.parse(", "exec(compile(", "read_text("],
-            "semantic_contract_tokens": ["expected_reply_type", "interaction_owner", "retag"],
+            "semantic_contract_tokens": ["interaction_owner", "retag"],
         },
     }
     path = repo / "docs" / "LEGACY_SUNSET.yaml"
@@ -78,11 +78,28 @@ def test_proof_path_guard_blocks_semantic_tokens_in_proof_only_file(tmp_path: Pa
     config = write_config(repo)
     base = commit_base(repo)
     diagnose = repo / "ops" / "diagnose.py"
-    diagnose.write_text("def keep():\n    return None\n\nexpected_reply_type = 'time'\n", encoding="utf-8")
+    diagnose.write_text("def keep():\n    return None\n\ninteraction_owner = 'turn_planner'\n", encoding="utf-8")
 
     violations = module.evaluate(repo, config, base, None)
     assert violations
     assert "semantic-authority token" in violations[0]
+
+
+def test_proof_path_guard_allows_contract_key_reads_in_proof_only_file(tmp_path: Path) -> None:
+    module = load_module("proof_path_guard", SCRIPTS / "proof_path_guard.py")
+    repo = init_repo(tmp_path)
+    config = write_config(repo)
+    base = commit_base(repo)
+    diagnose = repo / "ops" / "diagnose.py"
+    diagnose.write_text(
+        "def keep(expected):\n"
+        "    expected_reply_type = expected.get('expected_reply_type')\n"
+        "    return {'expected_reply_type': expected_reply_type}\n",
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo, config, base, None)
+    assert violations == []
 
 
 def test_proof_path_guard_blocks_test_ast_exec_from_proof_only_path(tmp_path: Path) -> None:

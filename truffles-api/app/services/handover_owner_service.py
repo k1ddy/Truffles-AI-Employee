@@ -24,14 +24,13 @@ from app.services.handover_context_service import (
 from app.services.result import Result
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
-    _capture_pending_resume_context,
     _reset_context_preserving_trace,
-    _restore_pending_resume_context,
     DECISION_TRACE_KEY,
-    PENDING_RESUME_CLEAR_KEYS,
-    PENDING_RESUME_KEY,
+    capture_pending_resume_on_conversation,
     force_state,
     is_simulation_context,
+    restore_pending_resume_on_conversation,
+    sync_pending_resume_on_handover_reuse,
     transition_state,
 )
 from app.services.telegram_service import (
@@ -1003,24 +1002,7 @@ def _record_handover_contract_trace(
 
 
 def _sync_pending_resume_on_handover_reuse(conversation: Conversation) -> bool:
-    original_context = (
-        dict(conversation.context)
-        if isinstance(conversation.context, dict)
-        else conversation.context
-    )
-    captured_context = _capture_pending_resume_context(conversation.context)
-    if not isinstance(captured_context, dict):
-        captured_context = {}
-    if PENDING_RESUME_KEY in captured_context:
-        normalized_context = dict(captured_context)
-        for key in PENDING_RESUME_CLEAR_KEYS:
-            normalized_context.pop(key, None)
-    else:
-        normalized_context = captured_context
-    if normalized_context == original_context:
-        return False
-    conversation.context = normalized_context
-    return True
+    return sync_pending_resume_on_handover_reuse(conversation)
 
 
 def _find_recent_resolved_handover(
@@ -1217,7 +1199,7 @@ def escalate_to_pending(
 
     try:
         if is_simulation_context(conversation):
-            conversation.context = _capture_pending_resume_context(conversation.context)
+            capture_pending_resume_on_conversation(conversation)
             now = datetime.now(timezone.utc)
             user = db.query(User).filter(User.id == conversation.user_id).first()
             remote_jid = user.remote_jid if user else None
@@ -1294,7 +1276,7 @@ def escalate_to_pending(
             )
             return Result.success(handover)
 
-        conversation.context = _capture_pending_resume_context(conversation.context)
+        capture_pending_resume_on_conversation(conversation)
         routing_meta = resolve_telegram_routing(
             db,
             conversation=conversation,
@@ -1482,8 +1464,7 @@ def manager_resolve(
         if not preserve_context:
             _reset_context_preserving_trace(conversation)
         else:
-            restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)
-            conversation.context = restored_context
+            restore_pending_resume_on_conversation(conversation, now=now)
 
         handover.status = "resolved"
         handover.resolved_at = now
@@ -1529,8 +1510,7 @@ def manager_return(
         if not preserve_context:
             _reset_context_preserving_trace(conversation)
         else:
-            restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)
-            conversation.context = restored_context
+            restore_pending_resume_on_conversation(conversation, now=now)
 
         handover.status = "bot_handling"
         handover.resolved_at = None

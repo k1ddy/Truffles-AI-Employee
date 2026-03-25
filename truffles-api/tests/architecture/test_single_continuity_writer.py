@@ -87,6 +87,52 @@ def test_continuity_writer_guard_allows_current_writer_paths(tmp_path: Path) -> 
     assert violations == []
 
 
+def test_continuity_writer_guard_ignores_local_read_or_trace_plumbing(tmp_path: Path) -> None:
+    module = load_module("continuity_writer_guard", SCRIPTS / "continuity_writer_guard.py")
+    repo = init_repo(tmp_path)
+    config = write_config(repo)
+    base = commit_base(repo)
+    rogue = repo / "truffles-api" / "app" / "services" / "rogue.py"
+    rogue.write_text(
+        "\n".join(
+            [
+                "def build(payload, trace):",
+                "    expected_reply_type = payload.get('expected_reply_type')",
+                "    trace_event = {'expected_reply_type': expected_reply_type}",
+                "    return trace_event",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo, config, base, None)
+    assert violations == []
+
+
+def test_continuity_writer_guard_blocks_context_assignment_from_pending_resume_helper(tmp_path: Path) -> None:
+    module = load_module("continuity_writer_guard", SCRIPTS / "continuity_writer_guard.py")
+    repo = init_repo(tmp_path)
+    config = write_config(repo)
+    base = commit_base(repo)
+    rogue = repo / "truffles-api" / "app" / "services" / "rogue.py"
+    rogue.write_text(
+        "\n".join(
+            [
+                "def sync(conversation, now):",
+                "    restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)",
+                "    conversation.context = restored_context",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo, config, base, None)
+    assert violations
+    assert "conversation.context = restored_context" in violations[0]
+
+
 def test_continuity_writer_guard_allows_scoped_waiver_lines_in_frozen_file(tmp_path: Path) -> None:
     module = load_module("continuity_writer_guard", SCRIPTS / "continuity_writer_guard.py")
     repo = init_repo(tmp_path)

@@ -561,6 +561,53 @@ def _restore_pending_resume_context(context: dict | None, *, now: datetime) -> t
     return restored, True
 
 
+def capture_pending_resume_on_conversation(conversation: Conversation) -> bool:
+    original_context = (
+        dict(conversation.context)
+        if isinstance(conversation.context, dict)
+        else conversation.context
+    )
+    captured_context = _capture_pending_resume_context(conversation.context)
+    if not isinstance(captured_context, dict):
+        captured_context = {}
+    if captured_context == original_context:
+        return False
+    conversation.context = captured_context
+    return True
+
+
+def sync_pending_resume_on_handover_reuse(conversation: Conversation) -> bool:
+    original_context = (
+        dict(conversation.context)
+        if isinstance(conversation.context, dict)
+        else conversation.context
+    )
+    captured_context = _capture_pending_resume_context(conversation.context)
+    if not isinstance(captured_context, dict):
+        captured_context = {}
+    if PENDING_RESUME_KEY in captured_context:
+        normalized_context = dict(captured_context)
+        for key in PENDING_RESUME_CLEAR_KEYS:
+            normalized_context.pop(key, None)
+    else:
+        normalized_context = captured_context
+    if normalized_context == original_context:
+        return False
+    conversation.context = normalized_context
+    return True
+
+
+def restore_pending_resume_on_conversation(
+    conversation: Conversation,
+    *,
+    now: datetime,
+) -> bool:
+    restored_context, restored = _restore_pending_resume_context(conversation.context, now=now)
+    if restored:
+        conversation.context = restored_context
+    return restored
+
+
 def _build_pending_resume_snapshot_payload(
     *,
     context: dict | None,
