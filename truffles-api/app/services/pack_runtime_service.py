@@ -1225,70 +1225,90 @@ def _normalize_identifier_token(value: str | None) -> str | None:
 
 def _dedupe_entity_refs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     unique_rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for row in rows:
         if not isinstance(row, dict):
             continue
-        item_id = row.get("id")
-        if not isinstance(item_id, str) or not item_id.strip():
+        fingerprint = (
+            _coerce_text_token(row.get("entity_id")) or "",
+            _coerce_text_token(row.get("entity_type")) or "",
+            _coerce_text_token(row.get("source_ref")) or "",
+            _coerce_text_token(row.get("value")) or "",
+        )
+        if fingerprint in seen or not any(fingerprint):
             continue
-        token = item_id.strip()
-        if token in seen:
-            continue
-        seen.add(token)
+        seen.add(fingerprint)
         unique_rows.append(row)
     return unique_rows
 
 
-def _extract_entity_refs(meta: dict[str, Any], *, intent: str | None) -> list[dict[str, Any]]:
+def _extract_entity_refs(
+    meta: dict[str, Any],
+    *,
+    confidence: float | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not isinstance(meta, dict):
         meta = {}
     service_query = meta.get("service_query")
     if isinstance(service_query, str) and service_query.strip():
         service_id = _normalize_identifier_token(service_query) or "service"
-        rows.append(
-            {
-                "id": f"service:{service_id}",
-                "type": "service",
-                "label": service_query.strip(),
-            }
-        )
+        row: dict[str, Any] = {
+            "entity_id": f"service:{service_id}",
+            "entity_type": "service",
+            "value": service_query.strip(),
+            "source_ref": _coerce_text_token(meta.get("service_query_source")) or "resolver",
+        }
+        if confidence is not None:
+            row["confidence"] = confidence
+        rows.append(row)
     price_item = meta.get("price_item")
     if isinstance(price_item, dict):
         item_name = price_item.get("name")
         if isinstance(item_name, str) and item_name.strip():
             item_id = _normalize_identifier_token(item_name) or "price-item"
-            rows.append(
-                {
-                    "id": f"price_item:{item_id}",
-                    "type": "price_item",
-                    "label": item_name.strip(),
-                }
-            )
-    info_sections = meta.get("info_sections")
-    if isinstance(info_sections, list):
-        for section in info_sections:
-            if not isinstance(section, str) or not section.strip():
-                continue
-            section_token = section.strip().casefold()
-            rows.append(
-                {
-                    "id": f"info_section:{section_token}",
-                    "type": "info_section",
-                    "label": section.strip(),
-                }
-            )
-    if isinstance(intent, str) and intent.strip():
-        intent_token = intent.strip().casefold()
-        rows.append(
-            {
-                "id": f"intent:{intent_token}",
-                "type": "intent",
-                "label": intent.strip(),
+            row = {
+                "entity_id": f"price_item:{item_id}",
+                "entity_type": "price_item",
+                "value": item_name.strip(),
+                "source_ref": _coerce_text_token(meta.get("fact_source")) or "resolver",
             }
-        )
+            if confidence is not None:
+                row["confidence"] = confidence
+            rows.append(row)
     return _dedupe_entity_refs(rows)
+
+
+def _extract_referents(
+    meta: dict[str, Any],
+    *,
+    entity_refs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    referents: dict[str, dict[str, Any]] = {}
+    if not isinstance(meta, dict):
+        return referents
+    service_query = _coerce_text_token(meta.get("service_query"))
+    if service_query:
+        service_ref = next(
+            (
+                row
+                for row in entity_refs
+                if isinstance(row, dict)
+                and _coerce_text_token(row.get("entity_type")) == "service"
+            ),
+            None,
+        )
+        referent: dict[str, Any] = {
+            "value": service_query,
+            "entity_type": "service",
+            "source_ref": _coerce_text_token(meta.get("service_query_source")) or "resolver",
+        }
+        if isinstance(service_ref, dict):
+            entity_id = _coerce_text_token(service_ref.get("entity_id"))
+            if entity_id:
+                referent["entity_id"] = entity_id
+        referents["service"] = referent
+    return referents
 
 
 def _extract_slot_candidates(meta: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1363,6 +1383,42 @@ def _build_fact_bundle(
         "intent_class": intent_token,
         "abstain_reason": abstain_reason,
     }
+
+
+def _build_grounding_provenance(
+    *,
+    fact_bundle: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None,
+    resolver_id: str,
+    resolver_version: str,
+) -> dict[str, Any]:
+    provenance: dict[str, Any] = {
+        "pack_id": _coerce_text_token(fact_bundle.get("pack_id")),
+        "entity_id": _coerce_text_token(fact_bundle.get("entity_id")),
+        "source_ref": _coerce_text_token(fact_bundle.get("source_ref")),
+        "confidence": _coerce_confidence(fact_bundle.get("confidence")) or 0.0,
+        "resolver_id": resolver_id,
+        "resolver_version": resolver_version,
+    }
+    if isinstance(retrieval_meta, dict) and retrieval_meta:
+        provenance["retrieval"] = retrieval_meta
+    return provenance
+
+
+def _build_semantic_grounding(
+    *,
+    entity_refs: list[dict[str, Any]],
+    referents: dict[str, dict[str, Any]],
+    grounding_provenance: dict[str, Any] | None,
+) -> dict[str, Any]:
+    grounding: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
+    if entity_refs:
+        grounding["entity_refs"] = entity_refs
+    if referents:
+        grounding["referents"] = referents
+    if isinstance(grounding_provenance, dict) and grounding_provenance:
+        grounding["grounding_provenance"] = grounding_provenance
+    return grounding
 
 
 def _derive_resolver_confidence(meta: dict[str, Any], *, action_class: str) -> float:
@@ -1501,19 +1557,21 @@ def ensure_resolver_meta(
         "info_clarify",
     }:
         action_class = "COLLECT"
-    entity_refs = _extract_entity_refs(payload, intent=intent)
-    slot_candidates = _extract_slot_candidates(payload)
     confidence = _derive_resolver_confidence(payload, action_class=action_class)
     abstain_reason = _derive_abstain_reason(
         payload,
         action_class=action_class,
         confidence=confidence,
     )
+    entity_refs = _extract_entity_refs(payload, confidence=confidence)
+    referents = _extract_referents(payload, entity_refs=entity_refs)
+    slot_candidates = _extract_slot_candidates(payload)
     intent_class = intent.strip() if isinstance(intent, str) and intent.strip() else None
     resolver_contract = {
         "intent_class": intent_class,
         "action_class": action_class,
         "entity_refs": entity_refs,
+        "referents": referents,
         "slot_candidates": slot_candidates,
         "confidence": confidence,
         "abstain_reason": abstain_reason,
@@ -1533,6 +1591,18 @@ def ensure_resolver_meta(
         entity_refs=entity_refs,
         client_slug=client_slug,
     )
+    grounding_provenance = _build_grounding_provenance(
+        fact_bundle=fact_bundle,
+        retrieval_meta=retrieval_meta,
+        resolver_id=resolver_id_token,
+        resolver_version=resolver_version_token,
+    )
+    resolver_contract["grounding_provenance"] = grounding_provenance
+    semantic_grounding = _build_semantic_grounding(
+        entity_refs=entity_refs,
+        referents=referents,
+        grounding_provenance=grounding_provenance,
+    )
     payload.update(resolver_contract)
     payload["resolver_contract_version"] = _RESOLVER_CONTRACT_VERSION
     payload["resolver_contract"] = resolver_contract
@@ -1541,6 +1611,8 @@ def ensure_resolver_meta(
     if retrieval_meta:
         payload["retrieval_meta"] = retrieval_meta
     payload["fact_bundle"] = fact_bundle
+    payload["semantic_grounding"] = semantic_grounding
+    payload["grounding_provenance"] = grounding_provenance
     payload["provenance"] = {
         "pack_id": fact_bundle["pack_id"],
         "entity_id": fact_bundle["entity_id"],
@@ -1834,6 +1906,9 @@ def has_consult_recommendation_signal(decision: PackDecision | None) -> bool:
     ):
         return True
     intent_token = decision.intent.strip().casefold() if isinstance(decision.intent, str) else ""
+    intent_class = meta.get("intent_class")
+    if isinstance(intent_class, str) and intent_class.strip().casefold() == "consult_reply":
+        return True
     resolver_contract = meta.get("resolver_contract")
     if isinstance(resolver_contract, dict):
         intent_class = resolver_contract.get("intent_class")
@@ -1856,19 +1931,16 @@ def is_timeout_fact_fallback_candidate(
         return False
     meta = decision.meta if isinstance(decision.meta, dict) else {}
     resolver_contract = meta.get("resolver_contract")
-    action_class = None
-    abstain_reason = None
-    confidence = None
+    action_class = meta.get("action_class")
+    abstain_reason = meta.get("abstain_reason")
+    confidence = _coerce_confidence(meta.get("resolver_confidence"))
     if isinstance(resolver_contract, dict):
-        action_class = resolver_contract.get("action_class")
-        abstain_reason = resolver_contract.get("abstain_reason")
-        confidence = _coerce_confidence(resolver_contract.get("confidence"))
-    if not isinstance(action_class, str):
-        action_class = meta.get("action_class")
-    if not isinstance(abstain_reason, str):
-        abstain_reason = meta.get("abstain_reason")
-    if confidence is None:
-        confidence = _coerce_confidence(meta.get("resolver_confidence"))
+        if not isinstance(action_class, str):
+            action_class = resolver_contract.get("action_class")
+        if not isinstance(abstain_reason, str):
+            abstain_reason = resolver_contract.get("abstain_reason")
+        if confidence is None:
+            confidence = _coerce_confidence(resolver_contract.get("confidence"))
     if confidence is None:
         confidence = _RESOLVER_FACT_CONFIDENCE
     if not isinstance(action_class, str) or action_class.strip().upper() != "FACT":

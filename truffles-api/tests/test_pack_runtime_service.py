@@ -75,10 +75,38 @@ def test_get_pack_decision_enriches_resolver_contract(monkeypatch) -> None:
     assert meta.get("resolver_confidence") == 0.88
     assert isinstance(meta.get("resolver_candidates"), list) and meta.get("resolver_candidates")
     assert isinstance(meta.get("resolver_contract"), dict)
+    assert meta.get("resolver_contract", {}).get("entity_refs") == meta.get("entity_refs")
+    assert meta.get("resolver_candidates") == meta.get("entity_refs")
+    entity_refs = meta.get("entity_refs")
+    assert entity_refs == meta.get("semantic_grounding", {}).get("entity_refs")
+    assert entity_refs == [
+        {
+            "entity_id": entity_refs[0]["entity_id"],
+            "entity_type": "service",
+            "value": "Маникюр",
+            "source_ref": "semantic_match",
+            "confidence": 0.88,
+        }
+    ]
+    assert str(entity_refs[0]["entity_id"]).startswith("service:")
+    assert meta.get("referents") == {
+        "service": {
+            "value": "Маникюр",
+            "entity_id": entity_refs[0]["entity_id"],
+            "entity_type": "service",
+            "source_ref": "semantic_match",
+        }
+    }
+    semantic_grounding = meta.get("semantic_grounding")
+    assert isinstance(semantic_grounding, dict)
+    assert semantic_grounding.get("contract_version") == "semantic_contract.v1"
+    assert semantic_grounding.get("entity_refs") == meta.get("entity_refs")
+    assert semantic_grounding.get("referents") == meta.get("referents")
     fact_bundle = meta.get("fact_bundle")
     assert isinstance(fact_bundle, dict)
     assert fact_bundle.get("pack_id") == "demo_salon"
     assert fact_bundle.get("source_ref") == "truth"
+    assert meta.get("grounding_provenance", {}).get("pack_id") == "demo_salon"
     assert isinstance(meta.get("provenance"), dict)
     assert meta.get("provenance", {}).get("pack_id") == "demo_salon"
 
@@ -112,12 +140,10 @@ def test_has_consult_recommendation_signal_prefers_contract_meta() -> None:
         intent="service_match",
         meta={
             "consult_recommendation": True,
-            "resolver_contract": {
-                "intent_class": "service_match",
-                "action_class": "FACT",
-                "confidence": 0.9,
-                "abstain_reason": None,
-            },
+            "intent_class": "service_match",
+            "action_class": "FACT",
+            "resolver_confidence": 0.9,
+            "abstain_reason": None,
         },
     )
     assert runtime.has_consult_recommendation_signal(decision) is True
@@ -129,12 +155,10 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
         response="Салон работает с 9:00 до 21:00.",
         intent="hours",
         meta={
-            "resolver_contract": {
-                "intent_class": "hours",
-                "action_class": "FACT",
-                "confidence": 0.83,
-                "abstain_reason": None,
-            }
+            "intent_class": "hours",
+            "action_class": "FACT",
+            "resolver_confidence": 0.83,
+            "abstain_reason": None,
         },
     )
     assert runtime.is_timeout_fact_fallback_candidate(fact_decision, min_confidence=0.6) is True
@@ -144,12 +168,10 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
         response="Нужно уточнение.",
         intent="hours",
         meta={
-            "resolver_contract": {
-                "intent_class": "hours",
-                "action_class": "FACT",
-                "confidence": 0.91,
-                "abstain_reason": "low_confidence_collect",
-            }
+            "intent_class": "hours",
+            "action_class": "FACT",
+            "resolver_confidence": 0.91,
+            "abstain_reason": "low_confidence_collect",
         },
     )
     assert runtime.is_timeout_fact_fallback_candidate(abstain_decision, min_confidence=0.6) is False
@@ -159,12 +181,10 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
         response="Возможно, это по прайсу.",
         intent="pricing",
         meta={
-            "resolver_contract": {
-                "intent_class": "pricing",
-                "action_class": "FACT",
-                "confidence": 0.41,
-                "abstain_reason": None,
-            }
+            "intent_class": "pricing",
+            "action_class": "FACT",
+            "resolver_confidence": 0.41,
+            "abstain_reason": None,
         },
     )
     assert runtime.is_timeout_fact_fallback_candidate(low_conf_decision, min_confidence=0.6) is False

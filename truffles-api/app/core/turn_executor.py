@@ -445,6 +445,10 @@ class TurnExecutor:
                 if "master" not in info_sections:
                     info_sections.append("master")
                 master_meta["info_sections"] = info_sections
+                semantic_contract = self._merge_pack_grounding_semantic_contract(
+                    semantic_contract,
+                    master_meta,
+                )
                 return RuntimeExecutionResult(
                     text=master_reply.response.strip(),
                     tool_action=decision.tool_action,
@@ -522,6 +526,10 @@ class TurnExecutor:
                 info_sections.append("services_overview")
             if info_sections:
                 pack_meta["info_sections"] = info_sections
+            semantic_contract = self._merge_pack_grounding_semantic_contract(
+                semantic_contract,
+                pack_meta,
+            )
             request_handoff = pack_decision.action == "escalate"
             return RuntimeExecutionResult(
                 text=pack_decision.response.strip(),
@@ -621,6 +629,142 @@ class TurnExecutor:
         if len(projection) == 1:
             return projected_args, {}
         return projected_args, projection
+
+    @classmethod
+    def _normalize_semantic_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        cleaned: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            payload: dict[str, Any] = {}
+            entity_id = cls._normalize_execution_text(item.get("entity_id") or item.get("id"))
+            entity_type = cls._normalize_execution_text(item.get("entity_type") or item.get("type"))
+            source_ref = cls._normalize_execution_text(item.get("source_ref"))
+            entity_value = cls._normalize_execution_text(item.get("value") or item.get("label"))
+            if entity_id:
+                payload["entity_id"] = entity_id
+            if entity_type:
+                payload["entity_type"] = entity_type
+            if source_ref:
+                payload["source_ref"] = source_ref
+            if entity_value:
+                payload["value"] = entity_value
+            confidence = item.get("confidence")
+            if isinstance(confidence, (int, float)):
+                payload["confidence"] = max(0.0, min(float(confidence), 1.0))
+            if not payload:
+                continue
+            fingerprint = (
+                str(payload.get("entity_id") or ""),
+                str(payload.get("entity_type") or ""),
+                str(payload.get("source_ref") or ""),
+                str(payload.get("value") or ""),
+            )
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            cleaned.append(payload)
+        return cleaned
+
+    @classmethod
+    def _normalize_semantic_referents(cls, value: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(value, dict):
+            return {}
+        referents: dict[str, dict[str, Any]] = {}
+        for referent_key in ("service", "specialist", "branch", "booking_ref", "customer"):
+            raw_payload = value.get(referent_key)
+            if not isinstance(raw_payload, dict):
+                continue
+            payload: dict[str, Any] = {}
+            for source_key in ("value", "entity_id", "entity_type", "source_ref"):
+                token = cls._normalize_execution_text(raw_payload.get(source_key))
+                if token:
+                    payload[source_key] = token
+            if payload:
+                referents[referent_key] = payload
+        return referents
+
+    @classmethod
+    def _normalize_grounding_provenance(cls, value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in ("pack_id", "entity_id", "source_ref", "resolver_id", "resolver_version"):
+            token = cls._normalize_execution_text(value.get(key))
+            if token:
+                payload[key] = token
+        confidence = value.get("confidence")
+        if isinstance(confidence, (int, float)):
+            payload["confidence"] = max(0.0, min(float(confidence), 1.0))
+        retrieval = value.get("retrieval")
+        if isinstance(retrieval, dict) and retrieval:
+            payload["retrieval"] = dict(retrieval)
+        return payload or None
+
+    @classmethod
+    def _pack_semantic_grounding(cls, meta: dict[str, Any] | None) -> dict[str, Any] | None:
+        grounding = meta.get("semantic_grounding") if isinstance(meta, dict) else None
+        source = grounding if isinstance(grounding, dict) else meta
+        if not isinstance(source, dict):
+            return None
+        payload: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
+        entity_refs = cls._normalize_semantic_entity_refs(source.get("entity_refs"))
+        referents = cls._normalize_semantic_referents(source.get("referents"))
+        grounding_provenance = cls._normalize_grounding_provenance(
+            source.get("grounding_provenance") or source.get("provenance")
+        )
+        if entity_refs:
+            payload["entity_refs"] = entity_refs
+        if referents:
+            payload["referents"] = referents
+        if grounding_provenance:
+            payload["grounding_provenance"] = grounding_provenance
+        return payload if len(payload) > 1 else None
+
+    @classmethod
+    def _merge_pack_grounding_semantic_contract(
+        cls,
+        semantic_contract: dict[str, Any] | None,
+        pack_meta: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        grounding = cls._pack_semantic_grounding(pack_meta)
+        if not grounding:
+            return semantic_contract
+        contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
+        contract["contract_version"] = "semantic_contract.v1"
+
+        merged_entity_refs = cls._normalize_semantic_entity_refs(contract.get("entity_refs"))
+        merged_entity_refs.extend(
+            cls._normalize_semantic_entity_refs(grounding.get("entity_refs"))
+        )
+        if merged_entity_refs:
+            contract["entity_refs"] = cls._normalize_semantic_entity_refs(merged_entity_refs)
+
+        merged_referents = cls._normalize_semantic_referents(contract.get("referents"))
+        for referent_key, payload in cls._normalize_semantic_referents(
+            grounding.get("referents")
+        ).items():
+            existing = merged_referents.get(referent_key)
+            if not isinstance(existing, dict):
+                merged_referents[referent_key] = payload
+                continue
+            existing_value = cls._normalize_execution_text(existing.get("value"))
+            grounded_value = cls._normalize_execution_text(payload.get("value"))
+            if existing_value and grounded_value and existing_value.casefold() != grounded_value.casefold():
+                continue
+            merged_referents[referent_key] = {**existing, **payload}
+        if merged_referents:
+            contract["referents"] = merged_referents
+
+        grounding_provenance = cls._normalize_grounding_provenance(
+            grounding.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            contract["grounding_provenance"] = grounding_provenance
+        return contract
 
     @staticmethod
     def _attach_semantic_contract_meta(

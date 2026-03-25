@@ -2975,3 +2975,88 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
         "entity_type": "specialist",
         "source_ref": "message",
     }
+
+
+def test_dialog_state_service_merges_execution_semantic_grounding_into_runtime_contract() -> None:
+    service = DialogStateService()
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "info",
+            "subject_kind": "service",
+            "capability": "pricing",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    execution_meta = {
+        "semantic_contract": {
+            "contract_version": "semantic_contract.v1",
+            "entity_refs": [
+                {
+                    "entity_id": "service:manikyur",
+                    "entity_type": "service",
+                    "value": "Маникюр",
+                    "source_ref": "truth:pricing",
+                    "confidence": 0.91,
+                }
+            ],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "service:manikyur",
+                    "entity_type": "service",
+                    "source_ref": "truth:pricing",
+                }
+            },
+            "grounding_provenance": {
+                "pack_id": "demo_salon",
+                "entity_id": "price_item:manikyur",
+                "source_ref": "truth:pricing",
+                "resolver_id": "pack_query_engine",
+                "resolver_version": "2026-03-25",
+                "confidence": 0.91,
+            },
+        }
+    }
+
+    updated, dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution_meta,
+        now=datetime(2026, 3, 25, 12, 24, tzinfo=timezone.utc),
+    )
+
+    runtime_payload = updated["consultant_runtime"]
+    semantic_contract = runtime_payload["semantic_contract"]
+    assert semantic_contract["referents"]["service"] == {
+        "value": "Маникюр",
+        "entity_id": "service:manikyur",
+        "entity_type": "service",
+        "source_ref": "truth:pricing",
+    }
+    assert semantic_contract["entity_refs"] == [
+        {
+            "entity_id": "service:manikyur",
+            "entity_type": "service",
+            "value": "Маникюр",
+            "source_ref": "truth:pricing",
+            "confidence": 0.91,
+        }
+    ]
+    assert semantic_contract["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "entity_id": "price_item:manikyur",
+        "source_ref": "truth:pricing",
+        "resolver_id": "pack_query_engine",
+        "resolver_version": "2026-03-25",
+        "confidence": 0.91,
+    }
+    assert dialog_state.current_referents.service == "Маникюр"
+    assert dialog_state.interaction_state.grounded_referents["service"] == "Маникюр"

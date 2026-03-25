@@ -1639,6 +1639,20 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
                     cleaned_referents[referent_key] = row
             if cleaned_referents:
                 cleaned_contract["referents"] = cleaned_referents
+        grounding_provenance = semantic_contract.get("grounding_provenance")
+        if isinstance(grounding_provenance, dict):
+            cleaned_grounding: dict[str, Any] = {}
+            for field_name in ("pack_id", "entity_id", "source_ref", "resolver_id", "resolver_version"):
+                raw_value = grounding_provenance.get(field_name)
+                if isinstance(raw_value, str) and raw_value.strip():
+                    cleaned_grounding[field_name] = " ".join(raw_value.split())[
+                        :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                    ]
+            confidence = grounding_provenance.get("confidence")
+            if isinstance(confidence, (int, float)):
+                cleaned_grounding["confidence"] = max(0.0, min(float(confidence), 1.0))
+            if cleaned_grounding:
+                cleaned_contract["grounding_provenance"] = cleaned_grounding
         if cleaned_contract:
             cleaned_contract["contract_version"] = "semantic_contract.v1"
             normalized["semantic_contract"] = cleaned_contract

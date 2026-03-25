@@ -634,9 +634,20 @@ class DialogStateService:
             if isinstance(decision.meta.get("semantic_contract"), dict)
             else {}
         )
+        execution_semantic_contract = (
+            dict(execution_payload.get("semantic_contract"))
+            if isinstance(execution_payload, dict)
+            and isinstance(execution_payload.get("semantic_contract"), dict)
+            else {}
+        )
         decision_referents = (
             decision_semantic_contract.get("referents")
             if isinstance(decision_semantic_contract.get("referents"), dict)
+            else {}
+        )
+        execution_referents = (
+            execution_semantic_contract.get("referents")
+            if isinstance(execution_semantic_contract.get("referents"), dict)
             else {}
         )
         for referent_key, source_key in (
@@ -647,6 +658,17 @@ class DialogStateService:
             ("customer", "customer"),
         ):
             payload = decision_referents.get(referent_key)
+            if not isinstance(payload, dict):
+                continue
+            _remember(source_key, payload.get("value") or payload.get("entity_id"))
+        for referent_key, source_key in (
+            ("service", "service"),
+            ("specialist", "specialist"),
+            ("branch", "branch"),
+            ("booking_ref", "booking_ref"),
+            ("customer", "customer"),
+        ):
+            payload = execution_referents.get(referent_key)
             if not isinstance(payload, dict):
                 continue
             _remember(source_key, payload.get("value") or payload.get("entity_id"))
@@ -726,8 +748,14 @@ class DialogStateService:
             if isinstance(decision.meta.get("semantic_contract"), dict)
             else {}
         )
+        execution_contract = (
+            dict(execution_payload.get("semantic_contract"))
+            if isinstance(execution_payload, dict)
+            and isinstance(execution_payload.get("semantic_contract"), dict)
+            else {}
+        )
         contract: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
-        for source in (existing_contract, decision_contract):
+        for source in (existing_contract, decision_contract, execution_contract):
             for key in (
                 "subject_kind",
                 "capability",
@@ -741,11 +769,20 @@ class DialogStateService:
                 if value:
                     contract[key] = value
 
-        entity_refs = self._normalize_semantic_entity_refs(
-            decision_contract.get("entity_refs") or existing_contract.get("entity_refs")
-        )
+        entity_refs = self._normalize_semantic_entity_refs(existing_contract.get("entity_refs"))
+        entity_refs.extend(self._normalize_semantic_entity_refs(decision_contract.get("entity_refs")))
+        entity_refs.extend(self._normalize_semantic_entity_refs(execution_contract.get("entity_refs")))
+        entity_refs = self._normalize_semantic_entity_refs(entity_refs)
         if entity_refs:
             contract["entity_refs"] = entity_refs
+
+        grounding_provenance = None
+        for source in (existing_contract, decision_contract, execution_contract):
+            normalized = self._normalize_grounding_provenance(source.get("grounding_provenance"))
+            if normalized:
+                grounding_provenance = normalized
+        if grounding_provenance:
+            contract["grounding_provenance"] = grounding_provenance
 
         referents = self._build_semantic_referents(
             existing_contract=existing_contract,
@@ -754,6 +791,7 @@ class DialogStateService:
             booking_payload=booking_payload,
             decision=decision,
             execution_payload=execution_payload,
+            execution_contract=execution_contract,
         )
         if referents:
             contract["referents"] = referents
@@ -768,6 +806,7 @@ class DialogStateService:
         booking_payload: dict[str, Any] | None,
         decision: PolicyDecision,
         execution_payload: dict[str, Any] | None,
+        execution_contract: dict[str, Any],
     ) -> dict[str, dict[str, Any]]:
         referents: dict[str, dict[str, Any]] = {}
 
@@ -828,6 +867,19 @@ class DialogStateService:
         decision_referents = decision_contract.get("referents")
         if isinstance(decision_referents, dict):
             for referent_key, payload in decision_referents.items():
+                if not isinstance(payload, dict):
+                    continue
+                _remember(
+                    referent_key,
+                    value=payload.get("value") or payload.get("entity_id"),
+                    entity_id=payload.get("entity_id"),
+                    entity_type=payload.get("entity_type"),
+                    source_ref=payload.get("source_ref"),
+                )
+
+        execution_referents = execution_contract.get("referents")
+        if isinstance(execution_referents, dict):
+            for referent_key, payload in execution_referents.items():
                 if not isinstance(payload, dict):
                     continue
                 _remember(
@@ -946,6 +998,22 @@ class DialogStateService:
             seen.add(fingerprint)
             cleaned.append(payload)
         return cleaned
+
+    def _normalize_grounding_provenance(self, value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        payload: dict[str, Any] = {}
+        for key in ("pack_id", "entity_id", "source_ref", "resolver_id", "resolver_version"):
+            token = self._normalize_projection_token(value.get(key))
+            if token:
+                payload[key] = token
+        confidence = value.get("confidence")
+        if isinstance(confidence, (int, float)):
+            payload["confidence"] = max(0.0, min(float(confidence), 1.0))
+        retrieval = value.get("retrieval")
+        if isinstance(retrieval, dict) and retrieval:
+            payload["retrieval"] = dict(retrieval)
+        return payload or None
 
     def _build_booking_followup_dialog_state(
         self,

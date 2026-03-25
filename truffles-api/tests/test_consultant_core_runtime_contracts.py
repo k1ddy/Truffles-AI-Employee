@@ -1869,6 +1869,148 @@ def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(m
     assert result.tool_decision == "price_query"
 
 
+def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> None:
+    def _get_pack_decision(query_text: str, client_slug: str | None = None):
+        assert query_text == "Сколько стоит маникюр?"
+        assert client_slug == "demo_salon"
+        return SimpleNamespace(
+            response="Маникюр стоит 10000 тг.",
+            intent="price_query",
+            action="reply",
+            meta={
+                "semantic_grounding": {
+                    "contract_version": "semantic_contract.v1",
+                    "entity_refs": [
+                        {
+                            "entity_id": "service:manikyur",
+                            "entity_type": "service",
+                            "value": "Маникюр",
+                            "source_ref": "truth:pricing",
+                            "confidence": 0.91,
+                        }
+                    ],
+                    "referents": {
+                        "service": {
+                            "value": "Маникюр",
+                            "entity_id": "service:manikyur",
+                            "entity_type": "service",
+                            "source_ref": "truth:pricing",
+                        }
+                    },
+                    "grounding_provenance": {
+                        "pack_id": "demo_salon",
+                        "entity_id": "price_item:manikyur",
+                        "source_ref": "truth:pricing",
+                        "resolver_id": "pack_query_engine",
+                        "resolver_version": "2026-03-25",
+                        "confidence": 0.91,
+                    },
+                }
+            },
+        )
+
+    monkeypatch.setattr("app.services.pack_runtime_service.get_pack_decision", _get_pack_decision)
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {},
+            "subject_kind": "service",
+            "capability": "pricing",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Сколько стоит маникюр?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    expected_service_referent = {
+        "value": "Маникюр",
+        "entity_id": "service:manikyur",
+        "entity_type": "service",
+        "source_ref": "truth:pricing",
+    }
+    assert result.meta["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert result.meta["semantic_contract"]["entity_refs"] == [
+        {
+            "entity_id": "service:manikyur",
+            "entity_type": "service",
+            "value": "Маникюр",
+            "source_ref": "truth:pricing",
+            "confidence": 0.91,
+        }
+    ]
+    assert result.meta["semantic_contract"]["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "entity_id": "price_item:manikyur",
+        "source_ref": "truth:pricing",
+        "resolver_id": "pack_query_engine",
+        "resolver_version": "2026-03-25",
+        "confidence": 0.91,
+    }
+
+    now = datetime.now(timezone.utc)
+    updated, dialog_state, _ = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=result.meta,
+        now=now,
+    )
+    runtime_payload = updated["consultant_runtime"]
+    assert dialog_state.current_referents.service == "Маникюр"
+    assert runtime_payload["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert runtime_payload["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
+
+    runtime = ConsultantRuntime()
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(
+        tool_action=result.tool_action,
+        tool_decision=result.tool_decision,
+        meta=result.meta,
+    )
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="fact"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("semantic_contract", {}).get("referents", {}).get("service")
+        == expected_service_referent
+        and entry.get("semantic_contract", {}).get("grounding_provenance", {}).get("pack_id")
+        == "demo_salon"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert decision_meta["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
+
+
 def test_turn_executor_does_not_use_truth_semantic_fallback_when_pack_misses(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.pack_runtime_service.get_pack_decision",

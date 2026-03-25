@@ -130,7 +130,13 @@ def test_pack_grounding_variant_respects_no_guess_policy(
         assert action_class == "FACT"
         candidates = meta.get("resolver_candidates") or []
         assert isinstance(candidates, list)
-        assert any("service:" in str(item.get("id") or "") for item in candidates if isinstance(item, dict))
+        assert any(
+            str(item.get("entity_id") or "").startswith("service:")
+            and item.get("entity_type") == "service"
+            for item in candidates
+            if isinstance(item, dict)
+        )
+        assert meta.get("referents", {}).get("service", {}).get("entity_type") == "service"
         return
     assert action_class in {"COLLECT", "HANDOFF"}
     assert isinstance(meta.get("abstain_reason"), str) and meta.get("abstain_reason")
