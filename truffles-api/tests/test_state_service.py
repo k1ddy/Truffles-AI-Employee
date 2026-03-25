@@ -6,12 +6,12 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.models import Handover, Message, User
-from app.routers.webhook import (
-    _legacy as legacy,
+from app.routers.webhook import _legacy as legacy
+from app.routers.webhook.dedup import should_process_debounced_message
+from app.routers.webhook.decision import (
     LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
     is_handover_status_question,
     should_offer_low_confidence_retry,
-    should_process_debounced_message,
 )
 from app.services.state_machine import ConversationState
 from app.services.handover_owner_service import (
@@ -1303,18 +1303,51 @@ def test_build_pending_resume_snapshot_payload_captures_pending_resume_contract(
         },
     )
 
-    assert payload == {
-        "context_manager": {"current_goal": "booking"},
+    assert payload["expected_reply_type"] == "time"
+    assert payload["expected_reply_reason"] == "booking_prompt"
+    assert payload["intent_queue"] == ["booking"]
+    assert payload["booking"] == {"active": True, "service": "Маникюр"}
+    assert payload["session_memory"] == {
+        "active_goal": "booking",
+        "interaction_state": {"resume_slot": "datetime"},
+    }
+    assert payload["last_service_hint"] == "Маникюр"
+    assert payload["last_service_hint_at"] == "2026-03-15T10:00:00+00:00"
+    assert payload["context_manager"]["current_goal"] == "booking"
+    assert payload["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
         "expected_reply_type": "time",
-        "expected_reply_reason": "booking_prompt",
-        "intent_queue": ["booking"],
-        "booking": {"active": True, "service": "Маникюр"},
-        "session_memory": {
-            "active_goal": "booking",
-            "interaction_state": {"resume_slot": "datetime"},
+        "reason": "booking_prompt",
+    }
+
+
+def test_build_pending_resume_snapshot_payload_prefers_canonical_question_contract() -> None:
+    payload = _build_pending_resume_snapshot_payload(
+        context={},
+        context_manager={
+            "current_goal": "booking",
+            "canonical_dialog_state": {
+                "pending_question_contract": {
+                    "expected_reply_type": " time ",
+                    "reason": " booking_interrupt ",
+                    "next_question": " datetime ",
+                    "open_questions": [" datetime "],
+                }
+            },
         },
-        "last_service_hint": "Маникюр",
-        "last_service_hint_at": "2026-03-15T10:00:00+00:00",
+        expected_reply_type=" service_choice ",
+        expected_reply_reason=" stale_projection ",
+        intent_queue=["booking"],
+        booking_context={"active": True, "service": "Маникюр"},
+        session_memory={"active_goal": "booking"},
+    )
+
+    assert payload["expected_reply_type"] == "time"
+    assert payload["expected_reply_reason"] == "booking_interrupt"
+    assert payload["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
     }
 
 
@@ -1402,6 +1435,57 @@ def test_prepare_pending_handoff_resume_boundary_restore_uses_owner_surface() ->
     assert restore.context.get("re_entry_required", {}).get("reason") == "pending_resume"
 
 
+def test_prepare_pending_handoff_resume_boundary_restore_prefers_canonical_question_contract() -> None:
+    now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
+
+    restore = _prepare_pending_handoff_resume_boundary_restore(
+        {
+            "pending_resume": {
+                "context_manager": {
+                    "current_goal": "booking",
+                    "canonical_dialog_state": {
+                        "pending_question_contract": {
+                            "expected_reply_type": " time ",
+                            "reason": " booking_interrupt ",
+                            "next_question": " datetime ",
+                            "open_questions": [" datetime "],
+                        }
+                    },
+                },
+                "booking": {
+                    "active": True,
+                    "service": "Маникюр",
+                    "last_question": "datetime",
+                },
+                "session_memory": {
+                    "active_goal": "booking",
+                    "last_question_type": " service_choice ",
+                },
+            }
+        },
+        now=now,
+        prompt_builder=lambda expected_reply_type: {
+            "service_choice": "Какая услуга вас интересует?",
+            "time": "Когда вам удобно?",
+        }.get(expected_reply_type),
+    )
+
+    assert restore.restored is True
+    assert restore.pending_reason == "booking_interrupt"
+    assert restore.expected_reply_type == "time"
+    assert restore.apply_boundary_booking_state is False
+    assert restore.boundary_payload == {
+        "booking_state": {
+            "active": True,
+            "service": "Маникюр",
+            "last_question": "datetime",
+        },
+        "expected_reply_type": "time",
+        "prompt": "Когда вам удобно?",
+        "resume_slot": "datetime",
+    }
+
+
 def test_prepare_resolved_handoff_resume_boundary_restore_uses_owner_surface() -> None:
     now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
 
@@ -1429,6 +1513,59 @@ def test_prepare_resolved_handoff_resume_boundary_restore_uses_owner_surface() -
             "service_choice": "Какая услуга вас интересует?",
             "time": "Когда вам удобно?",
             "name": "Подскажите, как к вам обращаться?",
+        }.get(expected_reply_type),
+    )
+
+    assert restore.restored is True
+    assert restore.pending_reason == "booking_interrupt"
+    assert restore.expected_reply_type == "time"
+    assert restore.apply_boundary_booking_state is True
+    assert restore.boundary_payload == {
+        "booking_state": {
+            "active": True,
+            "service": "Маникюр",
+            "last_question": "datetime",
+        },
+        "expected_reply_type": "time",
+        "prompt": "Когда вам удобно?",
+        "resume_slot": "datetime",
+    }
+
+
+def test_prepare_resolved_handoff_resume_boundary_restore_prefers_canonical_question_contract() -> None:
+    now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
+
+    restore = _prepare_resolved_handoff_resume_boundary_restore(
+        {
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": "service_choice",
+            },
+            "re_entry_required": {
+                "required": True,
+                "reason": "pending_resume",
+                "set_at": now.isoformat(),
+            },
+        },
+        now=now,
+        prompt_builder=lambda expected_reply_type: {
+            "time": "Когда вам удобно?",
         }.get(expected_reply_type),
     )
 

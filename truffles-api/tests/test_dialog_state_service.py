@@ -110,6 +110,34 @@ def test_dialog_state_service_omits_empty_pending_question_contract_projection()
     assert projected is None
 
 
+def test_dialog_state_service_projects_context_pending_question_contract_from_canonical_state() -> None:
+    service = DialogStateService()
+
+    projected = service.project_context_pending_question_contract(
+        {
+            "expected_reply_type": "service_choice",
+            "expected_reply_reason": "stale_projection",
+            "context_manager": {
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                }
+            },
+        }
+    )
+
+    assert projected == {
+        "expected_reply_type": "time",
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
 def test_dialog_state_service_builds_collect_owner_state() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {
@@ -672,6 +700,56 @@ def test_dialog_state_service_restores_pending_resume_payload() -> None:
     assert restored["re_entry_required"]["reason"] == "pending_resume"
 
 
+def test_dialog_state_service_restores_pending_resume_payload_from_canonical_question_contract() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 15, 18, 40, tzinfo=timezone.utc)
+
+    restored = service.restore_pending_resume_payload(
+        {
+            "expected_reply_type": "service_choice",
+            "expected_reply_reason": "stale_projection",
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                },
+            },
+            "booking": {"active": True, "service": "Маникюр", "last_question": "datetime"},
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": " time ",
+                "pending_question_contract": {
+                    "expected_reply_type": " time ",
+                    "reason": " booking_interrupt ",
+                    "next_question": " datetime ",
+                },
+            },
+        },
+        now=now,
+    )
+
+    assert restored["expected_reply_type"] == "time"
+    assert restored["expected_reply_reason"] == "booking_interrupt"
+    assert restored["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert restored["session_memory"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert restored["session_memory"]["last_updated_at"] == now.isoformat()
+
+
 def test_dialog_state_service_derives_pending_resume_boundary_payload() -> None:
     service = DialogStateService()
     now = datetime(2026, 3, 15, 18, 41, tzinfo=timezone.utc)
@@ -689,6 +767,55 @@ def test_dialog_state_service_derives_pending_resume_boundary_payload() -> None:
                 "session_memory": {
                     "active_goal": "booking",
                     "last_question_type": " time ",
+                },
+            }
+        },
+        now=now,
+        prompt_builder=lambda expected_reply_type: {
+            "service_choice": "Какая услуга вас интересует?",
+            "time": "Когда вам удобно?",
+            "name": "Подскажите, как к вам обращаться?",
+        }.get(expected_reply_type),
+    )
+
+    assert payload == {
+        "booking_state": {
+            "active": True,
+            "service": "Маникюр",
+            "last_question": "datetime",
+        },
+        "expected_reply_type": "time",
+        "prompt": "Когда вам удобно?",
+        "resume_slot": "datetime",
+    }
+
+
+def test_dialog_state_service_derives_pending_resume_boundary_from_canonical_question_contract() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 15, 18, 41, tzinfo=timezone.utc)
+
+    payload = service.derive_pending_booking_resume_boundary_payload(
+        {
+            "pending_resume": {
+                "context_manager": {
+                    "current_goal": "booking",
+                    "canonical_dialog_state": {
+                        "pending_question_contract": {
+                            "expected_reply_type": " time ",
+                            "reason": " booking_interrupt ",
+                            "next_question": " datetime ",
+                            "open_questions": [" datetime "],
+                        }
+                    },
+                },
+                "booking": {
+                    "active": True,
+                    "service": "Маникюр",
+                    "last_question": "datetime",
+                },
+                "session_memory": {
+                    "active_goal": "booking",
+                    "last_question_type": "service_choice",
                 },
             }
         },

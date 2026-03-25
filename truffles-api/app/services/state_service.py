@@ -685,16 +685,19 @@ def _prepare_pending_handoff_resume_boundary_restore(
     if not restored:
         return PendingResumeBoundaryRestore(context=context, restored=False)
 
-    projections = _dialog_state_service().project_expected_reply_projections(
-        expected_reply_type=restored_context.get("expected_reply_type"),
-        expected_reply_reason=restored_context.get("expected_reply_reason"),
+    pending_question_contract = _dialog_state_service().project_context_pending_question_contract(
+        restored_context
     )
     boundary_payload = _derive_pending_booking_resume_boundary_payload(
         restored_context,
         now=now,
         prompt_builder=prompt_builder,
     )
-    expected_reply_type = projections.expected_reply_type
+    expected_reply_type = (
+        pending_question_contract.get("expected_reply_type")
+        if isinstance(pending_question_contract, dict)
+        else None
+    )
     apply_boundary_booking_state = False
     if not expected_reply_type and boundary_payload is not None:
         expected_reply_type = boundary_payload.get("expected_reply_type")
@@ -721,11 +724,33 @@ def _prepare_resolved_handoff_resume_boundary_restore(
     if not _dialog_state_service().is_re_entry_required(context.get(RE_ENTRY_REQUIRED_KEY)):
         return PendingResumeBoundaryRestore(context=context, restored=False)
 
+    pending_question_contract = _dialog_state_service().project_context_pending_question_contract(
+        context
+    )
     projections = _dialog_state_service().project_expected_reply_projections(
         expected_reply_type=context.get("expected_reply_type"),
         expected_reply_reason=context.get("expected_reply_reason"),
     )
-    if projections.expected_reply_type:
+    canonical_expected_reply_type = (
+        pending_question_contract.get("expected_reply_type")
+        if isinstance(pending_question_contract, dict)
+        else None
+    )
+    canonical_reason = (
+        pending_question_contract.get("reason")
+        if isinstance(pending_question_contract, dict)
+        else None
+    )
+    if projections.expected_reply_type and (
+        not canonical_expected_reply_type
+        or (
+            projections.expected_reply_type == canonical_expected_reply_type
+            and (
+                canonical_reason is None
+                or projections.expected_reply_reason == canonical_reason
+            )
+        )
+    ):
         return PendingResumeBoundaryRestore(context=context, restored=False)
 
     boundary_payload = _derive_pending_booking_resume_boundary_payload(
@@ -733,12 +758,12 @@ def _prepare_resolved_handoff_resume_boundary_restore(
         now=now,
         prompt_builder=prompt_builder,
     )
-    expected_reply_type = (
+    expected_reply_type = canonical_expected_reply_type or (
         boundary_payload.get("expected_reply_type")
         if isinstance(boundary_payload, dict)
         else None
     )
-    pending_reason = _derive_pending_resume_reason(context)
+    pending_reason = canonical_reason or _derive_pending_resume_reason(context)
     if not (
         isinstance(expected_reply_type, str)
         and expected_reply_type.strip()
@@ -753,7 +778,7 @@ def _prepare_resolved_handoff_resume_boundary_restore(
         pending_reason=pending_reason.strip(),
         expected_reply_type=expected_reply_type.strip(),
         boundary_payload=boundary_payload,
-        apply_boundary_booking_state=True,
+        apply_boundary_booking_state=boundary_payload is not None,
     )
 
 
