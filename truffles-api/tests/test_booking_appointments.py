@@ -2211,6 +2211,33 @@ def test_tool_registry_catalog_service_query_duration_prefers_message_service_ov
     assert "маникюр" not in (result.response_text or "").lower()
 
 
+def test_tool_registry_catalog_service_query_requires_explicit_services_overview_hint():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.service_query",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug=None,
+            service_query=None,
+            message_text="Добрый день, какие услуги вы предлагаете?",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.decision_meta.get("tool_decision") == "missing_slot"
+    assert result.expected_reply_type == "service_choice"
+
+
 def test_tool_registry_catalog_service_query_services_overview_without_service_slot():
     db = Mock()
     branch = SimpleNamespace(
@@ -2234,6 +2261,7 @@ def test_tool_registry_catalog_service_query_services_overview_without_service_s
             branch_id=branch.id,
             client_slug=None,
             service_query=None,
+            info_sections_hint=["services_overview"],
             message_text="Добрый день, какие услуги вы предлагаете?",
         )
 

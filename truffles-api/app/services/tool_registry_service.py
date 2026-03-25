@@ -48,15 +48,6 @@ from app.services.calendar_sync_service import enqueue_appointment_sync, get_pro
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
 from app.services.expected_reply_contract import EXPECTED_REPLY_NAME, EXPECTED_REPLY_PHONE
-from app.services.info_signal_service import (
-    looks_like_booking_verification_message as _looks_like_booking_verification_message,
-)
-from app.services.info_signal_service import (
-    looks_like_services_overview_message as _looks_like_services_overview_message,
-)
-from app.services.info_signal_service import (
-    system_any_match as _system_any_match,
-)
 from app.services.pack_runtime_service import (
     _detect_promotion_intent,
     _has_duration_signal,
@@ -67,6 +58,7 @@ from app.services.pack_runtime_service import (
     build_info_combined_reply,
     format_reply_from_truth,
     get_pack_adapter,
+    get_system_lexicon_list,
     load_yaml_truth,
 )
 from app.services.tool_certification_service import resolve_tool_certification_decision
@@ -613,6 +605,13 @@ def _is_photo_offer_message(text: str | None) -> bool:
     if not _system_any_match(normalized, "style_reference_media_terms"):
         return False
     return _system_any_match(normalized, "style_reference_send_terms")
+
+
+def _system_any_match(normalized: str, key: str) -> bool:
+    phrases = get_system_lexicon_list(key)
+    return bool(phrases) and any(
+        phrase and phrase in normalized for phrase in phrases if isinstance(phrase, str)
+    )
 
 
 def _resolve_branch(db: Session, branch_id: UUID | None) -> Branch | None:
@@ -2281,10 +2280,7 @@ def execute_tool_action(
             info_sections: list[str] = []
             tool_decision = "missing_slot"
             expected_reply_type = legacy.EXPECTED_REPLY_SERVICE
-            if _looks_like_services_overview_message(
-                message_text,
-                client_slug=client_slug,
-            ):
+            if "services_overview" in hint_set:
                 overview_reply = _format_services_overview_reply(
                     db,
                     branch=branch,
