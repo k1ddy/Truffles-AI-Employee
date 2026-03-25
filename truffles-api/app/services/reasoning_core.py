@@ -385,9 +385,19 @@ def _build_conversation_snapshot(
                 if isinstance(memory_active_goal, str) and memory_active_goal.strip()
                 else None
             )
-            memory_expected_reply = dialog_state_service.project_expected_reply_projections(
-                **{_EXPECTED_REPLY_TYPE_FIELD: session_memory.get("last_question_type"), _EXPECTED_REPLY_REASON_FIELD: None}
-            ).expected_reply_type
+            memory_pending_question_contract = (
+                dialog_state_service.project_session_memory_pending_question_contract(session_memory)
+            )
+            memory_expected_reply = (
+                memory_pending_question_contract.get(_EXPECTED_REPLY_TYPE_FIELD)
+                if isinstance(memory_pending_question_contract, dict)
+                else None
+            )
+            memory_expected_reply_reason = (
+                memory_pending_question_contract.get("reason")
+                if isinstance(memory_pending_question_contract, dict)
+                else None
+            )
             is_short_reply = decision_router._is_short_reply(message_text)
             if (
                 not is_short_reply
@@ -409,6 +419,12 @@ def _build_conversation_snapshot(
                 )
             ):
                 expected_reply[_EXPECTED_REPLY_TYPE_FIELD] = memory_expected_reply
+                if (
+                    expected_reply.get(_EXPECTED_REPLY_REASON_FIELD) is None
+                    and isinstance(memory_expected_reply_reason, str)
+                    and memory_expected_reply_reason.strip()
+                ):
+                    expected_reply[_EXPECTED_REPLY_REASON_FIELD] = memory_expected_reply_reason.strip()
 
     pending_boundary = dialog_state_service.derive_pending_booking_resume_boundary_payload(context, now=now)
     boundary_booking_state = pending_boundary.get("booking_state") if isinstance(pending_boundary, dict) else None

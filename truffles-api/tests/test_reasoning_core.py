@@ -624,6 +624,51 @@ def test_build_conversation_snapshot_restores_session_memory_expected_reply_for_
     assert snapshot.service_referent is None
 
 
+def test_build_conversation_snapshot_prefers_session_memory_pending_question_contract() -> None:
+    now = datetime.now(timezone.utc)
+    conversation = Conversation(
+        id=UUID("00000000-0000-0000-0000-000000000347"),
+        client_id=UUID("00000000-0000-0000-0000-000000000348"),
+        user_id=UUID("00000000-0000-0000-0000-000000000349"),
+        channel="whatsapp",
+        status="active",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        state="bot_active",
+        bot_status="active",
+        branch_id=None,
+        context={
+            "booking": {
+                "active": True,
+                "datetime": "2026-02-12 17:45",
+                "last_question": "datetime",
+            },
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": decision_router.EXPECTED_REPLY_SERVICE,
+                "pending_question_contract": {
+                    "expected_reply_type": decision_router.EXPECTED_REPLY_TIME,
+                    "reason": "booking_interrupt",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "last_updated_at": now.isoformat(),
+                "ttl_hours": 24,
+            },
+        },
+    )
+
+    snapshot = reasoning_core._build_conversation_snapshot(
+        conversation,
+        message_text="завтра в 18:00",
+        client_slug="demo_salon",
+    )
+
+    assert snapshot.reply_slot == decision_router.EXPECTED_REPLY_TIME
+    assert snapshot.resume_reason == "booking_interrupt"
+    assert snapshot.booking_active is True
+    assert snapshot.booking_time_token == "17:45"
+
+
 def test_run_secret_enforced_preflight_reuses_http_preflight(monkeypatch) -> None:
     payload = WebhookRequest(
         client_slug="demo_salon",

@@ -2877,6 +2877,60 @@ def test_expected_reply_contract_bypasses_human_request():
     assert meta.get("session_memory_expected_reply_cleared") is True
 
 
+def test_expected_reply_contract_prefers_session_memory_pending_question_contract() -> None:
+    from app.routers.webhook import decision as decision_router
+
+    now = datetime.now(timezone.utc)
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    conversation = SimpleNamespace(
+        context={
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": webhook_router.EXPECTED_REPLY_SERVICE,
+                "pending_question_contract": {
+                    "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                    "reason": "booking_interrupt",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "last_updated_at": now.isoformat(),
+                "ttl_hours": 24,
+            },
+        },
+        state=ConversationState.BOT_ACTIVE.value,
+    )
+
+    with patch(
+        "app.routers.webhook.decision._match_expected_reply_candidates",
+        return_value=(False, None, []),
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply",
+        return_value={"ok": False, "payload": {}, "error": "no_match", "raw": None},
+    ):
+        state = decision_router._apply_expected_reply_contract(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text="завтра",
+            batch_messages=["завтра"],
+            context=conversation.context,
+            context_manager={},
+            now=now,
+            current_goal="booking",
+            class_carryover=None,
+            message_count=1,
+            policy_type=None,
+            policy_pack=None,
+            client_slug="demo_salon",
+        )
+
+    assert state.memory_expected_reply_type == webhook_router.EXPECTED_REPLY_TIME
+    assert state.expected_reply_type is None
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("session_memory_expected_reply") == webhook_router.EXPECTED_REPLY_TIME
+    assert meta.get("session_memory_expected_reply_reason") == "booking_interrupt"
+
+
 def test_should_block_expected_reply_time_for_question_without_datetime():
     from app.routers.webhook import decision as decision_router
 

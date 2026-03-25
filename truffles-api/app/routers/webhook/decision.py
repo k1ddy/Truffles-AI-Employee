@@ -1246,6 +1246,14 @@ def _apply_expected_reply_contract(
     session_memory = legacy._get_session_memory(context)
     re_entry_required = legacy._is_re_entry_required(context)
     memory_expected_reply_type = None
+    memory_pending_question_contract = DialogStateService().project_session_memory_pending_question_contract(
+        session_memory
+    )
+    memory_expected_reply_reason = (
+        memory_pending_question_contract.get("reason")
+        if isinstance(memory_pending_question_contract, dict)
+        else None
+    )
     if (
         not expected_reply_type
         and session_memory
@@ -1253,9 +1261,11 @@ def _apply_expected_reply_contract(
         and not legacy._is_session_memory_expired(session_memory, now)
     ):
         memory_active_goal = session_memory.get("active_goal")
-        last_question_type = session_memory.get("last_question_type")
-        if isinstance(last_question_type, str):
-            last_question_type = last_question_type.strip()
+        last_question_type = (
+            memory_pending_question_contract.get("expected_reply_type")
+            if isinstance(memory_pending_question_contract, dict)
+            else None
+        )
         is_short_reply = legacy._is_short_reply(message_text)
         if (
             not is_short_reply
@@ -1281,18 +1291,22 @@ def _apply_expected_reply_contract(
         ):
             expected_reply_type = last_question_type
             memory_expected_reply_type = last_question_type
+            if not expected_reply_reason and memory_expected_reply_reason:
+                expected_reply_reason = memory_expected_reply_reason
             legacy._record_decision_trace(
                 conversation,
                 {
                     "stage": "session_memory",
                     "decision": "expected_reply_fallback",
                     "expected_reply_type": last_question_type,
+                    "expected_reply_reason": memory_expected_reply_reason,
                 },
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
-                    saved_message, {"session_memory_expected_reply": last_question_type}
-                )
+                updates = {"session_memory_expected_reply": last_question_type}
+                if memory_expected_reply_reason:
+                    updates["session_memory_expected_reply_reason"] = memory_expected_reply_reason
+                legacy._update_message_decision_metadata(saved_message, updates)
 
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False

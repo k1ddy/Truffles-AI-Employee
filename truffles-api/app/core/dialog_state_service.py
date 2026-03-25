@@ -2097,14 +2097,7 @@ class DialogStateService:
         else:
             normalized["interaction_state"] = cleaned_state
 
-        pending_question_contract = self.project_pending_question_contract(
-            normalized.get("pending_question_contract"),
-            expected_reply_type=(
-                None
-                if self._normalize_projection_token(normalized.get("last_question_type"))
-                else normalized.get("last_question_type")
-            ),
-        )
+        pending_question_contract = self.project_session_memory_pending_question_contract(normalized)
         if pending_question_contract is not None:
             normalized["pending_question_contract"] = pending_question_contract
             if not self._normalize_projection_token(normalized.get("last_question_type")):
@@ -2119,6 +2112,29 @@ class DialogStateService:
         if errors:
             return normalized, ",".join(errors)
         return normalized, None
+
+    def project_session_memory_pending_question_contract(
+        self,
+        memory: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(memory, dict):
+            return None
+        pending_question_contract = self.project_pending_question_contract(
+            memory.get("pending_question_contract")
+        )
+        if pending_question_contract is not None:
+            return self.project_pending_question_contract(
+                pending_question_contract,
+                expected_reply_type=(
+                    None
+                    if pending_question_contract.get("expected_reply_type")
+                    else self._normalize_projection_token(memory.get("last_question_type"))
+                ),
+            )
+        return self.project_pending_question_contract(
+            None,
+            expected_reply_type=self._normalize_projection_token(memory.get("last_question_type")),
+        )
 
     def capture_pending_resume_payload(
         self,

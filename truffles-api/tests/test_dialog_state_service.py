@@ -138,6 +138,29 @@ def test_dialog_state_service_projects_context_pending_question_contract_from_ca
     }
 
 
+def test_dialog_state_service_projects_session_memory_pending_question_contract() -> None:
+    service = DialogStateService()
+
+    projected = service.project_session_memory_pending_question_contract(
+        {
+            "last_question_type": " service_choice ",
+            "pending_question_contract": {
+                "expected_reply_type": " time ",
+                "reason": " booking_interrupt ",
+                "next_question": " datetime ",
+                "open_questions": [" datetime "],
+            },
+        }
+    )
+
+    assert projected == {
+        "expected_reply_type": "time",
+        "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
 def test_dialog_state_service_builds_collect_owner_state() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {
@@ -512,6 +535,9 @@ def test_dialog_state_service_normalizes_session_memory_payload() -> None:
             "interaction_target": "time",
             "interaction_relation": "ask_about_requested_slot",
             "interaction_owner": "booking time followup",
+        },
+        "pending_question_contract": {
+            "expected_reply_type": "time",
         },
     }
     assert normalized["goal_stack"] == ["info", "booking", "consult"]
