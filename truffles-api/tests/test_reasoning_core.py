@@ -1841,6 +1841,96 @@ def test_reasoning_core_default_runtime_no_longer_contains_ingress_semantic_over
 
 
 @pytest.mark.asyncio
+async def test_reasoning_core_handle_webhook_payload_delegates_directly_to_consultant_runtime(
+    monkeypatch,
+):
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Привет",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-reasoning-core-direct-delegate-1",
+            ),
+        ),
+    )
+    db = Mock()
+    captured: dict[str, object] = {}
+
+    async def _delegate(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return WebhookResponse(success=True, message="delegated-runtime")
+
+    monkeypatch.setattr("app.core.consultant_runtime.handle_webhook_payload", _delegate)
+
+    response = await reasoning_core.handle_webhook_payload(
+        payload,
+        db,
+        provided_secret="secret",
+        enforce_secret=True,
+        enqueue_only=True,
+        skip_persist=True,
+        conversation_id=UUID("00000000-0000-0000-0000-000000000191"),
+        batch_messages=["a", "b"],
+        outbox_ids=["outbox-1"],
+    )
+
+    assert response.message == "delegated-runtime"
+    assert captured["args"] == (payload, db)
+    assert captured["kwargs"]["provided_secret"] == "secret"
+    assert captured["kwargs"]["enforce_secret"] is True
+    assert captured["kwargs"]["enqueue_only"] is True
+    assert captured["kwargs"]["skip_persist"] is True
+    assert captured["kwargs"]["batch_messages"] == ["a", "b"]
+    assert captured["kwargs"]["outbox_ids"] == ["outbox-1"]
+
+
+@pytest.mark.asyncio
+async def test_decision_router_handle_webhook_payload_delegates_directly_to_consultant_runtime(
+    monkeypatch,
+):
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Привет",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-webhook-router-direct-delegate-1",
+            ),
+        ),
+    )
+    db = Mock()
+    captured: dict[str, object] = {}
+
+    async def _delegate(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return WebhookResponse(success=True, message="delegated-router")
+
+    monkeypatch.setattr("app.core.consultant_runtime.handle_webhook_payload", _delegate)
+
+    response = await decision_router._handle_webhook_payload(
+        payload,
+        db,
+        provided_secret=None,
+        enforce_secret=False,
+        enqueue_only=False,
+        skip_persist=False,
+        conversation_id=UUID("00000000-0000-0000-0000-000000000192"),
+        batch_messages=["x"],
+        outbox_ids=["outbox-2"],
+    )
+
+    assert response.message == "delegated-router"
+    assert captured["args"] == (payload, db)
+    assert captured["kwargs"]["provided_secret"] is None
+    assert captured["kwargs"]["enforce_secret"] is False
+    assert captured["kwargs"]["batch_messages"] == ["x"]
+    assert captured["kwargs"]["outbox_ids"] == ["outbox-2"]
+
+
+@pytest.mark.asyncio
 async def test_reasoning_core_primes_policy_core_handoff_override_for_manager_request_delegate(
     monkeypatch,
 ):
