@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 def _summarize_validation_error(exc: ValidationError, *, limit: int = 3) -> str:
@@ -566,9 +574,12 @@ class LlmPolicyCoreOutput(BaseModel):
 
     intent: str
     action: str
-    tool_action: str
+    tool_action_hint: str = Field(
+        validation_alias=AliasChoices("tool_action_hint", "tool_action")
+    )
     pack_refs: list[str] = Field(default_factory=list)
     slots: dict[str, str] = Field(default_factory=dict)
+    expected_reply_type: str | None = None
     next_question: str | None = None
     open_questions: list[str] = Field(default_factory=list)
     needs_manager: bool = False
@@ -589,7 +600,7 @@ class LlmPolicyCoreOutput(BaseModel):
     resolver_id: str | None = None
     resolver_version: str | None = None
 
-    @field_validator("intent", "action", "tool_action", mode="before")
+    @field_validator("intent", "action", "tool_action_hint", mode="before")
     @classmethod
     def _validate_action(cls, value: Any, info) -> str:
         normalized = _normalize_required_string(value, field=info.field_name)
@@ -598,10 +609,11 @@ class LlmPolicyCoreOutput(BaseModel):
         return normalized
 
     @field_validator(
-        "tool_action",
+        "tool_action_hint",
         "language",
         "reason",
         "goal",
+        "expected_reply_type",
         "next_question",
         "resolver_id",
         "resolver_version",
@@ -715,14 +727,14 @@ class LlmPolicyCoreOutput(BaseModel):
         has_service_query = bool(slot_service or referent_service)
 
         if self.action == "fact":
-            if self.tool_action not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
+            if self.tool_action_hint not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
                 raise ValueError("master_query_tool_action_invalid")
             if not has_service_query:
                 raise ValueError("master_query_service_required")
             return self
 
         if self.action == "collect":
-            if self.tool_action not in _MASTER_QUERY_COLLECT_TOOL_ACTIONS:
+            if self.tool_action_hint not in _MASTER_QUERY_COLLECT_TOOL_ACTIONS:
                 raise ValueError("master_query_collect_tool_action_invalid")
             # Clarify path is valid when service is missing and the model explicitly asks for it.
             collect_requires_service = bool(

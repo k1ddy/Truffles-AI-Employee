@@ -630,6 +630,14 @@ class ConsultantRuntime:
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
 
+        slot_state: dict[str, str] = {}
+        for field_name in ("service", "datetime", "name", "phone"):
+            value = runtime_state.booking_state.get(field_name)
+            if isinstance(value, str) and value.strip():
+                slot_state[field_name] = value.strip()
+        if slot_state:
+            profile["slot_state"] = slot_state
+
         return profile
 
     def _execute_turn(

@@ -154,14 +154,17 @@ class TurnPlanner:
             )
 
         normalized_booking_state = self._normalize_booking_state(booking_state)
+        normalized_memory_profile = self._merge_booking_slot_state_into_memory_profile(
+            memory_profile,
+            slot_state=normalized_booking_state,
+        )
         consult_refs = self._load_consult_refs(load_consult_playbook, client_slug)
         policy_result = route_llm_policy_core(
             normalized_message,
-            slot_state=normalized_booking_state,
             info_refs=list(_DEFAULT_INFO_REFS),
             consult_refs=consult_refs,
             memory_summary=memory_summary,
-            memory_profile=memory_profile,
+            memory_profile=normalized_memory_profile,
             client_slug=client_slug,
             timing_context=timing_context,
         )
@@ -171,13 +174,35 @@ class TurnPlanner:
             decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
                 policy_result,
                 schema_verdict="ok",
-                projection_verdict="ok",
+                projection_verdict=str(
+                    (
+                        policy_result.get("projection_trace") or {}
+                    ).get("status")
+                    or "ok"
+                ),
             )
             return decision
 
         degrade_reason = self._normalize_token(
             policy_result.get("error") if isinstance(policy_result, dict) else None
         ) or "policy_core_unavailable"
+        projection_error = self._normalize_token(
+            policy_result.get("projection_error") if isinstance(policy_result, dict) else None
+        )
+        if degrade_reason == "invalid_projection":
+            earliest_failed_stage = "policy_projection"
+            root_reason_code = f"policy_projection:{projection_error or 'invalid_projection'}"
+            projection_verdict = projection_error or "invalid_projection"
+            schema_verdict = "ok"
+        else:
+            earliest_failed_stage = "policy_core"
+            root_reason_code = f"policy_core:{degrade_reason}"
+            projection_verdict = "skipped"
+            schema_verdict = (
+                "invalid_schema"
+                if degrade_reason == "invalid_schema"
+                else degrade_reason
+            )
         decision = self.build_controlled_degrade(
             reason_code=f"planner:{degrade_reason}",
             action="handoff",
@@ -185,16 +210,12 @@ class TurnPlanner:
             tool_action="handoff",
             interaction_owner="turn_planner_degrade",
         )
-        decision.meta["earliest_failed_stage"] = "policy_core"
-        decision.meta["root_reason_code"] = f"policy_core:{degrade_reason}"
+        decision.meta["earliest_failed_stage"] = earliest_failed_stage
+        decision.meta["root_reason_code"] = root_reason_code
         decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
             policy_result,
-            schema_verdict=(
-                "invalid_schema"
-                if degrade_reason == "invalid_schema"
-                else degrade_reason
-            ),
-            projection_verdict="skipped",
+            schema_verdict=schema_verdict,
+            projection_verdict=projection_verdict,
         )
         return decision
 
@@ -378,9 +399,12 @@ class TurnPlanner:
         }
         for field_name, result_key in (
             ("input", "policy_input"),
+            ("semantic_frame", "semantic_frame"),
             ("raw_output", "raw"),
             ("error", "error"),
             ("schema_error", "schema_error"),
+            ("projection_error", "projection_error"),
+            ("projection", "projection_trace"),
             ("elapsed_ms", "elapsed_ms"),
             ("model_name", "model_name"),
             ("attempt_count", "attempt_count"),
@@ -593,6 +617,18 @@ class TurnPlanner:
         if not isinstance(value, dict):
             return {}
         return self._normalize_planner_slots(value)
+
+    def _merge_booking_slot_state_into_memory_profile(
+        self,
+        memory_profile: dict[str, Any] | None,
+        *,
+        slot_state: dict[str, str] | None,
+    ) -> dict[str, Any] | None:
+        normalized_profile = dict(memory_profile) if isinstance(memory_profile, dict) else {}
+        normalized_slot_state = self._normalize_planner_slots(slot_state)
+        if normalized_slot_state and not isinstance(normalized_profile.get("slot_state"), dict):
+            normalized_profile["slot_state"] = normalized_slot_state
+        return normalized_profile or None
 
     def _normalize_booking_slot_name(
         self,

@@ -11,11 +11,11 @@ from typing import Any, Iterable, Tuple
 
 import httpx
 
+from app.core.policy_tool_projector import project_policy_tool_binding
 from app.logging_config import get_logger, record_llm_time
 from app.schemas.intent import (
     validate_llm_plan_output,
     validate_llm_policy_core_output,
-    validate_tool_args_shape,
 )
 from app.services.ai_service import (
     FAST_MODEL,
@@ -504,7 +504,7 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
         "required": [
             "intent",
             "action",
-            "tool_action",
+            "tool_action_hint",
             "needs_manager",
             "subject_kind",
             "capability",
@@ -527,9 +527,10 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
                 ],
             },
             "action": {"type": "string", "enum": ["fact", "collect", "handoff"]},
-            "tool_action": {"type": "string", "enum": allowed_tool_actions},
+            "tool_action_hint": {"type": "string", "enum": allowed_tool_actions},
             "pack_refs": {"type": "array", "items": {"type": "string"}},
             "slots": sparse_slots_schema,
+            "expected_reply_type": nullable_string_enum(["service_choice", "time", "name", "phone"]),
             "next_question": nullable_string_enum(["service", "datetime", "name", "phone"]),
             "open_questions": {"type": "array", "items": {"type": "string"}},
             "needs_manager": {"type": "boolean"},
@@ -669,6 +670,12 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
     if "tool_args" in sanitized_payload:
         sanitized_payload.pop("tool_args", None)
         sanitized = True
+    if "tool_action_hint" not in sanitized_payload and "tool_action" in sanitized_payload:
+        sanitized_payload["tool_action_hint"] = sanitized_payload.get("tool_action")
+        sanitized = True
+    if "tool_action" in sanitized_payload:
+        sanitized_payload.pop("tool_action", None)
+        sanitized = True
 
     def _token(value: Any) -> str | None:
         if not isinstance(value, str):
@@ -676,7 +683,7 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
         cleaned = value.strip().casefold()
         return cleaned or None
 
-    tool_action = _token(sanitized_payload.get("tool_action"))
+    tool_action_hint = _token(sanitized_payload.get("tool_action_hint"))
     subject_kind = _token(sanitized_payload.get("subject_kind"))
     capability = _token(sanitized_payload.get("capability"))
     reason = _token(sanitized_payload.get("reason"))
@@ -687,7 +694,7 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
         if _token(item) is not None
     }
     if (
-        tool_action == "calendar.get_booking"
+        tool_action_hint == "calendar.get_booking"
         and subject_kind == "booking"
         and capability == "booking_manage"
         and reason is not None
@@ -1301,6 +1308,20 @@ def _normalize_policy_core_memory_summary(summary: str | None) -> str | None:
     return compact[:POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS]
 
 
+def _normalize_policy_core_slot_state(slot_state: dict[str, Any] | None) -> dict[str, str] | None:
+    if not isinstance(slot_state, dict):
+        return None
+    normalized: dict[str, str] = {}
+    for field_name in ("service", "datetime", "name", "phone"):
+        value = slot_state.get(field_name)
+        if not isinstance(value, str):
+            continue
+        cleaned = " ".join(value.split())
+        if cleaned:
+            normalized[field_name] = cleaned[:POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS]
+    return normalized or None
+
+
 def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(profile, dict):
         return None
@@ -1329,6 +1350,9 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             seen_slots.add(slot)
         if cleaned_slots:
             normalized["active_slots"] = cleaned_slots
+    slot_state = _normalize_policy_core_slot_state(profile.get("slot_state"))
+    if slot_state:
+        normalized["slot_state"] = slot_state
     stored_keys = profile.get("stored_keys")
     if isinstance(stored_keys, list):
         cleaned_keys: list[str] = []
@@ -2307,6 +2331,9 @@ def route_llm_policy_core(
         "structured_output_fallback_used": False,
         "policy_input": None,
         "schema_error": None,
+        "projection_error": None,
+        "projection_trace": None,
+        "semantic_frame": None,
         "model_name": None,
         "attempt_count": 0,
     }
@@ -2379,6 +2406,9 @@ def route_llm_policy_core(
         and not normalized_memory_profile.get("active_goal")
     ):
         normalized_memory_profile["active_goal"] = current_goal.strip().casefold()
+    legacy_slot_state = _normalize_policy_core_slot_state(slot_state)
+    if legacy_slot_state and not normalized_memory_profile.get("slot_state"):
+        normalized_memory_profile["slot_state"] = legacy_slot_state
     if not normalized_memory_profile.get("pending_question_contract"):
         pending_contract = _build_policy_core_pending_contract_from_expected_reply_type(
             expected_reply_type,
@@ -2389,7 +2419,6 @@ def route_llm_policy_core(
     policy_input: dict[str, Any] = {
         "task": "llm_policy_core",
         "message": message,
-        "slot_state": slot_state or {},
         "allowed": {
             "tool_actions": list(allowed_tool_actions),
             "info_refs": list(info_refs or []),
@@ -2782,8 +2811,34 @@ def route_llm_policy_core(
         result["error"] = "invalid_schema"
         return result
 
+    semantic_frame = contract.model_dump(exclude_none=True)
+    for container_field in ("pack_refs", "slots", "open_questions", "risk_signals", "entity_refs", "referents"):
+        if not semantic_frame.get(container_field):
+            semantic_frame.pop(container_field, None)
+    result["semantic_frame"] = deepcopy(semantic_frame)
+
+    projection, projection_error = project_policy_tool_binding(
+        semantic_frame=semantic_frame,
+        allowed_tool_actions=allowed_tool_actions,
+    )
+    if projection_error:
+        result["error"] = "invalid_projection"
+        result["projection_error"] = projection_error
+        result["projection_trace"] = {
+            "status": "error",
+            "projection_source": "policy_tool_projector",
+            "tool_action_hint": semantic_frame.get("tool_action_hint"),
+            "error": projection_error,
+        }
+        return result
+
+    projected_payload = dict(semantic_frame)
+    projected_payload["tool_action"] = projection.tool_action
+    if projection.tool_args:
+        projected_payload["tool_args"] = dict(projection.tool_args)
+    result["projection_trace"] = dict(projection.trace)
     result["ok"] = True
-    result["payload"] = contract.model_dump()
+    result["payload"] = projected_payload
     return result
 
 

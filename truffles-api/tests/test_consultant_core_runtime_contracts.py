@@ -278,6 +278,7 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
     memory_profile = captured["memory_profile"]
     assert memory_profile == {
         "active_goal": "booking",
+        "slot_state": {"service": "manicure"},
         "pending_question_contract": {
             "next_question": "datetime",
             "open_questions": ["datetime"],

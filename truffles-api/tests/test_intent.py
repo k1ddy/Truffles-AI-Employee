@@ -230,7 +230,7 @@ class TestPolicyCoreTimeoutRetry:
         return {
             "intent": "booking",
             "action": "collect",
-            "tool_action": "calendar.list_slots",
+            "tool_action_hint": "collect",
             "pack_refs": [],
             "entity_refs": [],
             "referents": {},
@@ -471,7 +471,7 @@ class TestPolicyCoreTimeoutRetry:
         payload = {
             "intent": "booking",
             "action": "fact",
-            "tool_action": "calendar.list_slots",
+            "tool_action_hint": "calendar.list_slots",
             "tool_args": {
                 "service_query": "Маникюр",
                 "date": "tomorrow",
@@ -508,7 +508,32 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
-        assert "tool_args" not in result["payload"]
+        assert result["payload"]["tool_args"] == {"service_query": "Маникюр"}
+
+    def test_policy_core_route_rejects_collect_tool_action_hint_conflict(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "pack_refs": [],
+            "slots": {"service": "Маникюр"},
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "bad_collect_binding",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "temporal_scope": "day",
+            "resolution_mode": "ask_about_requested_slot",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Можно записаться на завтра?")
+
+        assert result["ok"] is False
+        assert result["error"] == "invalid_projection"
+        assert result["projection_error"] == "collect_tool_action_hint_conflict"
 
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -544,7 +569,7 @@ class TestPolicyCoreTimeoutRetry:
             {
                 "intent": "pricing",
                 "action": "fact",
-                "tool_action": "catalog.service_query",
+                "tool_action_hint": "catalog.service_query",
                 "tool_args": {"service_query": "маникюр с дизайном"},
                 "pack_refs": [],
                 "slots": {"service": "маникюр"},
@@ -593,7 +618,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
-        assert "tool_args" not in result["payload"]
+        assert result["payload"]["tool_args"] == {"service_query": "маникюр"}
 
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -809,8 +834,12 @@ class TestPolicyCoreTimeoutRetry:
         policy_input = json.loads(llm_messages[1]["content"])
         assert "expected_reply_type" not in policy_input
         assert "current_goal" not in policy_input
-        assert policy_input["slot_state"] == {"service": "маникюр", "datetime": "завтра 15:00"}
+        assert "slot_state" not in policy_input
         assert policy_input["memory"]["profile"]["active_goal"] == "booking"
+        assert policy_input["memory"]["profile"]["slot_state"] == {
+            "service": "маникюр",
+            "datetime": "завтра 15:00",
+        }
         assert policy_input["memory"]["profile"]["pending_question_contract"] == {
             "expected_reply_type": "time",
             "next_question": "datetime",
@@ -914,7 +943,7 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["pending_question_act"] is None
+        assert "pending_question_act" not in result["payload"]
         assert result["payload"]["pending_question_target"] == "specialist"
         assert result["payload"]["active_question_relation"] == "referent_followup"
         assert result["payload"]["referents"]["specialist"] == {
@@ -932,8 +961,8 @@ class TestPolicyCoreTimeoutRetry:
             {
                 "intent": "booking",
                 "action": "fact",
-                "tool_action": "calendar.get_booking",
-                    "pack_refs": [],
+                "tool_action_hint": "calendar.get_booking",
+                "pack_refs": [],
                 "slots": {},
                 "next_question": "name",
                 "open_questions": ["name"],
@@ -983,7 +1012,7 @@ class TestPolicyCoreTimeoutRetry:
             {
                 "action": "fact",
                 "intent": "pricing",
-                "tool_action": "catalog.service_query",
+                "tool_action_hint": "catalog.service_query",
                 "tool_args": {"service_query": "педикюр"},
                 "pack_refs": [],
                 "entity_refs": [
@@ -1016,7 +1045,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result.get("tool_args_sanitized") is True
-        assert "tool_args" not in result["payload"]
+        assert result["payload"]["tool_args"] == {"service_query": "маникюр"}
 
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1183,7 +1212,7 @@ class TestPolicyCoreTimeoutRetry:
         assert '"Долго ли ждать?"' in prompt
         assert '"Как долго длится процедура?"' in prompt
         assert '"Сколько по времени занимает услуга?"' in prompt
-        assert 'Верни `intent="duration"`, `action="fact"`, `tool_action="catalog.service_query"`' in prompt
+        assert 'Верни `intent="duration"`, `action="fact"`, `tool_action_hint="catalog.service_query"`' in prompt
         assert '`capability="duration"`' in prompt
         assert '`active_question_relation="generic_info_interrupt"`' in prompt
         assert 'Booking continuity сохрани через `next_question="datetime"`' in prompt
@@ -1202,7 +1231,7 @@ class TestPolicyCoreTimeoutRetry:
         prompt = _load_policy_core_prompt()
 
         assert '"Я хочу изменить время записи."' in prompt
-        assert '`action=handoff`, `tool_action="handoff"`' in prompt
+        assert '`action=handoff`, `tool_action_hint="handoff"`' in prompt
         assert '`capability="booking_manage"`' in prompt
         assert "Не перезапускай generic `next_question=\"datetime\"` collect" in prompt
 
@@ -1213,7 +1242,7 @@ class TestPolicyCoreTimeoutRetry:
         assert '"Когда я записан?"' in prompt
         assert '"intent": "booking|check_booking|verify_booking|' in prompt
         assert '`intent="check_booking"`' in prompt
-        assert '`tool_action="calendar.get_booking"`' in prompt
+        assert '`tool_action_hint="calendar.get_booking"`' in prompt
         assert '`reason="calendar_get_booking_collect_reference"`' in prompt
         assert '`expected_reply_type="name"`' in prompt
         assert '`next_question="name"`' in prompt
@@ -1332,7 +1361,7 @@ class TestPolicyCoreTimeoutRetry:
         assert schema["required"] == [
             "intent",
             "action",
-            "tool_action",
+            "tool_action_hint",
             "needs_manager",
             "subject_kind",
             "capability",
@@ -1343,6 +1372,7 @@ class TestPolicyCoreTimeoutRetry:
         assert "capability" in schema["properties"]
         assert "temporal_scope" in schema["properties"]
         assert "resolution_mode" in schema["properties"]
+        assert "expected_reply_type" in schema["properties"]
         assert "pending_question_act" in schema["properties"]
         assert "pending_question_target" in schema["properties"]
         assert "active_question_relation" in schema["properties"]
@@ -1350,7 +1380,7 @@ class TestPolicyCoreTimeoutRetry:
         assert "resolver_id" not in schema["properties"]
         assert "resolver_version" not in schema["properties"]
         assert "tool_args" not in schema["properties"]
-        assert schema["properties"]["tool_action"]["enum"] == ["calendar.book_slot"]
+        assert schema["properties"]["tool_action_hint"]["enum"] == ["calendar.book_slot"]
         slots_schema = schema["properties"]["slots"]
         referents_schema = schema["properties"]["referents"]
         assert "anyOf" in slots_schema

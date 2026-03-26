@@ -121,6 +121,64 @@ def test_plan_records_policy_core_schema_failure_bundle(monkeypatch):
     }
 
 
+def test_plan_records_policy_projection_failure_bundle(monkeypatch):
+    planner = TurnPlanner()
+
+    monkeypatch.setattr(
+        "app.services.consult_pack_service.load_consult_playbook",
+        lambda client_slug: ({}, None),
+    )
+    monkeypatch.setattr(
+        "app.services.intent_service.route_llm_policy_core",
+        lambda *args, **kwargs: {
+            "error": "invalid_projection",
+            "attempted": True,
+            "elapsed_ms": 91.2,
+            "raw": '{"intent":"booking"}',
+            "policy_input": {"message": "Можно завтра?", "task": "llm_policy_core"},
+            "semantic_frame": {
+                "intent": "booking",
+                "action": "collect",
+                "tool_action_hint": "calendar.list_slots",
+            },
+            "projection_error": "collect_tool_action_hint_conflict",
+            "projection_trace": {
+                "status": "error",
+                "projection_source": "policy_tool_projector",
+                "tool_action_hint": "calendar.list_slots",
+                "error": "collect_tool_action_hint_conflict",
+            },
+            "model_name": "gpt-5.4-nano-2026-03-17",
+            "attempt_count": 1,
+            "structured_output_enabled": True,
+            "structured_output_fallback_used": False,
+        },
+    )
+
+    decision = planner.plan(
+        message_text="Можно завтра?",
+        client_slug="demo_salon",
+        booking_state=None,
+    )
+
+    assert decision.meta["reason_code"] == "planner:invalid_projection"
+    assert decision.meta["earliest_failed_stage"] == "policy_projection"
+    assert (
+        decision.meta["root_reason_code"]
+        == "policy_projection:collect_tool_action_hint_conflict"
+    )
+    assert decision.meta["policy_core_trace"]["schema_verdict"] == "ok"
+    assert (
+        decision.meta["policy_core_trace"]["projection_verdict"]
+        == "collect_tool_action_hint_conflict"
+    )
+    assert decision.meta["policy_core_trace"]["projection"] == {
+        "status": "error",
+        "projection_source": "policy_tool_projector",
+        "tool_action_hint": "calendar.list_slots",
+        "error": "collect_tool_action_hint_conflict",
+    }
+
 
 def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monkeypatch):
     planner = TurnPlanner()
