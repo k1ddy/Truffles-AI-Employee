@@ -432,14 +432,10 @@ class TurnPlanner:
             )
             if item
         ]
-        if (
-            normalized_payload.get("action") == "collect"
-            and not normalized_payload["open_questions"]
-            and normalized_payload.get("next_question")
-        ):
+        if normalized_payload.get("next_question") and not normalized_payload["open_questions"]:
             normalized_payload["open_questions"] = [normalized_payload["next_question"]]
-        else:
-            normalized_payload = self._strip_pending_question_payload_if_not_collect(
+        if normalized_payload.get("action") == "handoff":
+            normalized_payload = self._strip_pending_question_payload_if_handoff(
                 normalized_payload
             )
         normalized_payload.setdefault("goal", current_goal)
@@ -453,11 +449,11 @@ class TurnPlanner:
         )
 
     @classmethod
-    def _strip_pending_question_payload_if_not_collect(
+    def _strip_pending_question_payload_if_handoff(
         cls,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        if cls._normalize_token(payload.get("action")) == "collect":
+        if cls._normalize_token(payload.get("action")) != "handoff":
             return payload
         normalized = dict(payload)
         normalized.pop("next_question", None)

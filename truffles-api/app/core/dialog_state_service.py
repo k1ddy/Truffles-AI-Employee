@@ -1463,28 +1463,49 @@ class DialogStateService:
             if isinstance(working_context.get(runtime_key), dict)
             else {}
         )
+        runtime_has_canonical_question = bool(
+            isinstance(runtime_payload.get("pending_question_contract"), dict)
+            or (
+                isinstance(runtime_payload.get("dialog_state"), dict)
+                and isinstance(
+                    runtime_payload.get("dialog_state", {}).get("pending_question_contract"),
+                    dict,
+                )
+            )
+        )
+        legacy_expected_reply_type = (
+            working_context.get("expected_reply_type")
+            if not runtime_has_canonical_question
+            else None
+        )
+        legacy_expected_reply_reason = (
+            working_context.get("expected_reply_reason")
+            if not runtime_has_canonical_question
+            else None
+        )
         booking_payload = self.normalize_booking_payload(runtime_payload.get("booking"))
         if booking_payload is None:
             booking_payload = self.normalize_booking_payload(working_context.get("booking"))
         pending_contract = self.project_pending_question_contract_with_projection_fallback(
             runtime_payload.get("pending_question_contract"),
             expected_reply_type=runtime_payload.get("expected_reply_type")
-            or working_context.get("expected_reply_type"),
+            or legacy_expected_reply_type,
             expected_reply_reason=runtime_payload.get("expected_reply_reason")
-            or working_context.get("expected_reply_reason"),
+            or legacy_expected_reply_reason,
         ) or {}
         expected_projections = self.project_expected_reply_projections(
             expected_reply_type=pending_contract.get("expected_reply_type")
             or runtime_payload.get("expected_reply_type")
-            or working_context.get("expected_reply_type"),
+            or legacy_expected_reply_type,
             expected_reply_reason=pending_contract.get("reason")
             or runtime_payload.get("expected_reply_reason")
-            or working_context.get("expected_reply_reason"),
+            or legacy_expected_reply_reason,
         )
         expected_reply_type = expected_projections.expected_reply_type
         expected_reply_reason = expected_projections.expected_reply_reason
         current_goal = self._normalize_projection_token(
-            runtime_payload.get("current_goal") or working_context.get("current_goal")
+            runtime_payload.get("current_goal")
+            or (None if runtime_payload else working_context.get("current_goal"))
         )
 
         dialog_state_payload = runtime_payload.get("dialog_state")
@@ -1577,6 +1598,11 @@ class DialogStateService:
         clear_booking = bool(execution_payload.get("clear_booking"))
         merged_booking = self.normalize_booking_payload(existing_booking)
         loaded_current_goal = self._normalize_projection_token(loaded.get("current_goal"))
+        owner_pending_question_contract = None
+        if decision.outcome != "COLLECT":
+            owner_pending_question_contract = self.project_pending_question_contract(
+                decision.pending_question_contract,
+            )
         if decision.outcome == "COLLECT":
             merged_booking = self.build_collect_owner_booking_payload(
                 existing_booking=existing_booking,
@@ -1645,6 +1671,18 @@ class DialogStateService:
             expected_reply_type = None
             expected_reply_reason = None
             current_goal = None
+        elif owner_pending_question_contract:
+            projections = self.project_expected_reply_projections(
+                expected_reply_type=owner_pending_question_contract.get("expected_reply_type"),
+                expected_reply_reason=owner_pending_question_contract.get("reason"),
+            )
+            expected_reply_type = projections.expected_reply_type
+            expected_reply_reason = projections.expected_reply_reason
+            current_goal = loaded_current_goal or self._normalize_projection_token(
+                decision.meta.get("goal")
+            )
+            if current_goal is None and (merged_booking or decision.intent == "booking"):
+                current_goal = "booking"
         elif decision.outcome == "COLLECT":
             next_slot = self._normalize_projection_token(
                 execution_payload.get("next_slot")
@@ -1690,7 +1728,15 @@ class DialogStateService:
             grounded_referents=grounded_referents,
         )
 
-        if expected_reply_type and decision.outcome == "COLLECT":
+        if expected_reply_type and owner_pending_question_contract:
+            dialog_state = self.build_collect_owner_state(
+                decision=decision,
+                expected_reply_type=expected_reply_type,
+                expected_reply_reason=expected_reply_reason,
+                grounded_referents=grounded_referents,
+            )
+            dialog_state.meta["current_goal"] = current_goal
+        elif expected_reply_type and decision.outcome == "COLLECT":
             dialog_state = self.build_collect_owner_state(
                 decision=decision,
                 expected_reply_type=expected_reply_type,

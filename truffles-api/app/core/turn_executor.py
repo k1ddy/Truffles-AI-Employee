@@ -428,6 +428,7 @@ class TurnExecutor:
             )
             if isinstance(item, str) and item.strip()
         }
+        unresolved_info_meta: dict[str, Any] | None = None
         if decision.intent == "master_query" or "master" in fact_refs:
             master_service = self._resolve_fact_service_query(
                 decision=decision,
@@ -539,21 +540,12 @@ class TurnExecutor:
                         pending_question_contract=pending_question_contract,
                     ),
                 )
-            return RuntimeExecutionResult(
-                text="Я уточню это для вас.",
-                tool_action=resolved_tool_action,
-                tool_decision="info_ref_unresolved",
-                meta=self._attach_semantic_contract_meta(
-                    {
-                        "fact_fallback": True,
-                        "fact_fallback_reason": "policy_info_unresolved",
-                        "info_ref_source": "policy_core",
-                        "policy_info_refs": policy_info_refs,
-                    },
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
-                ),
-            )
+            unresolved_info_meta = {
+                "fact_fallback": True,
+                "fact_fallback_reason": "policy_info_unresolved",
+                "info_ref_source": "policy_core",
+                "policy_info_refs": policy_info_refs,
+            }
         pack_decision = get_pack_decision(query_text, client_slug=client_slug)
         if pack_decision and isinstance(pack_decision.response, str) and pack_decision.response.strip():
             pack_meta = dict(pack_decision.meta) if isinstance(pack_decision.meta, dict) else {}
@@ -588,6 +580,17 @@ class TurnExecutor:
                 tool_decision=pack_decision.intent or pack_decision.action,
                 meta=self._attach_semantic_contract_meta(
                     pack_meta,
+                    semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
+                ),
+            )
+        if unresolved_info_meta is not None:
+            return RuntimeExecutionResult(
+                text="Я уточню это для вас.",
+                tool_action=resolved_tool_action,
+                tool_decision="info_ref_unresolved",
+                meta=self._attach_semantic_contract_meta(
+                    unresolved_info_meta,
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
                 ),

@@ -920,6 +920,42 @@ class ConsultantRuntime:
         )
         if not semantic_contract and isinstance(dialog_state.meta.get("semantic_contract"), dict):
             semantic_contract = dict(dialog_state.meta.get("semantic_contract"))
+        execution_semantic_contract = (
+            dict(execution.meta.get("semantic_contract"))
+            if isinstance(execution.meta, dict)
+            and isinstance(execution.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        if execution_semantic_contract:
+            if not semantic_contract:
+                semantic_contract = execution_semantic_contract
+            else:
+                for key in (
+                    "subject_kind",
+                    "capability",
+                    "temporal_scope",
+                    "resolution_mode",
+                    "pending_question_act",
+                    "pending_question_target",
+                    "active_question_relation",
+                    "grounding_provenance",
+                ):
+                    if key not in semantic_contract and key in execution_semantic_contract:
+                        semantic_contract[key] = execution_semantic_contract[key]
+                if (
+                    "entity_refs" not in semantic_contract
+                    and isinstance(execution_semantic_contract.get("entity_refs"), list)
+                ):
+                    semantic_contract["entity_refs"] = list(
+                        execution_semantic_contract["entity_refs"]
+                    )
+                if (
+                    "referents" not in semantic_contract
+                    and isinstance(execution_semantic_contract.get("referents"), dict)
+                ):
+                    semantic_contract["referents"] = dict(
+                        execution_semantic_contract["referents"]
+                    )
         if semantic_contract:
             trace_event["semantic_contract"] = semantic_contract
         if isinstance(execution.meta, dict) and isinstance(

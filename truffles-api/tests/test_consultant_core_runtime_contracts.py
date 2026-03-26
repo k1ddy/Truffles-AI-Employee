@@ -567,6 +567,39 @@ def test_turn_planner_builds_tool_reply_owner_decision_for_pending_question_foll
     assert decision.interaction.relation == "ask_about_requested_slot"
 
 
+def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() -> None:
+    planner = TurnPlanner()
+
+    decision = planner._build_policy_core_decision(
+        {
+            "intent": "duration",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "reason": "collect:name",
+            "subject_kind": "service",
+            "capability": "duration",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+        },
+        current_goal="booking",
+        expected_reply_type="time",
+    )
+
+    assert decision.outcome == "FACT"
+    assert decision.pending_question_contract.expected_reply_type == "name"
+    assert decision.pending_question_contract.reason == "collect:name"
+    assert decision.pending_question_contract.pending_question_act == "ask_about_requested_slot"
+    assert decision.pending_question_contract.pending_question_target == "time"
+    assert decision.pending_question_contract.active_question_relation == "generic_info_interrupt"
+    assert decision.pending_question_contract.next_question == "name"
+    assert decision.pending_question_contract.open_questions == ["name"]
+
+
 def test_turn_planner_builds_tool_reply_owner_decision_for_master_override() -> None:
     planner = TurnPlanner()
 
