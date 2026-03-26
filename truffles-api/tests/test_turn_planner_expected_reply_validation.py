@@ -11,6 +11,7 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
     monkeypatch.setattr(
         "app.services.intent_service.route_llm_policy_core",
         lambda *args, **kwargs: {
+            "policy_input": {"message": "Алина", "task": "llm_policy_core"},
             "payload": {
                 "action": "fact",
                 "intent": "other",
@@ -36,6 +37,10 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
     assert decision.source == "llm_policy_core"
     assert decision.tool_action == "calendar.book_slot"
     assert decision.slots == {}
+    assert decision.meta["policy_core_trace"]["status"] == "ok"
+    assert decision.meta["policy_core_trace"]["schema_verdict"] == "ok"
+    assert decision.meta["policy_core_trace"]["projection_verdict"] == "ok"
+    assert decision.meta["policy_core_trace"]["input"]["message"] == "Алина"
 
 
 
@@ -61,6 +66,59 @@ def test_plan_degrades_when_policy_core_is_unavailable_instead_of_routing_fallba
     assert decision.intent == "planner_degrade"
     assert decision.interaction.owner == "turn_planner_degrade"
     assert decision.meta["reason_code"] == "planner:policy_timeout"
+    assert decision.meta["earliest_failed_stage"] == "policy_core"
+    assert decision.meta["root_reason_code"] == "policy_core:policy_timeout"
+    assert decision.meta["policy_core_trace"]["status"] == "error"
+    assert decision.meta["policy_core_trace"]["projection_verdict"] == "skipped"
+
+
+def test_plan_records_policy_core_schema_failure_bundle(monkeypatch):
+    planner = TurnPlanner()
+
+    monkeypatch.setattr(
+        "app.services.consult_pack_service.load_consult_playbook",
+        lambda client_slug: ({}, None),
+    )
+    monkeypatch.setattr(
+        "app.services.intent_service.route_llm_policy_core",
+        lambda *args, **kwargs: {
+            "error": "invalid_schema",
+            "attempted": True,
+            "elapsed_ms": 187.5,
+            "raw": '{"broken":true}',
+            "schema_error": "tool_action_missing",
+            "policy_input": {"message": "Когда запись?", "task": "llm_policy_core"},
+            "model_name": "gpt-5.4-nano-2026-03-17",
+            "attempt_count": 1,
+            "structured_output_enabled": True,
+            "structured_output_fallback_used": False,
+        },
+    )
+
+    decision = planner.plan(
+        message_text="Когда запись?",
+        client_slug="demo_salon",
+        booking_state=None,
+    )
+
+    assert decision.meta["reason_code"] == "planner:invalid_schema"
+    assert decision.meta["earliest_failed_stage"] == "policy_core"
+    assert decision.meta["root_reason_code"] == "policy_core:invalid_schema"
+    assert decision.meta["policy_core_trace"] == {
+        "attempted": True,
+        "status": "error",
+        "schema_verdict": "invalid_schema",
+        "projection_verdict": "skipped",
+        "input": {"message": "Когда запись?", "task": "llm_policy_core"},
+        "raw_output": '{"broken":true}',
+        "error": "invalid_schema",
+        "schema_error": "tool_action_missing",
+        "elapsed_ms": 187.5,
+        "model_name": "gpt-5.4-nano-2026-03-17",
+        "attempt_count": 1,
+        "structured_output_enabled": True,
+        "structured_output_fallback_used": False,
+    }
 
 
 

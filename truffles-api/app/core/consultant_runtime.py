@@ -875,6 +875,8 @@ class ConsultantRuntime:
             "trace_id": get_trace_id(),
             "delivered": delivered,
         }
+        earliest_failed_stage = None
+        root_reason_code = None
         reason_code = None
         observability = getattr(turn_result, "observability", None)
         if observability is not None:
@@ -883,8 +885,21 @@ class ConsultantRuntime:
             reason_code = decision.meta.get("reason_code")
         if not reason_code and isinstance(execution.meta, dict):
             reason_code = execution.meta.get("reason_code")
+        if isinstance(decision.meta, dict):
+            earliest_failed_stage = decision.meta.get("earliest_failed_stage")
+            root_reason_code = decision.meta.get("root_reason_code")
+        if not earliest_failed_stage and isinstance(execution.meta, dict):
+            earliest_failed_stage = execution.meta.get("earliest_failed_stage")
+        if not root_reason_code and isinstance(execution.meta, dict):
+            root_reason_code = execution.meta.get("root_reason_code")
+        if not root_reason_code:
+            root_reason_code = reason_code
         if isinstance(reason_code, str) and reason_code.strip():
             trace_event["reason_code"] = reason_code.strip()
+        if isinstance(earliest_failed_stage, str) and earliest_failed_stage.strip():
+            trace_event["earliest_failed_stage"] = earliest_failed_stage.strip()
+        if isinstance(root_reason_code, str) and root_reason_code.strip():
+            trace_event["root_reason_code"] = root_reason_code.strip()
         if expected_reply_type:
             trace_event["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
@@ -978,6 +993,19 @@ class ConsultantRuntime:
         trace = context.get(_RUNTIME_TRACE_KEY)
         if not isinstance(trace, list):
             trace = []
+        policy_core_trace = (
+            dict(decision.meta.get("policy_core_trace"))
+            if isinstance(decision.meta, dict)
+            and isinstance(decision.meta.get("policy_core_trace"), dict)
+            else None
+        )
+        if isinstance(policy_core_trace, dict):
+            policy_core_entry = {
+                "stage": "policy_core",
+                "source": "llm_policy_core",
+            }
+            policy_core_entry.update(policy_core_trace)
+            trace.append(policy_core_entry)
         if pending_question_act and expected_reply_type:
             interaction_entry = {
                 "stage": "pending_question_interaction",
@@ -1025,6 +1053,10 @@ class ConsultantRuntime:
         }
         if isinstance(reason_code, str) and reason_code.strip():
             decision_meta["reason_code"] = reason_code.strip()
+        if isinstance(earliest_failed_stage, str) and earliest_failed_stage.strip():
+            decision_meta["earliest_failed_stage"] = earliest_failed_stage.strip()
+        if isinstance(root_reason_code, str) and root_reason_code.strip():
+            decision_meta["root_reason_code"] = root_reason_code.strip()
         if expected_reply_type:
             decision_meta["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
@@ -1041,6 +1073,8 @@ class ConsultantRuntime:
             decision_meta["semantic_contract"] = semantic_contract
         if contract_source != decision.source:
             decision_meta["source_detail"] = decision.source
+        if policy_core_trace:
+            decision_meta["policy_core_trace"] = policy_core_trace
         if isinstance(execution.meta, dict):
             decision_meta.update(execution.meta)
         if user_message is not None:

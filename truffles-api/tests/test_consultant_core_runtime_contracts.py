@@ -2304,6 +2304,71 @@ def test_consultant_runtime_trace_emits_reason_code_for_controlled_degrade() -> 
     assert decision_meta.get("reason_code") == "planner:invalid_schema"
 
 
+def test_consultant_runtime_trace_records_policy_core_causal_bundle() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_controlled_degrade(
+        reason_code="planner:invalid_schema",
+        action="handoff",
+        intent="planner_degrade",
+        tool_action="handoff",
+        interaction_owner="turn_planner_degrade",
+    )
+    decision.meta["earliest_failed_stage"] = "policy_core"
+    decision.meta["root_reason_code"] = "policy_core:invalid_schema"
+    decision.meta["policy_core_trace"] = {
+        "attempted": True,
+        "status": "error",
+        "schema_verdict": "invalid_schema",
+        "projection_verdict": "skipped",
+        "input": {"message": "Когда запись?"},
+        "raw_output": '{"broken":true}',
+        "error": "invalid_schema",
+        "schema_error": "tool_action_missing",
+        "elapsed_ms": 143.2,
+        "model_name": "gpt-5.4-nano-2026-03-17",
+        "attempt_count": 1,
+    }
+    dialog_state = DialogState.model_validate({"meta": {"current_goal": "booking"}})
+    conversation = SimpleNamespace(context={}, state="pending")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="handoff", tool_decision="pending", meta={})
+    turn_result = SimpleNamespace(
+        dialog_state=dialog_state,
+        reply=SimpleNamespace(reply_kind="handoff"),
+        observability=SimpleNamespace(reason_code="planner:invalid_schema"),
+    )
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "policy_core"
+        and entry.get("schema_verdict") == "invalid_schema"
+        and entry.get("projection_verdict") == "skipped"
+        and entry.get("input") == {"message": "Когда запись?"}
+        and entry.get("raw_output") == '{"broken":true}'
+        for entry in trace
+    )
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("earliest_failed_stage") == "policy_core"
+        and entry.get("root_reason_code") == "policy_core:invalid_schema"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta.get("earliest_failed_stage") == "policy_core"
+    assert decision_meta.get("root_reason_code") == "policy_core:invalid_schema"
+    assert decision_meta.get("policy_core_trace", {}).get("schema_error") == "tool_action_missing"
+
+
 def test_consultant_runtime_trace_prefers_policy_core_semantic_contract_over_runtime_projection() -> None:
     runtime = ConsultantRuntime()
     decision = TurnPlanner().build_from_policy_override(

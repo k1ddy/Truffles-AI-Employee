@@ -167,18 +167,36 @@ class TurnPlanner:
         )
         payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
         if isinstance(payload, dict):
-            return self._build_policy_core_decision(payload)
+            decision = self._build_policy_core_decision(payload)
+            decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
+                policy_result,
+                schema_verdict="ok",
+                projection_verdict="ok",
+            )
+            return decision
 
         degrade_reason = self._normalize_token(
             policy_result.get("error") if isinstance(policy_result, dict) else None
         ) or "policy_core_unavailable"
-        return self.build_controlled_degrade(
+        decision = self.build_controlled_degrade(
             reason_code=f"planner:{degrade_reason}",
             action="handoff",
             intent="planner_degrade",
             tool_action="handoff",
             interaction_owner="turn_planner_degrade",
         )
+        decision.meta["earliest_failed_stage"] = "policy_core"
+        decision.meta["root_reason_code"] = f"policy_core:{degrade_reason}"
+        decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
+            policy_result,
+            schema_verdict=(
+                "invalid_schema"
+                if degrade_reason == "invalid_schema"
+                else degrade_reason
+            ),
+            projection_verdict="skipped",
+        )
+        return decision
 
     def build_from_policy_override(
         self,
@@ -343,6 +361,38 @@ class TurnPlanner:
         if not cleaned:
             raise ValueError("tool_action_missing")
         return cleaned
+
+    def _build_policy_core_trace_payload(
+        self,
+        policy_result: dict[str, Any] | None,
+        *,
+        schema_verdict: str,
+        projection_verdict: str,
+    ) -> dict[str, Any]:
+        payload = policy_result if isinstance(policy_result, dict) else {}
+        trace_payload: dict[str, Any] = {
+            "attempted": bool(payload.get("attempted")),
+            "status": "ok" if isinstance(payload.get("payload"), dict) else "error",
+            "schema_verdict": schema_verdict,
+            "projection_verdict": projection_verdict,
+        }
+        for field_name, result_key in (
+            ("input", "policy_input"),
+            ("raw_output", "raw"),
+            ("error", "error"),
+            ("schema_error", "schema_error"),
+            ("elapsed_ms", "elapsed_ms"),
+            ("model_name", "model_name"),
+            ("attempt_count", "attempt_count"),
+            ("compact_input_used", "compact_input_used"),
+            ("compact_retry_used", "compact_retry_used"),
+            ("structured_output_enabled", "structured_output_enabled"),
+            ("structured_output_fallback_used", "structured_output_fallback_used"),
+        ):
+            value = payload.get(result_key)
+            if value is not None:
+                trace_payload[field_name] = value
+        return trace_payload
 
     def _build_policy_core_decision(
         self,

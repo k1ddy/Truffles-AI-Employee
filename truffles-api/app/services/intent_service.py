@@ -1,3 +1,4 @@
+from copy import deepcopy
 import json
 import math
 import os
@@ -2304,6 +2305,10 @@ def route_llm_policy_core(
         "compact_retry_used": False,
         "structured_output_enabled": False,
         "structured_output_fallback_used": False,
+        "policy_input": None,
+        "schema_error": None,
+        "model_name": None,
+        "attempt_count": 0,
     }
     normalized = (message or "").strip()
     if not normalized:
@@ -2398,6 +2403,7 @@ def route_llm_policy_core(
             policy_input["memory"]["summary"] = normalized_memory_summary
         if normalized_memory_profile:
             policy_input["memory"]["profile"] = normalized_memory_profile
+    result["policy_input"] = deepcopy(policy_input)
 
     try:
         llm = get_llm_provider()
@@ -2681,6 +2687,8 @@ def route_llm_policy_core(
     result["compact_input_used"] = compact_input_used
     result["compact_retry_used"] = compact_retry_used
     result["structured_output_fallback_used"] = structured_output_fallback_used
+    result["model_name"] = model_name_used
+    result["attempt_count"] = attempt_count
     _log_timing(
         "policy_core_llm_ms",
         elapsed_ms,
@@ -2752,6 +2760,7 @@ def route_llm_policy_core(
     contract, schema_error = validate_llm_policy_core_output(payload)
     if schema_error:
         result["error"] = "invalid_schema"
+        result["schema_error"] = schema_error
         logger.warning(
             "LLM policy core returned invalid schema",
             extra={
