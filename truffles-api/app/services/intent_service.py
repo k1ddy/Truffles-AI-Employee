@@ -1758,15 +1758,14 @@ service_query должен быть словом/фразой только из 
 
 PLAN_PROMPT_FALLBACK = """# Hybrid LLM Plan Prompt
 Return JSON only (no markdown). Required fields: outcome, tool_action, confidence.
-Optional fields: tool_args, pack_refs, language, reason, goal, slot_state, open_questions.
+Optional fields: pack_refs, language, reason, goal, slot_state, open_questions.
 Use tool_action and pack_refs only from the allowed lists provided in the input.
 slot_state and open_questions may only use: service, datetime, name.
-For info pricing/duration, include tool_args.service_query (or slot_state.service).
 If missing required args, set outcome=collect and list open_questions accordingly.
 """
 POLICY_CORE_PROMPT_FALLBACK = """# LLM Policy Core Prompt
 Return JSON only (no markdown). Required fields: intent, action, tool_action, slots, confidence.
-Optional fields: tool_args, pack_refs, slots, next_question, open_questions, needs_manager,
+Optional fields: pack_refs, slots, next_question, open_questions, needs_manager,
 risk_signals, language, reason, goal, entity_refs, subject_kind, capability, temporal_scope,
 resolution_mode, pending_question_act, pending_question_target, active_question_relation,
 resolver_id, resolver_version.
@@ -1781,12 +1780,12 @@ Use intent=master_query only when user explicitly asks about specialists for a c
 Availability or specialist-selection questions for a concrete service (for example,
 "есть ли специалист по X" or "есть мастер по X") are master_query, not pricing.
 If the service is already present, do not collect specialist name; return fact with
-tool_action=catalog.service_query and tool_args.service_query instead.
+tool_action=catalog.service_query and ground the service through slots.service or referents.service.
 Example: "У вас есть специалист по окрашиванию?" -> intent=master_query,
-action=fact, tool_action=catalog.service_query, tool_args.service_query="окрашивание".
+action=fact, tool_action=catalog.service_query, slots.service="окрашивание".
 Example: "Какого мастера вы можете предложить?" -> intent=master_query,
 action=collect, tool_action=collect, next_question=service.
-master_query requires slots.service or tool_args.service_query for fact answers.
+master_query requires slots.service or referents.service for fact answers.
 If service is missing for master_query, use action=collect, tool_action=collect,
 next_question=service and open_questions must include service.
 If active pending_question_contract expects datetime for a known service and the user fixes

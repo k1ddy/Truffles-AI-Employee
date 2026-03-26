@@ -27,7 +27,6 @@ from app.services.policy_validation_boundary_service import (
     PolicyValidationBoundaryRuntimeInput,
     handle_policy_validation_boundary,
 )
-from app.services import reasoning_core as reasoning_core_service
 
 
 def _repo_root() -> Path:
@@ -542,32 +541,6 @@ def test_turn_planner_builds_policy_decision_from_policy_override_payload() -> N
     assert decision.meta["reason"] == "contact_question"
 
 
-def test_turn_planner_builds_tool_reply_owner_decision_for_pending_question_followup() -> None:
-    planner = TurnPlanner()
-
-    decision = planner.build_tool_reply_owner_decision(
-        payload={
-            "reason": "semantic_temporal_scope_missing_slot_guidance",
-            "tool_args": {"service_query": "Маникюр"},
-        },
-        default_intent="booking",
-        reply_intent="booking",
-        tool_action="calendar.list_slots",
-        expected_reply_type="time",
-        pending_question_tool_followup=True,
-        pending_question_act="ask_about_requested_slot",
-    )
-
-    _load_schema("contracts/runtime/policy_decision.v1.jsonschema").validate(
-        decision.model_dump(mode="json")
-    )
-    assert decision.intent == "booking"
-    assert decision.action == "collect"
-    assert decision.tool_action == "calendar.list_slots"
-    assert decision.interaction.owner == "booking_slot_guidance"
-    assert decision.interaction.relation == "ask_about_requested_slot"
-
-
 def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() -> None:
     planner = TurnPlanner()
 
@@ -586,9 +559,7 @@ def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() 
             "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
             "active_question_relation": "generic_info_interrupt",
-        },
-        current_goal="booking",
-        expected_reply_type="time",
+        }
     )
 
     assert decision.outcome == "FACT"
@@ -599,28 +570,6 @@ def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() 
     assert decision.pending_question_contract.active_question_relation == "generic_info_interrupt"
     assert decision.pending_question_contract.next_question == "name"
     assert decision.pending_question_contract.open_questions == ["name"]
-
-
-def test_turn_planner_builds_tool_reply_owner_decision_for_master_override() -> None:
-    planner = TurnPlanner()
-
-    decision = planner.build_tool_reply_owner_decision(
-        payload={"tool_action": "catalog.service_query"},
-        default_intent="master",
-        reply_intent="service_duration",
-        tool_action="catalog.service_query",
-        expected_reply_type=None,
-        master_override_applied=True,
-    )
-
-    _load_schema("contracts/runtime/policy_decision.v1.jsonschema").validate(
-        decision.model_dump(mode="json")
-    )
-    assert decision.intent == "master"
-    assert decision.action == "fact"
-    assert decision.tool_action == "catalog.service_query"
-    assert decision.interaction.owner == "policy_core_guard"
-    assert decision.interaction.relation == "policy_guard"
 
 
 def test_boundary_validator_builds_typed_block_override() -> None:
@@ -926,316 +875,8 @@ def test_turn_executor_builds_typed_tool_reply_owner_cutover_artifact() -> None:
     assert artifact.runtime_meta["downstream_tool_decision"] == "contract_invalid"
 
 
-def test_turn_executor_builds_tool_reply_owner_cutover_payload_for_pending_question() -> None:
-    decision = TurnPlanner().build_tool_reply_owner_decision(
-        payload={
-            "intent": "booking",
-            "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "next_question": "datetime",
-            "open_questions": ["datetime"],
-        },
-        default_intent="booking",
-        reply_intent="booking",
-        tool_action="calendar.list_slots",
-        expected_reply_type="time",
-        pending_question_tool_followup=True,
-    )
-    dialog_state = DialogStateService().build_tool_reply_owner_state(
-        decision=decision,
-        expected_reply_type="time",
-        expected_reply_reason="booking_slot_guidance",
-        owner_cutover="turn_executor.tool_reply_turn_outcome.v1",
-    )
-
-    payload = TurnExecutor().build_tool_reply_owner_cutover_payload(
-        decision=decision,
-        dialog_state=dialog_state,
-        text="На какое время вам удобно?",
-        owner_cutover="turn_executor.tool_reply_turn_outcome.v1",
-        reply_source="tool_registry",
-        reply_intent="calendar.list_slots",
-        intent="booking",
-        tool_action="calendar.list_slots",
-        raw_tool_decision="missing_slot",
-        normalized_tool_decision="missing_slot",
-        followup_type="time",
-        followup_reason="booking_slot_guidance",
-        followup_prompt=None,
-        services_overview_followup=False,
-        conversation_state="bot_active",
-        pending_question_tool_followup=True,
-        pending_question_act="ask_about_requested_slot",
-        pending_question_target=None,
-        saved_message_present=True,
-    )
-
-    assert payload.artifact.turn_outcome.contract_status == "ok"
-    assert payload.trace_payload_override["tool_decision"] == "missing_slot"
-    assert payload.trace_payload_override["reply_source"] == "tool_registry"
-    assert (
-        payload.trace_payload_override["turn_outcome"]["meta"]["interaction_owner"]
-        == "booking_slot_guidance"
-    )
-    assert payload.extra_trace_payloads == [
-        {
-            "stage": "pending_question_interaction",
-            "decision": "booking_slot_guidance",
-            "state": "bot_active",
-            "source": "tool_registry",
-            "tool_action": "calendar.list_slots",
-            "tool_decision": "missing_slot",
-            "pending_question_act": "ask_about_requested_slot",
-            "pending_question_target": "time",
-            "expected_reply_type": "time",
-        }
-    ]
-    assert payload.extra_meta_updates == [
-        {"intent": "calendar.list_slots"},
-        {
-            "pending_question_act": "ask_about_requested_slot",
-            "pending_question_target": "time",
-            "pending_question_interaction": "ask_about_requested_slot",
-            "pending_question_owner": "booking_slot_guidance",
-        },
-    ]
 
 
-def test_turn_executor_builds_tool_reply_owner_cutover_payload_for_interrupt_and_override() -> None:
-    decision = TurnPlanner().build_tool_reply_owner_decision(
-        payload={
-            "intent": "services_overview",
-            "action": "fact",
-            "tool_action": "catalog.service_query",
-        },
-        default_intent="services_overview",
-        reply_intent="master",
-        tool_action="catalog.service_query",
-        expected_reply_type="service_choice",
-        collect_service_info_interrupt_active=True,
-        master_override_applied=True,
-    )
-    dialog_state = DialogStateService().build_tool_reply_owner_state(
-        decision=decision,
-        expected_reply_type="service_choice",
-        expected_reply_reason="services_overview",
-        owner_cutover="turn_executor.tool_reply_turn_outcome.v1",
-    )
-
-    payload = TurnExecutor().build_tool_reply_owner_cutover_payload(
-        decision=decision,
-        dialog_state=dialog_state,
-        text="Могу подсказать услуги.",
-        owner_cutover="turn_executor.tool_reply_turn_outcome.v1",
-        reply_source="policy_core_guard",
-        reply_intent="master",
-        intent="master",
-        tool_action="catalog.service_query",
-        raw_tool_decision="services_overview",
-        normalized_tool_decision="verifier_blocked",
-        followup_type="service_choice",
-        followup_reason="services_overview",
-        followup_prompt="Какую услугу хотите?",
-        services_overview_followup=True,
-        conversation_state="bot_active",
-        collect_service_info_interrupt_active=True,
-        info_sections=["services_overview"],
-        saved_message_present=True,
-        master_override_meta={"policy_semantic_override_block_reason": "master_signal_override_blocked"},
-    )
-
-    assert payload.artifact.turn_outcome.contract_status == "degraded"
-    assert payload.artifact.turn_outcome.source == "policy_core_guard"
-    assert payload.trace_payload_override["tool_decision"] == "services_overview"
-    assert payload.extra_trace_payloads == [
-        {
-            "stage": "booking_interrupt",
-            "decision": "info_reply",
-            "state": "bot_active",
-            "booking_interrupt_info": True,
-            "info_sections": ["services_overview"],
-        }
-    ]
-    assert payload.extra_meta_updates == [
-        {"intent": "master"},
-        {
-            "booking_info_interrupt": True,
-            "booking_interrupt_info": True,
-            "booking_info_intents": ["services_overview"],
-        },
-        {"policy_semantic_override_block_reason": "master_signal_override_blocked"},
-    ]
-
-
-def test_turn_executor_builds_tool_reply_owner_execution() -> None:
-    runtime_input = {
-        "payload": {
-            "intent": "services_overview",
-            "action": "fact",
-            "tool_action": "catalog.service_query",
-        },
-        "default_intent": "master",
-        "reply_intent": "master",
-        "tool_action": "catalog.service_query",
-        "expected_reply_type": "service_choice",
-        "expected_reply_reason": "services_overview",
-        "text": "Могу подсказать услуги.",
-        "owner_cutover": "turn_executor.tool_reply_turn_outcome.v1",
-        "reply_source": "policy_core_guard",
-        "intent": "master",
-        "raw_tool_decision": "services_overview",
-        "normalized_tool_decision": "verifier_blocked",
-        "followup_prompt": "Какую услугу хотите?",
-        "services_overview_followup": True,
-        "conversation_state": "bot_active",
-        "collect_service_info_interrupt_active": True,
-        "info_sections": ["services_overview"],
-        "saved_message_present": True,
-        "master_override_applied": True,
-        "master_override_meta": {
-            "policy_semantic_override_block_reason": "master_signal_override_blocked"
-        },
-    }
-
-    expected_decision = TurnPlanner().build_tool_reply_owner_decision(
-        payload=runtime_input["payload"],
-        default_intent=runtime_input["default_intent"],
-        reply_intent=runtime_input["reply_intent"],
-        tool_action=runtime_input["tool_action"],
-        expected_reply_type=runtime_input["expected_reply_type"],
-        collect_service_info_interrupt_active=runtime_input[
-            "collect_service_info_interrupt_active"
-        ],
-        master_override_applied=runtime_input["master_override_applied"],
-    )
-    expected_state = DialogStateService().build_tool_reply_owner_state(
-        decision=expected_decision,
-        expected_reply_type=runtime_input["expected_reply_type"],
-        expected_reply_reason=runtime_input["expected_reply_reason"],
-        owner_cutover=runtime_input["owner_cutover"],
-    )
-    expected_payload = TurnExecutor().build_tool_reply_owner_cutover_payload(
-        decision=expected_decision,
-        dialog_state=expected_state,
-        text=runtime_input["text"],
-        owner_cutover=runtime_input["owner_cutover"],
-        reply_source=runtime_input["reply_source"],
-        reply_intent=runtime_input["reply_intent"],
-        intent=runtime_input["intent"],
-        tool_action=runtime_input["tool_action"],
-        raw_tool_decision=runtime_input["raw_tool_decision"],
-        normalized_tool_decision=runtime_input["normalized_tool_decision"],
-        followup_type=runtime_input["expected_reply_type"],
-        followup_reason=runtime_input["expected_reply_reason"],
-        followup_prompt=runtime_input["followup_prompt"],
-        services_overview_followup=runtime_input["services_overview_followup"],
-        conversation_state=runtime_input["conversation_state"],
-        collect_service_info_interrupt_active=runtime_input[
-            "collect_service_info_interrupt_active"
-        ],
-        info_sections=runtime_input["info_sections"],
-        saved_message_present=runtime_input["saved_message_present"],
-        master_override_meta=runtime_input["master_override_meta"],
-    )
-
-    execution = TurnExecutor().build_tool_reply_owner_execution(**runtime_input)
-
-    assert execution.decision == expected_decision
-    assert execution.dialog_state == expected_state
-    assert execution.payload == expected_payload
-
-
-def test_reasoning_core_finalizes_tool_reply_owner_execution(monkeypatch) -> None:
-    runtime_input = {
-        "payload": {
-            "intent": "services_overview",
-            "action": "fact",
-            "tool_action": "catalog.service_query",
-        },
-        "default_intent": "master",
-        "reply_intent": "master",
-        "tool_action": "catalog.service_query",
-        "expected_reply_type": "service_choice",
-        "expected_reply_reason": "services_overview",
-        "text": "Могу подсказать услуги.",
-        "owner_cutover": "turn_executor.tool_reply_turn_outcome.v1",
-        "reply_source": "policy_core_guard",
-        "intent": "master",
-        "raw_tool_decision": "services_overview",
-        "normalized_tool_decision": "verifier_blocked",
-        "followup_prompt": "Какую услугу хотите?",
-        "services_overview_followup": True,
-        "conversation_state": "bot_active",
-        "collect_service_info_interrupt_active": True,
-        "info_sections": ["services_overview"],
-        "saved_message_present": True,
-        "master_override_applied": True,
-        "master_override_meta": {
-            "policy_semantic_override_block_reason": "master_signal_override_blocked"
-        },
-    }
-    execution = TurnExecutor().build_tool_reply_owner_execution(**runtime_input)
-    captured: dict[str, object] = {}
-    sentinel_response = object()
-
-    def _fake_guard(**kwargs):
-        captured["guard_kwargs"] = kwargs
-        return None
-
-    def _fake_finalize(**kwargs):
-        captured["finalize_kwargs"] = kwargs
-        return sentinel_response
-
-    monkeypatch.setattr(
-        reasoning_core_service,
-        "_finalize_turn_planner_owner_cutover",
-        _fake_finalize,
-    )
-
-    result = reasoning_core_service._finalize_tool_reply_owner_execution(
-        payload=SimpleNamespace(),
-        db=SimpleNamespace(),
-        client_id=None,
-        conversation=SimpleNamespace(id="conv-1"),
-        saved_message=SimpleNamespace(id="msg-1"),
-        owner_execution=execution,
-        reply_text=runtime_input["text"],
-        reply_intent=runtime_input["reply_intent"],
-        reply_source=runtime_input["reply_source"],
-        owner_cutover=runtime_input["owner_cutover"],
-        tool_decision=runtime_input["normalized_tool_decision"],
-        expected_reply_type=runtime_input["expected_reply_type"],
-        expected_reply_reason=runtime_input["expected_reply_reason"],
-        maybe_apply_fact_guard=_fake_guard,
-        guard_decision_meta={"fact_source": "truth"},
-        allow_handover=True,
-        send_and_save=lambda text: (text, True),
-        transport_status_token="sent",
-        transport_reason_token=None,
-    )
-
-    assert result is sentinel_response
-    assert captured["guard_kwargs"] == {
-        "decision_meta": {"fact_source": "truth"},
-        "intent": "master",
-        "source": "policy_core_guard",
-        "allow_handover": True,
-    }
-    assert captured["finalize_kwargs"]["decision"] == execution.decision
-    assert captured["finalize_kwargs"]["artifact"] == execution.payload.artifact
-    assert (
-        captured["finalize_kwargs"]["trace_payload_override"]
-        == execution.payload.trace_payload_override
-    )
-    assert (
-        captured["finalize_kwargs"]["extra_trace_payloads"]
-        == execution.payload.extra_trace_payloads
-    )
-    assert (
-        captured["finalize_kwargs"]["extra_meta_updates"]
-        == execution.payload.extra_meta_updates
-    )
-    assert captured["finalize_kwargs"]["guard_response"] is None
 
 
 def test_policy_validation_boundary_fact_guard_uses_owner_primitives() -> None:
@@ -1407,37 +1048,6 @@ def test_policy_validation_boundary_fact_guard_escalates_at_limit() -> None:
     assert "attempt" not in captured
     assert "committed" not in captured
 
-
-def test_dialog_state_service_builds_tool_reply_owner_state_with_followup() -> None:
-    decision = TurnPlanner().build_tool_reply_owner_decision(
-        payload={
-            "intent": "booking",
-            "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "next_question": "datetime",
-            "open_questions": ["datetime"],
-        },
-        default_intent="booking",
-        reply_intent="booking",
-        tool_action="calendar.list_slots",
-        expected_reply_type="time",
-        pending_question_tool_followup=True,
-    )
-
-    state = DialogStateService().build_tool_reply_owner_state(
-        decision=decision,
-        expected_reply_type="time",
-        expected_reply_reason="booking_slot_guidance",
-        owner_cutover="turn_executor.tool_reply_turn_outcome.v1",
-    )
-
-    _load_schema("contracts/runtime/dialog_state.v1.jsonschema").validate(
-        state.model_dump(mode="json")
-    )
-    assert state.projections.expected_reply_type == "time"
-    assert state.projections.expected_reply_reason == "booking_slot_guidance"
-    assert state.interaction_state.interaction_owner == "booking_slot_guidance"
-    assert state.meta["owner_cutover"] == "turn_executor.tool_reply_turn_outcome.v1"
 
 
 def test_turn_executor_builds_typed_booking_prompt_owner_cutover_artifact() -> None:

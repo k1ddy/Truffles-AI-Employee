@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -601,66 +601,6 @@ def _finalize_turn_planner_owner_cutover(**_kwargs):
     raise RuntimeError("reasoning_core shadow owner path removed; use consultant_runtime")
 
 
-def _finalize_tool_reply_owner_execution(
-    *,
-    payload: WebhookRequest,
-    db: Session,
-    client_id: UUID | None,
-    conversation: Conversation,
-    saved_message: Message | None,
-    owner_execution: Any,
-    reply_text: str,
-    reply_intent: str | None,
-    reply_source: str,
-    owner_cutover: str,
-    tool_decision: str | None,
-    expected_reply_type: str | None,
-    expected_reply_reason: str | None,
-    maybe_apply_fact_guard: Callable[..., WebhookResponse | None],
-    guard_decision_meta: dict[str, object] | None,
-    allow_handover: bool,
-    send_and_save: Callable[[str], tuple[str, bool]],
-    transport_status_token: str | None,
-    transport_reason_token: str | None,
-    success_label: str = "LLM policy core tool response",
-) -> WebhookResponse | None:
-    guard_response = maybe_apply_fact_guard(
-        decision_meta=guard_decision_meta,
-        intent=reply_intent,
-        source=reply_source,
-        allow_handover=allow_handover,
-    )
-    return _finalize_turn_planner_owner_cutover(
-        payload=payload,
-        db=db,
-        client_id=client_id,
-        preflight_payload=None,
-        conversation_id=conversation.id,
-        decision=owner_execution.decision,
-        reply_text=reply_text,
-        reply_meta=None,
-        trace_meta=None,
-        owner_cutover=owner_cutover,
-        stage="llm_policy_core_tool",
-        success_label=success_label,
-        tool_decision=tool_decision,
-        outcome_action="reply",
-        outcome_source=reply_source,
-        artifact=owner_execution.payload.artifact,
-        existing_conversation=conversation,
-        existing_saved_message=saved_message,
-        send_and_save=send_and_save,
-        transport_status_token=transport_status_token,
-        transport_reason_token=transport_reason_token,
-        trace_payload_override=owner_execution.payload.trace_payload_override,
-        guard_response=guard_response,
-        extra_trace_payloads=owner_execution.payload.extra_trace_payloads,
-        extra_meta_updates=owner_execution.payload.extra_meta_updates,
-        followup_type=expected_reply_type,
-        question_reason=expected_reply_reason,
-    )
-
-
 async def run_reasoning_core(request: ReasoningCoreRequest) -> WebhookResponse:
     return await handle_webhook_payload(
         request.payload,
@@ -737,7 +677,6 @@ __all__ = [
     "_lookup_preexisting_duplicate_message",
     "_normalize_payload_for_delegation",
     "_run_secret_enforced_preflight",
-    "_finalize_tool_reply_owner_execution",
     "_finalize_turn_planner_owner_cutover",
     "handle_webhook_payload",
     "run_reasoning_core",

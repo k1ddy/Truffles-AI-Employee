@@ -386,31 +386,6 @@ class DialogStateService:
             meta=meta,
         )
 
-    def build_tool_reply_owner_state(
-        self,
-        *,
-        decision: PolicyDecision,
-        expected_reply_type: str | None,
-        expected_reply_reason: str | None = None,
-        owner_cutover: str | None = None,
-    ) -> DialogState:
-        expected_reply_token = self._normalize_projection_token(expected_reply_type)
-        if expected_reply_token:
-            return self.build_collect_owner_state(
-                decision=decision,
-                expected_reply_type=expected_reply_token,
-                expected_reply_reason=expected_reply_reason,
-                owner_cutover=owner_cutover,
-            )
-        return self.normalize(
-            {
-                "meta": {
-                    "writer": "dialog_state_service",
-                    "owner_cutover": owner_cutover,
-                }
-            }
-        )
-
     def project_pending_question_contract(
         self,
         contract: PendingQuestionContract | dict[str, Any] | None,
@@ -715,12 +690,6 @@ class DialogStateService:
         _remember("service", decision.slots.get("service"))
         _remember("customer", decision.slots.get("name"))
 
-        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        if "specialist" not in grounded:
-            _remember("specialist", tool_args.get("specialist_name") or tool_args.get("specialist_id"))
-        _remember("customer", tool_args.get("customer_name"))
-        _remember("booking_ref", tool_args.get("appointment_id"))
-
         entity_type_map = {
             "service": "service",
             "specialist": "specialist",
@@ -965,18 +934,6 @@ class DialogStateService:
         slots = decision.slots if isinstance(decision.slots, dict) else {}
         _remember("service", value=slots.get("service"), source_ref="decision_slots")
         _remember("customer", value=slots.get("name"), source_ref="decision_slots")
-
-        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        if "service" not in referents:
-            _remember("service", value=tool_args.get("service_query"), source_ref="tool_args")
-        if "specialist" not in referents:
-            _remember(
-                "specialist",
-                value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
-                source_ref="tool_args",
-            )
-        _remember("customer", value=tool_args.get("customer_name"), source_ref="tool_args")
-        _remember("booking_ref", value=tool_args.get("appointment_id"), source_ref="tool_args")
 
         if isinstance(execution_payload, dict):
             _remember(
@@ -1636,7 +1593,6 @@ class DialogStateService:
                 slot_values=slot_values,
             )
         if isinstance(merged_booking, dict):
-            tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
             semantic_contract = (
                 dict(decision.meta.get("semantic_contract"))
                 if isinstance(decision.meta.get("semantic_contract"), dict)
@@ -1657,13 +1613,12 @@ class DialogStateService:
                 specialist_value = self._normalize_projection_token(
                     specialist_referent.get(referent_field)
                     or execution_payload.get(specialist_key)
-                    or tool_args.get(specialist_key)
                     or merged_booking.get(specialist_key)
                 )
                 if specialist_value:
                     merged_booking[specialist_key] = specialist_value
             customer_name = self._normalize_projection_token(
-                execution_payload.get("customer_name") or tool_args.get("customer_name")
+                execution_payload.get("customer_name")
             )
             if customer_name and not merged_booking.get("name"):
                 merged_booking["name"] = customer_name

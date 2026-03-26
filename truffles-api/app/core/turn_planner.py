@@ -262,6 +262,7 @@ class TurnPlanner:
             "pending_question_act",
             "pending_question_target",
             "active_question_relation",
+            "alternate_datetime",
         ):
             value = self._normalize_token(payload.get(field_name))
             if value is not None:
@@ -272,59 +273,6 @@ class TurnPlanner:
         if entity_refs:
             contract["entity_refs"] = entity_refs
         return contract if len(contract) > 1 else None
-
-    def build_tool_reply_owner_decision(
-        self,
-        *,
-        payload: dict[str, Any] | None,
-        default_intent: str | None,
-        reply_intent: str | None,
-        tool_action: str | None,
-        expected_reply_type: str | None,
-        pending_question_tool_followup: bool = False,
-        pending_question_act: str | None = None,
-        collect_service_info_interrupt_active: bool = False,
-        master_override_applied: bool = False,
-    ) -> PolicyDecision:
-        tool_reply_payload = dict(payload) if isinstance(payload, dict) else {}
-        if not (
-            isinstance(tool_reply_payload.get("intent"), str)
-            and tool_reply_payload.get("intent").strip()
-        ):
-            tool_reply_payload["intent"] = (
-                default_intent or reply_intent or tool_action or "other"
-            )
-        if not (
-            isinstance(tool_reply_payload.get("action"), str)
-            and tool_reply_payload.get("action").strip()
-        ):
-            tool_reply_payload["action"] = "collect" if expected_reply_type else "fact"
-        if master_override_applied:
-            tool_reply_payload["intent"] = default_intent or "master"
-            tool_reply_payload["action"] = "fact"
-        if not (
-            isinstance(tool_reply_payload.get("tool_action"), str)
-            and tool_reply_payload.get("tool_action").strip()
-        ):
-            tool_reply_payload["tool_action"] = tool_action or "info"
-
-        interaction_owner = "tool_reply"
-        interaction_relation = "tool_reply"
-        if pending_question_tool_followup:
-            interaction_owner = "booking_slot_guidance"
-            interaction_relation = pending_question_act or "ask_about_requested_slot"
-        elif collect_service_info_interrupt_active:
-            interaction_owner = "booking_interrupt_info"
-            interaction_relation = "generic_info_interrupt"
-        elif master_override_applied:
-            interaction_owner = "policy_core_guard"
-            interaction_relation = "policy_guard"
-
-        return self.build_from_policy_override(
-            tool_reply_payload,
-            interaction_owner=interaction_owner,
-            interaction_relation=interaction_relation,
-        )
 
     def build_controlled_degrade(
         self,

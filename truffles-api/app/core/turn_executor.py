@@ -115,19 +115,6 @@ class OwnerExecutionArtifact(NamedTuple):
     runtime_meta: dict[str, Any]
 
 
-class ToolReplyOwnerCutoverPayload(NamedTuple):
-    artifact: OwnerExecutionArtifact
-    trace_payload_override: dict[str, Any]
-    extra_trace_payloads: list[dict[str, Any]]
-    extra_meta_updates: list[dict[str, Any]]
-
-
-class ToolReplyOwnerExecution(NamedTuple):
-    decision: PolicyDecision
-    dialog_state: DialogState
-    payload: ToolReplyOwnerCutoverPayload
-
-
 class TurnExecutor:
     """Assembles the typed turn result while runtime cutover is still pending."""
 
@@ -331,10 +318,12 @@ class TurnExecutor:
                 decision.meta.get("pending_question_act")
             )
         if pending_question_act == "slot_constraint" and next_slot == "datetime":
-            candidate_datetime = None
-            if isinstance(decision.tool_args, dict):
+            candidate_datetime = self._normalize_booking_slot(
+                decision.meta.get("alternate_datetime")
+            ) if isinstance(decision.meta, dict) else None
+            if not candidate_datetime:
                 candidate_datetime = self._normalize_booking_slot(
-                    decision.tool_args.get("candidate_datetime")
+                    (semantic_contract or {}).get("alternate_datetime")
                 )
             if candidate_datetime:
                 prompt = (
@@ -683,7 +672,7 @@ class TurnExecutor:
         service_name: str | None = None,
         tool_action: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        projected_args = dict(decision.tool_args) if isinstance(decision.tool_args, dict) else {}
+        projected_args: dict[str, Any] = {}
         referents = self._semantic_referents(semantic_contract)
         resolved_tool_action = self._normalize_fact_hint(tool_action) or self._normalize_fact_hint(
             decision.tool_action
@@ -693,7 +682,6 @@ class TurnExecutor:
         projected_service = self._normalize_execution_text(
             service_payload.get("value")
             or service_name
-            or projected_args.get("service_query")
         )
         if projected_service and resolved_tool_action in {
             "calendar.list_slots",
@@ -709,7 +697,7 @@ class TurnExecutor:
             else {}
         )
         projected_specialist_name = self._normalize_execution_text(
-            specialist_payload.get("value") or projected_args.get("specialist_name")
+            specialist_payload.get("value")
         )
         if projected_specialist_name and resolved_tool_action in {
             "calendar.list_slots",
@@ -718,7 +706,7 @@ class TurnExecutor:
             projected_args["specialist_name"] = projected_specialist_name
 
         projected_specialist_id = self._normalize_execution_text(
-            specialist_payload.get("entity_id") or projected_args.get("specialist_id")
+            specialist_payload.get("entity_id")
         )
         if (
             projected_specialist_id
@@ -729,12 +717,27 @@ class TurnExecutor:
         else:
             projected_args.pop("specialist_id", None)
 
+        booking_ref_payload = (
+            referents.get("booking_ref")
+            if isinstance(referents.get("booking_ref"), dict)
+            else {}
+        )
+        projected_booking_id = self._normalize_execution_text(
+            booking_ref_payload.get("entity_id") or booking_ref_payload.get("value")
+        )
+        if (
+            projected_booking_id
+            and resolved_tool_action in {"calendar.get_booking", "calendar.reschedule", "calendar.cancel"}
+            and self._looks_like_uuid(projected_booking_id)
+        ):
+            projected_args["appointment_id"] = projected_booking_id
+
         projected_args = self._sanitize_projected_tool_args(
             tool_action=resolved_tool_action,
             projected_args=projected_args,
         )
         projection: dict[str, Any] = {"projection_source": "semantic_contract"}
-        for key in ("service_query", "specialist_name", "specialist_id"):
+        for key in ("service_query", "specialist_name", "specialist_id", "appointment_id"):
             value = projected_args.get(key)
             if isinstance(value, str) and value.strip():
                 projection[key] = value.strip()
@@ -1006,19 +1009,6 @@ class TurnExecutor:
             )
         if "service" not in referents and isinstance(service_name, str) and service_name.strip():
             _remember("service", value=service_name, entity_type="service", source_ref="service_query")
-        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        if "service" not in referents:
-            _remember("service", value=tool_args.get("service_query"), entity_type="service", source_ref="tool_args")
-        if "specialist" not in referents:
-            _remember(
-                "specialist",
-                value=tool_args.get("specialist_name") or tool_args.get("specialist_id"),
-                entity_type="specialist",
-                source_ref="tool_args",
-            )
-        _remember("customer", value=tool_args.get("customer_name"), entity_type="customer", source_ref="tool_args")
-        _remember("booking_ref", value=tool_args.get("appointment_id"), entity_type="booking", source_ref="tool_args")
-
         if referents:
             contract["referents"] = referents
         return contract
@@ -1052,10 +1042,7 @@ class TurnExecutor:
             seen.add(normalized)
             refs.append(normalized)
 
-        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
-        for item in tool_args.get("info_refs") or []:
-            _remember(item)
-        _remember(tool_args.get("info_ref"))
+        _remember(decision.intent)
         for item in decision.pack_refs:
             _remember(item)
         for item in decision.fact_refs:
@@ -1109,10 +1096,6 @@ class TurnExecutor:
         projected_referent = self._normalize_execution_text(service_payload.get("value"))
         if projected_referent:
             return projected_referent
-        if isinstance(decision.tool_args, dict):
-            raw_service_query = decision.tool_args.get("service_query")
-            if isinstance(raw_service_query, str) and raw_service_query.strip():
-                return raw_service_query.strip()
         if isinstance(service_name, str) and service_name.strip():
             return service_name.strip()
         return None
@@ -1606,211 +1589,6 @@ class TurnExecutor:
             runtime_meta=runtime_meta,
         )
 
-    def build_tool_reply_owner_cutover_payload(
-        self,
-        *,
-        decision: PolicyDecision,
-        dialog_state: DialogState,
-        text: str,
-        owner_cutover: str,
-        reply_source: str,
-        reply_intent: str,
-        intent: str | None,
-        tool_action: str | None,
-        raw_tool_decision: str | None,
-        normalized_tool_decision: str | None,
-        followup_type: str | None,
-        followup_reason: str | None,
-        followup_prompt: str | None,
-        services_overview_followup: bool,
-        conversation_state: str,
-        pending_question_tool_followup: bool = False,
-        pending_question_act: str | None = None,
-        pending_question_target: str | None = None,
-        collect_service_info_interrupt_active: bool = False,
-        info_sections: list[str] | None = None,
-        saved_message_present: bool = False,
-        master_override_meta: dict[str, Any] | None = None,
-    ) -> ToolReplyOwnerCutoverPayload:
-        contract_status: TurnContractStatus = (
-            "degraded"
-            if normalized_tool_decision in {"contract_invalid", "verifier_blocked"}
-            else "ok"
-        )
-        artifact = self.build_owner_cutover_artifact(
-            decision=decision,
-            dialog_state=dialog_state,
-            text=text,
-            owner_cutover=owner_cutover,
-            transport_status="pending",
-            transport_reason=None,
-            downstream_tool_decision=normalized_tool_decision,
-            followup_type=followup_type,
-            followup_reason=followup_reason,
-            reason_code=decision.meta.get("reason") if isinstance(decision.meta, dict) else None,
-            stages=[
-                "ingress",
-                "decision_router",
-                "executor",
-                "realizer",
-                "llm_policy_core_tool",
-            ],
-            action="reply",
-            source=reply_source,
-            intent=intent,
-            tool_action=tool_action,
-            tool_decision=normalized_tool_decision,
-            followup_prompt=followup_prompt,
-            contract_status=contract_status,
-            meta={"services_overview_followup": services_overview_followup},
-        )
-        extra_trace_payloads: list[dict[str, Any]] = []
-        if pending_question_tool_followup:
-            extra_trace_payloads.append(
-                {
-                    "stage": "pending_question_interaction",
-                    "decision": "booking_slot_guidance",
-                    "state": conversation_state,
-                    "source": "tool_registry",
-                    "tool_action": tool_action,
-                    "tool_decision": normalized_tool_decision,
-                    "pending_question_act": pending_question_act,
-                    "pending_question_target": pending_question_target or "time",
-                    "expected_reply_type": followup_type,
-                }
-            )
-        if collect_service_info_interrupt_active:
-            interrupt_sections = (
-                list(info_sections)
-                if isinstance(info_sections, list) and info_sections
-                else ["services_overview"]
-            )
-            extra_trace_payloads.append(
-                {
-                    "stage": "booking_interrupt",
-                    "decision": "info_reply",
-                    "state": conversation_state,
-                    "booking_interrupt_info": True,
-                    "info_sections": interrupt_sections,
-                }
-            )
-
-        extra_meta_updates: list[dict[str, Any]] = [{"intent": reply_intent}]
-        if collect_service_info_interrupt_active and saved_message_present:
-            interrupt_sections = (
-                list(info_sections)
-                if isinstance(info_sections, list) and info_sections
-                else ["services_overview"]
-            )
-            extra_meta_updates.append(
-                {
-                    "booking_info_interrupt": True,
-                    "booking_interrupt_info": True,
-                    "booking_info_intents": interrupt_sections,
-                }
-            )
-        if pending_question_tool_followup and saved_message_present:
-            extra_meta_updates.append(
-                {
-                    "pending_question_act": pending_question_act,
-                    "pending_question_target": pending_question_target or "time",
-                    "pending_question_interaction": pending_question_act,
-                    "pending_question_owner": "booking_slot_guidance",
-                }
-            )
-        if isinstance(master_override_meta, dict):
-            extra_meta_updates.append(dict(master_override_meta))
-
-        return ToolReplyOwnerCutoverPayload(
-            artifact=artifact,
-            trace_payload_override={
-                "stage": "llm_policy_core_tool",
-                "decision": "reply",
-                "state": conversation_state,
-                "tool_action": tool_action,
-                "tool_decision": raw_tool_decision,
-                "reply_source": reply_source,
-                "turn_outcome": artifact.turn_outcome.to_metadata(),
-            },
-            extra_trace_payloads=extra_trace_payloads,
-            extra_meta_updates=extra_meta_updates,
-        )
-
-    def build_tool_reply_owner_execution(
-        self,
-        *,
-        payload: dict[str, Any] | None,
-        default_intent: str | None,
-        reply_intent: str | None,
-        tool_action: str | None,
-        expected_reply_type: str | None,
-        expected_reply_reason: str | None,
-        text: str,
-        owner_cutover: str,
-        reply_source: str,
-        intent: str | None,
-        raw_tool_decision: str | None,
-        normalized_tool_decision: str | None,
-        followup_prompt: str | None,
-        services_overview_followup: bool,
-        conversation_state: str,
-        pending_question_tool_followup: bool = False,
-        pending_question_act: str | None = None,
-        pending_question_target: str | None = None,
-        collect_service_info_interrupt_active: bool = False,
-        info_sections: list[str] | None = None,
-        saved_message_present: bool = False,
-        master_override_applied: bool = False,
-        master_override_meta: dict[str, Any] | None = None,
-    ) -> ToolReplyOwnerExecution:
-        tool_reply_decision = TurnPlanner().build_tool_reply_owner_decision(
-            payload=payload,
-            default_intent=default_intent,
-            reply_intent=reply_intent,
-            tool_action=tool_action,
-            expected_reply_type=expected_reply_type,
-            pending_question_tool_followup=pending_question_tool_followup,
-            pending_question_act=pending_question_act,
-            collect_service_info_interrupt_active=collect_service_info_interrupt_active,
-            master_override_applied=master_override_applied,
-        )
-        tool_reply_dialog_state = DialogStateService().build_tool_reply_owner_state(
-            decision=tool_reply_decision,
-            expected_reply_type=expected_reply_type,
-            expected_reply_reason=expected_reply_reason,
-            owner_cutover=owner_cutover,
-        )
-        tool_reply_payload = self.build_tool_reply_owner_cutover_payload(
-            decision=tool_reply_decision,
-            dialog_state=tool_reply_dialog_state,
-            text=text,
-            owner_cutover=owner_cutover,
-            reply_source=reply_source,
-            reply_intent=reply_intent or tool_action or default_intent or "info",
-            intent=intent,
-            tool_action=tool_action,
-            raw_tool_decision=raw_tool_decision,
-            normalized_tool_decision=normalized_tool_decision,
-            followup_type=expected_reply_type,
-            followup_reason=expected_reply_reason,
-            followup_prompt=followup_prompt,
-            services_overview_followup=services_overview_followup,
-            conversation_state=conversation_state,
-            pending_question_tool_followup=pending_question_tool_followup,
-            pending_question_act=pending_question_act,
-            pending_question_target=pending_question_target,
-            collect_service_info_interrupt_active=collect_service_info_interrupt_active,
-            info_sections=info_sections,
-            saved_message_present=saved_message_present,
-            master_override_meta=master_override_meta,
-        )
-        return ToolReplyOwnerExecution(
-            decision=tool_reply_decision,
-            dialog_state=tool_reply_dialog_state,
-            payload=tool_reply_payload,
-        )
-
-
 __all__ = [
     "BlockBoundaryRequest",
     "BoundaryExecutionArtifact",
@@ -1818,8 +1596,6 @@ __all__ = [
     "OwnerExecutionArtifact",
     "OwnerCutoverAction",
     "RuntimeExecutionResult",
-    "ToolReplyOwnerExecution",
-    "ToolReplyOwnerCutoverPayload",
     "ToolOutcome",
     "ToolStatus",
     "TurnContractStatus",
