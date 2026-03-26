@@ -378,8 +378,7 @@ def _build_conversation_snapshot(
     ).model_dump()
     booking_state = dict(context.get("booking") or {}) if isinstance(context.get("booking"), dict) else {}
     booking_active = bool(booking_state.get("active"))
-    current_goal = context.get("current_goal")
-    normalized_goal = current_goal.strip() if isinstance(current_goal, str) and current_goal.strip() else None
+    normalized_goal = dialog_state_service.project_context_current_goal(context)
 
     if expected_reply.get(_EXPECTED_REPLY_TYPE_FIELD) is None and isinstance(message_text, str) and message_text.strip():
         session_memory = context.get("session_memory") if isinstance(context.get("session_memory"), dict) else None

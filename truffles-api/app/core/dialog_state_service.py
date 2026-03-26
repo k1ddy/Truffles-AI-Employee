@@ -20,6 +20,7 @@ _SESSION_MEMORY_PENDING_SLOT_BY_REPLY_TYPE = {
 }
 _RUNTIME_CONTEXT_KEY = "consultant_runtime"
 _RUNTIME_PENDING_RESUME_SNAPSHOT_KEYS = {
+    "context_manager",
     "booking",
     "expected_reply_type",
     "expected_reply_reason",
@@ -473,6 +474,7 @@ class DialogStateService:
         self,
         context: dict[str, Any] | None,
         *,
+        runtime_key: str = _RUNTIME_CONTEXT_KEY,
         context_manager_key: str = "context_manager",
         canonical_state_key: str = "canonical_dialog_state",
         session_memory_key: str = "session_memory",
@@ -481,6 +483,50 @@ class DialogStateService:
     ) -> dict[str, Any] | None:
         if not isinstance(context, dict):
             return None
+
+        runtime_payload = context.get(runtime_key) if isinstance(context.get(runtime_key), dict) else None
+        runtime_dialog_state = (
+            runtime_payload.get("dialog_state") if isinstance(runtime_payload, dict) else None
+        )
+        runtime_projections = self.project_expected_reply_projections(
+            expected_reply_type=(
+                runtime_dialog_state.get("projections", {}).get("expected_reply_type")
+                if isinstance(runtime_dialog_state, dict)
+                and isinstance(runtime_dialog_state.get("projections"), dict)
+                else (runtime_payload.get("expected_reply_type") if isinstance(runtime_payload, dict) else None)
+            ),
+            expected_reply_reason=(
+                runtime_dialog_state.get("projections", {}).get("expected_reply_reason")
+                if isinstance(runtime_dialog_state, dict)
+                and isinstance(runtime_dialog_state.get("projections"), dict)
+                else (runtime_payload.get("expected_reply_reason") if isinstance(runtime_payload, dict) else None)
+            ),
+        )
+        runtime_pending_question_contract = self.project_pending_question_contract(
+            runtime_dialog_state.get("pending_question_contract")
+            if isinstance(runtime_dialog_state, dict)
+            else (runtime_payload.get("pending_question_contract") if isinstance(runtime_payload, dict) else None)
+        )
+        if runtime_pending_question_contract is not None:
+            return self.project_pending_question_contract(
+                runtime_pending_question_contract,
+                expected_reply_type=(
+                    None
+                    if runtime_pending_question_contract.get("expected_reply_type")
+                    else runtime_projections.expected_reply_type
+                ),
+                expected_reply_reason=(
+                    None
+                    if runtime_pending_question_contract.get("reason")
+                    else runtime_projections.expected_reply_reason
+                ),
+            )
+        if runtime_projections.expected_reply_type or runtime_projections.expected_reply_reason:
+            return self.project_pending_question_contract(
+                None,
+                expected_reply_type=runtime_projections.expected_reply_type,
+                expected_reply_reason=runtime_projections.expected_reply_reason,
+            )
 
         projections = self.project_expected_reply_projections(
             expected_reply_type=context.get(expected_reply_type_key),
@@ -534,6 +580,57 @@ class DialogStateService:
             expected_reply_type=projections.expected_reply_type,
             expected_reply_reason=projections.expected_reply_reason,
         )
+
+    def project_context_current_goal(
+        self,
+        context: dict[str, Any] | None,
+        *,
+        runtime_key: str = _RUNTIME_CONTEXT_KEY,
+        context_manager_key: str = "context_manager",
+        canonical_state_key: str = "canonical_dialog_state",
+    ) -> str | None:
+        if not isinstance(context, dict):
+            return None
+
+        runtime_payload = context.get(runtime_key) if isinstance(context.get(runtime_key), dict) else None
+        runtime_dialog_state = (
+            runtime_payload.get("dialog_state") if isinstance(runtime_payload, dict) else None
+        )
+        runtime_meta = runtime_dialog_state.get("meta") if isinstance(runtime_dialog_state, dict) else None
+        runtime_dialog_goal = self._normalize_projection_token(
+            runtime_meta.get("current_goal") if isinstance(runtime_meta, dict) else None
+        )
+        if runtime_dialog_goal:
+            return runtime_dialog_goal
+
+        context_manager = (
+            context.get(context_manager_key)
+            if isinstance(context.get(context_manager_key), dict)
+            else None
+        )
+        canonical_state = self.normalize_context_manager_canonical_state(
+            context_manager.get(canonical_state_key) if isinstance(context_manager, dict) else None
+        )
+        canonical_meta = canonical_state.get("meta") if isinstance(canonical_state, dict) else None
+        canonical_goal = self._normalize_projection_token(
+            canonical_meta.get("current_goal") if isinstance(canonical_meta, dict) else None
+        )
+        if canonical_goal:
+            return canonical_goal
+
+        manager_goal = self._normalize_projection_token(
+            context_manager.get("current_goal") if isinstance(context_manager, dict) else None
+        )
+        if manager_goal:
+            return manager_goal
+
+        runtime_goal = self._normalize_projection_token(
+            runtime_payload.get("current_goal") if isinstance(runtime_payload, dict) else None
+        )
+        if runtime_goal:
+            return runtime_goal
+
+        return self._normalize_projection_token(context.get("current_goal"))
 
     def project_pending_question_contract_with_projection_fallback(
         self,
@@ -1428,50 +1525,23 @@ class DialogStateService:
         )
         dialog_state_payload = runtime_payload.get("dialog_state")
         has_dialog_state_payload = isinstance(dialog_state_payload, dict)
-        runtime_has_canonical_question = bool(
-            isinstance(runtime_payload.get("pending_question_contract"), dict)
-            or (
-                has_dialog_state_payload
-                and isinstance(dialog_state_payload.get("pending_question_contract"), dict)
-            )
-        )
-        legacy_expected_reply_type = (
-            working_context.get("expected_reply_type")
-            if not runtime_has_canonical_question and not has_dialog_state_payload
-            else None
-        )
-        legacy_expected_reply_reason = (
-            working_context.get("expected_reply_reason")
-            if not runtime_has_canonical_question and not has_dialog_state_payload
-            else None
-        )
         booking_payload = self.normalize_booking_payload(runtime_payload.get("booking"))
         if booking_payload is None:
             booking_payload = self.normalize_booking_payload(working_context.get("booking"))
         pending_contract = {}
         expected_reply_type = None
         expected_reply_reason = None
-        legacy_or_shadow_goal = self._normalize_projection_token(
-            runtime_payload.get("current_goal")
-            or (None if runtime_payload else working_context.get("current_goal"))
-        )
+        legacy_or_shadow_goal = self.project_context_current_goal(working_context)
         current_goal = legacy_or_shadow_goal if not has_dialog_state_payload else None
 
         if not isinstance(dialog_state_payload, dict):
-            pending_contract = self.project_pending_question_contract_with_projection_fallback(
-                runtime_payload.get("pending_question_contract"),
-                expected_reply_type=runtime_payload.get("expected_reply_type")
-                or legacy_expected_reply_type,
-                expected_reply_reason=runtime_payload.get("expected_reply_reason")
-                or legacy_expected_reply_reason,
+            pending_contract = self.project_context_pending_question_contract(
+                working_context,
+                runtime_key=runtime_key,
             ) or {}
             expected_projections = self.project_expected_reply_projections(
-                expected_reply_type=pending_contract.get("expected_reply_type")
-                or runtime_payload.get("expected_reply_type")
-                or legacy_expected_reply_type,
-                expected_reply_reason=pending_contract.get("reason")
-                or runtime_payload.get("expected_reply_reason")
-                or legacy_expected_reply_reason,
+                expected_reply_type=pending_contract.get("expected_reply_type"),
+                expected_reply_reason=pending_contract.get("reason"),
             )
             expected_reply_type = expected_projections.expected_reply_type
             expected_reply_reason = expected_projections.expected_reply_reason
@@ -1766,18 +1836,9 @@ class DialogStateService:
             merged_booking,
             key="booking",
         )
-        if expected_reply_type:
-            updated_context["expected_reply_type"] = expected_reply_type
-        else:
-            updated_context.pop("expected_reply_type", None)
-        if expected_reply_reason:
-            updated_context["expected_reply_reason"] = expected_reply_reason
-        else:
-            updated_context.pop("expected_reply_reason", None)
-        if current_goal:
-            updated_context["current_goal"] = current_goal
-        else:
-            updated_context.pop("current_goal", None)
+        updated_context.pop("expected_reply_type", None)
+        updated_context.pop("expected_reply_reason", None)
+        updated_context.pop("current_goal", None)
 
         if decision.outcome == "HANDOFF":
             pending_resume = self.capture_pending_resume_payload(
@@ -2373,8 +2434,8 @@ class DialogStateService:
         payload: dict[str, Any] = {}
 
         context_manager = context.get("context_manager")
-        if "context_manager" in snapshot_keys and isinstance(context_manager, dict):
-            payload["context_manager"] = deepcopy(context_manager)
+        if "context_manager" in snapshot_keys:
+            payload["context_manager"] = deepcopy(context_manager) if isinstance(context_manager, dict) else {}
 
         pending_question_contract = self.project_context_pending_question_contract(context)
         if isinstance(payload.get("context_manager"), dict):
@@ -2382,6 +2443,11 @@ class DialogStateService:
                 payload.get("context_manager"),
                 pending_question_contract=pending_question_contract,
             )
+            projected_current_goal = self.project_context_current_goal(context)
+            if projected_current_goal:
+                payload["context_manager"]["current_goal"] = projected_current_goal
+            else:
+                payload["context_manager"].pop("current_goal", None)
 
         projections = self.project_expected_reply_projections(
             expected_reply_type=(
@@ -2405,6 +2471,13 @@ class DialogStateService:
             payload["intent_queue"] = deepcopy(intent_queue)
 
         booking = context.get("booking")
+        if not isinstance(booking, dict):
+            runtime_payload = (
+                context.get(_RUNTIME_CONTEXT_KEY)
+                if isinstance(context.get(_RUNTIME_CONTEXT_KEY), dict)
+                else None
+            )
+            booking = runtime_payload.get("booking") if isinstance(runtime_payload, dict) else None
         if "booking" in snapshot_keys and isinstance(booking, dict):
             payload["booking"] = deepcopy(booking)
 
@@ -2636,11 +2709,6 @@ class DialogStateService:
                 payload["prompt"] = boundary_prompt
             return payload
 
-        live_context_manager = (
-            context.get(context_manager_key)
-            if isinstance(context.get(context_manager_key), dict)
-            else None
-        )
         live_pending_question_contract = self.project_context_pending_question_contract(
             context,
             context_manager_key=context_manager_key,
@@ -2655,11 +2723,7 @@ class DialogStateService:
                 else None
             ),
             booking_state=context.get(booking_key) if isinstance(context.get(booking_key), dict) else None,
-            current_goal=(
-                live_context_manager.get("current_goal")
-                if isinstance(live_context_manager, dict)
-                else None
-            ),
+            current_goal=self.project_context_current_goal(context),
             session_memory=(
                 context.get(session_memory_key)
                 if isinstance(context.get(session_memory_key), dict)
@@ -2673,11 +2737,6 @@ class DialogStateService:
         if not isinstance(pending_resume, dict):
             return None
 
-        pending_context_manager = (
-            pending_resume.get(context_manager_key)
-            if isinstance(pending_resume.get(context_manager_key), dict)
-            else None
-        )
         pending_question_contract = self.project_context_pending_question_contract(
             pending_resume,
             context_manager_key=context_manager_key,
@@ -2696,11 +2755,7 @@ class DialogStateService:
                 if isinstance(pending_resume.get(booking_key), dict)
                 else None
             ),
-            current_goal=(
-                pending_context_manager.get("current_goal")
-                if isinstance(pending_context_manager, dict)
-                else None
-            ),
+            current_goal=self.project_context_current_goal(pending_resume),
             session_memory=(
                 pending_resume.get(session_memory_key)
                 if isinstance(pending_resume.get(session_memory_key), dict)

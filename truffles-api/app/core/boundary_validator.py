@@ -15,6 +15,18 @@ _BOUNDARY_OVERRIDE_PRESERVE_FIELDS = (
     "interaction_relation",
     "pending_question_contract",
 )
+_BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS = frozenset(
+    {
+        "semantic_contract",
+        "pending_question_contract",
+        "tool_args",
+        "tool_execution_projection",
+        "entity_refs",
+        "referents",
+        "slots",
+        "fact_refs",
+    }
+)
 
 
 class BoundaryOverride(BaseModel):
@@ -39,6 +51,36 @@ class BoundaryValidationResult(BaseModel):
 
 class BoundaryValidator:
     """Typed seam for future deterministic boundary validation."""
+
+    @staticmethod
+    def _sanitize_preserve_fields(fields: list[str] | tuple[str, ...] | None) -> list[str]:
+        allowed = set(_BOUNDARY_OVERRIDE_PRESERVE_FIELDS)
+        sanitized: list[str] = []
+        for field in fields or []:
+            if field in allowed and field not in sanitized:
+                sanitized.append(field)
+        return sanitized
+
+    @staticmethod
+    def _sanitize_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(meta, dict):
+            return {}
+        return {
+            key: value
+            for key, value in meta.items()
+            if isinstance(key, str) and key not in _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS
+        }
+
+    def _normalize_override(self, override: BoundaryOverride | None) -> BoundaryOverride | None:
+        if override is None:
+            return None
+        normalized = override.model_copy(
+            update={
+                "preserve_fields": self._sanitize_preserve_fields(override.preserve_fields),
+                "meta": self._sanitize_meta(override.meta),
+            }
+        )
+        return BoundaryOverride.model_validate(normalized.model_dump(mode="python"))
 
     @staticmethod
     def _build_turn_outcome_meta(
@@ -84,11 +126,11 @@ class BoundaryValidator:
         return BoundaryOverride(
             decision=decision,
             reason_code=reason_code,
-            preserve_fields=list(_BOUNDARY_OVERRIDE_PRESERVE_FIELDS),
+            preserve_fields=self._sanitize_preserve_fields(_BOUNDARY_OVERRIDE_PRESERVE_FIELDS),
             public_message=public_message,
             trace_message=trace_message,
             replan_hints=list(replan_hints),
-            meta=meta or {},
+            meta=self._sanitize_meta(meta),
         )
 
     def validate(
@@ -97,7 +139,9 @@ class BoundaryValidator:
         *,
         override: BoundaryOverride | None = None,
     ) -> BoundaryValidationResult:
-        return BoundaryValidationResult(decision=decision, override=override)
+        normalized_decision = PolicyDecision.model_validate(decision.model_dump(mode="python"))
+        normalized_override = self._normalize_override(override)
+        return BoundaryValidationResult(decision=normalized_decision, override=normalized_override)
 
     def build_degrade_override(
         self,

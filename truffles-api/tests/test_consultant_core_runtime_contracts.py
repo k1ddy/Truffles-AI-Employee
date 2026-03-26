@@ -597,6 +597,56 @@ def test_boundary_validator_builds_typed_block_override() -> None:
     assert override.replan_hints == ["require metadata.remoteJid"]
 
 
+def test_boundary_validator_strips_semantic_meta_from_override() -> None:
+    boundary = BoundaryValidator()
+
+    override = boundary.build_degrade_override(
+        reason_code="runtime_exception",
+        public_message="Fallback response skipped",
+        trace_message="reasoning_core exception degraded through new core",
+        meta={
+            "reply_kind": "handoff",
+            "activate_handoff": True,
+            "semantic_contract": {"capability": "duration"},
+            "pending_question_contract": {"expected_reply_type": "time"},
+            "tool_args": {"service_query": "Маникюр"},
+        },
+    )
+
+    assert override.meta == {
+        "reply_kind": "handoff",
+        "activate_handoff": True,
+    }
+
+
+def test_boundary_validator_validate_normalizes_override_surface() -> None:
+    boundary = BoundaryValidator()
+    decision = TurnPlanner().build_controlled_degrade(
+        reason_code="runtime_exception",
+        action="handoff",
+        intent="runtime_error",
+        interaction_owner="reasoning_core_exception_degrade",
+        interaction_relation="runtime_exception",
+    )
+    override = BoundaryOverride.model_validate(
+        {
+            "decision": "degrade",
+            "reason_code": "runtime_exception",
+            "preserve_fields": ["outcome", "tool_args", "outcome"],
+            "meta": {
+                "reply_kind": "handoff",
+                "semantic_contract": {"capability": "duration"},
+            },
+        }
+    )
+
+    validated = boundary.validate(decision, override=override)
+
+    assert validated.override is not None
+    assert validated.override.preserve_fields == ["outcome"]
+    assert validated.override.meta == {"reply_kind": "handoff"}
+
+
 def test_turn_executor_builds_typed_block_boundary_turn_result() -> None:
     planner = TurnPlanner()
     boundary = BoundaryValidator()
@@ -2720,7 +2770,9 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
     assert "pending_question_contract" not in runtime_payload
     assert "expected_reply_type" not in runtime_payload
     assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == expected_pending_question_contract
-    assert updated["expected_reply_type"] == "time"
+    assert "expected_reply_type" not in updated
+    loaded = DialogStateService().load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "time"
 
     runtime = ConsultantRuntime()
     conversation = SimpleNamespace(context={}, state="bot_active")

@@ -767,6 +767,51 @@ def test_dialog_state_service_captures_pending_resume_payload_as_isolated_snapsh
     assert payload["last_service_hint_at"] == "2026-03-15T10:00:00+00:00"
 
 
+def test_dialog_state_service_captures_pending_resume_payload_from_runtime_canonical_state() -> None:
+    service = DialogStateService()
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "pending_question_contract": {
+                    "expected_reply_type": " time ",
+                    "reason": " collect:datetime ",
+                    "next_question": " datetime ",
+                    "open_questions": [" datetime "],
+                },
+                "projections": {
+                    "expected_reply_type": "name",
+                    "expected_reply_reason": "stale_projection",
+                },
+                "meta": {"current_goal": " booking "},
+            },
+            "booking": {"active": True, "service": "Маникюр", "last_question": "datetime"},
+        }
+    }
+
+    payload = service.capture_pending_resume_payload(
+        context,
+        snapshot_keys={
+            "context_manager",
+            "expected_reply_type",
+            "expected_reply_reason",
+            "booking",
+        },
+    )
+
+    assert payload["context_manager"]["current_goal"] == "booking"
+    assert payload["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert payload["expected_reply_type"] == "time"
+    assert payload["expected_reply_reason"] == "collect:datetime"
+    assert payload["booking"] == {"active": True, "service": "Маникюр", "last_question": "datetime"}
+
+
 def test_dialog_state_service_restores_pending_resume_payload() -> None:
     service = DialogStateService()
     now = datetime(2026, 3, 15, 18, 40, tzinfo=timezone.utc)
@@ -2829,8 +2874,11 @@ def test_dialog_state_service_merges_fact_interrupt_slots_into_active_booking() 
     assert runtime_payload["booking"]["service"] == "Наращивание полигелем"
     assert "expected_reply_type" not in runtime_payload
     assert "expected_reply_reason" not in runtime_payload
-    assert updated["expected_reply_type"] == "service_choice"
-    assert updated["expected_reply_reason"] == "collect:service"
+    assert "expected_reply_type" not in updated
+    assert "expected_reply_reason" not in updated
+    loaded = service.load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "service_choice"
+    assert loaded["expected_reply_reason"] == "collect:service"
     assert dialog_state.current_referents.service == "Наращивание полигелем"
     assert booking_payload["service"] == "Наращивание полигелем"
 
@@ -2924,8 +2972,11 @@ def test_dialog_state_service_preserves_active_booking_contract_across_fact_inte
     runtime_payload = updated["consultant_runtime"]
     assert "expected_reply_type" not in runtime_payload
     assert "expected_reply_reason" not in runtime_payload
-    assert updated["expected_reply_type"] == "time"
-    assert updated["expected_reply_reason"] == "collect:datetime"
+    assert "expected_reply_type" not in updated
+    assert "expected_reply_reason" not in updated
+    loaded = service.load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "time"
+    assert loaded["expected_reply_reason"] == "collect:datetime"
     assert dialog_state.pending_question_contract.reason == "collect:datetime"
     assert dialog_state.pending_question_contract.pending_question_act is None
     assert dialog_state.pending_question_contract.pending_question_target == "time"
@@ -3061,8 +3112,11 @@ def test_dialog_state_service_fact_owner_contract_overrides_stale_booking_follow
     assert "expected_reply_type" not in runtime_payload
     assert "expected_reply_reason" not in runtime_payload
     assert "pending_question_contract" not in runtime_payload
-    assert updated["expected_reply_type"] == "name"
-    assert updated["expected_reply_reason"] == "collect:name"
+    assert "expected_reply_type" not in updated
+    assert "expected_reply_reason" not in updated
+    loaded = service.load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "name"
+    assert loaded["expected_reply_reason"] == "collect:name"
     assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
         "expected_reply_type": "name",
         "reason": "collect:name",
@@ -3197,8 +3251,11 @@ def test_dialog_state_service_check_booking_fact_keeps_owner_reference_followup_
     assert "expected_reply_type" not in runtime_payload
     assert "expected_reply_reason" not in runtime_payload
     assert "pending_question_contract" not in runtime_payload
-    assert updated["expected_reply_type"] == "name"
-    assert updated["expected_reply_reason"] == "calendar_get_booking_collect_reference"
+    assert "expected_reply_type" not in updated
+    assert "expected_reply_reason" not in updated
+    loaded = service.load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "name"
+    assert loaded["expected_reply_reason"] == "calendar_get_booking_collect_reference"
     assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
         "expected_reply_type": "name",
         "reason": "calendar_get_booking_collect_reference",
@@ -3387,7 +3444,9 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
 
     runtime_payload = updated["consultant_runtime"]
     assert "expected_reply_type" not in runtime_payload
-    assert updated["expected_reply_type"] == "time"
+    assert "expected_reply_type" not in updated
+    loaded = service.load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "time"
     assert dialog_state.pending_question_contract.reason == "collect:datetime"
     assert dialog_state.pending_question_contract.pending_question_act is None
     assert dialog_state.pending_question_contract.pending_question_target == "specialist"
