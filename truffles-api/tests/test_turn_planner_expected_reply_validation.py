@@ -228,3 +228,43 @@ def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monk
     assert decision.source == "llm_policy_core"
     assert decision.interaction.owner == "llm_policy_core"
     assert decision.slots == {"datetime": "завтра 15:00"}
+
+
+def test_plan_delegates_context_assembly_to_policy_core_route(monkeypatch):
+    planner = TurnPlanner()
+    captured_kwargs: dict[str, object] = {}
+
+    def _route_llm_policy_core(message_text: str, **kwargs):
+        captured_kwargs["message_text"] = message_text
+        captured_kwargs.update(kwargs)
+        return {
+            "payload": {
+                "action": "collect",
+                "intent": "booking",
+                "tool_action": "collect",
+                "slots": {"service": "Маникюр"},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "goal": "booking",
+                "reason": "llm_policy_core_collect",
+            }
+        }
+
+    monkeypatch.setattr(
+        "app.services.intent_service.route_llm_policy_core",
+        _route_llm_policy_core,
+    )
+
+    decision = planner.plan(
+        message_text="Хочу записаться на маникюр",
+        client_slug="demo_salon",
+        booking_state={"active": True, "service": "Маникюр"},
+        memory_summary="Клиент хочет маникюр",
+    )
+
+    assert decision.source == "llm_policy_core"
+    assert captured_kwargs["message_text"] == "Хочу записаться на маникюр"
+    assert captured_kwargs["client_slug"] == "demo_salon"
+    assert captured_kwargs["memory_summary"] == "Клиент хочет маникюр"
+    assert "info_refs" not in captured_kwargs
+    assert "consult_refs" not in captured_kwargs

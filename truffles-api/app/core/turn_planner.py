@@ -5,17 +5,6 @@ from typing import Any, Iterable, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DecisionOutcome = Literal["FACT", "COLLECT", "HANDOFF"]
-
-_DEFAULT_INFO_REFS = [
-    "pricing",
-    "hours",
-    "duration",
-    "location",
-    "parking",
-    "promotions",
-    "master",
-    "contact",
-]
 _PLANNER_SLOT_ALIASES = {
     "service_query": "service",
     "time": "datetime",
@@ -46,6 +35,22 @@ class PendingQuestionContract(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
 
 
+class SemanticFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = "semantic_frame.v2"
+    user_goal: str | None = None
+    requested_effect: str | None = None
+    subject: dict[str, Any] = Field(default_factory=dict)
+    referents: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    continuation: dict[str, Any] = Field(default_factory=dict)
+    capability_selection: dict[str, Any] = Field(default_factory=dict)
+    needs_human: bool = False
+    reason: str | None = None
+
+
 class PolicyDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,6 +67,7 @@ class PolicyDecision(BaseModel):
     capability_refs: list[str] = Field(default_factory=list)
     risk_signals: list[str] = Field(default_factory=list)
     interaction: InteractionContract
+    semantic_frame: SemanticFrame = Field(default_factory=SemanticFrame)
     pending_question_contract: PendingQuestionContract = Field(default_factory=PendingQuestionContract)
     meta: dict[str, Any] = Field(default_factory=dict)
 
@@ -141,7 +147,6 @@ class TurnPlanner:
         memory_profile: dict[str, Any] | None = None,
         timing_context: dict[str, Any] | None = None,
     ) -> PolicyDecision:
-        from app.services.consult_pack_service import load_consult_playbook
         from app.services.intent_service import route_llm_policy_core
 
         normalized_message = self._normalize_token(message_text)
@@ -158,11 +163,8 @@ class TurnPlanner:
             memory_profile,
             slot_state=normalized_booking_state,
         )
-        consult_refs = self._load_consult_refs(load_consult_playbook, client_slug)
         policy_result = route_llm_policy_core(
             normalized_message,
-            info_refs=list(_DEFAULT_INFO_REFS),
-            consult_refs=consult_refs,
             memory_summary=memory_summary,
             memory_profile=normalized_memory_profile,
             client_slug=client_slug,
@@ -237,7 +239,13 @@ class TurnPlanner:
             payload.get("active_question_relation")
         )
         capability = self._normalize_token(payload.get("capability"))
+        entity_refs = self._normalize_entity_refs(payload.get("entity_refs"))
         pending_question = self._build_pending_question_contract(payload)
+        semantic_frame = self._build_semantic_frame_payload(
+            payload,
+            entity_refs=entity_refs,
+            pending_question=pending_question,
+        )
         meta = {
             "planner_source": "turn_planner",
             "synthetic_policy_decision": True,
@@ -260,10 +268,13 @@ class TurnPlanner:
             value = payload.get(key)
             if value is not None:
                 meta[key] = value
-        entity_refs = self._normalize_entity_refs(payload.get("entity_refs"))
         if entity_refs:
             meta["entity_refs"] = entity_refs
-        semantic_contract = self._build_semantic_contract_payload(payload, entity_refs=entity_refs)
+        semantic_contract = self._build_semantic_contract_payload(
+            payload,
+            entity_refs=entity_refs,
+            semantic_frame=semantic_frame,
+        )
         if semantic_contract:
             meta["semantic_contract"] = semantic_contract
         return PolicyDecision(
@@ -282,6 +293,7 @@ class TurnPlanner:
                 target=self._normalize_token(payload.get("pending_question_target")),
                 relation=relation,
             ),
+            semantic_frame=semantic_frame,
             pending_question_contract=pending_question,
             meta=meta,
         )
@@ -291,27 +303,183 @@ class TurnPlanner:
         payload: dict[str, Any],
         *,
         entity_refs: list[dict[str, Any]] | None = None,
+        semantic_frame: SemanticFrame | None = None,
     ) -> dict[str, Any] | None:
         contract: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
-        for field_name in (
-            "subject_kind",
-            "capability",
-            "temporal_scope",
-            "resolution_mode",
-            "pending_question_act",
-            "pending_question_target",
-            "active_question_relation",
-            "alternate_datetime",
-        ):
-            value = self._normalize_token(payload.get(field_name))
+        frame_payload = (
+            semantic_frame.model_dump(mode="python", exclude_none=True)
+            if isinstance(semantic_frame, SemanticFrame)
+            else {}
+        )
+        subject = frame_payload.get("subject") if isinstance(frame_payload.get("subject"), dict) else {}
+        constraints = (
+            frame_payload.get("constraints")
+            if isinstance(frame_payload.get("constraints"), dict)
+            else {}
+        )
+        continuation = (
+            frame_payload.get("continuation")
+            if isinstance(frame_payload.get("continuation"), dict)
+            else {}
+        )
+        capability_selection = (
+            frame_payload.get("capability_selection")
+            if isinstance(frame_payload.get("capability_selection"), dict)
+            else {}
+        )
+        field_sources = (
+            ("subject_kind", subject.get("kind")),
+            ("capability", capability_selection.get("capability")),
+            ("temporal_scope", constraints.get("temporal_scope")),
+            ("resolution_mode", capability_selection.get("resolution_mode")),
+            ("pending_question_act", continuation.get("pending_question_act")),
+            ("pending_question_target", continuation.get("pending_question_target")),
+            ("active_question_relation", continuation.get("active_question_relation")),
+            ("alternate_datetime", constraints.get("alternate_datetime")),
+        )
+        for field_name, semantic_value in field_sources:
+            value = self._normalize_token(semantic_value)
+            if value is None:
+                value = self._normalize_token(payload.get(field_name))
             if value is not None:
                 contract[field_name] = value
-        referents = self._normalize_referents(payload.get("referents"))
+        referents = self._normalize_referents(
+            frame_payload.get("referents")
+            if isinstance(frame_payload.get("referents"), dict)
+            else payload.get("referents")
+        )
         if referents:
             contract["referents"] = referents
         if entity_refs:
             contract["entity_refs"] = entity_refs
         return contract if len(contract) > 1 else None
+
+    def _build_semantic_frame_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        entity_refs: list[dict[str, Any]] | None = None,
+        pending_question: PendingQuestionContract | None = None,
+    ) -> SemanticFrame:
+        normalized_slots = self._normalize_planner_slots(payload.get("slots"))
+        normalized_referents = self._normalize_referents(payload.get("referents"))
+        action = self._normalize_token(payload.get("action")) or "handoff"
+        tool_action_hint = self._normalize_token(
+            payload.get("tool_action_hint") or payload.get("tool_action")
+        )
+        subject_kind = self._normalize_token(payload.get("subject_kind"))
+        preferred_referent_key = {
+            "service": "service",
+            "specialist": "specialist",
+            "branch": "branch",
+            "booking": "booking_ref",
+        }.get(subject_kind or "")
+        preferred_referent = (
+            normalized_referents.get(preferred_referent_key)
+            if preferred_referent_key is not None
+            else None
+        )
+        subject: dict[str, Any] = {}
+        if subject_kind:
+            subject["kind"] = subject_kind
+        subject_value = None
+        if isinstance(preferred_referent, dict):
+            subject_value = self._normalize_token(preferred_referent.get("value"))
+        if subject_value is None:
+            subject_value = self._normalize_token(normalized_slots.get("service"))
+        if subject_value:
+            subject["value"] = subject_value
+        if entity_refs:
+            subject["entity_refs"] = list(entity_refs)
+
+        continuation: dict[str, Any] = {}
+        pending_payload = (
+            pending_question.model_dump(mode="python", exclude_none=True)
+            if isinstance(pending_question, PendingQuestionContract)
+            else {}
+        )
+        for field_name in (
+            "expected_reply_type",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+            "next_question",
+        ):
+            value = self._normalize_token(pending_payload.get(field_name))
+            if value:
+                continuation[field_name] = value
+        open_questions = self._normalize_list(pending_payload.get("open_questions"))
+        if open_questions:
+            continuation["open_questions"] = open_questions
+        if normalized_slots:
+            continuation["slot_values"] = dict(normalized_slots)
+
+        constraints: dict[str, Any] = {}
+        temporal_scope = self._normalize_token(payload.get("temporal_scope"))
+        if temporal_scope:
+            constraints["temporal_scope"] = temporal_scope
+        alternate_datetime = self._normalize_token(payload.get("alternate_datetime"))
+        if alternate_datetime:
+            constraints["alternate_datetime"] = alternate_datetime
+        risk_signals = self._normalize_list(payload.get("risk_signals"))
+        if risk_signals:
+            constraints["risk_signals"] = risk_signals
+
+        preferences: dict[str, Any] = {}
+        specialist_referent = normalized_referents.get("specialist")
+        if isinstance(specialist_referent, dict) and specialist_referent:
+            preferences["specialist"] = dict(specialist_referent)
+
+        capability_selection: dict[str, Any] = {}
+        capability = self._normalize_token(payload.get("capability"))
+        if capability:
+            capability_selection["capability"] = capability
+        resolution_mode = self._normalize_token(payload.get("resolution_mode"))
+        if resolution_mode:
+            capability_selection["resolution_mode"] = resolution_mode
+        if tool_action_hint:
+            capability_selection["tool_action_hint"] = tool_action_hint
+        pack_refs = self._normalize_list(payload.get("pack_refs"))
+        if pack_refs:
+            capability_selection["pack_refs"] = pack_refs
+
+        requested_effect = self._resolve_requested_effect(
+            action=action,
+            tool_action_hint=tool_action_hint,
+        )
+        user_goal = self._normalize_token(payload.get("goal")) or self._normalize_token(
+            payload.get("intent")
+        )
+        reason = self._normalize_token(payload.get("reason"))
+
+        return SemanticFrame(
+            user_goal=user_goal,
+            requested_effect=requested_effect,
+            subject=subject,
+            referents=normalized_referents,
+            constraints=constraints,
+            preferences=preferences,
+            continuation=continuation,
+            capability_selection=capability_selection,
+            needs_human=bool(payload.get("needs_manager")) or action == "handoff",
+            reason=reason,
+        )
+
+    def _resolve_requested_effect(
+        self,
+        *,
+        action: str,
+        tool_action_hint: str | None,
+    ) -> str:
+        if action == "collect":
+            return "collect_missing_input"
+        if action == "handoff":
+            return "handoff_to_human"
+        if tool_action_hint == "calendar.book_slot":
+            return "commit_booking"
+        if tool_action_hint == "calendar.get_booking":
+            return "retrieve_booking"
+        return "deliver_grounded_fact"
 
     def build_controlled_degrade(
         self,
@@ -678,23 +846,12 @@ class TurnPlanner:
             return "collect"
         return "info"
 
-    def _load_consult_refs(self, loader, client_slug: str | None) -> list[str]:
-        playbook, error = loader(client_slug)
-        if error or not playbook:
-            return []
-        refs: list[str] = []
-        for topic in getattr(playbook, "topics", []):
-            topic_id = self._normalize_token(getattr(topic, "id", None))
-            if topic_id:
-                refs.append(topic_id)
-        return refs
-
-
 __all__ = [
     "DecisionOutcome",
     "InboundTurnInput",
     "InteractionContract",
     "PendingQuestionContract",
     "PolicyDecision",
+    "SemanticFrame",
     "TurnPlanner",
 ]

@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.core.turn_planner import PendingQuestionContract, PolicyDecision
+from app.core.turn_planner import PendingQuestionContract, PolicyDecision, SemanticFrame
 from app.schemas.webhook import InteractionStateContract, MemoryContract
 
 
@@ -203,10 +203,32 @@ class StyleReferencePendingState(BaseModel):
     sha256: str | None = None
 
 
+class SemanticStateEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    at: str | None = None
+    source: str | None = None
+    outcome: str | None = None
+    action: str | None = None
+    intent: str | None = None
+    tool_action: str | None = None
+    reason_code: str | None = None
+    semantic_frame: SemanticFrame = Field(default_factory=SemanticFrame)
+
+
+class CanonicalSemanticState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = "canonical_semantic_state.v1"
+    materialized_frame: SemanticFrame = Field(default_factory=SemanticFrame)
+    event_log: list[SemanticStateEvent] = Field(default_factory=list)
+
+
 class DialogState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = "dialog_state.v1"
+    semantic_state: CanonicalSemanticState = Field(default_factory=CanonicalSemanticState)
     current_referents: CurrentReferents = Field(default_factory=CurrentReferents)
     pending_question_contract: PendingQuestionContract = Field(default_factory=PendingQuestionContract)
     interaction_state: InteractionState = Field(default_factory=InteractionState)
@@ -232,6 +254,674 @@ class DialogStateService:
         if isinstance(payload, DialogState):
             return payload
         return DialogState.model_validate(payload)
+
+    @staticmethod
+    def project_semantic_frame(
+        payload: SemanticFrame | dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if isinstance(payload, SemanticFrame):
+            frame = payload.model_dump(mode="python", exclude_none=True)
+        elif isinstance(payload, dict):
+            try:
+                frame = SemanticFrame.model_validate(payload).model_dump(
+                    mode="python",
+                    exclude_none=True,
+                )
+            except ValidationError:
+                return None
+        else:
+            return None
+        projected: dict[str, Any] = {}
+        for key, value in frame.items():
+            if key == "needs_human" and value is False:
+                continue
+            if value in (None, {}, []):
+                continue
+            projected[key] = value
+        if projected == {"schema_version": "semantic_frame.v2"}:
+            return None
+        return projected or None
+
+    def _normalize_semantic_referents(
+        self,
+        payload: Any,
+    ) -> dict[str, dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return {}
+        normalized: dict[str, dict[str, Any]] = {}
+        for referent_key in ("service", "specialist", "branch", "booking_ref", "customer"):
+            raw_payload = payload.get(referent_key)
+            if not isinstance(raw_payload, dict):
+                continue
+            item: dict[str, Any] = {}
+            for field_name in ("value", "entity_id", "entity_type", "source_ref"):
+                token = self._normalize_projection_token(raw_payload.get(field_name))
+                if token:
+                    item[field_name] = token
+            if item:
+                normalized[referent_key] = item
+        return normalized
+
+    def _current_referent_payloads(
+        self,
+        payload: CurrentReferents | dict[str, Any] | None,
+    ) -> dict[str, dict[str, str]]:
+        if isinstance(payload, CurrentReferents):
+            source = payload.model_dump(mode="python", exclude_none=True)
+        elif isinstance(payload, dict):
+            source = dict(payload)
+        else:
+            source = {}
+        normalized: dict[str, dict[str, str]] = {}
+        for source_key, referent_key, entity_type in (
+            ("service", "service", "service"),
+            ("specialist", "specialist", "specialist"),
+            ("branch", "branch", "branch"),
+            ("booking", "booking_ref", "booking"),
+            ("booking_ref", "booking_ref", "booking"),
+            ("customer", "customer", "customer"),
+        ):
+            value = self._normalize_projection_token(source.get(source_key))
+            if not value:
+                continue
+            normalized[referent_key] = {
+                "value": value,
+                "entity_type": entity_type,
+                "source_ref": "carryover",
+            }
+        return normalized
+
+    def project_current_goal_from_frame(
+        self,
+        frame: SemanticFrame | dict[str, Any] | None,
+    ) -> str | None:
+        payload = self.project_semantic_frame(frame)
+        if not isinstance(payload, dict):
+            return None
+        return self._normalize_projection_token(payload.get("user_goal"))
+
+    def project_current_referents_from_frame(
+        self,
+        frame: SemanticFrame | dict[str, Any] | None,
+    ) -> CurrentReferents:
+        referents = self._normalize_semantic_referents(
+            (self.project_semantic_frame(frame) or {}).get("referents")
+        )
+
+        def _value(referent_key: str) -> str | None:
+            payload = referents.get(referent_key)
+            if not isinstance(payload, dict):
+                return None
+            return self._normalize_projection_token(
+                payload.get("value") or payload.get("entity_id")
+            )
+
+        return CurrentReferents(
+            service=_value("service"),
+            specialist=_value("specialist"),
+            branch=_value("branch"),
+            booking=_value("booking_ref"),
+            customer=_value("customer"),
+        )
+
+    def project_grounded_referents_from_frame(
+        self,
+        frame: SemanticFrame | dict[str, Any] | None,
+    ) -> dict[str, str]:
+        current_referents = self.project_current_referents_from_frame(frame)
+        grounded: dict[str, str] = {}
+        for source_key, value in (
+            ("service", current_referents.service),
+            ("specialist", current_referents.specialist),
+            ("branch", current_referents.branch),
+            ("booking_ref", current_referents.booking),
+            ("customer", current_referents.customer),
+        ):
+            token = self._normalize_projection_token(value)
+            if token:
+                grounded[source_key] = token
+        return grounded
+
+    def _legacy_semantic_frame(
+        self,
+        *,
+        current_goal: str | None,
+        semantic_contract: dict[str, Any] | None,
+        pending_question_contract: dict[str, Any] | None,
+        booking_payload: dict[str, Any] | None,
+        current_referents_payload: CurrentReferents | dict[str, Any] | None = None,
+    ) -> SemanticFrame:
+        contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
+        pending = (
+            dict(pending_question_contract)
+            if isinstance(pending_question_contract, dict)
+            else {}
+        )
+        booking = dict(booking_payload) if isinstance(booking_payload, dict) else {}
+        subject: dict[str, Any] = {}
+        subject_kind = self._normalize_projection_token(contract.get("subject_kind"))
+        if subject_kind:
+            subject["kind"] = subject_kind
+        subject_value = None
+        referents = self._normalize_semantic_referents(contract.get("referents"))
+        for referent_key, payload in self._current_referent_payloads(
+            current_referents_payload
+        ).items():
+            referents.setdefault(referent_key, payload)
+        preferred_subject_key = {
+            "service": "service",
+            "specialist": "specialist",
+            "branch": "branch",
+            "booking": "booking_ref",
+        }.get(subject_kind or "")
+        if preferred_subject_key and isinstance(referents.get(preferred_subject_key), dict):
+            subject_value = self._normalize_projection_token(
+                referents[preferred_subject_key].get("value")
+            )
+        if subject_value is None:
+            subject_value = self._normalize_projection_token(booking.get("service"))
+        if subject_value:
+            subject["value"] = subject_value
+        entity_refs = contract.get("entity_refs")
+        if isinstance(entity_refs, list) and entity_refs:
+            subject["entity_refs"] = list(entity_refs)
+
+        constraints: dict[str, Any] = {}
+        for field_name in ("temporal_scope", "alternate_datetime", "grounding_provenance"):
+            value = contract.get(field_name)
+            if value not in (None, {}, []):
+                constraints[field_name] = value
+        preferences: dict[str, Any] = {}
+        specialist = referents.get("specialist")
+        if isinstance(specialist, dict) and specialist:
+            preferences["specialist"] = dict(specialist)
+        continuation: dict[str, Any] = {}
+        for field_name in (
+            "expected_reply_type",
+            "reason",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+            "next_question",
+        ):
+            value = pending.get(field_name)
+            if value not in (None, {}, []):
+                continuation[field_name] = value
+        open_questions = pending.get("open_questions")
+        if isinstance(open_questions, list) and open_questions:
+            continuation["open_questions"] = list(open_questions)
+        slot_values = {
+            key: value
+            for key, value in booking.items()
+            if key in _BOOKING_CONTEXT_SLOT_KEYS and isinstance(value, str) and value.strip()
+        }
+        if slot_values:
+            continuation["slot_values"] = slot_values
+
+        capability_selection: dict[str, Any] = {}
+        for field_name in ("capability", "resolution_mode"):
+            value = contract.get(field_name)
+            if value not in (None, {}, []):
+                capability_selection[field_name] = value
+        pack_id = constraints.get("grounding_provenance", {}).get("pack_id") if isinstance(
+            constraints.get("grounding_provenance"), dict
+        ) else None
+        if isinstance(pack_id, str) and pack_id.strip():
+            capability_selection["pack_refs"] = [pack_id.strip()]
+
+        return SemanticFrame(
+            user_goal=self._normalize_projection_token(current_goal),
+            requested_effect=None,
+            subject=subject,
+            referents=referents,
+            constraints=constraints,
+            preferences=preferences,
+            continuation=continuation,
+            capability_selection=capability_selection,
+            needs_human=bool(self._normalize_projection_token(current_goal) == "handoff"),
+            reason=self._normalize_projection_token(pending.get("reason")),
+        )
+
+    def _merge_semantic_frame(
+        self,
+        *,
+        existing: SemanticFrame | None,
+        decision: PolicyDecision,
+        execution_payload: dict[str, Any] | None,
+        current_goal: str | None,
+        booking_payload: dict[str, Any] | None,
+    ) -> SemanticFrame:
+        existing_payload = self.project_semantic_frame(existing) or {}
+        decision_payload = self.project_semantic_frame(decision.semantic_frame) or {}
+        materialized = deepcopy(existing_payload)
+        for section_name in (
+            "subject",
+            "referents",
+            "constraints",
+            "preferences",
+            "continuation",
+            "capability_selection",
+        ):
+            materialized.setdefault(section_name, {})
+        for key in ("user_goal", "requested_effect", "needs_human", "reason"):
+            if decision_payload.get(key) not in (None, {}, []):
+                materialized[key] = decision_payload[key]
+        for section_name in (
+            "subject",
+            "constraints",
+            "preferences",
+            "continuation",
+            "capability_selection",
+        ):
+            incoming = decision_payload.get(section_name)
+            if isinstance(incoming, dict) and incoming:
+                materialized[section_name].update(incoming)
+        incoming_pending_contract = self.project_pending_question_contract(
+            decision.pending_question_contract
+        )
+        if isinstance(incoming_pending_contract, dict) and incoming_pending_contract:
+            for field_name in (
+                "expected_reply_type",
+                "reason",
+                "pending_question_act",
+                "pending_question_target",
+                "active_question_relation",
+                "next_question",
+                "open_questions",
+            ):
+                materialized["continuation"].pop(field_name, None)
+            for field_name in (
+                "expected_reply_type",
+                "reason",
+                "pending_question_act",
+                "pending_question_target",
+                "active_question_relation",
+                "next_question",
+            ):
+                value = incoming_pending_contract.get(field_name)
+                if value not in (None, {}, []):
+                    materialized["continuation"][field_name] = value
+            open_questions = incoming_pending_contract.get("open_questions")
+            if isinstance(open_questions, list) and open_questions:
+                materialized["continuation"]["open_questions"] = list(open_questions)
+        incoming_referents = decision_payload.get("referents")
+        if isinstance(incoming_referents, dict) and incoming_referents:
+            for referent_key, referent_payload in incoming_referents.items():
+                if not isinstance(referent_payload, dict):
+                    continue
+                current_referent = materialized["referents"].get(referent_key)
+                if isinstance(current_referent, dict):
+                    merged = dict(current_referent)
+                    merged.update(referent_payload)
+                    materialized["referents"][referent_key] = merged
+                else:
+                    materialized["referents"][referent_key] = dict(referent_payload)
+
+        execution = dict(execution_payload) if isinstance(execution_payload, dict) else {}
+        execution_contract = (
+            dict(execution.get("semantic_contract"))
+            if isinstance(execution.get("semantic_contract"), dict)
+            else {}
+        )
+        if execution_contract:
+            subject_kind = self._normalize_projection_token(
+                execution_contract.get("subject_kind")
+            )
+            if subject_kind and "kind" not in materialized["subject"]:
+                materialized["subject"]["kind"] = subject_kind
+            execution_entity_refs = execution_contract.get("entity_refs")
+            if isinstance(execution_entity_refs, list) and execution_entity_refs:
+                existing_entity_refs = materialized["subject"].get("entity_refs")
+                if isinstance(existing_entity_refs, list) and existing_entity_refs:
+                    materialized["subject"]["entity_refs"] = [
+                        *existing_entity_refs,
+                        *execution_entity_refs,
+                    ]
+                else:
+                    materialized["subject"]["entity_refs"] = list(execution_entity_refs)
+            for field_name in ("temporal_scope", "alternate_datetime", "grounding_provenance"):
+                value = execution_contract.get(field_name)
+                if value not in (None, {}, []):
+                    materialized["constraints"][field_name] = value
+            for field_name in ("capability", "resolution_mode"):
+                value = execution_contract.get(field_name)
+                if value not in (None, {}, []):
+                    materialized["capability_selection"][field_name] = value
+            execution_referents = self._normalize_semantic_referents(
+                execution_contract.get("referents")
+            )
+            for referent_key, referent_payload in execution_referents.items():
+                current_referent = materialized["referents"].get(referent_key)
+                if isinstance(current_referent, dict):
+                    merged = dict(current_referent)
+                    merged.update(referent_payload)
+                    materialized["referents"][referent_key] = merged
+                else:
+                    materialized["referents"][referent_key] = referent_payload
+
+        slot_values = execution.get("slot_values")
+        if isinstance(slot_values, dict) and slot_values:
+            cleaned_slots = {
+                key: value.strip()
+                for key, value in slot_values.items()
+                if key in _BOOKING_CONTEXT_SLOT_KEYS and isinstance(value, str) and value.strip()
+            }
+            if cleaned_slots:
+                materialized["continuation"]["slot_values"] = cleaned_slots
+        if not materialized.get("user_goal"):
+            goal = self._normalize_projection_token(current_goal)
+            if goal:
+                materialized["user_goal"] = goal
+            elif isinstance(booking_payload, dict) and booking_payload:
+                materialized["user_goal"] = "booking"
+        if decision.outcome == "HANDOFF":
+            materialized["needs_human"] = True
+            materialized["requested_effect"] = "handoff_to_human"
+            materialized["continuation"] = {}
+
+        cleaned = {
+            key: value
+            for key, value in materialized.items()
+            if value not in (None, {}, [])
+        }
+        return SemanticFrame.model_validate(cleaned)
+
+    def _build_semantic_state(
+        self,
+        *,
+        existing_state: DialogState,
+        decision: PolicyDecision,
+        execution_payload: dict[str, Any] | None,
+        current_goal: str | None,
+        booking_payload: dict[str, Any] | None,
+        now: datetime,
+    ) -> CanonicalSemanticState:
+        existing_semantic_state = (
+            existing_state.semantic_state
+            if isinstance(existing_state.semantic_state, CanonicalSemanticState)
+            else CanonicalSemanticState()
+        )
+        base_frame = existing_semantic_state.materialized_frame
+        if not self.project_semantic_frame(base_frame):
+            base_frame = self._legacy_semantic_frame(
+                current_goal=current_goal,
+                semantic_contract=(
+                    dict(existing_state.meta.get("semantic_contract"))
+                    if isinstance(existing_state.meta.get("semantic_contract"), dict)
+                    else None
+                ),
+                pending_question_contract=self.project_pending_question_contract_with_projection_fallback(
+                    existing_state.pending_question_contract,
+                    expected_reply_type=existing_state.projections.expected_reply_type,
+                    expected_reply_reason=existing_state.projections.expected_reply_reason,
+                ),
+                booking_payload=booking_payload,
+                current_referents_payload=existing_state.current_referents,
+            )
+        materialized_frame = self._merge_semantic_frame(
+            existing=base_frame,
+            decision=decision,
+            execution_payload=execution_payload,
+            current_goal=current_goal,
+            booking_payload=booking_payload,
+        )
+        event = SemanticStateEvent(
+            at=now.isoformat(),
+            source=decision.source,
+            outcome=decision.outcome,
+            action=decision.action,
+            intent=decision.intent,
+            tool_action=decision.tool_action,
+            reason_code=self._normalize_projection_token(
+                (execution_payload or {}).get("reason_code")
+                or decision.meta.get("reason_code")
+            ),
+            semantic_frame=materialized_frame,
+        )
+        return CanonicalSemanticState(
+            materialized_frame=materialized_frame,
+            event_log=[*existing_semantic_state.event_log, event],
+        )
+
+    def _semantic_contract_from_frame(
+        self,
+        frame: SemanticFrame | dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        payload = self.project_semantic_frame(frame)
+        if not isinstance(payload, dict):
+            return None
+        subject = payload.get("subject") if isinstance(payload.get("subject"), dict) else {}
+        constraints = (
+            payload.get("constraints")
+            if isinstance(payload.get("constraints"), dict)
+            else {}
+        )
+        continuation = (
+            payload.get("continuation")
+            if isinstance(payload.get("continuation"), dict)
+            else {}
+        )
+        capability_selection = (
+            payload.get("capability_selection")
+            if isinstance(payload.get("capability_selection"), dict)
+            else {}
+        )
+        contract: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
+        for field_name, value in (
+            ("subject_kind", subject.get("kind")),
+            ("capability", capability_selection.get("capability")),
+            ("temporal_scope", constraints.get("temporal_scope")),
+            ("resolution_mode", capability_selection.get("resolution_mode")),
+            ("pending_question_act", continuation.get("pending_question_act")),
+            ("pending_question_target", continuation.get("pending_question_target")),
+            ("active_question_relation", continuation.get("active_question_relation")),
+            ("alternate_datetime", constraints.get("alternate_datetime")),
+        ):
+            if value not in (None, {}, []):
+                contract[field_name] = value
+        grounding_provenance = self._normalize_grounding_provenance(
+            constraints.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            contract["grounding_provenance"] = grounding_provenance
+        referents = self._normalize_semantic_referents(payload.get("referents"))
+        if referents:
+            contract["referents"] = referents
+        entity_refs = subject.get("entity_refs")
+        if isinstance(entity_refs, list) and entity_refs:
+            contract["entity_refs"] = list(entity_refs)
+        return contract if len(contract) > 1 else None
+
+    def _pending_question_from_frame(
+        self,
+        frame: SemanticFrame | dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        payload = self.project_semantic_frame(frame)
+        if not isinstance(payload, dict):
+            return None
+        continuation = (
+            payload.get("continuation")
+            if isinstance(payload.get("continuation"), dict)
+            else {}
+        )
+        projected = self.project_pending_question_contract(
+            continuation,
+            expected_reply_reason=self._normalize_projection_token(
+                (
+                    continuation.get("reason")
+                    if isinstance(continuation, dict)
+                    else None
+                )
+                or payload.get("reason")
+            ),
+        )
+        if not isinstance(projected, dict):
+            return None
+        if not any(
+            projected.get(field_name)
+            for field_name in (
+                "expected_reply_type",
+                "pending_question_act",
+                "pending_question_target",
+                "active_question_relation",
+                "next_question",
+            )
+        ) and not projected.get("open_questions"):
+            return None
+        return projected
+
+    def project_runtime_semantic_frame(
+        self,
+        state: DialogState,
+        *,
+        booking_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        frame = self.project_semantic_frame(state.semantic_state.materialized_frame)
+        if isinstance(frame, dict):
+            return frame
+        return self.project_semantic_frame(
+            self._legacy_semantic_frame(
+                current_goal=(
+                    state.meta.get("current_goal")
+                    if isinstance(state.meta, dict)
+                    else None
+                ),
+                semantic_contract=(
+                    dict(state.meta.get("semantic_contract"))
+                    if isinstance(state.meta, dict)
+                    and isinstance(state.meta.get("semantic_contract"), dict)
+                    else None
+                ),
+                pending_question_contract=self.project_pending_question_contract_with_projection_fallback(
+                    state.pending_question_contract,
+                    expected_reply_type=state.projections.expected_reply_type,
+                    expected_reply_reason=state.projections.expected_reply_reason,
+                ),
+                booking_payload=self.normalize_booking_payload(booking_payload),
+                current_referents_payload=state.current_referents,
+            )
+        )
+
+    def project_runtime_current_goal(
+        self,
+        state: DialogState,
+        *,
+        booking_payload: dict[str, Any] | None = None,
+    ) -> str | None:
+        return self.project_current_goal_from_frame(
+            self.project_runtime_semantic_frame(
+                state,
+                booking_payload=booking_payload,
+            )
+        )
+
+    def project_runtime_semantic_contract(
+        self,
+        state: DialogState,
+        *,
+        booking_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        return self._semantic_contract_from_frame(
+            self.project_runtime_semantic_frame(
+                state,
+                booking_payload=booking_payload,
+            )
+        )
+
+    def project_runtime_pending_question_contract(
+        self,
+        state: DialogState,
+        *,
+        booking_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        frame_pending_question_contract = self._pending_question_from_frame(
+            self.project_runtime_semantic_frame(
+                state,
+                booking_payload=booking_payload,
+            )
+        )
+        return self.project_pending_question_contract(
+            frame_pending_question_contract,
+            expected_reply_type=(
+                None
+                if isinstance(frame_pending_question_contract, dict)
+                and frame_pending_question_contract.get("expected_reply_type")
+                else state.projections.expected_reply_type
+            ),
+            expected_reply_reason=(
+                None
+                if isinstance(frame_pending_question_contract, dict)
+                and frame_pending_question_contract.get("reason")
+                else state.projections.expected_reply_reason
+            ),
+        )
+
+    def project_state_compatibility_fields(
+        self,
+        state: DialogState,
+        *,
+        expected_reply_type: str | None = None,
+        expected_reply_reason: str | None = None,
+    ) -> DialogState:
+        frame = state.semantic_state.materialized_frame
+        derived_pending_question_contract = self._pending_question_from_frame(frame)
+        if isinstance(derived_pending_question_contract, dict):
+            pending_question_contract = self.project_pending_question_contract(
+                derived_pending_question_contract,
+                expected_reply_type=(
+                    None
+                    if derived_pending_question_contract.get("expected_reply_type")
+                    else expected_reply_type
+                ),
+                expected_reply_reason=(
+                    None
+                    if derived_pending_question_contract.get("reason")
+                    else expected_reply_reason
+                ),
+            ) or {}
+        else:
+            pending_question_contract = self.project_pending_question_contract_with_projection_fallback(
+                state.pending_question_contract,
+                expected_reply_type=expected_reply_type,
+                expected_reply_reason=expected_reply_reason,
+            ) or {}
+        projections = self.project_expected_reply_projections(
+            state.projections,
+            expected_reply_type=(
+                pending_question_contract.get("expected_reply_type") or expected_reply_type
+            ),
+            expected_reply_reason=(
+                pending_question_contract.get("reason") or expected_reply_reason
+            ),
+        )
+        grounded_referents = self.project_grounded_referents_from_frame(frame)
+        interaction_update: dict[str, Any] = {}
+        if grounded_referents:
+            interaction_update["grounded_referents"] = grounded_referents
+        meta = dict(state.meta)
+        current_goal = self.project_current_goal_from_frame(frame)
+        if current_goal:
+            meta["current_goal"] = current_goal
+        else:
+            meta.pop("current_goal", None)
+        semantic_contract = self._semantic_contract_from_frame(frame)
+        if semantic_contract:
+            meta["semantic_contract"] = semantic_contract
+        else:
+            meta.pop("semantic_contract", None)
+        return state.model_copy(
+            update={
+                "current_referents": self.project_current_referents_from_frame(frame),
+                "pending_question_contract": PendingQuestionContract.model_validate(
+                    pending_question_contract
+                ),
+                "interaction_state": state.interaction_state.model_copy(
+                    update=interaction_update
+                ),
+                "projections": projections,
+                "meta": meta,
+            }
+        )
 
     def build_degraded_state(
         self,
@@ -488,6 +1178,18 @@ class DialogStateService:
         runtime_dialog_state = (
             runtime_payload.get("dialog_state") if isinstance(runtime_payload, dict) else None
         )
+        runtime_semantic_state = (
+            runtime_dialog_state.get("semantic_state")
+            if isinstance(runtime_dialog_state, dict)
+            and isinstance(runtime_dialog_state.get("semantic_state"), dict)
+            else None
+        )
+        runtime_frame = (
+            runtime_semantic_state.get("materialized_frame")
+            if isinstance(runtime_semantic_state, dict)
+            and isinstance(runtime_semantic_state.get("materialized_frame"), dict)
+            else None
+        )
         runtime_projections = self.project_expected_reply_projections(
             expected_reply_type=(
                 runtime_dialog_state.get("projections", {}).get("expected_reply_type")
@@ -502,10 +1204,16 @@ class DialogStateService:
                 else (runtime_payload.get("expected_reply_reason") if isinstance(runtime_payload, dict) else None)
             ),
         )
-        runtime_pending_question_contract = self.project_pending_question_contract(
+        runtime_pending_question_contract = self._pending_question_from_frame(
+            runtime_frame
+        ) or self.project_pending_question_contract(
             runtime_dialog_state.get("pending_question_contract")
             if isinstance(runtime_dialog_state, dict)
-            else (runtime_payload.get("pending_question_contract") if isinstance(runtime_payload, dict) else None)
+            else (
+                runtime_payload.get("pending_question_contract")
+                if isinstance(runtime_payload, dict)
+                else None
+            )
         )
         if runtime_pending_question_contract is not None:
             return self.project_pending_question_contract(
@@ -596,6 +1304,21 @@ class DialogStateService:
         runtime_dialog_state = (
             runtime_payload.get("dialog_state") if isinstance(runtime_payload, dict) else None
         )
+        runtime_semantic_state = (
+            runtime_dialog_state.get("semantic_state")
+            if isinstance(runtime_dialog_state, dict)
+            and isinstance(runtime_dialog_state.get("semantic_state"), dict)
+            else None
+        )
+        runtime_frame = (
+            runtime_semantic_state.get("materialized_frame")
+            if isinstance(runtime_semantic_state, dict)
+            and isinstance(runtime_semantic_state.get("materialized_frame"), dict)
+            else None
+        )
+        runtime_frame_goal = self.project_current_goal_from_frame(runtime_frame)
+        if runtime_frame_goal:
+            return runtime_frame_goal
         runtime_meta = runtime_dialog_state.get("meta") if isinstance(runtime_dialog_state, dict) else None
         runtime_dialog_goal = self._normalize_projection_token(
             runtime_meta.get("current_goal") if isinstance(runtime_meta, dict) else None
@@ -679,7 +1402,18 @@ class DialogStateService:
         )
 
     def project_legacy_fields(self, state: DialogState) -> dict[str, Any]:
-        projections = self.project_expected_reply_projections(state.projections)
+        pending_question_contract = self._pending_question_from_frame(
+            state.semantic_state.materialized_frame
+        ) or self.project_pending_question_contract_with_projection_fallback(
+            state.pending_question_contract,
+            expected_reply_type=state.projections.expected_reply_type,
+            expected_reply_reason=state.projections.expected_reply_reason,
+        ) or {}
+        projections = self.project_expected_reply_projections(
+            state.projections,
+            expected_reply_type=pending_question_contract.get("expected_reply_type"),
+            expected_reply_reason=pending_question_contract.get("reason"),
+        )
         return {
             "expected_reply_type": projections.expected_reply_type,
             "expected_reply_reason": projections.expected_reply_reason,
@@ -719,6 +1453,10 @@ class DialogStateService:
             if normalized:
                 grounded[key] = normalized
 
+        for key, value in self.project_grounded_referents_from_frame(
+            existing_state.semantic_state.materialized_frame
+        ).items():
+            _remember(key, value)
         _remember("service", existing_state.current_referents.service)
         _remember("specialist", existing_state.current_referents.specialist)
         _remember("branch", existing_state.current_referents.branch)
@@ -726,9 +1464,12 @@ class DialogStateService:
         _remember("customer", existing_state.current_referents.customer)
 
         decision_semantic_contract = (
-            dict(decision.meta.get("semantic_contract"))
-            if isinstance(decision.meta.get("semantic_contract"), dict)
-            else {}
+            self._semantic_contract_from_frame(decision.semantic_frame)
+            or (
+                dict(decision.meta.get("semantic_contract"))
+                if isinstance(decision.meta.get("semantic_contract"), dict)
+                else {}
+            )
         )
         execution_semantic_contract = (
             dict(execution_payload.get("semantic_contract"))
@@ -828,15 +1569,20 @@ class DialogStateService:
         execution_payload: dict[str, Any] | None,
         grounded_referents: dict[str, str] | None,
     ) -> dict[str, Any] | None:
-        existing_contract = (
+        existing_contract = self._semantic_contract_from_frame(
+            existing_state.semantic_state.materialized_frame
+        ) or (
             dict(existing_state.meta.get("semantic_contract"))
             if isinstance(existing_state.meta.get("semantic_contract"), dict)
             else {}
         )
         decision_contract = (
-            dict(decision.meta.get("semantic_contract"))
-            if isinstance(decision.meta.get("semantic_contract"), dict)
-            else {}
+            self._semantic_contract_from_frame(decision.semantic_frame)
+            or (
+                dict(decision.meta.get("semantic_contract"))
+                if isinstance(decision.meta.get("semantic_contract"), dict)
+                else {}
+            )
         )
         execution_contract = (
             dict(execution_payload.get("semantic_contract"))
@@ -1567,27 +2313,41 @@ class DialogStateService:
                 },
             }
         dialog_state = self.normalize(dialog_state_payload)
-        dialog_pending_contract = self.project_pending_question_contract_with_projection_fallback(
-            dialog_state.pending_question_contract,
+        semantic_state = dialog_state.semantic_state
+        if not self.project_semantic_frame(semantic_state.materialized_frame):
+            semantic_state = CanonicalSemanticState(
+                materialized_frame=self._legacy_semantic_frame(
+                    current_goal=current_goal,
+                    semantic_contract=(
+                        dict(dialog_state.meta.get("semantic_contract"))
+                        if isinstance(dialog_state.meta.get("semantic_contract"), dict)
+                        else None
+                    ),
+                    pending_question_contract=(
+                        pending_contract
+                        if isinstance(pending_contract, dict) and pending_contract
+                        else self.project_pending_question_contract(dialog_state.pending_question_contract)
+                    ),
+                    booking_payload=booking_payload,
+                    current_referents_payload=dialog_state.current_referents,
+                ),
+                event_log=list(semantic_state.event_log),
+            )
+        dialog_state = self.project_state_compatibility_fields(
+            dialog_state.model_copy(
+                update={
+                    "semantic_state": semantic_state,
+                }
+            ),
             expected_reply_type=expected_reply_type,
             expected_reply_reason=expected_reply_reason,
-        ) or {}
-        projections = self.project_expected_reply_projections(
-            dialog_state.projections,
-            expected_reply_type=dialog_pending_contract.get("expected_reply_type") or expected_reply_type,
-            expected_reply_reason=dialog_pending_contract.get("reason") or expected_reply_reason,
         )
-        dialog_state = dialog_state.model_copy(
-            update={
-                "pending_question_contract": PendingQuestionContract.model_validate(
-                    dialog_pending_contract
-                ),
-                "projections": projections,
-            }
+        expected_reply_type = dialog_state.projections.expected_reply_type
+        expected_reply_reason = dialog_state.projections.expected_reply_reason
+        semantic_goal = self._normalize_projection_token(
+            dialog_state.semantic_state.materialized_frame.user_goal
         )
-        expected_reply_type = projections.expected_reply_type
-        expected_reply_reason = projections.expected_reply_reason
-        dialog_goal = self._normalize_projection_token(
+        dialog_goal = semantic_goal or self._normalize_projection_token(
             dialog_state.meta.get("current_goal")
             if isinstance(dialog_state.meta, dict)
             else None
@@ -1769,6 +2529,34 @@ class DialogStateService:
             execution_payload=execution_payload,
             grounded_referents=grounded_referents,
         )
+        semantic_execution_payload = dict(execution_payload)
+        if semantic_contract and "semantic_contract" not in semantic_execution_payload:
+            semantic_execution_payload["semantic_contract"] = semantic_contract
+        semantic_state = self._build_semantic_state(
+            existing_state=loaded["dialog_state"],
+            decision=decision,
+            execution_payload=semantic_execution_payload,
+            current_goal=current_goal,
+            booking_payload=merged_booking,
+            now=now,
+        )
+        current_goal = current_goal or self._normalize_projection_token(
+            semantic_state.materialized_frame.user_goal
+        )
+        semantic_contract = (
+            self._semantic_contract_from_frame(semantic_state.materialized_frame)
+            or semantic_contract
+        )
+        if not expected_reply_type:
+            frame_pending_contract = self._pending_question_from_frame(
+                semantic_state.materialized_frame
+            ) or {}
+            frame_projections = self.project_expected_reply_projections(
+                expected_reply_type=frame_pending_contract.get("expected_reply_type"),
+                expected_reply_reason=frame_pending_contract.get("reason"),
+            )
+            expected_reply_type = frame_projections.expected_reply_type
+            expected_reply_reason = frame_projections.expected_reply_reason
 
         if expected_reply_type and owner_pending_question_contract:
             dialog_state = self.build_collect_owner_state(
@@ -1778,6 +2566,7 @@ class DialogStateService:
                 grounded_referents=grounded_referents,
             )
             dialog_state.meta["current_goal"] = current_goal
+            dialog_state.semantic_state = semantic_state
         elif expected_reply_type and decision.outcome == "COLLECT":
             dialog_state = self.build_collect_owner_state(
                 decision=decision,
@@ -1786,6 +2575,7 @@ class DialogStateService:
                 grounded_referents=grounded_referents,
             )
             dialog_state.meta["current_goal"] = current_goal
+            dialog_state.semantic_state = semantic_state
         elif expected_reply_type and current_goal == "booking":
             dialog_state = self._build_booking_followup_dialog_state(
                 base_state=loaded["dialog_state"],
@@ -1795,6 +2585,7 @@ class DialogStateService:
                 grounded_referents=grounded_referents,
             )
             dialog_state.meta["current_goal"] = current_goal
+            dialog_state.semantic_state = semantic_state
         else:
             interaction_state = InteractionState(
                 interaction_owner=decision.interaction.owner,
@@ -1803,6 +2594,7 @@ class DialogStateService:
                 grounded_referents=grounded_referents,
             )
             dialog_state = DialogState(
+                semantic_state=semantic_state,
                 current_referents=self._current_referents_from_grounded_referents(
                     grounded_referents
                 ),
@@ -1817,8 +2609,11 @@ class DialogStateService:
                     "current_goal": current_goal,
                 },
             )
-        if semantic_contract:
-            dialog_state.meta["semantic_contract"] = semantic_contract
+        dialog_state = self.project_state_compatibility_fields(
+            dialog_state,
+            expected_reply_type=expected_reply_type,
+            expected_reply_reason=expected_reply_reason,
+        )
 
         runtime_payload = {
             "schema_version": "consultant_runtime.v1",

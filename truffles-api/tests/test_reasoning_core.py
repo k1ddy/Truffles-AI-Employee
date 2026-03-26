@@ -98,6 +98,9 @@ def test_reasoning_core_pending_booking_reactivation_candidate_restores_dialog_s
     assert policy_core_calls[0]["memory_profile"] == {
         "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
         "active_slots": ["datetime"],
+        "pending_question_contract": {
+            "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
+        },
     }
     assert set(policy_core_calls[0]["consult_refs"]) == {
         "hair_aftercolor",
@@ -257,49 +260,79 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
                 "expected_reply_reason": "collect:service",
                 "current_goal": "booking",
                 "dialog_state": {
-                    "current_referents": {
-                        "service": "Маникюр",
-                        "specialist": "Айгерим",
-                    },
-                    "pending_question_contract": {
-                        "next_question": "service",
-                        "open_questions": ["service"],
-                        "expected_reply_type": "service_choice",
-                        "reason": "collect:service",
-                        "pending_question_target": "specialist",
-                        "active_question_relation": "referent_followup",
-                    },
-                    "interaction_state": {"interaction_owner": "booking_time_followup"},
-                    "meta": {
-                        "semantic_contract": {
-                            "contract_version": "semantic_contract.v1",
-                            "subject_kind": "specialist",
-                            "capability": "bookability",
-                            "resolution_mode": "referent_followup",
-                            "pending_question_target": "specialist",
-                            "active_question_relation": "referent_followup",
-                            "entity_refs": [
-                                {
-                                    "entity_id": "svc:manicure",
-                                    "entity_type": "service",
-                                    "value": "Маникюр",
-                                },
-                                {
-                                    "entity_id": "spec:aigerim",
-                                    "entity_type": "specialist",
-                                    "value": "Айгерим",
-                                },
-                            ],
+                    "semantic_state": {
+                        "schema_version": "canonical_semantic_state.v1",
+                        "materialized_frame": {
+                            "schema_version": "semantic_frame.v2",
+                            "user_goal": "booking",
+                            "requested_effect": "collect_missing_input",
+                            "subject": {
+                                "kind": "specialist",
+                                "value": "Айгерим",
+                            },
                             "referents": {
                                 "service": {
                                     "value": "Маникюр",
                                     "entity_id": "svc:manicure",
                                     "entity_type": "service",
+                                    "source_ref": "memory",
                                 },
                                 "specialist": {
                                     "value": "Айгерим",
                                     "entity_id": "spec:aigerim",
                                     "entity_type": "specialist",
+                                    "source_ref": "memory",
+                                },
+                            },
+                            "constraints": {},
+                            "preferences": {},
+                            "continuation": {
+                                "expected_reply_type": "service_choice",
+                                "reason": "collect:service",
+                                "pending_question_target": "specialist",
+                                "active_question_relation": "referent_followup",
+                                "next_question": "service",
+                                "open_questions": ["service"],
+                            },
+                            "capability_selection": {"capability": "bookability"},
+                            "needs_human": False,
+                            "reason": "specialist_followup",
+                        },
+                        "event_log": [],
+                    },
+                    "current_referents": {
+                        "service": "Педикюр",
+                        "specialist": "Алина",
+                    },
+                    "pending_question_contract": {
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                        "expected_reply_type": "name",
+                        "reason": "collect:name",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                    "interaction_state": {"interaction_owner": "booking_time_followup"},
+                    "meta": {
+                        "semantic_contract": {
+                            "contract_version": "semantic_contract.v1",
+                            "subject_kind": "service",
+                            "capability": "pricing",
+                            "resolution_mode": "policy_fact",
+                            "pending_question_target": "time",
+                            "active_question_relation": "ask_about_requested_slot",
+                            "entity_refs": [
+                                {
+                                    "entity_id": "svc:pedicure",
+                                    "entity_type": "service",
+                                    "value": "Педикюр",
+                                },
+                            ],
+                            "referents": {
+                                "service": {
+                                    "value": "Педикюр",
+                                    "entity_id": "svc:pedicure",
+                                    "entity_type": "service",
                                 },
                             },
                         }
@@ -318,7 +351,6 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
     assert len(policy_core_calls) == 1
     assert policy_core_calls[0]["memory_profile"] == {
         "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
-        "active_slots": ["datetime"],
         "current_referents": {
             "service": "Маникюр",
             "specialist": "Айгерим",
@@ -335,31 +367,20 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
             "contract_version": "semantic_contract.v1",
             "subject_kind": "specialist",
             "capability": "bookability",
-            "resolution_mode": "referent_followup",
             "pending_question_target": "specialist",
             "active_question_relation": "referent_followup",
-            "entity_refs": [
-                {
-                    "entity_id": "svc:manicure",
-                    "entity_type": "service",
-                    "value": "Маникюр",
-                },
-                {
-                    "entity_id": "spec:aigerim",
-                    "entity_type": "specialist",
-                    "value": "Айгерим",
-                },
-            ],
             "referents": {
                 "service": {
                     "value": "Маникюр",
                     "entity_id": "svc:manicure",
                     "entity_type": "service",
+                    "source_ref": "memory",
                 },
                 "specialist": {
                     "value": "Айгерим",
                     "entity_id": "spec:aigerim",
                     "entity_type": "specialist",
+                    "source_ref": "memory",
                 },
             },
         },
@@ -414,7 +435,7 @@ async def test_run_reasoning_core_delegates_to_handle_webhook_payload(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_reasoning_core_handle_webhook_payload_delegates_directly_to_consultant_runtime(monkeypatch) -> None:
+async def test_reasoning_core_handle_webhook_payload_delegates_directly_to_consultant_core_v2(monkeypatch) -> None:
     payload = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
@@ -433,7 +454,7 @@ async def test_reasoning_core_handle_webhook_payload_delegates_directly_to_consu
         captured["kwargs"] = kwargs
         return WebhookResponse(success=True, message="delegated", bot_response="ok")
 
-    monkeypatch.setattr("app.core.consultant_runtime.handle_webhook_payload", _delegate)
+    monkeypatch.setattr("app.core.consultant_core_v2.handle_webhook_payload", _delegate)
 
     response = await reasoning_core.handle_webhook_payload(
         payload,

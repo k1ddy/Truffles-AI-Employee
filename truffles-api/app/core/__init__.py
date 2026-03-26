@@ -5,11 +5,13 @@ from app.core.boundary_validator import (
     BoundaryValidator,
 )
 from app.core.dialog_state_service import (
+    CanonicalSemanticState,
     CurrentReferents,
     DialogState,
     DialogStateProjections,
     DialogStateService,
     InteractionState,
+    SemanticStateEvent,
 )
 from app.core.response_realizer import ReplyEnvelope, ReplyKind, ResponseRealizer
 from app.core.turn_executor import (
@@ -30,6 +32,7 @@ from app.core.turn_planner import (
     InteractionContract,
     PendingQuestionContract,
     PolicyDecision,
+    SemanticFrame,
     TurnPlanner,
 )
 
@@ -39,6 +42,7 @@ __all__ = [
     "BoundaryValidationResult",
     "BoundaryValidator",
     "BlockBoundaryRequest",
+    "CanonicalSemanticState",
     "CurrentReferents",
     "DegradeBoundaryRequest",
     "DecisionOutcome",
@@ -54,6 +58,8 @@ __all__ = [
     "ReplyEnvelope",
     "ReplyKind",
     "ResponseRealizer",
+    "SemanticFrame",
+    "SemanticStateEvent",
     "ToolOutcome",
     "ToolStatus",
     "TurnContractStatus",

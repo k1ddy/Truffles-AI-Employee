@@ -236,6 +236,10 @@ POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS = max(
     int(os.environ.get("LLM_POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS", "120")),
     40,
 )
+POLICY_CORE_CONTEXT_CARD_LIMIT = max(
+    int(os.environ.get("LLM_POLICY_CORE_CONTEXT_CARD_LIMIT", "6")),
+    1,
+)
 POLICY_CORE_STRUCTURED_OUTPUT = os.environ.get("LLM_POLICY_CORE_STRUCTURED_OUTPUT")
 POLICY_CORE_MICRO_TIMEOUT_SECONDS = max(
     float(os.environ.get("LLM_POLICY_CORE_MICRO_TIMEOUT_SECONDS", "0.8")),
@@ -660,6 +664,14 @@ def _build_policy_core_compact_input(policy_input: dict[str, Any]) -> dict[str, 
                 normalized_profile["active_slots"] = active_slots[:3]
             normalized_memory["profile"] = normalized_profile
         compact_input["memory"] = normalized_memory
+
+    context_payload = compact_input.get("context")
+    if isinstance(context_payload, dict):
+        normalized_context = _compact_policy_core_context(context_payload)
+        if normalized_context:
+            compact_input["context"] = normalized_context
+        else:
+            compact_input.pop("context", None)
 
     return compact_input
 
@@ -1649,6 +1661,292 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     return normalized or None
 
 
+def _normalize_policy_core_ref_candidates(refs: list[str] | None) -> list[str]:
+    if not isinstance(refs, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_ref in refs:
+        if not isinstance(raw_ref, str):
+            continue
+        token = raw_ref.strip().casefold()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized.append(token)
+    return normalized
+
+
+def _trim_policy_core_context_text(
+    value: Any,
+    *,
+    max_chars: int = POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS,
+) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = " ".join(value.split())
+    if not compact:
+        return None
+    return compact[:max_chars]
+
+
+def _build_policy_core_policy_cards(runtime: Any) -> list[dict[str, Any]]:
+    if runtime is None:
+        return []
+    policy_overrides = runtime.payload.policy_overrides.model_dump(exclude_none=True)
+    source = str(getattr(runtime, "source", "") or "runtime")
+    cards: list[dict[str, Any]] = []
+    for section_name, section_payload in policy_overrides.items():
+        if not isinstance(section_payload, dict):
+            continue
+        response = _trim_policy_core_context_text(
+            section_payload.get("response"),
+            max_chars=POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS,
+        )
+        if response is None:
+            continue
+        cards.append(
+            {
+                "section": section_name,
+                "response": response,
+                "source": source,
+            }
+        )
+    return cards[:POLICY_CORE_CONTEXT_CARD_LIMIT]
+
+
+def _build_policy_core_capability_cards(runtime: Any) -> list[dict[str, Any]]:
+    if runtime is None:
+        return []
+    source = str(getattr(runtime, "source", "") or "runtime")
+    payload = getattr(runtime, "payload", None)
+    if payload is None:
+        return []
+
+    cards: list[dict[str, Any]] = []
+    domain_slug = _trim_policy_core_context_text(getattr(payload, "domain_slug", None), max_chars=48)
+    if domain_slug:
+        cards.append({"kind": "domain", "source": source, "domain_slug": domain_slug})
+
+    providers = payload.providers.model_dump(exclude_none=True)
+    if providers:
+        cards.append({"kind": "providers", "source": source, **providers})
+
+    features = payload.features.model_dump(exclude_none=True)
+    if features:
+        cards.append({"kind": "features", "source": source, **features})
+
+    tools = payload.tools.model_dump(exclude_none=True)
+    if tools:
+        cards.append({"kind": "tool_policy", "source": source, **tools})
+
+    allowed_fact_scopes = [
+        scope.strip().casefold()
+        for scope in getattr(payload, "allowed_fact_scopes", None) or []
+        if isinstance(scope, str) and scope.strip()
+    ]
+    if allowed_fact_scopes:
+        cards.append(
+            {
+                "kind": "fact_scope",
+                "source": source,
+                "allowed_scopes": allowed_fact_scopes[:POLICY_CORE_CONTEXT_CARD_LIMIT],
+            }
+        )
+
+    handoff_policy = _trim_policy_core_context_text(
+        getattr(payload, "handoff_policy", None),
+        max_chars=40,
+    )
+    if handoff_policy:
+        cards.append(
+            {
+                "kind": "handoff_policy",
+                "source": source,
+                "policy": handoff_policy.casefold(),
+            }
+        )
+
+    return cards[:POLICY_CORE_CONTEXT_CARD_LIMIT]
+
+
+def _load_policy_core_consult_catalog(
+    client_slug: str | None,
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    normalized_client_slug = _trim_policy_core_context_text(client_slug, max_chars=64)
+    if not normalized_client_slug:
+        return [], {}
+
+    from app.services.consult_pack_service import load_consult_playbook
+
+    playbook, error = load_consult_playbook(normalized_client_slug)
+    if error or playbook is None:
+        return [], {}
+
+    refs: list[str] = []
+    cards: dict[str, dict[str, Any]] = {}
+    for topic in getattr(playbook, "topics", []):
+        topic_id = _trim_policy_core_context_text(getattr(topic, "id", None), max_chars=64)
+        if topic_id is None:
+            continue
+        normalized_topic_id = topic_id.casefold()
+        refs.append(normalized_topic_id)
+        card: dict[str, Any] = {"id": normalized_topic_id}
+
+        title = _trim_policy_core_context_text(getattr(topic, "title", None), max_chars=96)
+        if title:
+            card["title"] = title
+
+        summary = _trim_policy_core_context_text(getattr(topic, "summary", None), max_chars=160)
+        if summary:
+            card["summary"] = summary
+
+        risk_tags = [
+            str(tag).strip().casefold()
+            for tag in getattr(topic, "risk_tags", []) or []
+            if str(tag).strip()
+        ]
+        if risk_tags:
+            card["risk_tags"] = risk_tags[:POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX]
+
+        fact_requirements = [
+            str(item).strip().casefold()
+            for item in getattr(topic, "fact_requirements", []) or []
+            if str(item).strip()
+        ]
+        if fact_requirements:
+            card["fact_requirements"] = fact_requirements[
+                :POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX
+            ]
+
+        next_step = _trim_policy_core_context_text(getattr(topic, "next_step", None), max_chars=160)
+        if next_step:
+            card["next_step"] = next_step
+
+        cards[normalized_topic_id] = card
+    return refs, cards
+
+
+def _filter_policy_core_fact_refs(
+    namespace: str,
+    refs: list[str],
+) -> list[str]:
+    from app.services.capability_manifest_service import resolve_fact_scope_decision
+
+    filtered: list[str] = []
+    for ref in refs:
+        decision = resolve_fact_scope_decision(f"{namespace}.{ref}")
+        if decision.allowed:
+            filtered.append(ref)
+    return filtered
+
+
+def _build_policy_core_allowed_context(
+    *,
+    client_slug: str | None,
+    info_refs: list[str] | None,
+    consult_refs: list[str] | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    from app.services.capabilities_runtime import get_runtime_capabilities
+    from app.services.capability_manifest_service import resolve_tool_protocol_decision
+    from app.services.tool_registry_service import TOOL_ACTIONS
+
+    runtime = get_runtime_capabilities()
+    policy_cards = _build_policy_core_policy_cards(runtime)
+
+    if info_refs is None:
+        candidate_info_refs = list(_POLICY_CORE_DEFAULT_INFO_REFS)
+    else:
+        candidate_info_refs = _normalize_policy_core_ref_candidates(info_refs)
+    allowed_info_refs = _filter_policy_core_fact_refs("info", candidate_info_refs)
+
+    consult_card_catalog: dict[str, dict[str, Any]] = {}
+    if consult_refs is None:
+        candidate_consult_refs, consult_card_catalog = _load_policy_core_consult_catalog(
+            client_slug,
+        )
+    else:
+        candidate_consult_refs = _normalize_policy_core_ref_candidates(consult_refs)
+        if candidate_consult_refs:
+            _, consult_card_catalog = _load_policy_core_consult_catalog(client_slug)
+    allowed_consult_refs = _filter_policy_core_fact_refs("consult", candidate_consult_refs)
+
+    allowed_tool_actions: list[str] = []
+    info_context_available = bool(allowed_info_refs or policy_cards)
+    consult_context_available = bool(allowed_consult_refs)
+    for action in _POLICY_CORE_GENERIC_TOOL_ACTIONS:
+        if action == "info" and not info_context_available:
+            continue
+        if action == "consult" and not consult_context_available:
+            continue
+        allowed_tool_actions.append(action)
+
+    for tool_action in sorted(TOOL_ACTIONS):
+        if tool_action.startswith("catalog.") and not allowed_info_refs:
+            continue
+        if resolve_tool_protocol_decision(tool_action).allowed:
+            allowed_tool_actions.append(tool_action)
+
+    context_payload: dict[str, Any] = {}
+    capability_cards = _build_policy_core_capability_cards(runtime)
+    if capability_cards:
+        context_payload["capability_cards"] = capability_cards
+    if policy_cards:
+        context_payload["policy_cards"] = policy_cards
+    consult_cards = [
+        consult_card_catalog[ref]
+        for ref in allowed_consult_refs
+        if ref in consult_card_catalog
+    ][:POLICY_CORE_CONTEXT_CARD_LIMIT]
+    if consult_cards:
+        context_payload["consult_cards"] = consult_cards
+
+    return (
+        {
+            "tool_actions": allowed_tool_actions,
+            "info_refs": allowed_info_refs,
+            "consult_refs": allowed_consult_refs,
+        },
+        context_payload or None,
+    )
+
+
+def _compact_policy_core_context(context_payload: dict[str, Any]) -> dict[str, Any] | None:
+    normalized_context: dict[str, Any] = {}
+    for key in ("capability_cards", "policy_cards", "consult_cards"):
+        raw_cards = context_payload.get(key)
+        if not isinstance(raw_cards, list):
+            continue
+        compact_cards: list[dict[str, Any]] = []
+        for raw_card in raw_cards[:POLICY_CORE_CONTEXT_CARD_LIMIT]:
+            if not isinstance(raw_card, dict):
+                continue
+            compact_card: dict[str, Any] = {}
+            for field_name, raw_value in raw_card.items():
+                if isinstance(raw_value, str):
+                    compact_value = _trim_policy_core_context_text(
+                        raw_value,
+                        max_chars=POLICY_CORE_COMPACT_MEMORY_SUMMARY_MAX_CHARS,
+                    )
+                    if compact_value:
+                        compact_card[field_name] = compact_value
+                elif isinstance(raw_value, bool):
+                    compact_card[field_name] = raw_value
+                elif isinstance(raw_value, list):
+                    compact_items: list[str] = []
+                    for raw_item in raw_value[:POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX]:
+                        compact_item = _trim_policy_core_context_text(raw_item, max_chars=64)
+                        if compact_item and compact_item not in compact_items:
+                            compact_items.append(compact_item)
+                    if compact_items:
+                        compact_card[field_name] = compact_items
+            if compact_card:
+                compact_cards.append(compact_card)
+        if compact_cards:
+            normalized_context[key] = compact_cards
+    return normalized_context or None
+
+
 def _build_policy_core_pending_contract_from_expected_reply_type(
     expected_reply_type: str | None,
 ) -> dict[str, Any] | None:
@@ -1685,6 +1983,17 @@ ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE = {
     "time": "datetime",
     "name": "name",
 }
+_POLICY_CORE_DEFAULT_INFO_REFS = (
+    "pricing",
+    "hours",
+    "duration",
+    "location",
+    "parking",
+    "promotions",
+    "master",
+    "contact",
+)
+_POLICY_CORE_GENERIC_TOOL_ACTIONS = ("info", "consult", "booking", "handoff", "collect")
 CONTROLLER_ALLOWED_CLASSES = {
     "booking",
     "info_bundle",
@@ -2384,21 +2693,6 @@ def route_llm_policy_core(
         result["error"] = "budget_exceeded"
         return result
 
-    allowed_tool_actions = [
-        "info",
-        "consult",
-        "booking",
-        "handoff",
-        "collect",
-        "calendar.list_slots",
-        "calendar.book_slot",
-        "calendar.get_booking",
-        "calendar.reschedule",
-        "calendar.cancel",
-        "catalog.service_query",
-        "catalog.location",
-        "catalog.portfolio",
-    ]
     normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile) or {}
     if (
         isinstance(current_goal, str)
@@ -2416,15 +2710,23 @@ def route_llm_policy_core(
         if pending_contract:
             normalized_memory_profile["pending_question_contract"] = pending_contract
 
+    # Assemble the owner envelope from runtime manifests and candidate refs,
+    # rather than letting callers hardcode the full policy-core world.
+    allowed_payload, context_payload = _build_policy_core_allowed_context(
+        client_slug=client_slug,
+        info_refs=info_refs,
+        consult_refs=consult_refs,
+    )
+    allowed_tool_actions = list(allowed_payload.get("tool_actions") or [])
+    allowed_info_refs = list(allowed_payload.get("info_refs") or [])
+    allowed_consult_refs = list(allowed_payload.get("consult_refs") or [])
     policy_input: dict[str, Any] = {
         "task": "llm_policy_core",
         "message": message,
-        "allowed": {
-            "tool_actions": list(allowed_tool_actions),
-            "info_refs": list(info_refs or []),
-            "consult_refs": list(consult_refs or []),
-        },
+        "allowed": dict(allowed_payload),
     }
+    if context_payload:
+        policy_input["context"] = context_payload
     normalized_memory_summary = _normalize_policy_core_memory_summary(memory_summary)
     if normalized_memory_summary or normalized_memory_profile:
         policy_input["memory"] = {}
@@ -2804,7 +3106,7 @@ def route_llm_policy_core(
         return result
     allowed_pack_refs = {
         ref.strip()
-        for ref in list(info_refs or []) + list(consult_refs or [])
+        for ref in allowed_info_refs + allowed_consult_refs
         if isinstance(ref, str) and ref.strip()
     }
     if any(ref not in allowed_pack_refs for ref in contract.pack_refs):

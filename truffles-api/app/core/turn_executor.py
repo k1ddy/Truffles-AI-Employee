@@ -922,7 +922,25 @@ class TurnExecutor:
     def _build_execution_pending_question_contract(
         decision: PolicyDecision,
     ) -> dict[str, Any] | None:
-        return DialogStateService().project_pending_question_contract(
+        dialog_state_service = DialogStateService()
+        frame_pending_question_contract = dialog_state_service._pending_question_from_frame(
+            decision.semantic_frame
+        )
+        if isinstance(frame_pending_question_contract, dict):
+            return dialog_state_service.project_pending_question_contract(
+                frame_pending_question_contract,
+                expected_reply_type=(
+                    None
+                    if frame_pending_question_contract.get("expected_reply_type")
+                    else decision.pending_question_contract.expected_reply_type
+                ),
+                expected_reply_reason=(
+                    None
+                    if frame_pending_question_contract.get("reason")
+                    else decision.pending_question_contract.reason
+                ),
+            )
+        return dialog_state_service.project_pending_question_contract(
             decision.pending_question_contract,
         )
 
@@ -933,7 +951,9 @@ class TurnExecutor:
         booking_state: dict[str, Any] | None,
         service_name: str | None = None,
     ) -> dict[str, Any] | None:
-        base_contract = (
+        base_contract = DialogStateService()._semantic_contract_from_frame(
+            decision.semantic_frame
+        ) or (
             dict(decision.meta.get("semantic_contract"))
             if isinstance(decision.meta.get("semantic_contract"), dict)
             else {}

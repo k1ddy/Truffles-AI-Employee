@@ -2,9 +2,13 @@ import inspect
 import json
 import time
 from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 
+from app.schemas.capabilities import CapabilitiesPayload
+from app.schemas.consult import ConsultPlaybook
+from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
 from app.services.intent_service import (
     DomainIntent,
     ESCALATION_INTENTS,
@@ -846,6 +850,164 @@ class TestPolicyCoreTimeoutRetry:
             "open_questions": ["datetime"],
         }
 
+    def test_policy_core_assembles_manifest_scoped_dynamic_context(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        runtime = RuntimeCapabilities(
+            payload=CapabilitiesPayload.model_validate(
+                {
+                    "domain_slug": "beauty_salon",
+                    "providers": {"calendar_provider": "google_calendar"},
+                    "features": {"booking_mode": "confirm_slots"},
+                    "tools": {"allow": ["calendar.get_booking", "catalog.location"]},
+                    "allowed_fact_scopes": ["info.location", "consult.hair_damage"],
+                    "handoff_policy": "manager_request_only",
+                    "policy_overrides": {
+                        "payment_info": {"response": "Оплата только по счету"}
+                    },
+                }
+            ),
+            client_id=uuid4(),
+            branch_id=None,
+            source="client_capabilities",
+            has_records=True,
+            has_tool_policy_records=True,
+        )
+        playbook = ConsultPlaybook.model_validate(
+            {
+                "version": "v1",
+                "topics": [
+                    {
+                        "id": "hair_damage",
+                        "title": "Восстановление волос",
+                        "summary": "Советы по уходу после осветления и признаки риска.",
+                        "allowed_advice": ["Используйте мягкий уход."],
+                        "required_questions": ["Когда было окрашивание?"],
+                        "optional_questions": [],
+                        "disallowed_claims": [],
+                        "fact_requirements": ["service_exists"],
+                        "risk_tags": ["none"],
+                        "clarify_limit": 1,
+                        "escalate_when": ["missing_fact"],
+                        "next_step": "Если есть жжение, нужен мастер.",
+                    }
+                ],
+            }
+        )
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            monkeypatch.setattr(
+                "app.services.consult_pack_service.load_consult_playbook",
+                lambda _client_slug: (playbook, None),
+            )
+            set_runtime_capabilities(runtime)
+            try:
+                result = route_llm_policy_core(
+                    "Где вы находитесь?",
+                    info_refs=["pricing", "location"],
+                    consult_refs=None,
+                    client_slug="demo_salon",
+                )
+            finally:
+                set_runtime_capabilities(None)
+
+        assert result["ok"] is True
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        assert policy_input["allowed"] == {
+            "tool_actions": [
+                "info",
+                "consult",
+                "booking",
+                "handoff",
+                "collect",
+                "calendar.get_booking",
+                "catalog.location",
+            ],
+            "info_refs": ["location"],
+            "consult_refs": ["hair_damage"],
+        }
+        assert policy_input["context"]["capability_cards"] == [
+            {
+                "kind": "domain",
+                "source": "client_capabilities",
+                "domain_slug": "beauty_salon",
+            },
+            {
+                "kind": "providers",
+                "source": "client_capabilities",
+                "calendar_provider": "google_calendar",
+            },
+            {
+                "kind": "features",
+                "source": "client_capabilities",
+                "booking_mode": "confirm_slots",
+            },
+            {
+                "kind": "tool_policy",
+                "source": "client_capabilities",
+                "allow": ["calendar.get_booking", "catalog.location"],
+            },
+            {
+                "kind": "fact_scope",
+                "source": "client_capabilities",
+                "allowed_scopes": ["info.location", "consult.hair_damage"],
+            },
+            {
+                "kind": "handoff_policy",
+                "source": "client_capabilities",
+                "policy": "manager_request_only",
+            },
+        ]
+        assert policy_input["context"]["policy_cards"] == [
+            {
+                "section": "payment_info",
+                "response": "Оплата только по счету",
+                "source": "client_capabilities",
+            }
+        ]
+        assert policy_input["context"]["consult_cards"] == [
+            {
+                "id": "hair_damage",
+                "title": "Восстановление волос",
+                "summary": "Советы по уходу после осветления и признаки риска.",
+                "risk_tags": ["none"],
+                "fact_requirements": ["service_exists"],
+                "next_step": "Если есть жжение, нужен мастер.",
+            }
+        ]
+
+    def test_policy_core_honors_explicit_booking_only_context_envelope(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Хочу записаться на маникюр",
+                info_refs=[],
+                consult_refs=[],
+                client_slug="demo_salon",
+            )
+
+        assert result["ok"] is True
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        assert policy_input["allowed"] == {
+            "tool_actions": [
+                "booking",
+                "handoff",
+                "collect",
+                "calendar.book_slot",
+                "calendar.cancel",
+                "calendar.get_booking",
+                "calendar.list_slots",
+                "calendar.reschedule",
+            ],
+            "info_refs": [],
+            "consult_refs": [],
+        }
+        assert "context" not in policy_input or "consult_cards" not in policy_input.get("context", {})
+
     def test_policy_core_preserves_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = self._policy_payload()
@@ -1272,6 +1434,15 @@ class TestPolicyCoreTimeoutRetry:
         assert "Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`." in prompt
         assert "`memory.profile.semantic_contract` и `memory.profile.pending_question_contract`" in prompt
         assert "Не возвращай `tool_args`" in prompt
+
+    def test_policy_core_prompt_uses_dynamic_context_cards(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"context": {' in prompt
+        assert '"capability_cards"' in prompt
+        assert '"policy_cards"' in prompt
+        assert '"consult_cards"' in prompt
+        assert "dynamic context assembly envelope" in prompt
 
     def test_policy_core_prompt_named_specialist_preference_under_active_time_collect_is_referent_followup(self):
         prompt = _load_policy_core_prompt()

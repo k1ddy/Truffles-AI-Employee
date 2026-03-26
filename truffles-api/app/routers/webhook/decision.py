@@ -8595,9 +8595,9 @@ async def _handle_webhook_payload(
     outbox_created_at: datetime | None = None,
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow payloads."""
-    from app.core import consultant_runtime
+    from app.core.consultant_core_v2 import handle_webhook_payload as handle_consultant_core_v2
 
-    return await consultant_runtime.handle_webhook_payload(
+    return await handle_consultant_core_v2(
         payload,
         db,
         provided_secret=provided_secret,

@@ -187,6 +187,128 @@ def test_dialog_state_service_load_runtime_payload_prefers_canonical_question_co
     assert loaded["dialog_state"].pending_question_contract.active_question_relation == "generic_info_interrupt"
 
 
+def test_dialog_state_service_load_runtime_payload_reprojects_stale_legacy_fields_from_semantic_state() -> None:
+    service = DialogStateService()
+
+    loaded = service.load_runtime_payload(
+        {
+            "consultant_runtime": {
+                "schema_version": "consultant_runtime.v1",
+                "dialog_state": {
+                    "schema_version": "dialog_state.v1",
+                    "semantic_state": {
+                        "schema_version": "canonical_semantic_state.v1",
+                        "materialized_frame": {
+                            "schema_version": "semantic_frame.v2",
+                            "user_goal": "booking",
+                            "requested_effect": "collect_missing_input",
+                            "subject": {"kind": "service", "value": "Маникюр"},
+                            "referents": {
+                                "service": {
+                                    "value": "Маникюр",
+                                    "entity_id": "svc:manicure",
+                                    "entity_type": "service",
+                                    "source_ref": "memory",
+                                }
+                            },
+                            "constraints": {},
+                            "preferences": {},
+                            "continuation": {
+                                "expected_reply_type": "time",
+                                "reason": "collect:datetime",
+                                "pending_question_act": "ask_about_requested_slot",
+                                "pending_question_target": "time",
+                                "active_question_relation": "ask_about_requested_slot",
+                                "next_question": "datetime",
+                                "open_questions": ["datetime"],
+                            },
+                            "capability_selection": {"capability": "bookability"},
+                            "needs_human": False,
+                            "reason": "collect_datetime",
+                        },
+                        "event_log": [],
+                    },
+                    "current_referents": {"service": "Педикюр"},
+                    "pending_question_contract": {
+                        "expected_reply_type": "name",
+                        "reason": "collect:name",
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                    },
+                    "projections": {
+                        "expected_reply_type": "name",
+                        "expected_reply_reason": "collect:name",
+                    },
+                    "meta": {
+                        "current_goal": "handoff",
+                        "semantic_contract": {"contract_version": "semantic_contract.v1"},
+                    },
+                },
+            }
+        }
+    )
+
+    dialog_state = loaded["dialog_state"]
+    assert loaded["current_goal"] == "booking"
+    assert dialog_state.current_referents.service == "Маникюр"
+    assert dialog_state.pending_question_contract.expected_reply_type == "time"
+    assert dialog_state.pending_question_contract.next_question == "datetime"
+    assert dialog_state.projections.expected_reply_type == "time"
+    assert dialog_state.meta["current_goal"] == "booking"
+    assert dialog_state.meta["semantic_contract"]["capability"] == "bookability"
+
+
+def test_dialog_state_service_projects_context_goal_and_question_from_runtime_semantic_state() -> None:
+    service = DialogStateService()
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "semantic_state": {
+                    "schema_version": "canonical_semantic_state.v1",
+                    "materialized_frame": {
+                        "schema_version": "semantic_frame.v2",
+                        "user_goal": "booking",
+                        "requested_effect": "collect_missing_input",
+                        "subject": {"kind": "service", "value": "Маникюр"},
+                        "referents": {},
+                        "constraints": {},
+                        "preferences": {},
+                        "continuation": {
+                            "expected_reply_type": "time",
+                            "reason": "collect:datetime",
+                            "next_question": "datetime",
+                            "open_questions": ["datetime"],
+                        },
+                        "capability_selection": {"capability": "bookability"},
+                        "needs_human": False,
+                        "reason": "collect_datetime",
+                    },
+                    "event_log": [],
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "name",
+                    "reason": "collect:name",
+                    "next_question": "name",
+                    "open_questions": ["name"],
+                },
+                "meta": {"current_goal": "handoff"},
+            },
+            "current_goal": "handoff",
+        },
+        "current_goal": "handoff",
+    }
+
+    assert service.project_context_current_goal(context) == "booking"
+    assert service.project_context_pending_question_contract(context) == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
 def test_dialog_state_service_projects_session_memory_pending_question_contract() -> None:
     service = DialogStateService()
 

@@ -58,6 +58,31 @@
     ],
     "info_refs": ["pricing", "duration", "location", "hours", "promotions"],
     "consult_refs": ["playbook_id_1"]
+  },
+  "context": {
+    "capability_cards": [
+      {
+        "kind": "providers",
+        "calendar_provider": "google_calendar"
+      },
+      {
+        "kind": "tool_policy",
+        "allow": ["calendar.*", "catalog.location"]
+      }
+    ],
+    "policy_cards": [
+      {
+        "section": "payment_info",
+        "response": "Оплата только по счету"
+      }
+    ],
+    "consult_cards": [
+      {
+        "id": "playbook_id_1",
+        "title": "Уход после окрашивания",
+        "summary": "Базовые рекомендации по домашнему уходу и признаки риска"
+      }
+    ]
   }
 }
 ```
@@ -100,6 +125,8 @@
 - `tool_action_hint` обязателен всегда и должен быть из `allowed.tool_actions`.
 - Deterministic projector после owner boundary строит final `tool_action` и `tool_args` из `tool_action_hint` + semantic frame.
 - `pack_refs` можно брать только из `allowed.info_refs` или `allowed.consult_refs`.
+- `context.capability_cards`, `context.policy_cards`, `context.consult_cards` — единственный dynamic context assembly envelope этого хода. Если card/refs нет во входе, не придумывай их.
+- Используй только релевантные cards текущего хода. Не тащи скрытый “общий мир” вне входного JSON.
 - `slots` использует только `service`, `datetime`, `name`, `phone` и должен быть sparse.
 - `referents` — канонический semantic carrier для grounded entities: `service`, `specialist`, `branch`, `booking_ref`, `customer`.
 - Не возвращай `tool_args`: tool binding строится deterministic projector'ом после owner boundary.

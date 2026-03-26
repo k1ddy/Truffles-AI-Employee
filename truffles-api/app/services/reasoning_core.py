@@ -1,6 +1,6 @@
 """Legacy reasoning-core compatibility shim.
 
-Active webhook runtime ownership lives in `app.core.consultant_runtime`.
+Active webhook runtime ownership lives in `app.core.consultant_core_v2`.
 This module only preserves the thin compatibility surface that tests and
 legacy wrappers still import while shadow runtime code is removed.
 """
@@ -597,7 +597,7 @@ def _run_secret_enforced_preflight(
 
 
 def _finalize_turn_planner_owner_cutover(**_kwargs):
-    raise RuntimeError("reasoning_core shadow owner path removed; use consultant_runtime")
+    raise RuntimeError("reasoning_core shadow owner path removed; use consultant_core_v2")
 
 
 async def run_reasoning_core(request: ReasoningCoreRequest) -> WebhookResponse:
@@ -630,9 +630,9 @@ async def handle_webhook_payload(
     outbox_created_at: datetime | None = None,
     preflight_payload: dict[str, object] | None = None,
 ) -> WebhookResponse:
-    from app.core import consultant_runtime
+    from app.core.consultant_core_v2 import handle_webhook_payload as handle_consultant_core_v2
 
-    return await consultant_runtime.handle_webhook_payload(
+    return await handle_consultant_core_v2(
         payload,
         db,
         provided_secret=provided_secret,

@@ -37,7 +37,7 @@ async def handle_public_webhook_payload(
     enqueue_only: bool = False,
     preflight_payload: dict[str, object] | None = None,
 ) -> WebhookResponse:
-    from app.core.consultant_runtime import handle_webhook_payload
+    from app.core.consultant_core_v2 import handle_webhook_payload
 
     response = await handle_webhook_payload(
         payload,

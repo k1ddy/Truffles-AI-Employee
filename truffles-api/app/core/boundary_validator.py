@@ -18,6 +18,8 @@ _BOUNDARY_OVERRIDE_PRESERVE_FIELDS = (
 _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS = frozenset(
     {
         "semantic_contract",
+        "semantic_frame",
+        "semantic_state",
         "pending_question_contract",
         "tool_args",
         "tool_execution_projection",

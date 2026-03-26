@@ -55,7 +55,7 @@ from app.schemas.console import (
     ConsoleConsultantVerificationTurnRecord,
 )
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookTenantContext
-from app.core import consultant_runtime
+from app.core import consultant_core_v2
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities_layers, validate_capabilities_payload
 from app.services.chatflow_service import get_instance_id
@@ -1668,7 +1668,7 @@ async def _run_consultant_verification_simulation(
             instance_id=instance_id,
         )
         set_runtime_truth_override(runtime_truth_override)
-        response = await consultant_runtime.handle_webhook_payload(
+        response = await consultant_core_v2.handle_webhook_payload(
             payload,
             runtime_db,
             provided_secret=None,

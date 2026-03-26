@@ -245,81 +245,36 @@ def resolve_llm_booking_prompt_candidate(
         if isinstance(summary_text, str) and summary_text.strip():
             policy_memory_summary = summary_text.strip()
 
-    loaded_runtime = DialogStateService().load_runtime_payload(context)
+    dialog_state_service = DialogStateService()
+    loaded_runtime = dialog_state_service.load_runtime_payload(context)
     loaded_dialog_state = loaded_runtime.get("dialog_state")
-    runtime_expected_reply_type = loaded_runtime.get("expected_reply_type")
-    runtime_expected_reply_reason = loaded_runtime.get("expected_reply_reason")
-    runtime_semantic_contract = (
-        dict(loaded_dialog_state.meta.get("semantic_contract"))
+    semantic_frame = (
+        loaded_dialog_state.semantic_state.materialized_frame
         if loaded_dialog_state is not None
-        and isinstance(getattr(loaded_dialog_state, "meta", None), dict)
-        and isinstance(loaded_dialog_state.meta.get("semantic_contract"), dict)
         else None
+    )
+    runtime_semantic_contract = dialog_state_service._semantic_contract_from_frame(
+        semantic_frame
     )
     runtime_current_referents: dict[str, str] = {}
     if loaded_dialog_state is not None:
+        projected_referents = dialog_state_service.project_current_referents_from_frame(
+            semantic_frame
+        )
         referent_map = {
-            "service": loaded_dialog_state.current_referents.service,
-            "specialist": loaded_dialog_state.current_referents.specialist,
-            "branch": loaded_dialog_state.current_referents.branch,
-            "booking_ref": loaded_dialog_state.current_referents.booking,
-            "customer": loaded_dialog_state.current_referents.customer,
+            "service": projected_referents.service,
+            "specialist": projected_referents.specialist,
+            "branch": projected_referents.branch,
+            "booking_ref": projected_referents.booking,
+            "customer": projected_referents.customer,
         }
         for referent_key, raw_value in referent_map.items():
             if isinstance(raw_value, str) and raw_value.strip():
                 runtime_current_referents[referent_key] = raw_value.strip()
-    runtime_pending_question_contract: dict[str, Any] = {}
-    if loaded_dialog_state is not None:
-        next_question = loaded_dialog_state.pending_question_contract.next_question
-        if isinstance(next_question, str) and next_question.strip():
-            runtime_pending_question_contract["next_question"] = next_question.strip()
-        open_questions = [
-            item.strip()
-            for item in loaded_dialog_state.pending_question_contract.open_questions
-            if isinstance(item, str) and item.strip()
-        ]
-        if open_questions:
-            runtime_pending_question_contract["open_questions"] = open_questions
-        pending_question_act = loaded_dialog_state.pending_question_contract.pending_question_act
-        if isinstance(pending_question_act, str) and pending_question_act.strip():
-            runtime_pending_question_contract["pending_question_act"] = pending_question_act.strip()
-        pending_question_target = loaded_dialog_state.pending_question_contract.pending_question_target
-        if isinstance(pending_question_target, str) and pending_question_target.strip():
-            runtime_pending_question_contract["pending_question_target"] = (
-                pending_question_target.strip()
-            )
-        active_question_relation = loaded_dialog_state.pending_question_contract.active_question_relation
-        if isinstance(active_question_relation, str) and active_question_relation.strip():
-            runtime_pending_question_contract["active_question_relation"] = (
-                active_question_relation.strip()
-            )
-        question_reason = loaded_dialog_state.pending_question_contract.reason
-        if isinstance(question_reason, str) and question_reason.strip():
-            runtime_pending_question_contract["reason"] = question_reason.strip()
-    if (
-        "next_question" not in runtime_pending_question_contract
-        and isinstance(runtime_expected_reply_type, str)
-        and runtime_expected_reply_type.strip()
-    ):
-        projected_slot = {
-            decision_router.EXPECTED_REPLY_SERVICE: "service",
-            decision_router.EXPECTED_REPLY_TIME: "datetime",
-            decision_router.EXPECTED_REPLY_NAME: "name",
-            decision_router.EXPECTED_REPLY_PHONE: "phone",
-        }.get(runtime_expected_reply_type.strip())
-        if projected_slot:
-            runtime_pending_question_contract["next_question"] = projected_slot
-            runtime_pending_question_contract.setdefault("open_questions", [projected_slot])
-    if isinstance(runtime_expected_reply_type, str) and runtime_expected_reply_type.strip():
-        runtime_pending_question_contract["expected_reply_type"] = (
-            runtime_expected_reply_type.strip()
-        )
-    if (
-        "reason" not in runtime_pending_question_contract
-        and isinstance(runtime_expected_reply_reason, str)
-        and runtime_expected_reply_reason.strip()
-    ):
-        runtime_pending_question_contract["reason"] = runtime_expected_reply_reason.strip()
+    runtime_pending_question_contract = dialog_state_service.project_pending_question_contract(
+        dialog_state_service._pending_question_from_frame(semantic_frame),
+        expected_reply_type=reply_slot,
+    ) or {}
 
     policy_memory_profile = None
     active_slots = decision_router._collect_policy_active_slots(

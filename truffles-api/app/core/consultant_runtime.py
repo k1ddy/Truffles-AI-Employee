@@ -77,12 +77,13 @@ class PreparedConversation:
 
 
 class ConsultantRuntime:
-    def __init__(self) -> None:
+    def __init__(self, *, semantic_runtime_path: str = "consultant_core_v2") -> None:
         self.planner = TurnPlanner()
         self.boundary = BoundaryValidator()
         self.dialog_state = DialogStateService()
         self.executor = TurnExecutor()
         self.realizer = ResponseRealizer()
+        self.semantic_runtime_path = semantic_runtime_path
 
     async def handle_webhook_payload(
         self,
@@ -154,6 +155,7 @@ class ConsultantRuntime:
             )
             decision = boundary_result.decision
             boundary_override = boundary_result.override
+            decision.meta.setdefault("semantic_runtime_path", self.semantic_runtime_path)
             decision.meta.setdefault("client_id", prepared.client.id)
             decision.meta.setdefault("conversation_id", prepared.conversation.id)
             if outbox_ids:
@@ -226,6 +228,7 @@ class ConsultantRuntime:
                 conversation=prepared.conversation,
                 user_message=prepared.user_message,
                 bot_response=bot_response,
+                runtime_state_before=runtime_state,
                 decision=effective_decision,
                 execution=execution,
                 turn_result=turn_result,
@@ -563,23 +566,22 @@ class ConsultantRuntime:
         runtime_state: LoadedRuntimeState,
     ) -> dict[str, Any]:
         profile: dict[str, Any] = {}
-        active_goal = None
-        if isinstance(runtime_state.dialog_state.meta, dict):
-            active_goal = runtime_state.dialog_state.meta.get("current_goal")
+        dialog_state = runtime_state.dialog_state
+        semantic_frame = self.dialog_state.project_runtime_semantic_frame(
+            dialog_state,
+            booking_payload=runtime_state.booking_state,
+        ) or {}
+        active_goal = self.dialog_state.project_runtime_current_goal(
+            dialog_state,
+            booking_payload=runtime_state.booking_state,
+        )
         if not active_goal and runtime_state.booking_state:
             active_goal = "booking"
         if isinstance(active_goal, str) and active_goal.strip():
             profile["active_goal"] = active_goal.strip()
 
-        dialog_state = runtime_state.dialog_state
         canonical_referents: dict[str, dict[str, Any]] = {}
-        referent_map = {
-            "service": dialog_state.current_referents.service,
-            "specialist": dialog_state.current_referents.specialist,
-            "branch": dialog_state.current_referents.branch,
-            "booking_ref": dialog_state.current_referents.booking,
-            "customer": dialog_state.current_referents.customer,
-        }
+        referent_map = self.dialog_state.project_grounded_referents_from_frame(semantic_frame)
         referent_entity_types = {
             "service": "service",
             "specialist": "specialist",
@@ -595,11 +597,11 @@ class ConsultantRuntime:
                     "source_ref": "carryover",
                 }
 
-        semantic_contract = (
-            dict(dialog_state.meta.get("semantic_contract"))
-            if isinstance(dialog_state.meta.get("semantic_contract"), dict)
-            else {}
+        semantic_contract = self.dialog_state.project_runtime_semantic_contract(
+            dialog_state,
+            booking_payload=runtime_state.booking_state,
         )
+        semantic_contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
         if semantic_contract:
             semantic_referents = (
                 dict(semantic_contract.get("referents"))
@@ -624,21 +626,142 @@ class ConsultantRuntime:
                 "referents": canonical_referents,
             }
 
-        pending_contract = self.dialog_state.project_pending_question_contract(
-            dialog_state.pending_question_contract,
+        pending_contract = self.dialog_state.project_runtime_pending_question_contract(
+            dialog_state,
+            booking_payload=runtime_state.booking_state,
         ) or {}
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
 
         slot_state: dict[str, str] = {}
-        for field_name in ("service", "datetime", "name", "phone"):
-            value = runtime_state.booking_state.get(field_name)
-            if isinstance(value, str) and value.strip():
-                slot_state[field_name] = value.strip()
+        frame_continuation = semantic_frame.get("continuation") if isinstance(semantic_frame, dict) else None
+        frame_slot_values = (
+            frame_continuation.get("slot_values")
+            if isinstance(frame_continuation, dict)
+            else None
+        )
+        if isinstance(frame_slot_values, dict):
+            for field_name, value in frame_slot_values.items():
+                if field_name in {"service", "datetime", "name", "phone"} and isinstance(value, str) and value.strip():
+                    slot_state[field_name] = value.strip()
+        if not slot_state:
+            for field_name in ("service", "datetime", "name", "phone"):
+                value = runtime_state.booking_state.get(field_name)
+                if isinstance(value, str) and value.strip():
+                    slot_state[field_name] = value.strip()
         if slot_state:
             profile["slot_state"] = slot_state
 
         return profile
+
+    def _project_runtime_semantic_frame(
+        self,
+        dialog_state: DialogState,
+        *,
+        booking_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.dialog_state.project_runtime_semantic_frame(
+            dialog_state,
+            booking_payload=booking_state,
+        ) or {}
+
+    def _project_runtime_semantic_contract(
+        self,
+        dialog_state: DialogState,
+        *,
+        booking_state: dict[str, Any] | None = None,
+        decision: PolicyDecision | None = None,
+        execution: RuntimeExecutionResult | None = None,
+    ) -> dict[str, Any]:
+        semantic_contract = self.dialog_state.project_runtime_semantic_contract(
+            dialog_state,
+            booking_payload=booking_state,
+        )
+        owner_semantic_contract = self.dialog_state._semantic_contract_from_frame(
+            decision.semantic_frame if isinstance(decision, PolicyDecision) else None
+        )
+        contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
+        if isinstance(owner_semantic_contract, dict) and owner_semantic_contract:
+            if not contract:
+                contract = dict(owner_semantic_contract)
+            else:
+                for key in (
+                    "subject_kind",
+                    "capability",
+                    "temporal_scope",
+                    "resolution_mode",
+                    "pending_question_act",
+                    "pending_question_target",
+                    "active_question_relation",
+                    "alternate_datetime",
+                    "grounding_provenance",
+                ):
+                    if key not in contract and key in owner_semantic_contract:
+                        contract[key] = owner_semantic_contract[key]
+                if "entity_refs" not in contract and isinstance(owner_semantic_contract.get("entity_refs"), list):
+                    contract["entity_refs"] = list(owner_semantic_contract["entity_refs"])
+                if "referents" not in contract and isinstance(owner_semantic_contract.get("referents"), dict):
+                    contract["referents"] = dict(owner_semantic_contract["referents"])
+        execution_meta = getattr(execution, "meta", None)
+        execution_semantic_contract = (
+            dict(execution_meta.get("semantic_contract"))
+            if isinstance(execution_meta, dict)
+            and isinstance(execution_meta.get("semantic_contract"), dict)
+            else {}
+        )
+        if not execution_semantic_contract:
+            return contract
+        if not contract:
+            return execution_semantic_contract
+        for key in (
+            "subject_kind",
+            "capability",
+            "temporal_scope",
+            "resolution_mode",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+            "grounding_provenance",
+        ):
+            if key not in contract and key in execution_semantic_contract:
+                contract[key] = execution_semantic_contract[key]
+        if "entity_refs" not in contract and isinstance(execution_semantic_contract.get("entity_refs"), list):
+            contract["entity_refs"] = list(execution_semantic_contract["entity_refs"])
+        if "referents" not in contract and isinstance(execution_semantic_contract.get("referents"), dict):
+            contract["referents"] = dict(execution_semantic_contract["referents"])
+        return contract
+
+    def _project_runtime_pending_question_contract(
+        self,
+        dialog_state: DialogState,
+        *,
+        booking_state: dict[str, Any] | None = None,
+        decision: PolicyDecision | None = None,
+    ) -> dict[str, Any]:
+        pending_question_contract = self.dialog_state.project_runtime_pending_question_contract(
+            dialog_state,
+            booking_payload=booking_state,
+        ) or self.dialog_state.project_pending_question_contract(
+            decision.pending_question_contract if isinstance(decision, PolicyDecision) else None,
+        )
+        contract = dict(pending_question_contract) if isinstance(pending_question_contract, dict) else {}
+        owner_contract = self.dialog_state.project_pending_question_contract(
+            decision.pending_question_contract if isinstance(decision, PolicyDecision) else None,
+        )
+        if isinstance(owner_contract, dict) and owner_contract:
+            for key in (
+                "expected_reply_type",
+                "reason",
+                "pending_question_act",
+                "pending_question_target",
+                "active_question_relation",
+                "next_question",
+            ):
+                if key not in contract and key in owner_contract:
+                    contract[key] = owner_contract[key]
+            if "open_questions" not in contract and isinstance(owner_contract.get("open_questions"), list):
+                contract["open_questions"] = list(owner_contract["open_questions"])
+        return contract
 
     def _execute_turn(
         self,
@@ -722,6 +845,13 @@ class ConsultantRuntime:
             execution_meta=execution_meta,
             now=now,
         )
+        runtime_payload = (
+            updated_context.get("consultant_runtime")
+            if isinstance(updated_context.get("consultant_runtime"), dict)
+            else None
+        )
+        if isinstance(runtime_payload, dict):
+            runtime_payload["semantic_runtime_path"] = self.semantic_runtime_path
         return updated_context, dialog_state
 
     def _activate_handoff(
@@ -851,27 +981,37 @@ class ConsultantRuntime:
         conversation: Conversation,
         user_message: Message | None,
         bot_response: Message | None,
+        runtime_state_before: LoadedRuntimeState | None = None,
         decision: PolicyDecision,
         execution: RuntimeExecutionResult,
         turn_result: Any,
         delivered: bool,
     ) -> None:
         dialog_state = turn_result.dialog_state
+        semantic_frame_before = None
+        if isinstance(runtime_state_before, LoadedRuntimeState):
+            semantic_frame_before = self._project_runtime_semantic_frame(
+                runtime_state_before.dialog_state,
+                booking_state=runtime_state_before.booking_state,
+            )
+        semantic_frame_after = self._project_runtime_semantic_frame(
+            dialog_state,
+        ) or self.dialog_state.project_semantic_frame(decision.semantic_frame)
         contract_action = self._derive_contract_action(
             decision=decision,
             execution=execution,
             turn_result=turn_result,
         )
         contract_source = self._derive_contract_source(decision)
-        pending_question_contract = self.dialog_state.project_pending_question_contract_with_projection_fallback(
-            dialog_state.pending_question_contract,
-            expected_reply_type=dialog_state.projections.expected_reply_type,
-            expected_reply_reason=dialog_state.projections.expected_reply_reason,
-        ) or {}
+        pending_question_contract = self._project_runtime_pending_question_contract(
+            dialog_state,
+            decision=decision,
+        )
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         expected_reply_reason = pending_question_contract.get("reason")
         trace_event = {
             "stage": _RUNTIME_ENTRYPOINT_NAME,
+            "semantic_runtime_path": self.semantic_runtime_path,
             "decision": contract_action,
             "intent": decision.intent,
             "outcome": decision.outcome,
@@ -916,10 +1056,9 @@ class ConsultantRuntime:
             trace_event["pending_question_contract"] = pending_question_contract
         pending_question_act = None
         pending_question_target = None
-        active_question_relation = (
-            dialog_state.pending_question_contract.active_question_relation
-            or decision.interaction.relation
-        )
+        active_question_relation = pending_question_contract.get(
+            "active_question_relation"
+        ) or decision.interaction.relation
         question_contract_active = False
         if isinstance(execution.meta, dict):
             pending_question_act = execution.meta.get("pending_question_act")
@@ -936,61 +1075,28 @@ class ConsultantRuntime:
         if not question_contract_active and decision.outcome == "COLLECT" and pending_question_contract:
             question_contract_active = True
         if not pending_question_act:
-            pending_question_act = dialog_state.pending_question_contract.pending_question_act
+            pending_question_act = pending_question_contract.get("pending_question_act")
         if not pending_question_target:
-            pending_question_target = (
-                dialog_state.pending_question_contract.pending_question_target
-                or decision.interaction.target
-            )
+            pending_question_target = pending_question_contract.get(
+                "pending_question_target"
+            ) or decision.interaction.target
         if pending_question_target:
             trace_event["pending_question_target"] = pending_question_target
         if active_question_relation:
             trace_event["active_question_relation"] = active_question_relation
-        semantic_contract = (
-            dict(decision.meta.get("semantic_contract"))
-            if isinstance(decision.meta.get("semantic_contract"), dict)
-            else {}
+        semantic_contract = self._project_runtime_semantic_contract(
+            dialog_state,
+            decision=decision,
+            execution=execution,
         )
-        if not semantic_contract and isinstance(dialog_state.meta.get("semantic_contract"), dict):
-            semantic_contract = dict(dialog_state.meta.get("semantic_contract"))
-        execution_semantic_contract = (
-            dict(execution.meta.get("semantic_contract"))
-            if isinstance(execution.meta, dict)
-            and isinstance(execution.meta.get("semantic_contract"), dict)
-            else {}
-        )
-        if execution_semantic_contract:
-            if not semantic_contract:
-                semantic_contract = execution_semantic_contract
-            else:
-                for key in (
-                    "subject_kind",
-                    "capability",
-                    "temporal_scope",
-                    "resolution_mode",
-                    "pending_question_act",
-                    "pending_question_target",
-                    "active_question_relation",
-                    "grounding_provenance",
-                ):
-                    if key not in semantic_contract and key in execution_semantic_contract:
-                        semantic_contract[key] = execution_semantic_contract[key]
-                if (
-                    "entity_refs" not in semantic_contract
-                    and isinstance(execution_semantic_contract.get("entity_refs"), list)
-                ):
-                    semantic_contract["entity_refs"] = list(
-                        execution_semantic_contract["entity_refs"]
-                    )
-                if (
-                    "referents" not in semantic_contract
-                    and isinstance(execution_semantic_contract.get("referents"), dict)
-                ):
-                    semantic_contract["referents"] = dict(
-                        execution_semantic_contract["referents"]
-                    )
         if semantic_contract:
             trace_event["semantic_contract"] = semantic_contract
+        if semantic_frame_after:
+            trace_event["semantic_frame"] = semantic_frame_after
+        if semantic_frame_before:
+            trace_event["semantic_state_before"] = semantic_frame_before
+        if semantic_frame_after:
+            trace_event["semantic_state_after"] = semantic_frame_after
         if isinstance(execution.meta, dict) and isinstance(
             execution.meta.get("tool_execution_projection"), dict
         ):
@@ -1051,6 +1157,7 @@ class ConsultantRuntime:
         decision_meta = {
             "source": contract_source,
             "runtime_entrypoint": _RUNTIME_ENTRYPOINT_NAME,
+            "semantic_runtime_path": self.semantic_runtime_path,
             "action": contract_action,
             "intent": decision.intent,
             "outcome": decision.outcome,
@@ -1079,6 +1186,12 @@ class ConsultantRuntime:
             decision_meta["active_question_relation"] = active_question_relation
         if semantic_contract:
             decision_meta["semantic_contract"] = semantic_contract
+        if semantic_frame_after:
+            decision_meta["semantic_frame"] = semantic_frame_after
+        if semantic_frame_before:
+            decision_meta["semantic_state_before"] = semantic_frame_before
+        if semantic_frame_after:
+            decision_meta["semantic_state_after"] = semantic_frame_after
         if contract_source != decision.source:
             decision_meta["source_detail"] = decision.source
         if policy_core_trace:
@@ -1112,16 +1225,13 @@ class ConsultantRuntime:
         turn_result: Any,
     ) -> str:
         dialog_state = turn_result.dialog_state
-        current_goal = (
-            dialog_state.meta.get("current_goal")
-            if isinstance(dialog_state.meta, dict)
-            else None
+        current_goal = self.dialog_state.project_runtime_current_goal(dialog_state) or (
+            self.dialog_state.project_current_goal_from_frame(decision.semantic_frame)
         )
-        pending_question_contract = self.dialog_state.project_pending_question_contract_with_projection_fallback(
-            dialog_state.pending_question_contract,
-            expected_reply_type=dialog_state.projections.expected_reply_type,
-            expected_reply_reason=dialog_state.projections.expected_reply_reason,
-        ) or {}
+        pending_question_contract = self._project_runtime_pending_question_contract(
+            dialog_state,
+            decision=decision,
+        )
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         if (
             execution.tool_action == "calendar.book_slot"
@@ -1226,10 +1336,6 @@ class ConsultantRuntime:
             return True
         return False
 
-
-_RUNTIME = ConsultantRuntime()
-
-
 async def handle_webhook_payload(
     payload: WebhookRequest,
     db: Session,
@@ -1244,7 +1350,9 @@ async def handle_webhook_payload(
     outbox_created_at: datetime | None = None,
     preflight_payload: dict[str, object] | None = None,
 ) -> WebhookResponse:
-    return await _RUNTIME.handle_webhook_payload(
+    from app.core.consultant_core_v2 import handle_webhook_payload as handle_consultant_core_v2
+
+    return await handle_consultant_core_v2(
         payload,
         db,
         provided_secret=provided_secret,
