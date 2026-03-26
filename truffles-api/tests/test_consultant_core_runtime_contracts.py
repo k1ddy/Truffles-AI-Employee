@@ -1931,8 +1931,9 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
     )
     runtime_payload = updated["consultant_runtime"]
     assert dialog_state.current_referents.service == "Маникюр"
-    assert runtime_payload["semantic_contract"]["referents"]["service"] == expected_service_referent
-    assert runtime_payload["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
+    assert "semantic_contract" not in runtime_payload
+    assert dialog_state.meta["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert dialog_state.meta["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
 
     runtime = ConsultantRuntime()
     conversation = SimpleNamespace(context={}, state="bot_active")
@@ -2708,15 +2709,18 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
         now=now,
     )
     runtime_payload = updated["consultant_runtime"]
-    assert runtime_payload["semantic_contract"]["referents"]["service"] == expected_service_referent
-    assert runtime_payload["semantic_contract"]["referents"]["specialist"] == expected_specialist_referent
-    assert runtime_payload["semantic_contract"]["grounding_provenance"] == {
+    assert "semantic_contract" not in runtime_payload
+    assert dialog_state.meta["semantic_contract"]["referents"]["service"] == expected_service_referent
+    assert dialog_state.meta["semantic_contract"]["referents"]["specialist"] == expected_specialist_referent
+    assert dialog_state.meta["semantic_contract"]["grounding_provenance"] == {
         "pack_id": "demo_salon",
         "resolver_id": "pack_query_engine",
         "resolver_version": "2026-03-25",
     }
-    assert runtime_payload["pending_question_contract"] == expected_pending_question_contract
-    assert runtime_payload["expected_reply_type"] == "time"
+    assert "pending_question_contract" not in runtime_payload
+    assert "expected_reply_type" not in runtime_payload
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == expected_pending_question_contract
+    assert updated["expected_reply_type"] == "time"
 
     runtime = ConsultantRuntime()
     conversation = SimpleNamespace(context={}, state="bot_active")

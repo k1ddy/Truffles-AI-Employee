@@ -2827,8 +2827,10 @@ def test_dialog_state_service_merges_fact_interrupt_slots_into_active_booking() 
 
     runtime_payload = updated["consultant_runtime"]
     assert runtime_payload["booking"]["service"] == "Наращивание полигелем"
-    assert runtime_payload["expected_reply_type"] == "service_choice"
-    assert runtime_payload["expected_reply_reason"] == "collect:service"
+    assert "expected_reply_type" not in runtime_payload
+    assert "expected_reply_reason" not in runtime_payload
+    assert updated["expected_reply_type"] == "service_choice"
+    assert updated["expected_reply_reason"] == "collect:service"
     assert dialog_state.current_referents.service == "Наращивание полигелем"
     assert booking_payload["service"] == "Наращивание полигелем"
 
@@ -2920,8 +2922,10 @@ def test_dialog_state_service_preserves_active_booking_contract_across_fact_inte
     )
 
     runtime_payload = updated["consultant_runtime"]
-    assert runtime_payload["expected_reply_type"] == "time"
-    assert runtime_payload["expected_reply_reason"] == "collect:datetime"
+    assert "expected_reply_type" not in runtime_payload
+    assert "expected_reply_reason" not in runtime_payload
+    assert updated["expected_reply_type"] == "time"
+    assert updated["expected_reply_reason"] == "collect:datetime"
     assert dialog_state.pending_question_contract.reason == "collect:datetime"
     assert dialog_state.pending_question_contract.pending_question_act is None
     assert dialog_state.pending_question_contract.pending_question_target == "time"
@@ -3054,9 +3058,12 @@ def test_dialog_state_service_fact_owner_contract_overrides_stale_booking_follow
     )
 
     runtime_payload = updated["consultant_runtime"]
-    assert runtime_payload["expected_reply_type"] == "name"
-    assert runtime_payload["expected_reply_reason"] == "collect:name"
-    assert runtime_payload["pending_question_contract"] == {
+    assert "expected_reply_type" not in runtime_payload
+    assert "expected_reply_reason" not in runtime_payload
+    assert "pending_question_contract" not in runtime_payload
+    assert updated["expected_reply_type"] == "name"
+    assert updated["expected_reply_reason"] == "collect:name"
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
         "expected_reply_type": "name",
         "reason": "collect:name",
         "pending_question_act": "ask_about_requested_slot",
@@ -3187,9 +3194,12 @@ def test_dialog_state_service_check_booking_fact_keeps_owner_reference_followup_
     )
 
     runtime_payload = updated["consultant_runtime"]
-    assert runtime_payload["expected_reply_type"] == "name"
-    assert runtime_payload["expected_reply_reason"] == "calendar_get_booking_collect_reference"
-    assert runtime_payload["pending_question_contract"] == {
+    assert "expected_reply_type" not in runtime_payload
+    assert "expected_reply_reason" not in runtime_payload
+    assert "pending_question_contract" not in runtime_payload
+    assert updated["expected_reply_type"] == "name"
+    assert updated["expected_reply_reason"] == "calendar_get_booking_collect_reference"
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
         "expected_reply_type": "name",
         "reason": "calendar_get_booking_collect_reference",
         "next_question": "name",
@@ -3376,7 +3386,8 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
     )
 
     runtime_payload = updated["consultant_runtime"]
-    assert runtime_payload["expected_reply_type"] == "time"
+    assert "expected_reply_type" not in runtime_payload
+    assert updated["expected_reply_type"] == "time"
     assert dialog_state.pending_question_contract.reason == "collect:datetime"
     assert dialog_state.pending_question_contract.pending_question_act is None
     assert dialog_state.pending_question_contract.pending_question_target == "specialist"
@@ -3385,7 +3396,8 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
     assert dialog_state.current_referents.specialist == "Айгерим"
     assert dialog_state.interaction_state.grounded_referents["specialist"] == "Айгерим"
     assert booking_payload["specialist_name"] == "Айгерим"
-    semantic_contract = runtime_payload["semantic_contract"]
+    assert "semantic_contract" not in runtime_payload
+    semantic_contract = dialog_state.meta["semantic_contract"]
     assert semantic_contract["subject_kind"] == "specialist"
     assert semantic_contract["capability"] == "bookability"
     assert semantic_contract["pending_question_target"] == "specialist"
@@ -3461,7 +3473,8 @@ def test_dialog_state_service_merges_execution_semantic_grounding_into_runtime_c
     )
 
     runtime_payload = updated["consultant_runtime"]
-    semantic_contract = runtime_payload["semantic_contract"]
+    assert "semantic_contract" not in runtime_payload
+    semantic_contract = dialog_state.meta["semantic_contract"]
     assert semantic_contract["referents"]["service"] == {
         "value": "Маникюр",
         "entity_id": "service:manikyur",

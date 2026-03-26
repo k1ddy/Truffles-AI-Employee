@@ -1515,6 +1515,13 @@ class DialogStateService:
         )
         expected_reply_type = projections.expected_reply_type
         expected_reply_reason = projections.expected_reply_reason
+        dialog_goal = self._normalize_projection_token(
+            dialog_state.meta.get("current_goal")
+            if isinstance(dialog_state.meta, dict)
+            else None
+        )
+        if dialog_goal:
+            current_goal = dialog_goal
 
         if not booking_payload and working_context.get("pending_resume"):
             restored = self.restore_pending_resume_payload(
@@ -1739,20 +1746,10 @@ class DialogStateService:
         if semantic_contract:
             dialog_state.meta["semantic_contract"] = semantic_contract
 
-        pending_question_contract = self.project_pending_question_contract(
-            dialog_state.pending_question_contract,
-            expected_reply_type=expected_reply_type,
-            expected_reply_reason=expected_reply_reason,
-        )
         runtime_payload = {
             "schema_version": "consultant_runtime.v1",
             "dialog_state": dialog_state.model_dump(mode="json", exclude_none=True),
             "booking": merged_booking,
-            "pending_question_contract": pending_question_contract,
-            "expected_reply_type": expected_reply_type,
-            "expected_reply_reason": expected_reply_reason,
-            "current_goal": current_goal,
-            "semantic_contract": semantic_contract,
             "updated_at": now.isoformat(),
         }
         runtime_payload = {

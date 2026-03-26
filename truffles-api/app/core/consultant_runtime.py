@@ -61,9 +61,6 @@ class LoadedRuntimeState:
     context: dict[str, Any]
     dialog_state: DialogState
     booking_state: dict[str, Any]
-    expected_reply_type: str | None
-    expected_reply_reason: str | None
-    current_goal: str | None
 
 
 @dataclass(frozen=True)
@@ -369,16 +366,10 @@ class ConsultantRuntime:
         context = dict(conversation.context or {})
         payload = self.dialog_state.load_runtime_payload(context)
         booking_state = dict(payload.get("booking_payload") or {})
-        current_goal = payload.get("current_goal")
-        if current_goal is None and booking_state:
-            current_goal = "booking"
         return LoadedRuntimeState(
             context=context,
             dialog_state=payload["dialog_state"],
             booking_state=booking_state,
-            expected_reply_type=payload.get("expected_reply_type"),
-            expected_reply_reason=payload.get("expected_reply_reason"),
-            current_goal=current_goal,
         )
 
     def _handle_control_turn(
@@ -572,8 +563,13 @@ class ConsultantRuntime:
         runtime_state: LoadedRuntimeState,
     ) -> dict[str, Any]:
         profile: dict[str, Any] = {}
-        if runtime_state.current_goal:
-            profile["active_goal"] = runtime_state.current_goal
+        active_goal = None
+        if isinstance(runtime_state.dialog_state.meta, dict):
+            active_goal = runtime_state.dialog_state.meta.get("current_goal")
+        if not active_goal and runtime_state.booking_state:
+            active_goal = "booking"
+        if isinstance(active_goal, str) and active_goal.strip():
+            profile["active_goal"] = active_goal.strip()
 
         dialog_state = runtime_state.dialog_state
         canonical_referents: dict[str, dict[str, Any]] = {}
