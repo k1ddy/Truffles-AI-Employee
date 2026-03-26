@@ -3017,3 +3017,72 @@ def test_turn_executor_builds_typed_owner_cutover_turn_outcome() -> None:
     assert outcome.meta["owner_cutover"] == "turn_planner.safe_pricing_collect.v1"
     assert outcome.meta["downstream_tool_decision"] == "service_clarify"
     assert outcome.meta["owner_replacement_cutover"] is True
+
+
+def test_response_realizer_honors_degrade_reply_kind_override() -> None:
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "duration",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+    override = BoundaryValidator().build_degrade_override(
+        reason_code="executor:handoff_requested",
+        public_message="Передаю диалог менеджеру.",
+        trace_message="execution_requested_handoff",
+        meta={"reply_kind": "handoff", "activate_handoff": True},
+    )
+
+    reply = ResponseRealizer().realize(decision, override=override, text="ignored")
+
+    assert reply.reply_kind == "handoff"
+    assert reply.text == "Передаю диалог менеджеру."
+
+
+def test_consultant_runtime_preserves_owner_decision_when_executor_requests_handoff() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "duration",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+    execution = TurnExecutor().execute(
+        TurnPlanner().build_controlled_degrade(
+            reason_code="branch_missing",
+            action="handoff",
+            intent="branch_missing",
+            interaction_owner="turn_executor",
+        ),
+        db=None,
+        message_text=None,
+        client_slug=None,
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    preserved_decision, override = runtime._apply_execution_boundary_override(
+        decision=decision,
+        execution=execution,
+        boundary_override=None,
+    )
+
+    assert preserved_decision == decision
+    assert override is not None
+    assert override.reason_code == "executor:handoff_requested"
+    assert override.meta["reply_kind"] == "handoff"
+    assert runtime._should_activate_handoff(
+        decision=preserved_decision,
+        boundary_override=override,
+    ) is True

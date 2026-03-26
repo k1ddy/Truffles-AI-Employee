@@ -33,6 +33,17 @@ class ResponseRealizer:
         if override and override.decision == "block":
             reply_kind: ReplyKind = "system"
             body = override.public_message or text
+        elif override and override.decision == "degrade":
+            requested_kind = override.meta.get("reply_kind") if isinstance(override.meta, dict) else None
+            if requested_kind in {"fact", "collect", "handoff", "system"}:
+                reply_kind = requested_kind
+            elif decision.outcome == "HANDOFF":
+                reply_kind = "handoff"
+            elif decision.outcome == "COLLECT":
+                reply_kind = "collect"
+            else:
+                reply_kind = "fact"
+            body = override.public_message or text
         elif decision.outcome == "FACT":
             reply_kind = "fact"
             body = text

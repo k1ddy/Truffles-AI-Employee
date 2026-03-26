@@ -174,19 +174,11 @@ class ConsultantRuntime:
                 runtime_state=runtime_state,
                 now=now,
             )
-            if execution.request_handoff and decision.outcome != "HANDOFF":
-                decision = self.planner.build_controlled_degrade(
-                    reason_code="executor:handoff_requested",
-                    action="handoff",
-                    intent="executor_handoff",
-                    interaction_owner="turn_executor",
-                )
-                boundary_override = self.boundary.build_degrade_override(
-                    reason_code="executor:handoff_requested",
-                    public_message=execution.text,
-                    trace_message="execution_requested_handoff",
-                )
-
+            decision, boundary_override = self._apply_execution_boundary_override(
+                decision=decision,
+                execution=execution,
+                boundary_override=boundary_override,
+            )
             effective_decision = decision
             updated_context, dialog_state = self._write_runtime_state(
                 prepared=prepared,
@@ -197,7 +189,10 @@ class ConsultantRuntime:
             )
             prepared.conversation.context = updated_context
 
-            if effective_decision.outcome == "HANDOFF":
+            if self._should_activate_handoff(
+                decision=effective_decision,
+                boundary_override=boundary_override,
+            ):
                 self._activate_handoff(
                     db,
                     prepared=prepared,
@@ -666,6 +661,42 @@ class ConsultantRuntime:
             user_phone=user_phone,
             now=now,
         )
+
+    def _apply_execution_boundary_override(
+        self,
+        *,
+        decision: PolicyDecision,
+        execution: RuntimeExecutionResult,
+        boundary_override: BoundaryOverride | None,
+    ) -> tuple[PolicyDecision, BoundaryOverride | None]:
+        if not execution.request_handoff or decision.outcome == "HANDOFF":
+            return decision, boundary_override
+        return decision, self.boundary.build_degrade_override(
+            reason_code="executor:handoff_requested",
+            public_message=execution.text,
+            trace_message="execution_requested_handoff",
+            meta={
+                "activate_handoff": True,
+                "reply_kind": "handoff",
+                "degrade_stage": "executor",
+            },
+        )
+
+    @staticmethod
+    def _should_activate_handoff(
+        *,
+        decision: PolicyDecision,
+        boundary_override: BoundaryOverride | None,
+    ) -> bool:
+        if decision.outcome == "HANDOFF":
+            return True
+        if not isinstance(boundary_override, BoundaryOverride):
+            return False
+        if boundary_override.decision != "degrade":
+            return False
+        if not isinstance(boundary_override.meta, dict):
+            return False
+        return bool(boundary_override.meta.get("activate_handoff"))
 
     def _write_runtime_state(
         self,
