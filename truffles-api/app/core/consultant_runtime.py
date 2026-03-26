@@ -627,10 +627,8 @@ class ConsultantRuntime:
                     profile["current_referents"] = current_referents
             profile["semantic_contract"] = semantic_contract
 
-        pending_contract = self.dialog_state.project_pending_question_contract_with_projection_fallback(
+        pending_contract = self.dialog_state.project_pending_question_contract(
             dialog_state.pending_question_contract,
-            expected_reply_type=runtime_state.expected_reply_type,
-            expected_reply_reason=runtime_state.expected_reply_reason,
         ) or {}
         if pending_contract:
             profile["pending_question_contract"] = pending_contract

@@ -394,6 +394,15 @@ class TurnExecutor:
         )
         from app.services.tool_registry_service import execute_tool_action, is_tool_action
 
+        query_text = (message_text or "").strip()
+        merged_slots = self._merge_booking_slots(booking_state, decision.slots)
+        service_name = merged_slots.get("service")
+        semantic_contract = self._build_execution_semantic_contract(
+            decision,
+            booking_state=merged_slots,
+            service_name=service_name,
+        )
+        pending_question_contract = self._build_execution_pending_question_contract(decision)
         if decision.tool_action == "calendar.get_booking" and decision.intent in {
             "check_booking",
             "verify_booking",
@@ -405,18 +414,12 @@ class TurnExecutor:
                 ),
                 tool_action=decision.tool_action,
                 tool_decision="not_found",
-                meta={"booking_verification_prompt": True},
+                meta=self._attach_semantic_contract_meta(
+                    {"booking_verification_prompt": True},
+                    semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
+                ),
             )
-
-        query_text = (message_text or "").strip()
-        merged_slots = self._merge_booking_slots(booking_state, decision.slots)
-        service_name = merged_slots.get("service")
-        semantic_contract = self._build_execution_semantic_contract(
-            decision,
-            booking_state=merged_slots,
-            service_name=service_name,
-        )
-        pending_question_contract = self._build_execution_pending_question_contract(decision)
         policy_info_refs = self._resolve_policy_info_refs(decision)
         fact_refs = {
             str(item).strip().casefold()

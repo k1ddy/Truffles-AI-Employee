@@ -63,7 +63,7 @@
 Выход JSON:
 ```json
 {
-  "intent": "booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other",
+  "intent": "booking|check_booking|verify_booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other",
   "action": "fact|collect|handoff",
   "tool_action": "info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio",
   "tool_args": {},
@@ -119,7 +119,7 @@ Booking semantics:
 - Если booking уже дошел до сбора имени и пользователь спрашивает alternate time, например `"А есть ли свободные слоты на 15:00?"`, сохрани booking continuity: `next_question="name"`, `open_questions=["name"]`, `subject_kind="booking"`, `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`. Это alternate-time availability follow-up, а не новый collect владельца смысла.
 - Если booking уже дошел до сбора имени, и пользователь выбирает мастера, не трактуй это как customer name и не коммить booking.
 - Если пользователь просит перенести/изменить/отменить уже существующую запись, но нет `referents.booking_ref`, это не collect. Для `"Я хочу изменить время записи."` верни `action=handoff`, `tool_action="handoff"`, `needs_manager=true`, `subject_kind="booking"`, `capability="booking_manage"`. Не перезапускай generic `next_question="datetime"` collect.
-- Если пользователь хочет только проверить/найти существующую запись (`"Я хотел бы проверить свою запись."`, `"Когда я записан?"`) и нет `referents.booking_ref`, это НЕ handoff по умолчанию. Верни `intent="check_booking"`, `action="fact"`, `tool_action="calendar.get_booking"`, `subject_kind="booking"`, `capability="booking_manage"`. Оставь диалог в `bot_active`: runtime сам должен спросить reference details (имя/телефон/примерную дату), а не переводить в менеджера.
+- Если пользователь хочет только проверить/найти существующую запись (`"Я хотел бы проверить свою запись."`, `"Когда я записан?"`) и нет `referents.booking_ref`, это НЕ handoff по умолчанию. Верни `intent="check_booking"`, `action="fact"`, `tool_action="calendar.get_booking"`, `subject_kind="booking"`, `capability="booking_manage"`, `reason="calendar_get_booking_collect_reference"`. Сохрани bot-active follow-up contract: если `referents.customer` ещё нет, верни `expected_reply_type="name"`, `next_question="name"`, `open_questions=["name"]`; если `referents.customer` уже grounded, но booking reference всё ещё нет, верни `expected_reply_type="time"`, `next_question="datetime"`, `open_questions=["datetime"]`. Runtime может только озвучить этот follow-up, но не придумывает его сам.
 - Если текущий контекст уже в `booking_manage` / проверке существующей записи и пользователь спрашивает детали ЭТОЙ записи (`"Какой специалист меня ждет?"`, `"Кто мой мастер?"`, `"Во сколько моя запись?"`), это не live availability и не новый booking collect. Сохрани `intent="check_booking"`, `action="fact"`, `tool_action="calendar.get_booking"`, `subject_kind="booking"`, `capability="booking_manage"`. Не возвращай `master_query` с generic `next_question="datetime"` и не спрашивай `"На какую дату и время вам удобно?"`.
 - Семантическое различие обязательно:
   - `"Какой мастер свободен на этой неделе?"` / `"А какие мастера доступны?"` => live availability follow-up по услуге и времени.

@@ -1533,8 +1533,14 @@ def test_turn_executor_returns_reference_prompt_for_check_booking_fact() -> None
             "intent": "check_booking",
             "action": "fact",
             "tool_action": "calendar.get_booking",
-            "reason": "booking_verification_text",
+            "reason": "calendar_get_booking_collect_reference",
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
             "goal": "booking",
+            "subject_kind": "booking",
+            "capability": "booking_manage",
+            "resolution_mode": "direct",
         },
         interaction_owner="turn_planner_intent_routing",
         interaction_relation="grounded_fact",
@@ -1556,6 +1562,13 @@ def test_turn_executor_returns_reference_prompt_for_check_booking_fact() -> None
     assert "Чтобы проверить запись" in result.text
     assert result.tool_action == "calendar.get_booking"
     assert result.tool_decision == "not_found"
+    assert result.meta["pending_question_contract"] == {
+        "expected_reply_type": "name",
+        "reason": "calendar_get_booking_collect_reference",
+        "next_question": "name",
+        "open_questions": ["name"],
+    }
+    assert result.meta["semantic_contract"]["capability"] == "booking_manage"
 
 
 def test_turn_executor_routes_master_query_through_master_catalog() -> None:
@@ -2850,6 +2863,68 @@ def test_consultant_runtime_records_tool_execution_projection_in_trace_and_meta(
         "entity_type": "service",
         "source_ref": "message",
     }
+
+
+def test_consultant_runtime_memory_profile_uses_canonical_pending_question_contract_only() -> None:
+    runtime = ConsultantRuntime()
+    dialog_state = DialogState.model_validate(
+        {
+            "schema_version": "dialog_state.v1",
+            "current_referents": {
+                "service": "Маникюр",
+                "specialist": None,
+                "branch": None,
+                "booking": None,
+                "customer": None,
+            },
+            "pending_question_contract": {
+                "expected_reply_type": "name",
+                "reason": "calendar_get_booking_collect_reference",
+                "next_question": "name",
+                "open_questions": ["name"],
+            },
+            "interaction_state": {
+                "interaction_owner": "llm_policy_core",
+            },
+            "projections": {
+                "expected_reply_type": "name",
+                "expected_reply_reason": "calendar_get_booking_collect_reference",
+            },
+            "meta": {
+                "semantic_contract": {
+                    "contract_version": "semantic_contract.v1",
+                    "subject_kind": "booking",
+                    "capability": "booking_manage",
+                    "resolution_mode": "direct",
+                    "referents": {
+                        "service": {
+                            "value": "Маникюр",
+                            "entity_id": "svc:manicure",
+                            "entity_type": "service",
+                            "source_ref": "memory",
+                        }
+                    },
+                }
+            },
+        }
+    )
+    runtime_state = SimpleNamespace(
+        current_goal="booking",
+        booking_state={"service": "Маникюр"},
+        dialog_state=dialog_state,
+        expected_reply_type="time",
+        expected_reply_reason="collect:datetime",
+    )
+
+    profile = runtime._build_policy_core_memory_profile(runtime_state)
+
+    assert profile["pending_question_contract"] == {
+        "expected_reply_type": "name",
+        "reason": "calendar_get_booking_collect_reference",
+        "next_question": "name",
+        "open_questions": ["name"],
+    }
+    assert profile["semantic_contract"]["capability"] == "booking_manage"
 
 
 def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_question_contracts() -> None:

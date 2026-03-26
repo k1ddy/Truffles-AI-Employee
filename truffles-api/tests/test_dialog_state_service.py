@@ -3072,6 +3072,138 @@ def test_dialog_state_service_fact_owner_contract_overrides_stale_booking_follow
     assert booking_payload["service"] == "Маникюр"
 
 
+def test_dialog_state_service_check_booking_fact_keeps_owner_reference_followup_without_stale_booking_interrupt() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 26, 12, 24, tzinfo=timezone.utc)
+    context = {
+        "expected_reply_type": "time",
+        "expected_reply_reason": "collect:datetime",
+        "current_goal": "booking",
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "current_referents": {
+                    "service": "Наращивание гелем",
+                    "specialist": None,
+                    "branch": None,
+                    "booking": None,
+                    "customer": None,
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "interaction_state": {
+                    "resume_slot": "datetime",
+                    "interaction_target": "time",
+                    "interaction_relation": "ask_about_requested_slot",
+                    "interaction_owner": "booking_time_followup",
+                    "grounded_referents": {"service": "Наращивание гелем"},
+                },
+                "projections": {
+                    "expected_reply_type": "time",
+                    "expected_reply_reason": "collect:datetime",
+                },
+                "meta": {
+                    "writer": "dialog_state_service",
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "subject_kind": "booking",
+                        "capability": "bookability",
+                        "resolution_mode": "ask_about_requested_slot",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                        "referents": {
+                            "service": {
+                                "value": "Наращивание гелем",
+                                "entity_id": "svc:gel_extension",
+                                "entity_type": "service",
+                                "source_ref": "memory",
+                            }
+                        },
+                    },
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": "Наращивание гелем",
+                "last_question": "datetime",
+            },
+            "pending_question_contract": {
+                "expected_reply_type": "time",
+                "reason": "collect:datetime",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            "expected_reply_type": "time",
+            "expected_reply_reason": "collect:datetime",
+            "current_goal": "booking",
+        },
+    }
+    decision = planner.build_from_policy_override(
+        {
+            "action": "fact",
+            "intent": "check_booking",
+            "tool_action": "calendar.get_booking",
+            "reason": "calendar_get_booking_collect_reference",
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
+            "goal": "booking",
+            "subject_kind": "booking",
+            "capability": "booking_manage",
+            "resolution_mode": "direct",
+            "referents": {
+                "service": {
+                    "value": "Наращивание гелем",
+                    "entity_id": "svc:gel_extension",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation=None,
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"tool_decision": "not_found"},
+        now=now,
+    )
+
+    runtime_payload = updated["consultant_runtime"]
+    assert runtime_payload["expected_reply_type"] == "name"
+    assert runtime_payload["expected_reply_reason"] == "calendar_get_booking_collect_reference"
+    assert runtime_payload["pending_question_contract"] == {
+        "expected_reply_type": "name",
+        "reason": "calendar_get_booking_collect_reference",
+        "next_question": "name",
+        "open_questions": ["name"],
+    }
+    assert dialog_state.pending_question_contract.expected_reply_type == "name"
+    assert dialog_state.pending_question_contract.next_question == "name"
+    assert dialog_state.meta["semantic_contract"]["capability"] == "booking_manage"
+    assert "pending_question_act" not in dialog_state.meta["semantic_contract"]
+    assert "pending_question_target" not in dialog_state.meta["semantic_contract"]
+    assert "active_question_relation" not in dialog_state.meta["semantic_contract"]
+    assert booking_payload["service"] == "Наращивание гелем"
+
+
 def test_dialog_state_service_clears_expected_reply_contract_on_handoff() -> None:
     service = DialogStateService()
     planner = TurnPlanner()

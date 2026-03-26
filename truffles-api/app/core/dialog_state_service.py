@@ -785,6 +785,12 @@ class DialogStateService:
                 "capability",
                 "temporal_scope",
                 "resolution_mode",
+            ):
+                value = self._normalize_projection_token(source.get(key))
+                if value:
+                    contract[key] = value
+        for source in (decision_contract, execution_contract):
+            for key in (
                 "pending_question_act",
                 "pending_question_target",
                 "active_question_relation",

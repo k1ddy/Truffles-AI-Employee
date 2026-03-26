@@ -1009,8 +1009,9 @@ class TestPolicyCoreTimeoutRetry:
             mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
             result = route_llm_policy_core("Сколько стоит маникюр?")
 
-        assert result["ok"] is False
-        assert result["error"] == "invalid_schema"
+        assert result["ok"] is True
+        assert result.get("tool_args_sanitized") is True
+        assert result["payload"]["tool_args"]["service_query"] == "маникюр"
 
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1205,10 +1206,14 @@ class TestPolicyCoreTimeoutRetry:
 
         assert '"Я хотел бы проверить свою запись."' in prompt
         assert '"Когда я записан?"' in prompt
+        assert '"intent": "booking|check_booking|verify_booking|' in prompt
         assert '`intent="check_booking"`' in prompt
         assert '`tool_action="calendar.get_booking"`' in prompt
+        assert '`reason="calendar_get_booking_collect_reference"`' in prompt
+        assert '`expected_reply_type="name"`' in prompt
+        assert '`next_question="name"`' in prompt
         assert "это НЕ handoff по умолчанию" in prompt
-        assert "Оставь диалог в `bot_active`" in prompt
+        assert "Сохрани bot-active follow-up contract" in prompt
 
     def test_policy_core_prompt_existing_booking_detail_question_stays_check_booking(self):
         prompt = _load_policy_core_prompt()
