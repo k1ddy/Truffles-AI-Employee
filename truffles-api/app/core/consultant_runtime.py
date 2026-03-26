@@ -583,17 +583,8 @@ class ConsultantRuntime:
         if runtime_state.current_goal:
             profile["active_goal"] = runtime_state.current_goal
 
-        active_slots = [
-            slot_key
-            for slot_key in ("service", "datetime", "name", "phone")
-            if isinstance(runtime_state.booking_state.get(slot_key), str)
-            and runtime_state.booking_state.get(slot_key, "").strip()
-        ]
-        if active_slots:
-            profile["active_slots"] = active_slots
-
         dialog_state = runtime_state.dialog_state
-        current_referents: dict[str, str] = {}
+        canonical_referents: dict[str, dict[str, Any]] = {}
         referent_map = {
             "service": dialog_state.current_referents.service,
             "specialist": dialog_state.current_referents.specialist,
@@ -601,11 +592,20 @@ class ConsultantRuntime:
             "booking_ref": dialog_state.current_referents.booking,
             "customer": dialog_state.current_referents.customer,
         }
+        referent_entity_types = {
+            "service": "service",
+            "specialist": "specialist",
+            "branch": "branch",
+            "booking_ref": "booking",
+            "customer": "customer",
+        }
         for key, raw_value in referent_map.items():
             if isinstance(raw_value, str) and raw_value.strip():
-                current_referents[key] = raw_value.strip()
-        if current_referents:
-            profile["current_referents"] = current_referents
+                canonical_referents[key] = {
+                    "value": raw_value.strip(),
+                    "entity_type": referent_entity_types[key],
+                    "source_ref": "carryover",
+                }
 
         semantic_contract = (
             dict(dialog_state.meta.get("semantic_contract"))
@@ -613,46 +613,34 @@ class ConsultantRuntime:
             else {}
         )
         if semantic_contract:
-            semantic_referents = semantic_contract.get("referents")
-            if isinstance(semantic_referents, dict):
-                for referent_key, payload in semantic_referents.items():
-                    if referent_key in current_referents:
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    referent_value = payload.get("value")
-                    if isinstance(referent_value, str) and referent_value.strip():
-                        current_referents[referent_key] = referent_value.strip()
-                if current_referents:
-                    profile["current_referents"] = current_referents
+            semantic_referents = (
+                dict(semantic_contract.get("referents"))
+                if isinstance(semantic_contract.get("referents"), dict)
+                else {}
+            )
+            for referent_key, payload in canonical_referents.items():
+                existing = semantic_referents.get(referent_key)
+                if isinstance(existing, dict):
+                    merged = dict(existing)
+                    for field_name, field_value in payload.items():
+                        merged.setdefault(field_name, field_value)
+                    semantic_referents[referent_key] = merged
+                    continue
+                semantic_referents[referent_key] = dict(payload)
+            if semantic_referents:
+                semantic_contract["referents"] = semantic_referents
             profile["semantic_contract"] = semantic_contract
+        elif canonical_referents:
+            profile["semantic_contract"] = {
+                "contract_version": "semantic_contract.v1",
+                "referents": canonical_referents,
+            }
 
         pending_contract = self.dialog_state.project_pending_question_contract(
             dialog_state.pending_question_contract,
         ) or {}
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
-
-        interaction_state: dict[str, Any] = {}
-        if dialog_state.interaction_state.resume_slot:
-            interaction_state["resume_slot"] = dialog_state.interaction_state.resume_slot
-        if dialog_state.interaction_state.interaction_target:
-            interaction_state["interaction_target"] = (
-                dialog_state.interaction_state.interaction_target
-            )
-        if dialog_state.interaction_state.interaction_relation:
-            interaction_state["interaction_relation"] = (
-                dialog_state.interaction_state.interaction_relation
-            )
-        if dialog_state.interaction_state.interaction_owner:
-            interaction_state["interaction_owner"] = dialog_state.interaction_state.interaction_owner
-        grounded_referents = dict(dialog_state.interaction_state.grounded_referents or {})
-        if not grounded_referents:
-            grounded_referents = dict(current_referents)
-        if grounded_referents:
-            interaction_state["grounded_referents"] = grounded_referents
-        if interaction_state:
-            profile["interaction_state"] = interaction_state
 
         return profile
 

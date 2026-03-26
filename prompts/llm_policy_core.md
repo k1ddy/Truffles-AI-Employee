@@ -16,7 +16,6 @@
     "summary": "...",
     "profile": {
       "active_goal": "booking",
-      "current_referents": {"service": "маникюр", "specialist": "Айгерим"},
       "pending_question_contract": {
         "next_question": "datetime",
         "open_questions": ["datetime"],
@@ -34,7 +33,16 @@
       "semantic_contract": {
         "subject_kind": "service",
         "capability": "bookability",
-        "resolution_mode": "direct"
+        "resolution_mode": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "referents": {
+          "service": {
+            "value": "маникюр",
+            "entity_type": "service",
+            "source_ref": "carryover"
+          }
+        }
       }
     }
   },
@@ -107,12 +115,13 @@
 Booking semantics:
 - `slots.name` и `next_question="name"` означают только имя клиента (`customer_name`), а не выбор мастера.
 - Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`. Передавай мастера через `referents.specialist`.
-- `memory.profile.interaction_state`, `memory.profile.pending_question_contract` и `memory.profile.semantic_contract` — grounded dialog contract, а не слабые подсказки.
+- `memory.profile.semantic_contract` и `memory.profile.pending_question_contract` — единственный grounded dialog contract. Не ищи вторую semantic truth в дублирующих carrier-полях.
 - Если услуга названа, но время еще не заполнено, первый booking prompt должен сохранять requested-slot contract. Для `"Я хочу записаться на маникюр."` это canonical `ask_about_requested_slot(time)`: верни `action=collect`, `tool_action=collect`, `next_question="datetime"`, `open_questions=["datetime"]`, `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`. Не оставляй `active_question_relation` пустым на первом booking prompt. Также не используй `fill_requested_slot` для первого booking prompt.
 - `fill_requested_slot` используй только когда пользователь действительно заполняет недостающий slot, а не когда он спрашивает про варианты времени.
 - Если `expected_reply_type=name` или активный collect ждёт имя клиента, короткий bare reply вида `Амина`, `Айжан`, `Амина Ахметова` трактуй как заполнение `slots.name`.
 - booking commit canonical rule: если service + datetime уже grounded, и текущий ход заполняет последний обязательный booking slot имени клиента, НЕ спрашивай phone по умолчанию. Верни `action="fact"`, `tool_action="calendar.book_slot"`, передай заполненные `slots` и нужные booking args.
 - Если есть активный `pending_question_contract` по `datetime` и пользователь спрашивает про удобное время вместо заполнения точного слота, сохраняй collect и тот же requested-slot owner. Для `"Когда у вас есть свободные слоты?"` Не используй `calendar.list_slots` без `temporal_scope`; сохраняй `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`.
+- Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, и пользователь фиксирует предпочтение по конкретному мастеру/специалисту — например `"Мне нужно, чтобы мастер был Айгерим."`, `"Хочу к Айгерим."`, `"Можно к Айгерим?"` — это referent follow-up внутри того же booking collect, а не generic time collect. Сохрани `action="collect"` и `next_question="datetime"`, но semantic axes должны стать specialist follow-up: передай `referents.specialist`, `subject_kind="specialist"`, `capability="bookability"`, `resolution_mode="referent_followup"`, `pending_question_target="specialist"`, `active_question_relation="referent_followup"`, `open_questions=["datetime"]`. Forbidden: generic `subject_kind="service"` / `active_question_relation="ask_about_requested_slot"` при уже grounded `referents.specialist`.
 - Если есть активный `pending_question_contract` по `datetime` и пользователь задает общий info-вопрос по пути бронирования, ответь по info/fact, но не теряй booking continuity. Используй `active_question_relation="generic_info_interrupt"` и сохраняй `next_question`/`open_questions` активного booking collect.
 - Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, а пользователь спрашивает про длительность/ожидание вместо указания конкретного слота — например `"Долго ли ждать?"`, `"Как долго длится процедура?"`, `"Сколько по времени занимает услуга?"` — это duration info interrupt, а НЕ заполнение requested slot. Верни `intent="duration"`, `action="fact"`, `tool_action="catalog.service_query"`, `subject_kind="service"`, `capability="duration"`, `resolution_mode="policy_fact"`, `active_question_relation="generic_info_interrupt"`. Booking continuity сохрани через `next_question="datetime"`, `open_questions=["datetime"]`, `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`. Forbidden: `action="collect"`, `capability="bookability"`, generic prompt `"На какую дату и время вам удобно?"`.
 - Если есть активный `pending_question_contract` по `datetime`, услуга уже известна и пользователь спрашивает про мастеров по времени, это follow-up live availability, а не новый semantic owner. Для `"Какой мастер свободен на этой неделе?"` и `"А какие мастера доступны?"` используй `subject_kind="specialist"`, `capability="live_availability"`, `active_question_relation="specialist_availability_followup"`.

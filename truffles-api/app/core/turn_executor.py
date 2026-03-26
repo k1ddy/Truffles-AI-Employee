@@ -358,9 +358,14 @@ class TurnExecutor:
                         },
                         semantic_contract=semantic_contract,
                         pending_question_contract=pending_question_contract,
-                    ),
-                )
-        prompt = prompt_map.get(next_slot or "", "Подскажите, пожалуйста, следующий удобный слот.")
+                ),
+            )
+        prompt = self._build_collect_prompt(
+            next_slot=next_slot,
+            prompt_map=prompt_map,
+            semantic_contract=semantic_contract,
+            pending_question_contract=pending_question_contract,
+        )
         meta: dict[str, Any] = self._attach_semantic_contract_meta(
             {"slot_values": merged_slots},
             semantic_contract=semantic_contract,
@@ -374,6 +379,36 @@ class TurnExecutor:
             tool_decision=next_slot or "collect",
             meta=meta,
         )
+
+    def _build_collect_prompt(
+        self,
+        *,
+        next_slot: str | None,
+        prompt_map: dict[str, str],
+        semantic_contract: dict[str, Any] | None,
+        pending_question_contract: dict[str, Any] | None,
+    ) -> str:
+        prompt = prompt_map.get(
+            next_slot or "",
+            "Подскажите, пожалуйста, следующий удобный слот.",
+        )
+        pending_target = self._normalize_fact_hint(
+            (pending_question_contract or {}).get("pending_question_target")
+            or (semantic_contract or {}).get("pending_question_target")
+        )
+        relation = self._normalize_fact_hint(
+            (pending_question_contract or {}).get("active_question_relation")
+            or (semantic_contract or {}).get("active_question_relation")
+        )
+        if pending_target != "specialist" or relation != "referent_followup":
+            return prompt
+        specialist_payload = self._semantic_referents(semantic_contract).get("specialist")
+        if not isinstance(specialist_payload, dict):
+            return prompt
+        specialist_name = self._normalize_execution_text(specialist_payload.get("value"))
+        if not specialist_name:
+            return prompt
+        return f"Хорошо, ориентир по мастеру — {specialist_name}. {prompt}"
 
     def _execute_fact(
         self,

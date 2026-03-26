@@ -279,13 +279,6 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
     memory_profile = captured["memory_profile"]
     assert memory_profile == {
         "active_goal": "booking",
-        "active_slots": ["service"],
-        "current_referents": {
-            "service": "manicure",
-            "specialist": "Айгерим",
-            "branch": "almaty-center",
-            "customer": "Марина",
-        },
         "pending_question_contract": {
             "next_question": "datetime",
             "open_questions": ["datetime"],
@@ -294,17 +287,6 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
             "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
             "active_question_relation": "ask_about_requested_slot",
-        },
-        "interaction_state": {
-            "resume_slot": "time",
-            "interaction_target": "time",
-            "interaction_relation": "ask_about_requested_slot",
-            "interaction_owner": "booking_time_followup",
-            "grounded_referents": {
-                "service": "manicure",
-                "specialist": "Айгерим",
-                "customer": "Марина",
-            },
         },
         "semantic_contract": {
             "contract_version": "semantic_contract.v1",
@@ -338,6 +320,16 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
                     "value": "Айгерим",
                     "entity_id": "spec:aigerim",
                     "entity_type": "specialist",
+                    "source_ref": "carryover",
+                },
+                "branch": {
+                    "value": "almaty-center",
+                    "entity_type": "branch",
+                    "source_ref": "carryover",
+                },
+                "customer": {
+                    "value": "Марина",
+                    "entity_type": "customer",
                     "source_ref": "carryover",
                 },
             },
@@ -393,7 +385,16 @@ def test_consultant_runtime_plan_turn_does_not_prefill_service_from_raw_message(
     )
 
     assert captured["booking_state"] == {}
-    assert captured["memory_profile"]["current_referents"] == {"branch": "almaty-center"}
+    assert captured["memory_profile"]["semantic_contract"] == {
+        "contract_version": "semantic_contract.v1",
+        "referents": {
+            "branch": {
+                "value": "almaty-center",
+                "entity_type": "branch",
+                "source_ref": "carryover",
+            }
+        },
+    }
     assert decision.pending_question_contract.next_question == "datetime"
     assert override is None
 
@@ -1645,6 +1646,61 @@ def test_turn_executor_keeps_slot_constraint_collect_contract() -> None:
     assert result.meta.get("pending_question_act") == "slot_constraint"
     assert result.meta.get("pending_question_target") == "time"
     assert result.meta.get("question_contract") is True
+
+
+def test_turn_executor_realizes_specialist_followup_collect_prompt_from_canonical_contract() -> None:
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "reason": "user_requested_specific_master_keep_datetime_collect",
+            "goal": "booking",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Наращивание гелем",
+                    "entity_id": "svc:gel_extension",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                },
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "spec:aigerim",
+                    "entity_type": "specialist",
+                    "source_ref": "user_request",
+                },
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "referent_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="referent_followup",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Мне нужно, чтобы мастер был Айгерим.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Наращивание гелем"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert "Айгерим" in result.text
+    assert "мастер" in result.text.casefold()
+    assert "дат" in result.text.casefold()
+    assert result.tool_decision == "datetime"
+    assert result.meta["pending_question_contract"]["pending_question_target"] == "specialist"
+    assert result.meta["pending_question_contract"]["active_question_relation"] == "referent_followup"
 
 
 def test_turn_executor_adds_pricing_info_sections_for_price_reply() -> None:
@@ -2925,6 +2981,15 @@ def test_consultant_runtime_memory_profile_uses_canonical_pending_question_contr
         "open_questions": ["name"],
     }
     assert profile["semantic_contract"]["capability"] == "booking_manage"
+    assert profile["semantic_contract"]["referents"]["service"] == {
+        "value": "Маникюр",
+        "entity_id": "svc:manicure",
+        "entity_type": "service",
+        "source_ref": "memory",
+    }
+    assert "current_referents" not in profile
+    assert "interaction_state" not in profile
+    assert "active_slots" not in profile
 
 
 def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_question_contracts() -> None:

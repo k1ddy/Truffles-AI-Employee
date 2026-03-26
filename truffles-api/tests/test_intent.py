@@ -1233,8 +1233,20 @@ class TestPolicyCoreTimeoutRetry:
 
         assert "`slots.name` и `next_question=\"name\"` означают только имя клиента" in prompt
         assert "Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`." in prompt
-        assert "`memory.profile.interaction_state`" in prompt
+        assert "`memory.profile.semantic_contract` и `memory.profile.pending_question_contract`" in prompt
         assert "`tool_args.specialist_name`" in prompt
+
+    def test_policy_core_prompt_named_specialist_preference_under_active_time_collect_is_referent_followup(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Мне нужно, чтобы мастер был Айгерим."' in prompt
+        assert '"Хочу к Айгерим."' in prompt
+        assert '"Можно к Айгерим?"' in prompt
+        assert '`subject_kind="specialist"`' in prompt
+        assert '`resolution_mode="referent_followup"`' in prompt
+        assert '`pending_question_target="specialist"`' in prompt
+        assert '`active_question_relation="referent_followup"`' in prompt
+        assert "Forbidden: generic `subject_kind=\"service\"`" in prompt
 
     def test_policy_core_memory_profile_keeps_interaction_state_and_customer_referent(self):
         normalized = _normalize_policy_core_memory_profile(
