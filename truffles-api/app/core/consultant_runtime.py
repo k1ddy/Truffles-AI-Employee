@@ -865,6 +865,16 @@ class ConsultantRuntime:
             "trace_id": get_trace_id(),
             "delivered": delivered,
         }
+        reason_code = None
+        observability = getattr(turn_result, "observability", None)
+        if observability is not None:
+            reason_code = getattr(observability, "reason_code", None)
+        if not reason_code and isinstance(decision.meta, dict):
+            reason_code = decision.meta.get("reason_code")
+        if not reason_code and isinstance(execution.meta, dict):
+            reason_code = execution.meta.get("reason_code")
+        if isinstance(reason_code, str) and reason_code.strip():
+            trace_event["reason_code"] = reason_code.strip()
         if expected_reply_type:
             trace_event["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
@@ -967,6 +977,8 @@ class ConsultantRuntime:
             "interaction_owner": decision.interaction.owner,
             "decision_trace": trace_event,
         }
+        if isinstance(reason_code, str) and reason_code.strip():
+            decision_meta["reason_code"] = reason_code.strip()
         if expected_reply_type:
             decision_meta["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:

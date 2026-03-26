@@ -2502,6 +2502,45 @@ def test_consultant_runtime_trace_emits_question_contract_for_collect_pending_co
     assert decision_meta.get("question_contract") is True
 
 
+def test_consultant_runtime_trace_emits_reason_code_for_controlled_degrade() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_controlled_degrade(
+        reason_code="planner:invalid_schema",
+        action="handoff",
+        intent="planner_degrade",
+        tool_action="handoff",
+        interaction_owner="turn_planner_degrade",
+    )
+    dialog_state = DialogState.model_validate({"meta": {"current_goal": "booking"}})
+    conversation = SimpleNamespace(context={}, state="pending")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="handoff", tool_decision="pending", meta={})
+    turn_result = SimpleNamespace(
+        dialog_state=dialog_state,
+        reply=SimpleNamespace(reply_kind="handoff"),
+        observability=SimpleNamespace(reason_code="planner:invalid_schema"),
+    )
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("reason_code") == "planner:invalid_schema"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta.get("reason_code") == "planner:invalid_schema"
+
+
 def test_consultant_runtime_trace_prefers_policy_core_semantic_contract_over_runtime_projection() -> None:
     runtime = ConsultantRuntime()
     decision = TurnPlanner().build_from_policy_override(
