@@ -136,9 +136,6 @@ class TurnPlanner:
         *,
         message_text: str | None,
         client_slug: str | None,
-        expected_reply_type: str | None,
-        expected_reply_reason: str | None,
-        current_goal: str | None,
         booking_state: dict[str, Any] | None,
         memory_summary: str | None = None,
         memory_profile: dict[str, Any] | None = None,
@@ -160,8 +157,6 @@ class TurnPlanner:
         consult_refs = self._load_consult_refs(load_consult_playbook, client_slug)
         policy_result = route_llm_policy_core(
             normalized_message,
-            expected_reply_type=expected_reply_type,
-            current_goal=current_goal,
             slot_state=normalized_booking_state,
             info_refs=list(_DEFAULT_INFO_REFS),
             consult_refs=consult_refs,
@@ -172,11 +167,7 @@ class TurnPlanner:
         )
         payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
         if isinstance(payload, dict):
-            return self._build_policy_core_decision(
-                payload,
-                current_goal=current_goal,
-                expected_reply_type=expected_reply_type,
-            )
+            return self._build_policy_core_decision(payload)
 
         degrade_reason = self._normalize_token(
             policy_result.get("error") if isinstance(policy_result, dict) else None
@@ -408,9 +399,6 @@ class TurnPlanner:
     def _build_policy_core_decision(
         self,
         payload: dict[str, Any],
-        *,
-        current_goal: str | None,
-        expected_reply_type: str | None,
     ) -> PolicyDecision:
         normalized_payload = dict(payload)
         normalized_payload["tool_action"] = self._normalize_tool_action(
@@ -438,7 +426,6 @@ class TurnPlanner:
             normalized_payload = self._strip_pending_question_payload_if_handoff(
                 normalized_payload
             )
-        normalized_payload.setdefault("goal", current_goal)
         return self.build_from_policy_override(
             normalized_payload,
             interaction_owner="llm_policy_core",

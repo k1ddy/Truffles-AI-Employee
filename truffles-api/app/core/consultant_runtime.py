@@ -552,9 +552,6 @@ class ConsultantRuntime:
         decision = self.planner.plan(
             message_text=payload.body.message,
             client_slug=payload.client_slug,
-            expected_reply_type=runtime_state.expected_reply_type,
-            expected_reply_reason=runtime_state.expected_reply_reason,
-            current_goal=runtime_state.current_goal,
             booking_state=dict(runtime_state.booking_state or {}),
             memory_summary=recent_summary,
             memory_profile=memory_profile,

@@ -23,9 +23,6 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
     decision = planner.plan(
         message_text="Алина",
         client_slug="demo_salon",
-        expected_reply_type="name",
-        expected_reply_reason="collect:name",
-        current_goal="booking",
         booking_state={
             "active": True,
             "service": "маникюр",
@@ -57,9 +54,6 @@ def test_plan_degrades_when_policy_core_is_unavailable_instead_of_routing_fallba
     decision = planner.plan(
         message_text="Подтвердите, пожалуйста, мою запись на четверг.",
         client_slug="demo_salon",
-        expected_reply_type=None,
-        expected_reply_reason=None,
-        current_goal=None,
         booking_state=None,
     )
 
@@ -107,9 +101,6 @@ def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monk
     decision = planner.plan(
         message_text="Есть ли место завтра в 15:00?",
         client_slug="demo_salon",
-        expected_reply_type="time",
-        expected_reply_reason="collect:datetime",
-        current_goal="booking",
         booking_state={
             "active": True,
             "service": "Маникюр",
@@ -119,5 +110,5 @@ def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monk
 
     assert policy_calls == ["Есть ли место завтра в 15:00?"]
     assert decision.source == "llm_policy_core"
-    assert decision.interaction.owner == "llm_policy_core_booking"
+    assert decision.interaction.owner == "llm_policy_core"
     assert decision.slots == {"datetime": "завтра 15:00"}
