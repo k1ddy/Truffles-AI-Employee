@@ -131,6 +131,22 @@ class ToolReplyOwnerExecution(NamedTuple):
 class TurnExecutor:
     """Assembles the typed turn result while runtime cutover is still pending."""
 
+    _POLICY_INFO_TOOL_ACTION_MAP = {
+        "pricing": "catalog.service_query",
+        "duration": "catalog.service_query",
+        "promotions": "catalog.service_query",
+        "services_overview": "catalog.service_query",
+        "location": "catalog.location",
+        "hours": "catalog.location",
+        "parking": "catalog.location",
+    }
+    _DIRECT_INFO_TRUTH_REFS = {
+        "location",
+        "hours",
+        "parking",
+        "promotions",
+        "services_overview",
+    }
     _BOOKING_PROMPTS = {
         "service": "На какую услугу хотите записаться?",
         "datetime": "На какую дату и время вам удобно?",
@@ -255,16 +271,6 @@ class TurnExecutor:
         now: datetime,
     ) -> RuntimeExecutionResult:
         merged_booking = self._merge_booking_slots(booking_state, decision.slots)
-        if decision.outcome == "FACT":
-            return self._execute_fact(
-                decision,
-                db=db,
-                message_text=message_text,
-                client_slug=client_slug,
-                branch_id=branch_id,
-                booking_state=merged_booking,
-                now=now,
-            )
         if decision.outcome == "HANDOFF":
             return RuntimeExecutionResult(
                 text="Передаю диалог менеджеру. Он скоро подключится.",
@@ -273,11 +279,7 @@ class TurnExecutor:
                 meta={"handoff_requested": True},
                 request_handoff=True,
             )
-        if decision.tool_action == "calendar.book_slot" or (
-            decision.outcome == "COLLECT"
-            and decision.intent == "booking"
-            and self._first_missing_booking_slot(merged_booking) is None
-        ):
+        if decision.tool_action == "calendar.book_slot":
             return self._execute_booking_confirmation(
                 decision,
                 db=db,
@@ -285,6 +287,16 @@ class TurnExecutor:
                 booking_state=merged_booking,
                 user_name=user_name,
                 user_phone=user_phone,
+                now=now,
+            )
+        if decision.outcome == "FACT":
+            return self._execute_fact(
+                decision,
+                db=db,
+                message_text=message_text,
+                client_slug=client_slug,
+                branch_id=branch_id,
+                booking_state=merged_booking,
                 now=now,
             )
         return self._execute_collect(decision, booking_state=merged_booking)
@@ -376,6 +388,7 @@ class TurnExecutor:
     ) -> RuntimeExecutionResult:
         from app.services.pack_runtime_service import (
             build_master_reply_from_pack,
+            format_reply_from_truth,
             get_pack_decision,
             resolve_master_intent,
         )
@@ -404,12 +417,14 @@ class TurnExecutor:
             service_name=service_name,
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
+        policy_info_refs = self._resolve_policy_info_refs(decision)
         fact_refs = {
             str(item).strip().casefold()
             for item in (
                 list(decision.pack_refs)
                 + list(decision.fact_refs)
                 + list(decision.capability_refs)
+                + policy_info_refs
             )
             if isinstance(item, str) and item.strip()
         }
@@ -454,12 +469,10 @@ class TurnExecutor:
                         semantic_contract=semantic_contract,
                         pending_question_contract=pending_question_contract,
                     ),
-                    request_handoff=master_reply.action == "escalate",
                 )
         resolved_tool_action = self._resolve_fact_tool_action(
             decision=decision,
-            fact_refs=fact_refs,
-            service_name=service_name,
+            policy_info_refs=policy_info_refs,
         )
         projected_tool_args, tool_execution_projection = self._build_tool_execution_projection(
             decision=decision,
@@ -489,8 +502,6 @@ class TurnExecutor:
             )
             if tool_result.handled and isinstance(tool_result.response_text, str) and tool_result.response_text.strip():
                 tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
-                if resolved_tool_action != decision.tool_action:
-                    tool_meta["resolved_tool_action"] = resolved_tool_action
                 if tool_execution_projection:
                     tool_meta["tool_execution_projection"] = tool_execution_projection
                 tool_meta = self._attach_semantic_contract_meta(
@@ -504,6 +515,45 @@ class TurnExecutor:
                     tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
                     meta=tool_meta,
                 )
+        if decision.tool_action == "info":
+            direct_info_ref, direct_info_reply = self._build_direct_policy_info_reply(
+                policy_info_refs=policy_info_refs,
+                client_slug=client_slug,
+                format_reply_from_truth=format_reply_from_truth,
+            )
+            if direct_info_ref and direct_info_reply:
+                direct_meta: dict[str, Any] = {
+                    "info_sections": [direct_info_ref],
+                    "info_ref_execution": True,
+                    "info_ref_source": "policy_core",
+                }
+                if tool_execution_projection:
+                    direct_meta["tool_execution_projection"] = tool_execution_projection
+                return RuntimeExecutionResult(
+                    text=direct_info_reply,
+                    tool_action=resolved_tool_action,
+                    tool_decision=direct_info_ref,
+                    meta=self._attach_semantic_contract_meta(
+                        direct_meta,
+                        semantic_contract=semantic_contract,
+                        pending_question_contract=pending_question_contract,
+                    ),
+                )
+            return RuntimeExecutionResult(
+                text="Я уточню это для вас.",
+                tool_action=resolved_tool_action,
+                tool_decision="info_ref_unresolved",
+                meta=self._attach_semantic_contract_meta(
+                    {
+                        "fact_fallback": True,
+                        "fact_fallback_reason": "policy_info_unresolved",
+                        "info_ref_source": "policy_core",
+                        "policy_info_refs": policy_info_refs,
+                    },
+                    semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
+                ),
+            )
         pack_decision = get_pack_decision(query_text, client_slug=client_slug)
         if pack_decision and isinstance(pack_decision.response, str) and pack_decision.response.strip():
             pack_meta = dict(pack_decision.meta) if isinstance(pack_decision.meta, dict) else {}
@@ -532,7 +582,6 @@ class TurnExecutor:
                 semantic_contract,
                 pack_meta,
             )
-            request_handoff = pack_decision.action == "escalate"
             return RuntimeExecutionResult(
                 text=pack_decision.response.strip(),
                 tool_action=decision.tool_action,
@@ -542,7 +591,6 @@ class TurnExecutor:
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
                 ),
-                request_handoff=request_handoff,
             )
         fallback_text = (message_text or "").strip() or "Я уточню это для вас."
         return RuntimeExecutionResult(
@@ -862,13 +910,18 @@ class TurnExecutor:
             if referent_key not in {"service", "specialist", "branch", "booking_ref", "customer"}:
                 return
             payload = dict(referents.get(referent_key) or {})
-            if isinstance(value, str) and value.strip():
-                payload["value"] = value.strip()
-            if entity_type:
+            normalized_value = self._normalize_execution_text(value)
+            if normalized_value:
+                payload["value"] = normalized_value
+            has_identity = bool(
+                self._normalize_execution_text(payload.get("value"))
+                or self._normalize_execution_text(payload.get("entity_id"))
+            )
+            if entity_type and has_identity:
                 payload.setdefault("entity_type", entity_type)
-            if source_ref:
+            if source_ref and has_identity:
                 payload.setdefault("source_ref", source_ref)
-            if payload:
+            if has_identity:
                 referents[referent_key] = payload
 
         if isinstance(contract.get("entity_refs"), list):
@@ -933,9 +986,75 @@ class TurnExecutor:
         sections: list[str] = []
         for token in fact_refs:
             normalized = self._normalize_fact_hint(token)
-            if normalized in {"pricing", "promotions", "duration", "services_overview", "location"}:
+            if normalized in {
+                "pricing",
+                "promotions",
+                "duration",
+                "services_overview",
+                "location",
+                "hours",
+                "parking",
+                "contact",
+                "master",
+            }:
                 sections.append(normalized)
         return sections or None
+
+    def _resolve_policy_info_refs(self, decision: PolicyDecision) -> list[str]:
+        refs: list[str] = []
+        seen: set[str] = set()
+
+        def _remember(value: Any) -> None:
+            normalized = self._normalize_fact_hint(value)
+            if normalized is None or normalized in seen:
+                return
+            seen.add(normalized)
+            refs.append(normalized)
+
+        tool_args = decision.tool_args if isinstance(decision.tool_args, dict) else {}
+        for item in tool_args.get("info_refs") or []:
+            _remember(item)
+        _remember(tool_args.get("info_ref"))
+        for item in decision.pack_refs:
+            _remember(item)
+        for item in decision.fact_refs:
+            _remember(item)
+        for item in decision.capability_refs:
+            _remember(item)
+
+        semantic_contract = decision.meta.get("semantic_contract") if isinstance(decision.meta, dict) else None
+        if isinstance(semantic_contract, dict):
+            _remember(semantic_contract.get("capability"))
+        return refs
+
+    def _resolve_fact_tool_action(
+        self,
+        *,
+        decision: PolicyDecision,
+        policy_info_refs: list[str],
+    ) -> str:
+        if decision.tool_action != "info":
+            return decision.tool_action
+        for info_ref in policy_info_refs:
+            projected = self._POLICY_INFO_TOOL_ACTION_MAP.get(info_ref)
+            if projected:
+                return projected
+        return decision.tool_action
+
+    def _build_direct_policy_info_reply(
+        self,
+        *,
+        policy_info_refs: list[str],
+        client_slug: str | None,
+        format_reply_from_truth: Any,
+    ) -> tuple[str | None, str | None]:
+        for info_ref in policy_info_refs:
+            if info_ref not in self._DIRECT_INFO_TRUTH_REFS:
+                continue
+            reply = format_reply_from_truth(info_ref, client_slug=client_slug)
+            if isinstance(reply, str) and reply.strip():
+                return info_ref, reply.strip()
+        return None, None
 
     def _resolve_fact_service_query(
         self,
@@ -956,25 +1075,6 @@ class TurnExecutor:
         if isinstance(service_name, str) and service_name.strip():
             return service_name.strip()
         return None
-
-    def _resolve_fact_tool_action(
-        self,
-        *,
-        decision: PolicyDecision,
-        fact_refs: set[str],
-        service_name: str | None,
-    ) -> str:
-        normalized_tool_action = self._normalize_fact_hint(decision.tool_action) or "info"
-        if normalized_tool_action != "info":
-            return decision.tool_action
-        if "location" in fact_refs:
-            return "catalog.location"
-        if service_name or any(
-            token in {"pricing", "promotions", "duration", "services_overview"}
-            for token in fact_refs
-        ):
-            return "catalog.service_query"
-        return decision.tool_action
 
     def _execute_booking_confirmation(
         self,

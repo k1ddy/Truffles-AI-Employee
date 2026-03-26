@@ -4250,7 +4250,7 @@ def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
         include_media=False,
         media_mode="text",
         media_kind="photo",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         api_key="test-key",
         coverage=["booking", "info", "interrupt", "handoff"],
@@ -5853,7 +5853,7 @@ def test_call_openai_classifies_quota_error(monkeypatch):
         _module._call_openai(
             "test prompt",
             api_key="test-key",
-            model="gpt-5-mini",
+            model="gpt-5.4-nano-2026-03-17",
             base_url="https://api.openai.com",
             max_tokens=256,
         )
@@ -5861,6 +5861,52 @@ def test_call_openai_classifies_quota_error(monkeypatch):
     message = str(exc_info.value)
     assert "openai_rate_or_quota_limited" in message
     assert "insufficient_quota" in message
+
+
+def test_call_openai_uses_gpt5_compatible_token_field(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "{\"dialogs\": []}"
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    def _fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeResponse()
+
+    monkeypatch.setattr(_module.urllib.request, "urlopen", _fake_urlopen)
+
+    content = _module._call_openai(
+        "test prompt",
+        api_key="test-key",
+        model="gpt-5.4-nano-2026-03-17",
+        base_url="https://api.openai.com",
+        max_tokens=256,
+    )
+
+    assert content == "{\"dialogs\": []}"
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["timeout"] == 40.0
+    assert captured["body"]["max_completion_tokens"] == 256
+    assert "max_tokens" not in captured["body"]
 
 
 def test_resolve_scenario_context_loads_pack_truth_for_non_salon_pack():

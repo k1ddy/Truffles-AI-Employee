@@ -413,49 +413,62 @@ class TurnPlanner:
         expected_reply_type: str | None,
     ) -> PolicyDecision:
         normalized_payload = dict(payload)
-        normalized_payload["tool_action"] = self._normalize_policy_tool_action(
-            normalized_payload.get("tool_action"),
-            action=normalized_payload.get("action"),
+        normalized_payload["tool_action"] = self._normalize_tool_action(
+            normalized_payload.get("tool_action")
         )
         normalized_payload["slots"] = self._normalize_planner_slots(
             normalized_payload.get("slots")
         )
         normalized_payload["next_question"] = self._normalize_booking_slot_name(
-            normalized_payload.get("next_question"),
-            expected_reply_type=expected_reply_type,
-            booking_slots=normalized_payload["slots"],
+            normalized_payload.get("next_question")
         )
         normalized_payload["open_questions"] = [
             item
             for item in (
                 self._normalize_booking_slot_name(
                     raw_item,
-                    expected_reply_type=expected_reply_type,
-                    booking_slots=normalized_payload["slots"],
                 )
                 for raw_item in self._normalize_list(normalized_payload.get("open_questions"))
             )
             if item
         ]
-        normalized_payload.setdefault("goal", current_goal)
-        if normalized_payload.get("goal") == "booking" or normalized_payload["slots"]:
-            interaction_owner = "llm_policy_core_booking"
-            interaction_relation = (
-                normalized_payload.get("active_question_relation")
-                or "fill_requested_slot"
-            )
-        elif normalized_payload.get("action") == "handoff":
-            interaction_owner = "llm_policy_core_handoff"
-            interaction_relation = "explicit_handoff"
+        if (
+            normalized_payload.get("action") == "collect"
+            and not normalized_payload["open_questions"]
+            and normalized_payload.get("next_question")
+        ):
+            normalized_payload["open_questions"] = [normalized_payload["next_question"]]
         else:
-            interaction_owner = "llm_policy_core_fact"
-            interaction_relation = "grounded_fact"
+            normalized_payload = self._strip_pending_question_payload_if_not_collect(
+                normalized_payload
+            )
+        normalized_payload.setdefault("goal", current_goal)
         return self.build_from_policy_override(
             normalized_payload,
-            interaction_owner=interaction_owner,
-            interaction_relation=interaction_relation,
+            interaction_owner="llm_policy_core",
+            interaction_relation=self._normalize_token(
+                normalized_payload.get("active_question_relation")
+            ),
             source="llm_policy_core",
         )
+
+    @classmethod
+    def _strip_pending_question_payload_if_not_collect(
+        cls,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if cls._normalize_token(payload.get("action")) == "collect":
+            return payload
+        normalized = dict(payload)
+        normalized.pop("next_question", None)
+        normalized["open_questions"] = []
+        for key in (
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+        ):
+            normalized.pop(key, None)
+        return normalized
 
     def _build_pending_question_contract(
         self,

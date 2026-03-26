@@ -1870,8 +1870,12 @@ def _call_openai(
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": max(256, int(max_tokens)),
     }
+    token_limit = max(256, int(max_tokens))
+    if str(model or "").strip().lower().startswith("gpt-5"):
+        payload["max_completion_tokens"] = token_limit
+    else:
+        payload["max_tokens"] = token_limit
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/v1/chat/completions",
@@ -2162,7 +2166,7 @@ def main() -> None:
     parser.add_argument("--media-mode", choices=["text", "payload"], default="text")
     parser.add_argument("--media-kind", choices=["photo", "audio"], default="photo")
     parser.add_argument("--coverage", default="booking,info,interrupt")
-    parser.add_argument("--llm-model", default="gpt-4o-mini")
+    parser.add_argument("--llm-model", default="gpt-5.4-nano-2026-03-17")
     parser.add_argument("--llm-base-url", default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"))
     parser.add_argument("--llm-api-key", default=os.environ.get("OPENAI_API_KEY"))
     parser.add_argument(

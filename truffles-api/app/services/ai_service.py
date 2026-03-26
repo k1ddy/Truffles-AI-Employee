@@ -220,8 +220,8 @@ BOT_STATUS_KEYWORDS = {
 }
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-FAST_MODEL = os.environ.get("FAST_MODEL", "gpt-5-mini")
-SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
+FAST_MODEL = os.environ.get("FAST_MODEL", "gpt-5.4-nano-2026-03-17")
+SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5.4-nano-2026-03-17")
 FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
 INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))

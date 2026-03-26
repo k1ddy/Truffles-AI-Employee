@@ -16,6 +16,9 @@ from app.services.intent_service import (
     _build_specialist_hint_response_format,
     _load_policy_core_prompt,
     _normalize_policy_core_memory_profile,
+    _resolve_model_temperature,
+    _resolve_policy_core_reasoning_effort,
+    _sanitize_policy_core_payload,
     classify_intent,
     classify_domain_with_scores,
     extract_customer_name_hint_llm,
@@ -459,15 +462,15 @@ class TestPolicyCoreTimeoutRetry:
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_MODEL",
-            "gpt-primary",
+            "primary-model",
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
-            "gpt-5-mini",
+            "gpt-5.4-nano-2026-03-17",
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_REASONING_EFFORT",
-            "minimal",
+            "low",
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_GPT5_MIN_MAX_TOKENS",
@@ -490,12 +493,90 @@ class TestPolicyCoreTimeoutRetry:
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
         models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
-        assert models == ["gpt-primary", "gpt-5-mini"]
+        assert models == ["primary-model", "gpt-5.4-nano-2026-03-17"]
         fallback_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
-        assert fallback_kwargs["reasoning_effort"] == "minimal"
+        assert fallback_kwargs["reasoning_effort"] == "low"
         assert fallback_kwargs["max_tokens"] >= 400
-        assert fallback_kwargs["temperature"] == 1.0
-        assert fallback_kwargs["timeout_seconds"] == 6.0
+        assert fallback_kwargs["temperature"] is None
+        assert fallback_kwargs["timeout_seconds"] == 8.0
+
+    def test_policy_core_gpt5_compatibility_helpers_use_chat_safe_defaults(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_REASONING_EFFORT",
+            "minimal",
+        )
+
+        assert _resolve_policy_core_reasoning_effort("gpt-5.4-nano-2026-03-17") == "low"
+        assert _resolve_policy_core_reasoning_effort("legacy-model") is None
+        assert _resolve_model_temperature("gpt-5.4-nano-2026-03-17") is None
+        assert _resolve_model_temperature("legacy-model") == 0.0
+
+    def test_policy_core_payload_sanitizer_drops_invalid_optional_tool_args(self):
+        payload, sanitized = _sanitize_policy_core_payload(
+            {
+                "intent": "booking",
+                "action": "fact",
+                "tool_action": "calendar.list_slots",
+                "tool_args": {
+                    "service_query": "Маникюр",
+                    "date": "tomorrow",
+                    "duration_min": "null? nope invalid?",
+                },
+            }
+        )
+
+        assert sanitized is True
+        assert payload["tool_args"] == {
+            "service_query": "Маникюр",
+            "date": "tomorrow",
+        }
+
+    def test_policy_core_route_salvages_invalid_optional_tool_args(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "booking",
+            "action": "fact",
+            "tool_action": "calendar.list_slots",
+            "tool_args": {
+                "service_query": "Маникюр",
+                "date": "tomorrow",
+                "duration_min": "null? nope invalid?",
+            },
+            "pack_refs": [],
+            "slots": {"service": "Маникюр"},
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "booking_availability_for_tomorrow",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "slot_state",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "live_availability",
+            "temporal_scope": "day",
+            "resolution_mode": "live_calendar",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Можно записаться на завтра?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["tool_args_sanitized"] is True
+        assert result["payload"]["tool_args"] == {
+            "service_query": "Маникюр",
+            "date": "tomorrow",
+        }
 
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -577,7 +658,7 @@ class TestPolicyCoreTimeoutRetry:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS",
-            10.0,
+            20.0,
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS",
@@ -596,7 +677,7 @@ class TestPolicyCoreTimeoutRetry:
         assert len(policy_input["message"]) <= 90
         assert policy_input["message"] != long_message
 
-    def test_policy_core_respects_explicit_max_tokens_override(self, monkeypatch):
+    def test_policy_core_respects_explicit_max_tokens_override_with_gpt5_floor(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
@@ -609,7 +690,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         kwargs = mock_llm.return_value.generate.call_args.kwargs
-        assert kwargs["max_tokens"] == 120
+        assert kwargs["max_tokens"] == 800
 
     def test_returns_deadline_when_budget_below_min_policy_timeout(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1048,6 +1129,29 @@ class TestPolicyCoreTimeoutRetry:
         assert '`capability="booking_manage"`' in prompt
         assert "Не перезапускай generic `next_question=\"datetime\"` collect" in prompt
 
+    def test_policy_core_prompt_check_booking_without_reference_stays_bot_active(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я хотел бы проверить свою запись."' in prompt
+        assert '"Когда я записан?"' in prompt
+        assert '`intent="check_booking"`' in prompt
+        assert '`tool_action="calendar.get_booking"`' in prompt
+        assert "это НЕ handoff по умолчанию" in prompt
+        assert "Оставь диалог в `bot_active`" in prompt
+
+    def test_policy_core_prompt_existing_booking_detail_question_stays_check_booking(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Какой специалист меня ждет?"' in prompt
+        assert '"Кто мой мастер?"' in prompt
+        assert '"Во сколько моя запись?"' in prompt
+        assert "это не live availability и не новый booking collect" in prompt
+        assert 'фразы с `моя запись`, `мой мастер`, `меня ждет` => detail query про уже существующую запись, значит `check_booking`' in prompt
+        assert 'memory semantic context: `capability="booking_manage"` + активный `pending_question_contract` по `datetime`' in prompt
+        assert 'forbidden: `intent="master_query"`, `action="collect"`' in prompt
+        assert 'Не возвращай `master_query` с generic `next_question="datetime"`' in prompt
+        assert 'не спрашивай `"На какую дату и время вам удобно?"`' in prompt
+
     def test_policy_core_prompt_keeps_customer_name_distinct_from_specialist_preference(self):
         prompt = _load_policy_core_prompt()
 
@@ -1146,10 +1250,10 @@ class TestPolicyCoreTimeoutRetry:
         assert response_format["json_schema"]["strict"] is True
         schema = response_format["json_schema"]["schema"]
         assert schema["type"] == "object"
+        assert "tool_args" in schema["required"]
+        assert "pack_refs" in schema["required"]
         assert "next_question" in schema["required"]
         assert "reason" in schema["required"]
-        assert "goal" in schema["required"]
-        assert "entity_refs" in schema["required"]
         assert "subject_kind" in schema["required"]
         assert "capability" in schema["required"]
         assert "temporal_scope" in schema["required"]
@@ -1157,10 +1261,7 @@ class TestPolicyCoreTimeoutRetry:
         assert "pending_question_act" in schema["required"]
         assert "pending_question_target" in schema["required"]
         assert "active_question_relation" in schema["required"]
-        assert "resolver_id" in schema["required"]
-        assert "resolver_version" in schema["required"]
         assert "referents" in schema["required"]
-        assert "entity_refs" in schema["properties"]
         assert "referents" in schema["properties"]
         assert "subject_kind" in schema["properties"]
         assert "capability" in schema["properties"]
@@ -1169,8 +1270,9 @@ class TestPolicyCoreTimeoutRetry:
         assert "pending_question_act" in schema["properties"]
         assert "pending_question_target" in schema["properties"]
         assert "active_question_relation" in schema["properties"]
-        assert "resolver_id" in schema["properties"]
-        assert "resolver_version" in schema["properties"]
+        assert "entity_refs" not in schema["properties"]
+        assert "resolver_id" not in schema["properties"]
+        assert "resolver_version" not in schema["properties"]
         assert schema["properties"]["tool_action"]["enum"] == ["calendar.book_slot"]
         tool_args_schema = schema["properties"]["tool_args"]
         slots_schema = schema["properties"]["slots"]
@@ -1237,7 +1339,7 @@ class TestPolicyCoreErrorClassification:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = Exception(
-                "The model gpt-x does not exist"
+                "The model missing-model does not exist"
             )
             result = route_llm_policy_core("нужна запись")
 

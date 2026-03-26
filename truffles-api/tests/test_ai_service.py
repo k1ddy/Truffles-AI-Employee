@@ -354,10 +354,10 @@ class TestGenerateAIResponse:
             {
                 "LLM_RETRY_ON_TIMEOUT": "1",
                 "LLM_RETRY_TIMEOUT_SECONDS": "2",
-                "LLM_TIMEOUT_FALLBACK_MODEL": "gpt-fallback",
+                "LLM_TIMEOUT_FALLBACK_MODEL": "fallback-model",
             },
             clear=False,
-        ), patch.object(ai_service, "LLM_TIMEOUT_FALLBACK_MODEL", "gpt-fallback"), patch.object(
+        ), patch.object(ai_service, "LLM_TIMEOUT_FALLBACK_MODEL", "fallback-model"), patch.object(
             ai_service, "LLM_RETRY_TIMEOUT_SECONDS", 2.0
         ):
             result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
@@ -366,7 +366,7 @@ class TestGenerateAIResponse:
         assert result.value[0] == "Fallback response"
         models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
         assert models[:2] == [ai_service.FAST_MODEL, ai_service.FAST_MODEL]
-        assert models[2] == "gpt-fallback"
+        assert models[2] == "fallback-model"
 
     @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")

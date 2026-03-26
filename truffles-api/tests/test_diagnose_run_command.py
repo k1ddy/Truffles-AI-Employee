@@ -103,7 +103,7 @@ def test_llm_quality_generate_batch_uses_scenario_timeout(monkeypatch):
         branch_slug="almaty-center",
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -160,7 +160,7 @@ def test_llm_quality_generate_batch_enables_progress_stderr_for_generated_llm_by
         scenarios_file=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -210,7 +210,7 @@ def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
         branch_slug=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -259,7 +259,7 @@ def test_llm_quality_generate_batch_uses_bounded_inner_retry_default(monkeypatch
         scenarios_file=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -476,8 +476,7 @@ def test_llm_quality_service_choice_booking_prompt_contract_catches_wrong_handof
 
     assert "expected_action_mismatch" in wrong_reasons
     assert "expected_reply_type_mismatch" in wrong_reasons
-    assert "expected_meta_mismatch" in wrong_reasons
-    assert "expected_trace_miss" in wrong_reasons
+    assert "missing_bot_reply" in wrong_reasons
 
 
 def test_llm_quality_build_scenario_context_merges_pack_and_capabilities(monkeypatch):
@@ -732,6 +731,7 @@ def test_llm_quality_build_failure_family_report_groups_same_root_cause():
     failure_families = {}
     record = {
         "type": "turn",
+        "root_trace_stage": "policy_core_guard",
         "last_trace_stage": "policy_core_guard",
         "conversation_state": "bot_active",
         "message_id": "m1",
@@ -754,6 +754,18 @@ def test_llm_quality_build_failure_family_report_groups_same_root_cause():
     assert family["reason"] == "fact_without_evidence"
     assert family["trace_stage"] == "policy_core_guard"
     assert family["state"] == "bot_active"
+
+
+def test_llm_quality_root_trace_failure_prefers_earliest_reasoned_stage():
+    result = _module._llm_quality_root_trace_failure(
+        [
+            {"stage": "policy_core_guard", "reason_code": "invalid_schema"},
+            {"stage": "consultant_runtime", "decision": "handoff"},
+        ],
+        ["expected_reply_mismatch"],
+    )
+
+    assert result == {"stage": "policy_core_guard", "reason_code": "invalid_schema"}
 
 
 def test_llm_quality_has_fact_without_evidence_ignores_service_clarify_collect():

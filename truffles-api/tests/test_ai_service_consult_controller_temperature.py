@@ -40,7 +40,7 @@ def test_consult_controller_uses_supported_temperature_for_gpt5(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(ai_service, "FAST_MODEL", "gpt-5-mini")
+    monkeypatch.setattr(ai_service, "FAST_MODEL", "gpt-5.4-nano-2026-03-17")
     monkeypatch.setattr(ai_service, "_should_attempt_llm", lambda *_a, **_k: True)
     monkeypatch.setattr(ai_service, "get_llm_provider", lambda: _LLM())
 
@@ -66,7 +66,7 @@ def test_consult_controller_keeps_zero_temperature_for_non_gpt5(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(ai_service, "FAST_MODEL", "gpt-4o-mini")
+    monkeypatch.setattr(ai_service, "FAST_MODEL", "legacy-model")
     monkeypatch.setattr(ai_service, "_should_attempt_llm", lambda *_a, **_k: True)
     monkeypatch.setattr(ai_service, "get_llm_provider", lambda: _LLM())
 

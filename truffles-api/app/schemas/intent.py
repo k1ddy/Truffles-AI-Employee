@@ -569,13 +569,13 @@ class LlmPolicyCoreOutput(BaseModel):
     tool_action: str
     tool_args: dict[str, Any] = Field(default_factory=dict)
     pack_refs: list[str] = Field(default_factory=list)
-    slots: dict[str, str]
+    slots: dict[str, str] = Field(default_factory=dict)
     next_question: str | None = None
     open_questions: list[str] = Field(default_factory=list)
     needs_manager: bool = False
     risk_signals: list[str] = Field(default_factory=list)
     language: str | None = None
-    confidence: float = Field(..., ge=0, le=1)
+    confidence: float = Field(0.0, ge=0, le=1)
     reason: str | None = None
     goal: str | None = None
     entity_refs: list[dict[str, Any]] = Field(default_factory=list)

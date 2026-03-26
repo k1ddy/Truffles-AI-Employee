@@ -853,8 +853,12 @@ class DialogStateService:
             normalized_entity_id = self._normalize_projection_token(entity_id)
             if normalized_entity_id:
                 payload["entity_id"] = normalized_entity_id
+            has_identity = bool(
+                self._normalize_projection_token(payload.get("value"))
+                or self._normalize_projection_token(payload.get("entity_id"))
+            )
             normalized_entity_type = self._normalize_projection_token(entity_type)
-            if normalized_entity_type:
+            if normalized_entity_type and has_identity:
                 payload["entity_type"] = normalized_entity_type
             normalized_source_ref = self._normalize_projection_token(source_ref)
             source_changed = (
@@ -864,7 +868,7 @@ class DialogStateService:
             )
             if normalized_source_ref and (normalized_value or normalized_entity_id) and source_changed:
                 payload["source_ref"] = normalized_source_ref
-            if payload:
+            if has_identity:
                 referents[referent_key] = payload
 
         existing_referents = existing_contract.get("referents")

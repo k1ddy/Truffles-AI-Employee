@@ -45,7 +45,6 @@ from app.services.knowledge_runtime import (
     should_allow_truth_fallback,
 )
 from app.services.message_service import save_message
-from app.services.pack_runtime_service import get_pack_service_hint, semantic_service_match
 from app.services.state_machine import ConversationState
 from app.services.state_service import apply_simulation_context, transition_state
 
@@ -188,10 +187,7 @@ class ConsultantRuntime:
                     trace_message="execution_requested_handoff",
                 )
 
-            effective_decision = self._finalize_execution_decision(
-                decision=decision,
-                execution=execution,
-            )
+            effective_decision = decision
             updated_context, dialog_state = self._write_runtime_state(
                 prepared=prepared,
                 runtime_state=runtime_state,
@@ -552,28 +548,14 @@ class ConsultantRuntime:
             return decision, override
 
         recent_summary = self._build_memory_summary(db, prepared.conversation)
-        grounded_service = self._resolve_explicit_service_grounding(
-            payload.body.message,
-            client_slug=payload.client_slug,
-            branch_id=prepared.branch_id,
-        )
-        grounded_booking_state = dict(runtime_state.booking_state or {})
-        if grounded_service and not (
-            isinstance(grounded_booking_state.get("service"), str)
-            and grounded_booking_state.get("service", "").strip()
-        ):
-            grounded_booking_state["service"] = grounded_service
-        memory_profile = self._build_policy_core_memory_profile(
-            runtime_state,
-            grounded_service=grounded_service,
-        )
+        memory_profile = self._build_policy_core_memory_profile(runtime_state)
         decision = self.planner.plan(
             message_text=payload.body.message,
             client_slug=payload.client_slug,
             expected_reply_type=runtime_state.expected_reply_type,
             expected_reply_reason=runtime_state.expected_reply_reason,
             current_goal=runtime_state.current_goal,
-            booking_state=grounded_booking_state,
+            booking_state=dict(runtime_state.booking_state or {}),
             memory_summary=recent_summary,
             memory_profile=memory_profile,
         )
@@ -596,8 +578,6 @@ class ConsultantRuntime:
     def _build_policy_core_memory_profile(
         self,
         runtime_state: LoadedRuntimeState,
-        *,
-        grounded_service: str | None = None,
     ) -> dict[str, Any]:
         profile: dict[str, Any] = {}
         if runtime_state.current_goal:
@@ -624,8 +604,6 @@ class ConsultantRuntime:
         for key, raw_value in referent_map.items():
             if isinstance(raw_value, str) and raw_value.strip():
                 current_referents[key] = raw_value.strip()
-        if grounded_service and "service" not in current_referents:
-            current_referents["service"] = grounded_service
         if current_referents:
             profile["current_referents"] = current_referents
 
@@ -680,34 +658,6 @@ class ConsultantRuntime:
 
         return profile
 
-    @staticmethod
-    def _resolve_explicit_service_grounding(
-        message_text: str | None,
-        *,
-        client_slug: str | None,
-        branch_id: UUID | None,
-    ) -> str | None:
-        if not isinstance(message_text, str) or not message_text.strip():
-            return None
-        match = semantic_service_match(
-            message_text,
-            client_slug,
-            branch_id=str(branch_id) if branch_id else None,
-        )
-        if match and getattr(match, "action", None) == "match":
-            canonical_name = getattr(match, "canonical_name", None)
-            if isinstance(canonical_name, str) and canonical_name.strip():
-                return canonical_name.strip()
-        fallback = get_pack_service_hint(
-            message_text,
-            client_slug=client_slug,
-            branch_id=str(branch_id) if branch_id else None,
-        )
-        if not isinstance(fallback, str):
-            return None
-        cleaned = fallback.strip()
-        return cleaned or None
-
     def _execute_turn(
         self,
         db: Session,
@@ -755,21 +705,6 @@ class ConsultantRuntime:
             now=now,
         )
         return updated_context, dialog_state
-
-    @staticmethod
-    def _finalize_execution_decision(
-        *,
-        decision: PolicyDecision,
-        execution: RuntimeExecutionResult,
-    ) -> PolicyDecision:
-        if (
-            execution.tool_action == "calendar.book_slot"
-            and execution.tool_decision == "ok"
-            and isinstance(execution.meta, dict)
-            and execution.meta.get("appointment_id")
-        ):
-            return decision.model_copy(update={"outcome": "FACT"})
-        return decision
 
     def _activate_handoff(
         self,
@@ -955,6 +890,8 @@ class ConsultantRuntime:
             question_contract_active = question_contract_active or bool(
                 decision.meta.get("question_contract")
             )
+        if not question_contract_active and decision.outcome == "COLLECT" and pending_question_contract:
+            question_contract_active = True
         if not pending_question_act:
             pending_question_act = dialog_state.pending_question_contract.pending_question_act
         if not pending_question_target:
@@ -967,12 +904,12 @@ class ConsultantRuntime:
         if active_question_relation:
             trace_event["active_question_relation"] = active_question_relation
         semantic_contract = (
-            dict(dialog_state.meta.get("semantic_contract"))
-            if isinstance(dialog_state.meta.get("semantic_contract"), dict)
+            dict(decision.meta.get("semantic_contract"))
+            if isinstance(decision.meta.get("semantic_contract"), dict)
             else {}
         )
-        if not semantic_contract and isinstance(decision.meta.get("semantic_contract"), dict):
-            semantic_contract = dict(decision.meta.get("semantic_contract"))
+        if not semantic_contract and isinstance(dialog_state.meta.get("semantic_contract"), dict):
+            semantic_contract = dict(dialog_state.meta.get("semantic_contract"))
         if semantic_contract:
             trace_event["semantic_contract"] = semantic_contract
         if isinstance(execution.meta, dict) and isinstance(
@@ -1036,6 +973,8 @@ class ConsultantRuntime:
             decision_meta["expected_reply_reason"] = expected_reply_reason
         if pending_question_contract:
             decision_meta["pending_question_contract"] = pending_question_contract
+        if question_contract_active:
+            decision_meta["question_contract"] = True
         if pending_question_target:
             decision_meta["pending_question_target"] = pending_question_target
         if active_question_relation:

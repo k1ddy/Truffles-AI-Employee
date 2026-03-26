@@ -16,6 +16,7 @@ from app.schemas.intent import (
     validate_dialogue_controller_output,
     validate_llm_plan_output,
     validate_llm_policy_core_output,
+    validate_tool_args_shape,
 )
 from app.services.ai_service import (
     FAST_MODEL,
@@ -154,9 +155,7 @@ CONTROLLER_PROMPT_PATH = PROMPTS_DIR / "intent_classifier.md"
 CONTROLLER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
 CONTROLLER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
 CONTROLLER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.30"))
-_DEFAULT_CONTROLLER_MODEL = (
-    "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
-)
+_DEFAULT_CONTROLLER_MODEL = FAST_MODEL
 CONTROLLER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_CONTROLLER_MODEL).strip()
 PLAN_PROMPT_PATH = PROMPTS_DIR / "llm_plan.md"
 PLAN_TIMEOUT_SECONDS = float(os.environ.get("LLM_PLAN_TIMEOUT_SECONDS", "3.0"))
@@ -165,7 +164,7 @@ PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
 PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
 POLICY_CORE_PROMPT_PATH = PROMPTS_DIR / "llm_policy_core.md"
 POLICY_CORE_TIMEOUT_SECONDS = float(
-    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "8.0")
+    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "15.0")
 )
 POLICY_CORE_MIN_TIMEOUT_SECONDS = max(
     float(os.environ.get("LLM_POLICY_CORE_MIN_TIMEOUT_SECONDS", "1.2")),
@@ -186,21 +185,20 @@ POLICY_CORE_FALLBACK_TIMEOUT_SECONDS = max(
 POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
 POLICY_CORE_RETRY_ON_TRANSIENT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TRANSIENT")
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
-POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
-_DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL = (
-    FAST_MODEL.strip()
-    if FAST_MODEL.strip().lower().startswith("gpt-5")
-    else (_DEFAULT_CONTROLLER_MODEL if _DEFAULT_CONTROLLER_MODEL.strip() else FAST_MODEL)
+_DEFAULT_POLICY_CORE_MODEL = (
+    os.environ.get("LLM_SEMANTIC_OWNER_MODEL", "gpt-5.4-nano-2026-03-17").strip()
+    or "gpt-5.4-nano-2026-03-17"
 )
+POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", _DEFAULT_POLICY_CORE_MODEL).strip()
 POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
     "LLM_POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
-    _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL,
+    "",
 ).strip()
 POLICY_CORE_REASONING_EFFORT = (
-    os.environ.get("LLM_POLICY_CORE_REASONING_EFFORT", "minimal").strip().lower()
+    os.environ.get("LLM_POLICY_CORE_REASONING_EFFORT", "low").strip().lower()
 )
 POLICY_CORE_GPT5_MIN_MAX_TOKENS = max(
-    int(os.environ.get("LLM_POLICY_CORE_GPT5_MIN_MAX_TOKENS", "400")),
+    int(os.environ.get("LLM_POLICY_CORE_GPT5_MIN_MAX_TOKENS", "800")),
     1,
 )
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
@@ -382,15 +380,17 @@ def _resolve_policy_core_reasoning_effort(model_name: str | None) -> str | None:
     normalized = (model_name or "").strip().lower()
     if not normalized.startswith("gpt-5"):
         return None
-    if POLICY_CORE_REASONING_EFFORT in {"minimal", "low", "medium", "high"}:
+    if POLICY_CORE_REASONING_EFFORT == "minimal":
+        return "low"
+    if POLICY_CORE_REASONING_EFFORT in {"none", "low", "medium", "high", "xhigh"}:
         return POLICY_CORE_REASONING_EFFORT
-    return "minimal"
+    return "low"
 
 
-def _resolve_model_temperature(model_name: str | None) -> float:
+def _resolve_model_temperature(model_name: str | None) -> float | None:
     normalized = (model_name or "").strip().lower()
     if normalized.startswith("gpt-5"):
-        return 1.0
+        return None
     return 0.0
 
 
@@ -578,12 +578,7 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "next_question",
             "open_questions",
             "needs_manager",
-            "risk_signals",
-            "language",
-            "confidence",
             "reason",
-            "goal",
-            "entity_refs",
             "referents",
             "subject_kind",
             "capability",
@@ -592,8 +587,6 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "pending_question_act",
             "pending_question_target",
             "active_question_relation",
-            "resolver_id",
-            "resolver_version",
         ],
         "properties": {
             "intent": {
@@ -619,39 +612,7 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "next_question": nullable_string_enum(["service", "datetime", "name", "phone"]),
             "open_questions": {"type": "array", "items": {"type": "string"}},
             "needs_manager": {"type": "boolean"},
-            "risk_signals": {"type": "array", "items": {"type": "string"}},
-            "language": nullable_string_enum(["ru", "kk", "mix"]),
-            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "reason": nullable_string,
-            "goal": nullable_string_enum(
-                ["booking", "info", "consult", "greeting", "out_of_domain", "other"]
-            ),
-            "entity_refs": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "entity_id",
-                        "entity_type",
-                        "source_ref",
-                        "value",
-                        "confidence",
-                    ],
-                    "properties": {
-                        "entity_id": nullable_string,
-                        "entity_type": nullable_string,
-                        "source_ref": nullable_string,
-                        "value": nullable_string,
-                        "confidence": {
-                            "anyOf": [
-                                {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                                {"type": "null"},
-                            ]
-                        },
-                    },
-                },
-            },
             "referents": sparse_referents_schema,
             "subject_kind": nullable_string_enum(
                 ["service", "specialist", "branch", "booking", "general"]
@@ -709,8 +670,6 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
                     "tool_result_followup_specialist_missing",
                 ]
             ),
-            "resolver_id": nullable_string,
-            "resolver_version": nullable_string,
         },
     }
     return {
@@ -781,6 +740,34 @@ def _build_policy_core_compact_input(policy_input: dict[str, Any]) -> dict[str, 
         compact_input["memory"] = normalized_memory
 
     return compact_input
+
+
+def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    sanitized_payload = dict(payload)
+    raw_tool_args = sanitized_payload.get("tool_args")
+    if raw_tool_args is None:
+        return sanitized_payload, False
+    if not isinstance(raw_tool_args, dict):
+        sanitized_payload["tool_args"] = {}
+        return sanitized_payload, True
+
+    cleaned_args = dict(raw_tool_args)
+    sanitized = False
+    while True:
+        normalized_args, error = validate_tool_args_shape(
+            tool_action=sanitized_payload.get("tool_action"),
+            tool_args=cleaned_args,
+        )
+        if error is None:
+            sanitized_payload["tool_args"] = normalized_args or {}
+            return sanitized_payload, sanitized or sanitized_payload["tool_args"] != raw_tool_args
+        if error.startswith("tool_args_unknown_field:") or error.startswith("tool_args_type_invalid:"):
+            field = error.split(":", 1)[1].strip()
+            if field and field in cleaned_args:
+                cleaned_args.pop(field, None)
+                sanitized = True
+                continue
+        return sanitized_payload, sanitized
 
 
 def _resolve_specialist_hint_timeout_seconds(timing_context: dict | None) -> float:
@@ -992,6 +979,10 @@ def extract_specialist_hint_llm(
     result["raw"] = content
     if not content:
         result["error"] = "empty_response"
+        logger.warning(
+            "LLM policy core returned empty response",
+            extra={"context": {"model_name": model_name_used, "elapsed_ms": elapsed_ms}},
+        )
         return result
 
     payload = None
@@ -3107,11 +3098,35 @@ def route_llm_policy_core(
                 payload = None
     if not isinstance(payload, dict):
         result["error"] = "invalid_json"
+        logger.warning(
+            "LLM policy core returned invalid JSON",
+            extra={
+                "context": {
+                    "model_name": model_name_used,
+                    "elapsed_ms": elapsed_ms,
+                    "raw": content[:500],
+                }
+            },
+        )
         return result
 
+    payload, tool_args_sanitized = _sanitize_policy_core_payload(payload)
+    if tool_args_sanitized:
+        result["tool_args_sanitized"] = True
     contract, schema_error = validate_llm_policy_core_output(payload)
     if schema_error:
         result["error"] = "invalid_schema"
+        logger.warning(
+            "LLM policy core returned invalid schema",
+            extra={
+                "context": {
+                    "model_name": model_name_used,
+                    "elapsed_ms": elapsed_ms,
+                    "schema_error": schema_error,
+                    "payload": payload,
+                }
+            },
+        )
         return result
     allowed_pack_refs = {
         ref.strip()

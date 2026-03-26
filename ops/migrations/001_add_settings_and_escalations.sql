@@ -101,7 +101,7 @@ COMMENT ON COLUMN handovers.assigned_to_name IS 'Имя менеджера ко�
 ALTER TABLE handovers ADD COLUMN IF NOT EXISTS resolution_time_seconds INTEGER;
 COMMENT ON COLUMN handovers.resolution_time_seconds IS 'Секунды от создания до ответа менеджера';
 
--- Проверка LLM (gpt-5-mini)
+-- Проверка LLM (gpt-5.4-nano-2026-03-17)
 ALTER TABLE handovers ADD COLUMN IF NOT EXISTS llm_check_result JSONB;
 ALTER TABLE handovers ADD COLUMN IF NOT EXISTS llm_checked_at TIMESTAMPTZ;
 COMMENT ON COLUMN handovers.llm_check_result IS 'Результат проверки LLM: {ok: bool, issues: [string]}';

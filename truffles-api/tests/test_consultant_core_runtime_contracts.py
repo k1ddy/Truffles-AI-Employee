@@ -347,8 +347,7 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
     assert override is None
 
 
-def test_consultant_runtime_plan_turn_prefills_grounded_service_for_policy_core(
-) -> None:
+def test_consultant_runtime_plan_turn_does_not_prefill_service_from_raw_message() -> None:
     runtime = ConsultantRuntime()
     captured: dict[str, object] = {}
 
@@ -374,34 +373,27 @@ def test_consultant_runtime_plan_turn_prefills_grounded_service_for_policy_core(
     state = DialogState.model_validate(_dialog_state_payload())
     state.current_referents.service = None
 
-    with patch(
-        "app.core.consultant_runtime.semantic_service_match",
-        return_value=None,
-    ), patch(
-        "app.core.consultant_runtime.get_pack_service_hint",
-        return_value="маникюр",
-    ):
-        decision, override = runtime._plan_turn(
-            db=None,
-            payload=SimpleNamespace(
-                client_slug="demo_salon",
-                body=SimpleNamespace(message="Хотел бы записаться на маникюр."),
-            ),
-            prepared=SimpleNamespace(
-                conversation=SimpleNamespace(state="bot_active"),
-                branch_id=uuid4(),
-            ),
-            runtime_state=SimpleNamespace(
-                dialog_state=state,
-                booking_state={},
-                expected_reply_type=None,
-                expected_reply_reason=None,
-                current_goal=None,
-            ),
-        )
+    decision, override = runtime._plan_turn(
+        db=None,
+        payload=SimpleNamespace(
+            client_slug="demo_salon",
+            body=SimpleNamespace(message="Хотел бы записаться на маникюр."),
+        ),
+        prepared=SimpleNamespace(
+            conversation=SimpleNamespace(state="bot_active"),
+            branch_id=uuid4(),
+        ),
+        runtime_state=SimpleNamespace(
+            dialog_state=state,
+            booking_state={},
+            expected_reply_type=None,
+            expected_reply_reason=None,
+            current_goal=None,
+        ),
+    )
 
-    assert captured["booking_state"] == {"service": "маникюр"}
-    assert captured["memory_profile"]["current_referents"]["service"] == "маникюр"
+    assert captured["booking_state"] == {}
+    assert captured["memory_profile"]["current_referents"] == {"branch": "almaty-center"}
     assert decision.pending_question_contract.next_question == "datetime"
     assert override is None
 
@@ -1667,7 +1659,7 @@ def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_regis
         {
             "intent": "info",
             "action": "fact",
-            "tool_action": "info",
+            "tool_action": "catalog.service_query",
             "tool_args": {},
             "pack_refs": ["promotions"],
             "entity_refs": [
@@ -1717,7 +1709,6 @@ def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_regis
     assert result.text == "Официальные акции: первое посещение 10%."
     assert result.tool_decision == "promotions"
     assert result.tool_action == "catalog.service_query"
-    assert result.meta.get("resolved_tool_action") == "catalog.service_query"
     assert result.meta.get("tool_execution_projection") == {
         "projection_source": "semantic_contract",
         "service_query": "маникюр",
@@ -1728,6 +1719,114 @@ def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_regis
         "entity_type": "service",
         "source_ref": "message",
     }
+
+
+def test_turn_executor_projects_policy_info_refs_into_catalog_execution(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _execute_tool_action(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Официальные акции: первое посещение 10%.",
+            error_code=None,
+            decision_meta={
+                "tool_action": kwargs["tool_action"],
+                "tool_decision": "promotions",
+                "info_sections": ["promotions"],
+            },
+            trace={"stage": "tool_registry", "decision": "promotions"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.get_pack_decision",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
+    )
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "other",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {"info_refs": ["promotions"]},
+            "subject_kind": "service",
+            "capability": "promotions",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="У вас есть промо-коды?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert captured["tool_action"] == "catalog.service_query"
+    assert captured["info_sections_hint"] == ["promotions"]
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "promotions"
+    assert result.text == "Официальные акции: первое посещение 10%."
+
+
+def test_turn_executor_uses_policy_owned_info_truth_fallback_without_echo(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.get_pack_decision",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
+    )
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "other",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {"info_ref": "promotions"},
+            "subject_kind": "service",
+            "capability": "promotions",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="У вас есть промо-коды?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "promotions"
+    assert result.text != "У вас есть промо-коды?"
+    assert "10%" in result.text
+    assert result.meta.get("info_sections") == ["promotions"]
+    assert result.meta.get("info_ref_execution") is True
+    assert result.meta.get("info_ref_source") == "policy_core"
+    assert result.meta.get("fact_fallback") is None
 
 
 def test_turn_executor_projects_specialist_referent_into_tool_args(monkeypatch) -> None:
@@ -1855,8 +1954,8 @@ def test_turn_executor_prunes_legacy_info_args_when_resolving_catalog_service_qu
         {
             "intent": "duration",
             "action": "fact",
-            "tool_action": "info",
-            "tool_args": {"info_ref": "duration"},
+            "tool_action": "catalog.service_query",
+            "tool_args": {},
             "pack_refs": ["duration"],
             "slots": {"service": "маникюр"},
             "open_questions": ["datetime"],
@@ -1898,7 +1997,6 @@ def test_turn_executor_prunes_legacy_info_args_when_resolving_catalog_service_qu
     assert captured["tool_args"] == {"service_query": "маникюр"}
     assert result.tool_action == "catalog.service_query"
     assert result.tool_decision == "duration"
-    assert result.meta.get("resolved_tool_action") == "catalog.service_query"
     assert result.meta.get("tool_execution_projection") == {
         "projection_source": "semantic_contract",
         "service_query": "маникюр",
@@ -2345,6 +2443,149 @@ def test_consultant_runtime_trace_prefers_canonical_question_contract_over_stale
     }
 
 
+def test_consultant_runtime_trace_emits_question_contract_for_collect_pending_contract_without_flag() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "goal": "booking",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="ask_about_requested_slot",
+        source="llm_policy_core",
+    )
+    dialog_state = DialogState.model_validate(
+        {
+            "pending_question_contract": {
+                "expected_reply_type": "time",
+                "reason": "collect:datetime",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            "projections": {
+                "expected_reply_type": "time",
+                "expected_reply_reason": "collect:datetime",
+            },
+            "meta": {"current_goal": "booking"},
+        }
+    )
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="collect", tool_decision="datetime", meta={})
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="collect"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "question_contract"
+        and entry.get("expected_reply_type") == "time"
+        and entry.get("reason") == "collect:datetime"
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta.get("question_contract") is True
+
+
+def test_consultant_runtime_trace_prefers_policy_core_semantic_contract_over_runtime_projection() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "goal": "booking",
+            "capability": "bookability",
+            "subject_kind": "service",
+            "entity_refs": [
+                {
+                    "entity_type": "service",
+                    "value": "Покрытие гель-лак",
+                    "source_ref": "user_intent",
+                }
+            ],
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="ask_about_requested_slot",
+        source="llm_policy_core",
+    )
+    dialog_state = DialogState.model_validate(
+        {
+            "pending_question_contract": {
+                "expected_reply_type": "time",
+                "reason": "collect:datetime",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            "projections": {
+                "expected_reply_type": "time",
+                "expected_reply_reason": "collect:datetime",
+            },
+            "meta": {
+                "current_goal": "booking",
+                "semantic_contract": {
+                    "capability": "bookability",
+                    "subject_kind": "service",
+                    "referents": {
+                        "service": {
+                            "value": "Покрытие гель-лак",
+                            "source_ref": "runtime_grounding",
+                        }
+                    },
+                },
+            },
+        }
+    )
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="collect", tool_decision="datetime", meta={})
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="collect"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and (
+            (entry.get("semantic_contract", {}).get("entity_refs") or [{}])[0].get("source_ref")
+            == "user_intent"
+        )
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert (
+        decision_meta.get("semantic_contract", {})
+        .get("entity_refs", [{}])[0]
+        .get("source_ref")
+        == "user_intent"
+    )
+
+
 def test_turn_executor_omits_empty_pending_question_contract_from_execution_meta() -> None:
     decision = TurnPlanner().build_from_policy_override(
         {
@@ -2696,32 +2937,55 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
     assert decision_meta["expected_reply_type"] == "time"
 
 
-def test_consultant_runtime_finalizes_booking_commit_as_terminal_fact() -> None:
+def test_turn_executor_commits_booking_only_on_explicit_calendar_book_slot(
+    monkeypatch,
+) -> None:
     decision = TurnPlanner().build_from_policy_override(
         {
             "intent": "booking",
-            "action": "collect",
+            "action": "fact",
             "tool_action": "calendar.book_slot",
+            "slots": {
+                "service": "Маникюр",
+                "datetime": "2026-03-27T19:00:00+05:00",
+                "name": "Амина",
+            },
             "goal": "booking",
-            "reason": "answer_interpreter_fallback",
+            "reason": "explicit_booking_commit",
         },
-        interaction_owner="turn_planner_fallback",
+        interaction_owner="llm_policy_core",
         interaction_relation="fill_requested_slot",
-        source="answer_interpreter",
+        source="llm_policy_core",
     )
-    execution = SimpleNamespace(
-        tool_action="calendar.book_slot",
-        tool_decision="ok",
-        meta={"appointment_id": "appt-123"},
+    decision.meta["client_id"] = "client-123"
+
+    class _FakeSchedulingService:
+        def __init__(self, db):
+            self.db = db
+
+        def create_appointment(self, **kwargs):
+            return SimpleNamespace(id="appt-123")
+
+    monkeypatch.setattr(
+        "app.services.appointment_service.SchedulingService",
+        _FakeSchedulingService,
     )
 
-    finalized = ConsultantRuntime._finalize_execution_decision(
-        decision=decision,
-        execution=execution,
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Меня зовут Амина.",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone="77000000000",
+        now=datetime(2026, 3, 26, 12, 0, tzinfo=timezone.utc),
     )
 
-    assert finalized.outcome == "FACT"
-    assert finalized.action == "collect"
+    assert result.tool_action == "calendar.book_slot"
+    assert result.tool_decision == "ok"
+    assert result.meta["appointment_id"] == "appt-123"
 
 
 def test_turn_executor_builds_typed_explicit_handoff_owner_cutover_artifact() -> None:

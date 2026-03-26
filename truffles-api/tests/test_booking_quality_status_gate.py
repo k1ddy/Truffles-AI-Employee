@@ -16,6 +16,7 @@ def _load_quality_helpers():
     tree = ast.parse(source, filename=str(script_path))
 
     wanted_assignments = {
+        "CHAOS_PENDING_ACTIONS",
         "CHAOS_BOOKING_REPLY_TYPES",
         "LLM_QUALITY_THRESHOLDS",
         "LLM_QUALITY_THRESHOLD_DIRECTIONS",
@@ -77,8 +78,14 @@ def _load_quality_helpers():
         "_llm_quality_collect_override_reason_codes",
         "_llm_quality_collect_semantic_intent_override_audit",
         "_llm_quality_collect_plan_delta_audit",
+        "_llm_quality_expected_response",
         "_chaos_matches_action",
         "_chaos_action_fallback_ok",
+        "_chaos_state_fallback_ok",
+        "_llm_quality_has_booking_lookup_reference_prompt",
+        "_llm_quality_has_explicit_service_booking_progression_allowance",
+        "_llm_quality_has_cancel_confirmation_pending_followup_state_allowance",
+        "_llm_quality_state_matches_expected",
         "_llm_quality_init_rewrite_governance_state",
         "_llm_quality_track_rewrite_governance",
         "_llm_quality_finalize_rewrite_governance",
@@ -823,6 +830,206 @@ def test_expected_reply_false_stays_strict_for_pending_state():
     )
 
     assert result is False
+
+
+def test_expected_response_allows_handoff_reply_on_pending_transition():
+    ns = _load_quality_helpers()
+    expected_response = ns["_llm_quality_expected_response"]
+
+    result, reason = expected_response("pending", {"action": "handoff"})
+
+    assert result is True
+    assert reason == "pending_handoff_transition"
+
+
+def test_expected_response_keeps_pending_suppressed_without_handoff_transition():
+    ns = _load_quality_helpers()
+    expected_response = ns["_llm_quality_expected_response"]
+
+    result, reason = expected_response("pending", {"action": "reply"})
+
+    assert result is False
+    assert reason == "pending_state"
+
+
+def test_booking_lookup_reference_prompt_detected_for_existing_booking_detail_query():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_booking_lookup_reference_prompt"]
+
+    assert (
+        helper(
+            {
+                "action": "fact",
+                "intent": "booking",
+                "tool_action": "calendar.get_booking",
+                "tool_decision": "not_found",
+                "semantic_contract": {
+                    "capability": "booking_manage",
+                    "subject_kind": "booking",
+                },
+            },
+            "Проверил: пока не вижу подтверждённой записи. Если нужно перенести, подтвердить или отменить запись, подскажите номер телефона и примерную дату/время, и я помогу найти.",
+        )
+        is True
+    )
+
+
+def test_booking_lookup_reference_prompt_not_detected_without_booking_manage_contract():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_booking_lookup_reference_prompt"]
+
+    assert (
+        helper(
+            {
+                "action": "fact",
+                "intent": "master_query",
+                "tool_action": "catalog.service_query",
+                "tool_decision": "ok",
+                "semantic_contract": {
+                    "capability": "bookability",
+                    "subject_kind": "service",
+                },
+            },
+            "Чтобы подобрать мастера, подскажите дату и время.",
+        )
+        is False
+    )
+
+
+def test_explicit_service_booking_progression_allowance_detected_for_exact_service_turn():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_explicit_service_booking_progression_allowance"]
+
+    assert (
+        helper(
+            meta={
+                "action": "booking_prompt",
+                "source": "llm_policy_core",
+                "tool_action": "collect",
+                "expected_reply_reason": "collect:datetime",
+                "semantic_contract": {
+                    "capability": "bookability",
+                    "subject_kind": "service",
+                    "referents": {
+                        "service": {
+                            "value": "покрытие гель лак",
+                            "source_ref": "user_intent",
+                        }
+                    },
+                },
+            },
+            turn_text="Я хочу записаться на покрытие гель-лак.",
+            expected_reply_type="service_choice",
+            actual_expected_reply_type="time",
+            expected_meta={
+                "action": "booking_prompt",
+                "source": "llm_policy_core",
+                "tool_action": "collect",
+                "expected_reply_type": "service_choice",
+                "expected_reply_reason": "collect:service",
+            },
+            expected_meta_any=None,
+            expected_trace_contains=[
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "service_choice",
+                    "reason": "collect:service",
+                }
+            ],
+        )
+        is True
+    )
+
+
+def test_explicit_service_booking_progression_allowance_rejects_single_token_service():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_explicit_service_booking_progression_allowance"]
+
+    assert (
+        helper(
+            meta={
+                "action": "booking_prompt",
+                "source": "llm_policy_core",
+                "tool_action": "collect",
+                "expected_reply_reason": "collect:datetime",
+                "semantic_contract": {
+                    "capability": "bookability",
+                    "subject_kind": "service",
+                    "referents": {
+                        "service": {
+                            "value": "маникюр",
+                            "source_ref": "user_intent",
+                        }
+                    },
+                },
+            },
+            turn_text="Я хочу записаться на маникюр.",
+            expected_reply_type="service_choice",
+            actual_expected_reply_type="time",
+            expected_meta={
+                "action": "booking_prompt",
+                "source": "llm_policy_core",
+                "tool_action": "collect",
+                "expected_reply_type": "service_choice",
+                "expected_reply_reason": "collect:service",
+            },
+            expected_meta_any=None,
+            expected_trace_contains=[
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "service_choice",
+                    "reason": "collect:service",
+                }
+            ],
+        )
+        is False
+    )
+
+
+def test_cancel_confirmation_pending_followup_state_allowance_detected():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_cancel_confirmation_pending_followup_state_allowance"]
+
+    assert (
+        helper(
+            expected_state="bot_active",
+            actual_state="pending",
+            meta={
+                "action": "handoff",
+                "tool_action": "handoff",
+                "semantic_contract": {
+                    "capability": "booking_manage",
+                    "subject_kind": "booking",
+                },
+            },
+            turn_text="Вы можете подтвердить отмену записи?",
+        )
+        is True
+    )
+
+
+def test_state_match_accepts_cancel_confirmation_pending_followup():
+    ns = _load_quality_helpers()
+    matches = ns["_llm_quality_state_matches_expected"]
+
+    assert (
+        matches(
+            "bot_active",
+            "pending",
+            {
+                "action": "handoff",
+                "tool_action": "handoff",
+                "semantic_contract": {
+                    "capability": "booking_manage",
+                    "subject_kind": "booking",
+                },
+            },
+            {"state": "pending"},
+            {"status": "pending"},
+            turn_text="Вы можете подтвердить отмену записи?",
+        )
+        is True
+    )
 
 
 def test_meta_match_accepts_collect_reason_for_booking_prompt_expectation():
