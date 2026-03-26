@@ -460,73 +460,6 @@ def _build_sparse_object_anyof(
     }
 
 
-def _build_policy_core_tool_args_schema(
-    *,
-    nullable_string: dict[str, Any],
-) -> dict[str, Any]:
-    text_list_or_null = {
-        "anyOf": [
-            {"type": "array", "items": {"type": "string"}},
-            {"type": "null"},
-        ]
-    }
-    number_or_text_or_null = {
-        "anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]
-    }
-    variants: list[dict[str, Any]] = [_build_required_object_schema({}, required=[])]
-    variants.extend(
-        _build_sparse_object_variants(
-            {
-                "info_ref": nullable_string,
-                "info_refs": text_list_or_null,
-            },
-            include_empty=False,
-        )
-    )
-    variants.extend(
-        [
-            _build_required_object_schema({"service_query": nullable_string}),
-            _build_required_object_schema({"consult_question": nullable_string}),
-            _build_required_object_schema({"appointment_id": nullable_string}),
-            _build_required_object_schema(
-                {
-                    "service_query": nullable_string,
-                    "date": nullable_string,
-                    "start_at": nullable_string,
-                    "duration_min": number_or_text_or_null,
-                    "specialist_id": nullable_string,
-                    "specialist_name": nullable_string,
-                }
-            ),
-            _build_required_object_schema(
-                {
-                    "service_query": nullable_string,
-                    "start_at": nullable_string,
-                    "end_at": nullable_string,
-                    "specialist_id": nullable_string,
-                    "specialist_name": nullable_string,
-                    "customer_name": nullable_string,
-                    "customer_phone": nullable_string,
-                }
-            ),
-            _build_required_object_schema(
-                {
-                    "appointment_id": nullable_string,
-                    "start_at": nullable_string,
-                    "end_at": nullable_string,
-                }
-            ),
-            _build_required_object_schema(
-                {
-                    "appointment_id": nullable_string,
-                    "reason": nullable_string,
-                }
-            ),
-        ]
-    )
-    return {"anyOf": variants}
-
-
 def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[str, Any]:
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
     nullable_string_enum = lambda values: {
@@ -572,21 +505,10 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "intent",
             "action",
             "tool_action",
-            "tool_args",
-            "pack_refs",
-            "slots",
-            "next_question",
-            "open_questions",
             "needs_manager",
-            "reason",
-            "referents",
             "subject_kind",
             "capability",
-            "temporal_scope",
             "resolution_mode",
-            "pending_question_act",
-            "pending_question_target",
-            "active_question_relation",
         ],
         "properties": {
             "intent": {
@@ -606,7 +528,6 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             },
             "action": {"type": "string", "enum": ["fact", "collect", "handoff"]},
             "tool_action": {"type": "string", "enum": allowed_tool_actions},
-            "tool_args": _build_policy_core_tool_args_schema(nullable_string=nullable_string),
             "pack_refs": {"type": "array", "items": {"type": "string"}},
             "slots": sparse_slots_schema,
             "next_question": nullable_string_enum(["service", "datetime", "name", "phone"]),
@@ -745,70 +666,9 @@ def _build_policy_core_compact_input(policy_input: dict[str, Any]) -> dict[str, 
 def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     sanitized_payload = dict(payload)
     sanitized = False
-    raw_tool_args = sanitized_payload.get("tool_args")
-    if raw_tool_args is None:
-        cleaned_args = None
-    elif not isinstance(raw_tool_args, dict):
-        sanitized_payload["tool_args"] = {}
-        cleaned_args = {}
+    if "tool_args" in sanitized_payload:
+        sanitized_payload.pop("tool_args", None)
         sanitized = True
-    else:
-        cleaned_args = dict(raw_tool_args)
-        referents = sanitized_payload.get("referents")
-        if isinstance(referents, dict):
-            service_referent = referents.get("service")
-            if isinstance(service_referent, dict):
-                service_value = service_referent.get("value")
-                if (
-                    isinstance(service_value, str)
-                    and service_value.strip()
-                    and isinstance(cleaned_args.get("service_query"), str)
-                    and cleaned_args.get("service_query", "").strip()
-                    and cleaned_args.get("service_query").strip() != service_value.strip()
-                ):
-                    cleaned_args["service_query"] = service_value.strip()
-                    sanitized = True
-
-            specialist_referent = referents.get("specialist")
-            if isinstance(specialist_referent, dict):
-                specialist_name = specialist_referent.get("value")
-                if (
-                    isinstance(specialist_name, str)
-                    and specialist_name.strip()
-                    and isinstance(cleaned_args.get("specialist_name"), str)
-                    and cleaned_args.get("specialist_name", "").strip()
-                    and cleaned_args.get("specialist_name").strip() != specialist_name.strip()
-                ):
-                    cleaned_args["specialist_name"] = specialist_name.strip()
-                    sanitized = True
-
-                specialist_id = specialist_referent.get("entity_id")
-                if (
-                    isinstance(specialist_id, str)
-                    and specialist_id.strip()
-                    and isinstance(cleaned_args.get("specialist_id"), str)
-                    and cleaned_args.get("specialist_id", "").strip()
-                    and cleaned_args.get("specialist_id").strip() != specialist_id.strip()
-                ):
-                    cleaned_args["specialist_id"] = specialist_id.strip()
-                    sanitized = True
-
-        while True:
-            normalized_args, error = validate_tool_args_shape(
-                tool_action=sanitized_payload.get("tool_action"),
-                tool_args=cleaned_args,
-            )
-            if error is None:
-                sanitized_payload["tool_args"] = normalized_args or {}
-                sanitized = sanitized or sanitized_payload["tool_args"] != raw_tool_args
-                break
-            if error.startswith("tool_args_unknown_field:") or error.startswith("tool_args_type_invalid:"):
-                field = error.split(":", 1)[1].strip()
-                if field and field in cleaned_args:
-                    cleaned_args.pop(field, None)
-                    sanitized = True
-                    continue
-            return sanitized_payload, sanitized
 
     def _token(value: Any) -> str | None:
         if not isinstance(value, str):

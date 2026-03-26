@@ -567,7 +567,6 @@ class LlmPolicyCoreOutput(BaseModel):
     intent: str
     action: str
     tool_action: str
-    tool_args: dict[str, Any] = Field(default_factory=dict)
     pack_refs: list[str] = Field(default_factory=list)
     slots: dict[str, str] = Field(default_factory=dict)
     next_question: str | None = None
@@ -611,14 +610,6 @@ class LlmPolicyCoreOutput(BaseModel):
     @classmethod
     def _validate_optional_fields(cls, value: Any, info) -> str | None:
         return _normalize_optional_string(value, field=info.field_name)
-
-    @field_validator("tool_args", mode="before")
-    @classmethod
-    def _validate_tool_args(cls, value: Any) -> dict[str, Any]:
-        normalized, error = validate_tool_args_shape(tool_action=None, tool_args=value)
-        if error:
-            raise ValueError(error)
-        return normalized or {}
 
     @field_validator("pack_refs", "open_questions", "risk_signals", mode="before")
     @classmethod
@@ -715,25 +706,13 @@ class LlmPolicyCoreOutput(BaseModel):
         raise ValueError("needs_manager_invalid")
 
     @model_validator(mode="after")
-    def _validate_tool_args_for_action(self):
-        normalized, error = validate_tool_args_shape(
-            tool_action=self.tool_action,
-            tool_args=self.tool_args,
-        )
-        if error:
-            raise ValueError(error)
-        self.tool_args = normalized or {}
-        return self
-
-    @model_validator(mode="after")
     def _validate_master_query_contract(self):
         if self.intent not in _MASTER_QUERY_INTENTS:
             return self
 
         slot_service = _normalize_master_service_value(self.slots.get("service"))
-        arg_service = _normalize_master_service_value(self.tool_args.get("service_query"))
         referent_service = _referent_value(self.referents.get("service"))
-        has_service_query = bool(slot_service or referent_service or arg_service)
+        has_service_query = bool(slot_service or referent_service)
 
         if self.action == "fact":
             if self.tool_action not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
@@ -754,26 +733,6 @@ class LlmPolicyCoreOutput(BaseModel):
             return self
 
         return self
-
-    @model_validator(mode="after")
-    def _validate_tool_arg_shadow_consistency(self):
-        service_shadow = _normalize_master_service_value(self.tool_args.get("service_query"))
-        service_referent = _referent_value(self.referents.get("service"))
-        if service_shadow and service_referent and service_shadow != service_referent:
-            raise ValueError("tool_args_service_query_semantic_mismatch")
-
-        specialist_shadow = _normalize_master_service_value(self.tool_args.get("specialist_name"))
-        specialist_referent = _referent_value(self.referents.get("specialist"))
-        if specialist_shadow and specialist_referent and specialist_shadow != specialist_referent:
-            raise ValueError("tool_args_specialist_name_semantic_mismatch")
-
-        specialist_id_shadow = _normalize_master_service_value(self.tool_args.get("specialist_id"))
-        specialist_referent_id = _referent_entity_id(self.referents.get("specialist"))
-        if specialist_id_shadow and specialist_referent_id and specialist_id_shadow != specialist_referent_id:
-            raise ValueError("tool_args_specialist_id_semantic_mismatch")
-
-        return self
-
 
 def validate_dialogue_controller_output(
     payload_json: dict[str, Any],

@@ -74,7 +74,6 @@
   "intent": "booking|check_booking|verify_booking|pricing|duration|location|hours|master_query|consult|greeting|out_of_domain|other",
   "action": "fact|collect|handoff",
   "tool_action": "info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio",
-  "tool_args": {},
   "pack_refs": [],
   "slots": {"service": "маникюр"},
   "next_question": "datetime",
@@ -107,8 +106,7 @@
 - `pack_refs` можно брать только из `allowed.info_refs` или `allowed.consult_refs`.
 - `slots` использует только `service`, `datetime`, `name`, `phone` и должен быть sparse.
 - `referents` — канонический semantic carrier для grounded entities: `service`, `specialist`, `branch`, `booking_ref`, `customer`.
-- `tool_args` — execution projection, а не semantic source-of-truth. Передавай только реально нужные args.
-- Если все же передаешь execution shadow для мастера, `tool_args.specialist_name` должен совпадать с `referents.specialist.value`.
+- Не возвращай `tool_args`: tool binding строится deterministic projector'ом после owner boundary.
 - Для `collect` всегда передавай `next_question` и `open_questions`.
 - Для `handoff` по умолчанию НЕ передавай `next_question`, `open_questions`, `pending_question_act`, `pending_question_target`, `active_question_relation`: handoff не должен тащить stale collect contract.
 

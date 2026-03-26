@@ -290,7 +290,6 @@ class TestPolicyCoreTimeoutRetry:
             "intent": "booking",
             "action": "collect",
             "tool_action": "calendar.list_slots",
-            "tool_args": {},
             "pack_refs": [],
             "entity_refs": [],
             "referents": {},
@@ -321,7 +320,6 @@ class TestPolicyCoreTimeoutRetry:
             "intent": "master_query",
             "action": "fact",
             "tool_action": "info",
-            "tool_args": {},
             "pack_refs": [],
             "language": "ru",
             "confidence": 0.8,
@@ -346,7 +344,6 @@ class TestPolicyCoreTimeoutRetry:
             "intent": "master_query",
             "action": "fact",
             "tool_action": "info",
-            "tool_args": {},
             "pack_refs": [],
             "language": "ru",
             "confidence": 0.8,
@@ -395,7 +392,7 @@ class TestPolicyCoreTimeoutRetry:
             "entity_type": "service",
             "source_ref": "message",
         }
-        assert result["payload"]["tool_args"] == {}
+        assert "tool_args" not in result["payload"]
 
     def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -526,10 +523,7 @@ class TestPolicyCoreTimeoutRetry:
         )
 
         assert sanitized is True
-        assert payload["tool_args"] == {
-            "service_query": "Маникюр",
-            "date": "tomorrow",
-        }
+        assert "tool_args" not in payload
 
     def test_policy_core_route_salvages_invalid_optional_tool_args(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -573,10 +567,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
-        assert result["payload"]["tool_args"] == {
-            "service_query": "Маникюр",
-            "date": "tomorrow",
-        }
+        assert "tool_args" not in result["payload"]
 
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -661,7 +652,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
-        assert result["payload"]["tool_args"] == {"service_query": "маникюр"}
+        assert "tool_args" not in result["payload"]
 
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -969,7 +960,7 @@ class TestPolicyCoreTimeoutRetry:
             "entity_type": "specialist",
             "source_ref": "message",
         }
-        assert result["payload"]["tool_args"]["specialist_name"] == "Айгерим"
+        assert "tool_args" not in result["payload"]
 
     def test_policy_core_strips_stale_time_axes_from_check_booking_reference_followup(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -979,8 +970,7 @@ class TestPolicyCoreTimeoutRetry:
                 "intent": "booking",
                 "action": "fact",
                 "tool_action": "calendar.get_booking",
-                "tool_args": {},
-                "pack_refs": [],
+                    "pack_refs": [],
                 "slots": {},
                 "next_question": "name",
                 "open_questions": ["name"],
@@ -1063,7 +1053,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result.get("tool_args_sanitized") is True
-        assert result["payload"]["tool_args"]["service_query"] == "маникюр"
+        assert "tool_args" not in result["payload"]
 
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1289,7 +1279,7 @@ class TestPolicyCoreTimeoutRetry:
         assert "`slots.name` и `next_question=\"name\"` означают только имя клиента" in prompt
         assert "Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`." in prompt
         assert "`memory.profile.semantic_contract` и `memory.profile.pending_question_contract`" in prompt
-        assert "`tool_args.specialist_name`" in prompt
+        assert "Не возвращай `tool_args`" in prompt
 
     def test_policy_core_prompt_named_specialist_preference_under_active_time_collect_is_referent_followup(self):
         prompt = _load_policy_core_prompt()
@@ -1393,18 +1383,15 @@ class TestPolicyCoreTimeoutRetry:
         assert response_format["json_schema"]["strict"] is True
         schema = response_format["json_schema"]["schema"]
         assert schema["type"] == "object"
-        assert "tool_args" in schema["required"]
-        assert "pack_refs" in schema["required"]
-        assert "next_question" in schema["required"]
-        assert "reason" in schema["required"]
-        assert "subject_kind" in schema["required"]
-        assert "capability" in schema["required"]
-        assert "temporal_scope" in schema["required"]
-        assert "resolution_mode" in schema["required"]
-        assert "pending_question_act" in schema["required"]
-        assert "pending_question_target" in schema["required"]
-        assert "active_question_relation" in schema["required"]
-        assert "referents" in schema["required"]
+        assert schema["required"] == [
+            "intent",
+            "action",
+            "tool_action",
+            "needs_manager",
+            "subject_kind",
+            "capability",
+            "resolution_mode",
+        ]
         assert "referents" in schema["properties"]
         assert "subject_kind" in schema["properties"]
         assert "capability" in schema["properties"]
@@ -1416,19 +1403,12 @@ class TestPolicyCoreTimeoutRetry:
         assert "entity_refs" not in schema["properties"]
         assert "resolver_id" not in schema["properties"]
         assert "resolver_version" not in schema["properties"]
+        assert "tool_args" not in schema["properties"]
         assert schema["properties"]["tool_action"]["enum"] == ["calendar.book_slot"]
-        tool_args_schema = schema["properties"]["tool_args"]
         slots_schema = schema["properties"]["slots"]
         referents_schema = schema["properties"]["referents"]
-        assert "anyOf" in tool_args_schema
         assert "anyOf" in slots_schema
         assert "anyOf" in referents_schema
-        assert any(
-            variant["required"] == []
-            and variant["properties"] == {}
-            and variant["additionalProperties"] is False
-            for variant in tool_args_schema["anyOf"]
-        )
         assert any(
             variant["required"] == ["service"]
             and list(variant["properties"].keys()) == ["service"]
@@ -1438,19 +1418,6 @@ class TestPolicyCoreTimeoutRetry:
             variant["required"] == ["service"]
             and list(variant["properties"].keys()) == ["service"]
             for variant in referents_schema["anyOf"]
-        )
-        assert any(
-            variant["required"]
-            == [
-                "service_query",
-                "start_at",
-                "end_at",
-                "specialist_id",
-                "specialist_name",
-                "customer_name",
-                "customer_phone",
-            ]
-            for variant in tool_args_schema["anyOf"]
         )
 
 
