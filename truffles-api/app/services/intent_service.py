@@ -12,8 +12,6 @@ import httpx
 
 from app.logging_config import get_logger, record_llm_time
 from app.schemas.intent import (
-    validate_answer_interpreter_output,
-    validate_dialogue_controller_output,
     validate_llm_plan_output,
     validate_llm_policy_core_output,
     validate_tool_args_shape,
@@ -33,6 +31,7 @@ from app.services.ai_service import (
 from app.services.knowledge_service import QDRANT_COLLECTION as KNOWLEDGE_QDRANT_COLLECTION
 
 logger = get_logger("intent_service")
+_SECONDARY_SEMANTIC_OWNER_REMOVED = "secondary_semantic_owner_removed"
 
 
 def _log_timing(
@@ -2219,320 +2218,30 @@ def route_dialogue_controller(
     client_config: dict | None = None,
     timing_context: dict | None = None,
 ) -> dict:
-    result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
     carryover_input = _build_controller_carryover(carryover)
-    normalized = (message or "").strip()
-    controller_retry = False
-    total_elapsed_ms = 0.0
-
-    def _build_payload(
-        *,
-        controller_class: str | None = None,
-        goal: str | None = None,
-        intents: list[str] | None = None,
-        slots: dict | None = None,
-        followups: list[str] | None = None,
-        safety_flags: list[str] | None = None,
-        confidence: float = 0.0,
-        reason: str = "",
-        carryover_payload: dict | None = None,
-        controller_llm_ms: float | None = None,
-        controller_error: str = "none",
-        controller_retry_flag: bool | None = None,
-    ) -> dict:
-        payload = {
-            "class": controller_class,
-            "goal": goal,
-            "intents": list(intents or []),
-            "slots": dict(slots or {}),
-            "followups": list(followups or []),
-            "safety_flags": list(safety_flags or []),
-            "confidence": float(confidence or 0.0),
-            "reason": str(reason or ""),
-            "carryover": dict(carryover_payload or carryover_input),
-            "controller_llm_ms": round(controller_llm_ms or 0.0, 2),
-            "controller_error": controller_error,
-            "controller_retry": bool(
-                controller_retry_flag if controller_retry_flag is not None else controller_retry
-            ),
-        }
-        return payload
-
-    if not _current_openai_api_key():
-        result["error"] = "no_api_key"
-        result["payload"] = _build_payload(
-            controller_class=OFFLINE_CONTROLLER_CLASS,
-            goal=OFFLINE_CONTROLLER_GOAL,
-            intents=[],
-            slots={},
-            followups=[],
-            safety_flags=[],
-            confidence=0.0,
-            reason="offline_no_api_key",
-            carryover_payload=carryover_input,
-            controller_llm_ms=0.0,
-            controller_error="no_api_key",
-            controller_retry_flag=False,
-        )
-        return result
-
-    if not normalized:
-        result["error"] = "empty_message"
-        result["payload"] = _build_payload(controller_error="empty_message")
-        return result
-    prompt = _load_controller_prompt()
-    if not prompt:
-        result["error"] = "prompt_missing"
-        result["payload"] = _build_payload(controller_error="prompt_missing")
-        return result
-    if not _should_attempt_llm(
-        timing_context,
-        timeout_seconds=CONTROLLER_TIMEOUT_SECONDS,
-        stage="controller_llm",
-    ):
-        result["error"] = "deadline_exceeded"
-        result["payload"] = _build_payload(
-            controller_error="deadline_exceeded",
-            controller_llm_ms=0.0,
-            reason="deadline_exceeded",
-            controller_retry_flag=False,
-        )
-        return result
-
-    controller_input = {
-        "task": "controller",
-        "message": message,
-        "carryover": carryover_input,
+    logger.warning(
+        "Dialogue controller retired; semantic ownership lives in policy-core",
+        extra={"context": {"client_slug": client_slug, "timing_context_present": bool(timing_context)}},
+    )
+    return {
+        "ok": False,
+        "payload": {
+            "class": None,
+            "goal": None,
+            "intents": [],
+            "slots": {},
+            "followups": [],
+            "safety_flags": [],
+            "confidence": 0.0,
+            "reason": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+            "carryover": dict(carryover_input),
+            "controller_llm_ms": 0.0,
+            "controller_error": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+            "controller_retry": False,
+        },
+        "error": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+        "raw": None,
     }
-    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
-        controller_input["expected_reply_type"] = expected_reply_type.strip()
-
-    budget_meta = consume_llm_budget(
-        client_slug=client_slug or "unknown",
-        client_config=client_config,
-        scope="router",
-    )
-    _append_llm_budget_event(timing_context, budget_meta)
-    if not budget_meta.get("allowed", True):
-        result["error"] = "budget_exceeded"
-        result["payload"] = _build_payload(
-            controller_error="budget_exceeded",
-            controller_llm_ms=0.0,
-            controller_retry_flag=False,
-        )
-        return result
-
-    try:
-        llm = get_llm_provider()
-    except RuntimeError as exc:
-        if "OPENAI_API_KEY missing" in str(exc):
-            logger.info("Controller skipped: OPENAI_API_KEY missing")
-            result["error"] = "no_api_key"
-            return result
-        logger.warning(f"Controller provider init failed: {exc}")
-        result["error"] = _classify_llm_error(exc)
-        return result
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(controller_input, ensure_ascii=False)},
-    ]
-    model_name = CONTROLLER_MODEL.strip().lower()
-    temperature = 0.0
-    temperature_override: float | None = temperature
-    if model_name.startswith("gpt-5"):
-        temperature_override = 1.0
-    def _call_controller_llm(
-        max_tokens: int,
-        *,
-        temperature_override: float | None,
-    ) -> tuple[Any | None, float, str | None]:
-        llm_start = time.monotonic()
-        try:
-            kwargs = {
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "model": CONTROLLER_MODEL,
-                "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
-            }
-            if temperature_override is not None:
-                kwargs["temperature"] = temperature_override
-            response = llm.generate(**kwargs)
-        except httpx.TimeoutException as exc:
-            elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-            _log_timing(
-                "controller_llm_ms",
-                elapsed_ms,
-                timing_context=timing_context,
-                extra={
-                    "model_name": CONTROLLER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": True,
-                    "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature_override,
-                },
-            )
-            record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
-            logger.warning(f"Dialogue controller LLM timeout after {CONTROLLER_TIMEOUT_SECONDS}s: {exc}")
-            return None, elapsed_ms, "timeout"
-        except Exception as exc:
-            elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-            error_text = str(exc)
-            error_code = "error"
-            if "temperature" in error_text and "unsupported" in error_text:
-                error_code = "unsupported_temperature"
-            _log_timing(
-                "controller_llm_ms",
-                elapsed_ms,
-                timing_context=timing_context,
-                extra={
-                    "model_name": CONTROLLER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": False,
-                    "error": error_text,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature_override,
-                },
-            )
-            record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
-            logger.warning(f"Dialogue controller LLM failed: {exc}")
-            return None, elapsed_ms, error_code
-
-        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        _log_timing(
-            "controller_llm_ms",
-            elapsed_ms,
-            timing_context=timing_context,
-            extra={
-                "model_name": CONTROLLER_MODEL,
-                "model_tier": "fast",
-                "timeout": False,
-                "max_tokens": max_tokens,
-                "temperature": temperature_override,
-            },
-        )
-        record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
-        return response, elapsed_ms, None
-
-    response, elapsed_ms, error = _call_controller_llm(
-        CONTROLLER_MAX_TOKENS, temperature_override=temperature_override
-    )
-    total_elapsed_ms += elapsed_ms
-    if error == "unsupported_temperature":
-        controller_retry = True
-        temperature_override = 1.0
-        response, elapsed_ms, error = _call_controller_llm(
-            CONTROLLER_MAX_TOKENS, temperature_override=temperature_override
-        )
-        total_elapsed_ms += elapsed_ms
-    if error == "timeout":
-        controller_retry = True
-        retry_tokens = _controller_retry_max_tokens(CONTROLLER_MAX_TOKENS)
-        response, elapsed_ms, error = _call_controller_llm(
-            retry_tokens, temperature_override=temperature_override
-        )
-        total_elapsed_ms += elapsed_ms
-    if error is not None:
-        result["error"] = error
-        result["payload"] = _build_payload(
-            controller_error=error,
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-
-    content = (response.content or "").strip()
-    result["raw"] = content
-    if not content:
-        result["error"] = "empty_response"
-        result["payload"] = _build_payload(
-            controller_error="empty_response",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-
-    payload = None
-    try:
-        payload = json.loads(content)
-    except Exception:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                payload = json.loads(match.group(0))
-            except Exception:
-                payload = None
-    if not isinstance(payload, dict):
-        result["error"] = "invalid_json"
-        result["payload"] = _build_payload(
-            controller_error="invalid_json",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-    contract, schema_error = validate_dialogue_controller_output(payload)
-    if schema_error:
-        result["error"] = "invalid_schema"
-        result["payload"] = _build_payload(
-            controller_error="invalid_schema",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-    payload = contract.model_dump(by_alias=True)
-
-    controller_class = _clean_controller_class(payload.get("class"))
-    goal = _clean_controller_goal(payload.get("goal"))
-    if not controller_class:
-        result["error"] = "invalid_class"
-        result["payload"] = _build_payload(
-            controller_error="invalid_class",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-
-    intents = _clean_controller_intents(payload.get("intents"))
-    confidence = payload.get("confidence")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(confidence, 1.0))
-    reason = payload.get("reason")
-    if not isinstance(reason, str):
-        reason = ""
-
-    slots = payload.get("slots")
-    if not isinstance(slots, dict):
-        slots = {}
-    slots = dict(slots)
-    slots["service_query"] = _clean_controller_service_query(slots.get("service_query"))
-    followups = _clean_controller_followups(payload.get("followups"))
-    safety_flags = _clean_controller_safety_flags(payload.get("safety_flags"))
-
-    carryover_payload = payload.get("carryover")
-    if not isinstance(carryover_payload, dict):
-        carryover_payload = {}
-    if not carryover_payload and controller_input.get("carryover"):
-        carryover_payload = controller_input["carryover"]
-
-    result["ok"] = True
-    result["payload"] = _build_payload(
-        controller_class=controller_class,
-        goal=goal,
-        intents=intents,
-        slots=slots,
-        followups=followups,
-        safety_flags=safety_flags,
-        confidence=confidence,
-        reason=reason,
-        carryover_payload=carryover_payload,
-        controller_llm_ms=total_elapsed_ms,
-        controller_error="none",
-        controller_retry_flag=controller_retry,
-    )
-    return result
 
 
 def route_llm_plan(
@@ -3077,7 +2786,6 @@ def interpret_expected_reply(
     question_context: dict | None = None,
     client_slug: str | None = None,
 ) -> dict:
-    result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
     expected_reply_type_cleaned = (
         expected_reply_type.strip().lower()
         if isinstance(expected_reply_type, str)
@@ -3086,177 +2794,28 @@ def interpret_expected_reply(
     expected_slot = ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE.get(
         expected_reply_type_cleaned or ""
     )
-    payload = {
-        "slot": expected_slot or "",
-        "value": "",
-        "confidence": 0.0,
-        "reason": "",
-    }
-    result["payload"] = payload
-
-    normalized = (message or "").strip()
-    if not normalized:
-        result["error"] = "empty_message"
-        return result
-    if not expected_slot:
-        result["error"] = "unsupported_expected_reply_type"
-        return result
-    prompt = _load_controller_prompt()
-    if not prompt:
-        result["error"] = "prompt_missing"
-        return result
-
-    carryover_input = _build_controller_carryover(carryover)
-    interpreter_input = {
-        "task": "answer_interpreter",
-        "message": message,
-        "expected_reply_type": expected_reply_type_cleaned,
-        "carryover": carryover_input,
-        "question_context": question_context if isinstance(question_context, dict) else {},
-    }
-    try:
-        llm = get_llm_provider()
-    except RuntimeError as exc:
-        if "OPENAI_API_KEY missing" in str(exc):
-            logger.info("Answer interpreter skipped: OPENAI_API_KEY missing")
-            result["error"] = "no_api_key"
-            return result
-        logger.warning(f"Answer interpreter provider init failed: {exc}")
-        result["error"] = _classify_llm_error(exc)
-        return result
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(interpreter_input, ensure_ascii=False)},
-    ]
-    model_name = ANSWER_INTERPRETER_MODEL.strip()
-    temperature = 1.0 if model_name.lower().startswith("gpt-5") else 0.0
-    llm_start = time.monotonic()
-    try:
-        response = llm.generate(
-            messages,
-            temperature=temperature,
-            max_tokens=ANSWER_INTERPRETER_MAX_TOKENS,
-            model=ANSWER_INTERPRETER_MODEL,
-            timeout_seconds=ANSWER_INTERPRETER_TIMEOUT_SECONDS,
-        )
-    except httpx.TimeoutException as exc:
-        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        logger.info(
-            "Timing",
-            extra={
-                "context": {
-                    "stage": "answer_interpreter_llm_ms",
-                    "elapsed_ms": elapsed_ms,
-                    "model_name": ANSWER_INTERPRETER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": True,
-                    "timeout_seconds": ANSWER_INTERPRETER_TIMEOUT_SECONDS,
-                    "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
-                    "temperature": temperature,
-                }
-            },
-        )
-        record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
-        logger.warning(
-            f"Answer interpreter timeout after {ANSWER_INTERPRETER_TIMEOUT_SECONDS}s: {exc}"
-        )
-        result["error"] = "timeout"
-        return result
-    except Exception as exc:
-        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        logger.info(
-            "Timing",
-            extra={
-                "context": {
-                    "stage": "answer_interpreter_llm_ms",
-                    "elapsed_ms": elapsed_ms,
-                    "model_name": ANSWER_INTERPRETER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": False,
-                    "error": str(exc),
-                    "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
-                    "temperature": temperature,
-                }
-            },
-        )
-        record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
-        logger.warning(f"Answer interpreter failed: {exc}")
-        result["error"] = _classify_llm_error(exc)
-        return result
-
-    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-    logger.info(
-        "Timing",
+    logger.warning(
+        "Answer interpreter retired; semantic ownership lives in policy-core",
         extra={
             "context": {
-                "stage": "answer_interpreter_llm_ms",
-                "elapsed_ms": elapsed_ms,
-                "model_name": ANSWER_INTERPRETER_MODEL,
-                "model_tier": "fast",
-                "timeout": False,
-                "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
-                "temperature": temperature,
+                "client_slug": client_slug,
+                "expected_reply_type": expected_reply_type_cleaned,
+                "question_context_present": bool(question_context),
             }
         },
     )
-    record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
-
-    content = (response.content or "").strip()
-    result["raw"] = content
-    if not content:
-        result["error"] = "empty_response"
-        return result
-
-    parsed = None
-    try:
-        parsed = json.loads(content)
-    except Exception:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-            except Exception:
-                parsed = None
-    if not isinstance(parsed, dict):
-        result["error"] = "invalid_json"
-        return result
-    contract, schema_error = validate_answer_interpreter_output(parsed)
-    if schema_error:
-        result["error"] = "invalid_schema"
-        return result
-    parsed = contract.model_dump()
-
-    detected_slot = _clean_answer_slot(parsed.get("slot")) or expected_slot
-    slot = detected_slot
-    error = None
-    if slot != expected_slot:
-        error = "slot_mismatch"
-        slot = expected_slot
-    value = _clean_answer_value(parsed.get("value"), slot=slot)
-    if not value:
-        error = error or "empty_value"
-    confidence = parsed.get("confidence")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(confidence, 1.0))
-    if error:
-        confidence = 0.0
-    reason = parsed.get("reason")
-    if not isinstance(reason, str):
-        reason = ""
-
-    result["payload"] = {
-        "slot": slot,
-        "detected_slot": detected_slot or "",
-        "value": value,
-        "confidence": confidence,
-        "reason": reason,
+    return {
+        "ok": False,
+        "payload": {
+            "slot": expected_slot or "",
+            "detected_slot": "",
+            "value": "",
+            "confidence": 0.0,
+            "reason": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+        },
+        "error": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+        "raw": None,
     }
-    result["error"] = error
-    result["ok"] = error is None
-    return result
 
 
 def should_escalate(intent: Intent) -> bool:

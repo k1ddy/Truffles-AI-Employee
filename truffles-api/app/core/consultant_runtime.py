@@ -1096,9 +1096,7 @@ class ConsultantRuntime:
     def _derive_contract_source(decision: PolicyDecision) -> str:
         if isinstance(decision.source, str) and decision.source.strip():
             source = decision.source.strip()
-            if source == "policy_core" or source == "answer_interpreter" or source.startswith(
-                "turn_planner"
-            ):
+            if source == "policy_core" or source.startswith("turn_planner"):
                 return "llm_policy_core"
             return source
         return _RUNTIME_ENTRYPOINT_NAME

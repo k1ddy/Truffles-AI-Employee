@@ -140,18 +140,18 @@ class TestFrustrationHeuristics:
         assert is_frustration_message("спасибо") is False
 
 
-class TestDialogueControllerOffline:
-    def test_returns_fixed_class_and_goal_without_key(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "")
+class TestDialogueControllerRetired:
+    def test_returns_explicit_shadow_owner_removed_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             result = route_dialogue_controller("Привет")
 
-        assert result["error"] == "no_api_key"
+        assert result["error"] == "secondary_semantic_owner_removed"
         assert result["ok"] is False
         payload = result["payload"]
-        assert payload["class"] == "other"
-        assert payload["goal"] == "other"
-        assert payload["controller_error"] == "no_api_key"
+        assert payload["class"] is None
+        assert payload["goal"] is None
+        assert payload["controller_error"] == "secondary_semantic_owner_removed"
         mock_llm.assert_not_called()
 
 
@@ -159,17 +159,19 @@ def test_route_dialogue_controller_no_longer_contains_override_short_circuit():
     assert "_resolve_dialogue_controller_override" not in inspect.getsource(route_dialogue_controller)
 
 
-class TestDialogueControllerBudget:
-    def test_budget_deadline_skips_llm(self, monkeypatch):
+class TestDialogueControllerLegacySurface:
+    def test_carryover_payload_is_preserved_for_legacy_callers(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        timing_context = {"pipeline_deadline": time.monotonic() - 1.0, "pipeline_budget_ms": 10}
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            result = route_dialogue_controller("Привет", timing_context=timing_context)
+            result = route_dialogue_controller(
+                "Привет",
+                carryover={"class": "booking", "intents": ["booking"], "info_sections": ["pricing"]},
+            )
 
-        assert result["error"] == "deadline_exceeded"
-        assert result["ok"] is False
-        payload = result["payload"]
-        assert payload["controller_error"] == "deadline_exceeded"
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["payload"]["carryover"]["class"] == "booking"
+        assert result["payload"]["carryover"]["intents"] == ["booking"]
+        assert result["payload"]["carryover"]["info_sections"] == ["pricing"]
         mock_llm.assert_not_called()
 
 
@@ -194,93 +196,32 @@ class TestPolicyCoreOverride:
         mock_llm.assert_not_called()
 
 
-class TestDialogueControllerSchema:
-    def test_valid_schema(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
-            "class": "booking",
-            "goal": "booking",
-            "intents": ["booking"],
-            "slots": {"service_query": "service"},
-            "followups": [],
-            "safety_flags": [],
-            "confidence": 0.7,
-            "reason": "booking request",
-            "carryover": {},
-        }
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps(payload)
-            )
-            result = route_dialogue_controller("I want to book")
-
-        assert result["ok"] is True
-        assert result["error"] is None
-        assert result["payload"]["class"] == "booking"
-        assert result["payload"]["goal"] == "booking"
-
-    def test_invalid_schema(self, monkeypatch):
+class TestAnswerInterpreterRetired:
+    def test_returns_explicit_shadow_owner_removed_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps({"goal": "booking", "confidence": 0.4})
-            )
-            result = route_dialogue_controller("I want to book")
-
-        assert result["ok"] is False
-        assert result["error"] == "invalid_schema"
-
-
-class TestAnswerInterpreterSchema:
-    def test_valid_schema(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
-            "slot": "name",
-            "value": "Alex",
-            "confidence": 0.6,
-            "reason": "name provided",
-        }
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps(payload)
-            )
-            result = interpret_expected_reply("Alex", expected_reply_type="name")
-
-        assert result["ok"] is True
-        assert result["error"] is None
-        assert result["payload"]["slot"] == "name"
-        assert result["payload"]["value"] == "Alex"
-
-    def test_invalid_schema(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps({"slot": 123, "confidence": 0.5})
-            )
             result = interpret_expected_reply("Alex", expected_reply_type="name")
 
         assert result["ok"] is False
-        assert result["error"] == "invalid_schema"
-
-    def test_slot_mismatch_preserves_detected_slot(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["payload"] == {
             "slot": "name",
-            "value": "Лена",
-            "confidence": 0.92,
-            "reason": "name_provided",
+            "detected_slot": "",
+            "value": "",
+            "confidence": 0.0,
+            "reason": "secondary_semantic_owner_removed",
         }
+        mock_llm.assert_not_called()
+
+    def test_unsupported_slot_still_returns_explicit_removed_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps(payload, ensure_ascii=False)
-            )
-            result = interpret_expected_reply("Меня зовут Лена", expected_reply_type="time")
+            result = interpret_expected_reply("Alex", expected_reply_type="unsupported")
 
         assert result["ok"] is False
-        assert result["error"] == "slot_mismatch"
-        assert result["payload"]["slot"] == "datetime"
-        assert result["payload"]["detected_slot"] == "name"
-        assert result["payload"]["value"] == "Лена"
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["payload"]["slot"] == ""
+        mock_llm.assert_not_called()
 
 
 class TestPolicyCoreTimeoutRetry:
