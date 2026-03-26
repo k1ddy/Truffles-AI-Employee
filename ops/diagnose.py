@@ -4281,6 +4281,30 @@ def _llm_quality_has_booking_lookup_reference_prompt(meta, outbox_text):
     return any(marker in response_text for marker in prompt_markers)
 
 
+def _llm_quality_has_booking_detail_lookup_fallback(
+    *,
+    info_tags,
+    expected_info_sections,
+    meta,
+    outbox_text,
+):
+    normalized_tokens = (
+        {
+            _llm_quality_normalize_tool_token(section)
+            for section in (expected_info_sections or [])
+            if isinstance(section, str) and section.strip()
+        }
+        or {
+            _llm_quality_normalize_tool_token(section)
+            for section in (info_tags or [])
+            if isinstance(section, str) and section.strip()
+        }
+    )
+    if not normalized_tokens.intersection({"master", "specialist"}):
+        return False
+    return _llm_quality_has_booking_lookup_reference_prompt(meta, outbox_text)
+
+
 def _llm_quality_has_explicit_service_booking_progression_allowance(
     *,
     meta,
@@ -12732,21 +12756,12 @@ def _llm_quality_evaluate_turn(
             actual_expected_reply_type=actual_expected_reply_type,
         )
     )
-    booking_detail_lookup_fallback = bool(
-        (
-            {
-                _llm_quality_normalize_tool_token(section)
-                for section in (expected_info_sections or [])
-                if isinstance(section, str) and section.strip()
-            }
-            or {
-                _llm_quality_normalize_tool_token(section)
-                for section in (info_tags or [])
-                if isinstance(section, str) and section.strip()
-            }
-        )
-        & {"master", "specialist"}
-    ) and _llm_quality_has_booking_lookup_reference_prompt(meta, outbox_text)
+    booking_detail_lookup_fallback = _llm_quality_has_booking_detail_lookup_fallback(
+        info_tags=info_tags,
+        expected_info_sections=expected_info_sections,
+        meta=meta,
+        outbox_text=outbox_text,
+    )
     resume_meta_trace_allowance = _llm_quality_has_resume_meta_trace_allowance(
         meta=meta,
         trace_entries=trace_entries,
@@ -20311,6 +20326,12 @@ def _run_llm_quality(args):
                 info_sections = []
                 info_intents = []
                 info_mismatch = False
+                booking_detail_lookup_fallback = _llm_quality_has_booking_detail_lookup_fallback(
+                    info_tags=info_tags,
+                    expected_info_sections=expected_info_sections,
+                    meta=meta,
+                    outbox_text=outbox_text,
+                )
                 if expected_info_sections:
                     info_stats["turns_with_info_request"] += 1
                     answered_any, info_sections, info_intents = _llm_quality_expected_section_answered(
@@ -20342,7 +20363,11 @@ def _run_llm_quality(args):
                         info_stats["turns_info_answered"] += 1
                     else:
                         info_stats["turns_info_missed"] += 1
-                    if not answered_any and state not in {"manager_active", "pending"}:
+                    if (
+                        not answered_any
+                        and state not in {"manager_active", "pending"}
+                        and not booking_detail_lookup_fallback
+                    ):
                         info_mismatch = True
                         stats["info_mismatch"] += 1
                 elif info_tags:
@@ -20361,7 +20386,11 @@ def _run_llm_quality(args):
                             info_stats["by_tag"][tag]["answered"] += 1
                         else:
                             info_stats["by_tag"][tag]["missed"] += 1
-                    if not answered_any and state not in {"manager_active", "pending"}:
+                    if (
+                        not answered_any
+                        and state not in {"manager_active", "pending"}
+                        and not booking_detail_lookup_fallback
+                    ):
                         info_mismatch = True
                         stats["info_mismatch"] += 1
 

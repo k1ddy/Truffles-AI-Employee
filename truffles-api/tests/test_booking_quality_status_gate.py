@@ -82,6 +82,7 @@ def _load_quality_helpers():
         "_chaos_matches_action",
         "_chaos_action_fallback_ok",
         "_chaos_state_fallback_ok",
+        "_llm_quality_has_booking_detail_lookup_fallback",
         "_llm_quality_has_booking_lookup_reference_prompt",
         "_llm_quality_has_explicit_service_booking_progression_allowance",
         "_llm_quality_has_cancel_confirmation_pending_followup_state_allowance",
@@ -891,6 +892,60 @@ def test_booking_lookup_reference_prompt_not_detected_without_booking_manage_con
                 },
             },
             "Чтобы подобрать мастера, подскажите дату и время.",
+        )
+        is False
+    )
+
+
+def test_booking_detail_lookup_fallback_detected_for_master_tag_on_existing_booking_prompt():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_booking_detail_lookup_fallback"]
+
+    assert (
+        helper(
+            info_tags=["master"],
+            expected_info_sections=[],
+            meta={
+                "action": "fact",
+                "intent": "booking",
+                "tool_action": "calendar.get_booking",
+                "tool_decision": "not_found",
+                "semantic_contract": {
+                    "capability": "booking_manage",
+                    "subject_kind": "booking",
+                },
+            },
+            outbox_text=(
+                "Пока не вижу подтверждённой записи. Подскажите номер телефона "
+                "и примерную дату/время, чтобы я помог найти запись."
+            ),
+        )
+        is True
+    )
+
+
+def test_booking_detail_lookup_fallback_ignored_without_master_or_specialist_signal():
+    ns = _load_quality_helpers()
+    helper = ns["_llm_quality_has_booking_detail_lookup_fallback"]
+
+    assert (
+        helper(
+            info_tags=["location"],
+            expected_info_sections=[],
+            meta={
+                "action": "fact",
+                "intent": "booking",
+                "tool_action": "calendar.get_booking",
+                "tool_decision": "not_found",
+                "semantic_contract": {
+                    "capability": "booking_manage",
+                    "subject_kind": "booking",
+                },
+            },
+            outbox_text=(
+                "Пока не вижу подтверждённой записи. Подскажите номер телефона "
+                "и примерную дату/время, чтобы я помог найти запись."
+            ),
         )
         is False
     )
