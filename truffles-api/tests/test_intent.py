@@ -1113,6 +1113,19 @@ class TestPolicyCoreTimeoutRetry:
         assert '`subject_kind="booking"`' in prompt
         assert "alternate-time availability follow-up" in prompt
 
+    def test_policy_core_prompt_wait_time_interrupt_stays_duration_fact(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Долго ли ждать?"' in prompt
+        assert '"Как долго длится процедура?"' in prompt
+        assert '"Сколько по времени занимает услуга?"' in prompt
+        assert 'Верни `intent="duration"`, `action="fact"`, `tool_action="catalog.service_query"`' in prompt
+        assert '`capability="duration"`' in prompt
+        assert '`active_question_relation="generic_info_interrupt"`' in prompt
+        assert 'Booking continuity сохрани через `next_question="datetime"`' in prompt
+        assert 'Forbidden: `action="collect"`, `capability="bookability"`' in prompt
+        assert 'generic prompt `"На какую дату и время вам удобно?"`' in prompt
+
     def test_policy_core_prompt_initial_booking_prompt_keeps_requested_slot_contract(self):
         prompt = _load_policy_core_prompt()
 
