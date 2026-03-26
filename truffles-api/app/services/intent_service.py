@@ -744,69 +744,105 @@ def _build_policy_core_compact_input(policy_input: dict[str, Any]) -> dict[str, 
 
 def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     sanitized_payload = dict(payload)
+    sanitized = False
     raw_tool_args = sanitized_payload.get("tool_args")
     if raw_tool_args is None:
-        return sanitized_payload, False
-    if not isinstance(raw_tool_args, dict):
+        cleaned_args = None
+    elif not isinstance(raw_tool_args, dict):
         sanitized_payload["tool_args"] = {}
-        return sanitized_payload, True
+        cleaned_args = {}
+        sanitized = True
+    else:
+        cleaned_args = dict(raw_tool_args)
+        referents = sanitized_payload.get("referents")
+        if isinstance(referents, dict):
+            service_referent = referents.get("service")
+            if isinstance(service_referent, dict):
+                service_value = service_referent.get("value")
+                if (
+                    isinstance(service_value, str)
+                    and service_value.strip()
+                    and isinstance(cleaned_args.get("service_query"), str)
+                    and cleaned_args.get("service_query", "").strip()
+                    and cleaned_args.get("service_query").strip() != service_value.strip()
+                ):
+                    cleaned_args["service_query"] = service_value.strip()
+                    sanitized = True
 
-    cleaned_args = dict(raw_tool_args)
-    sanitized = False
-    referents = sanitized_payload.get("referents")
-    if isinstance(referents, dict):
-        service_referent = referents.get("service")
-        if isinstance(service_referent, dict):
-            service_value = service_referent.get("value")
-            if (
-                isinstance(service_value, str)
-                and service_value.strip()
-                and isinstance(cleaned_args.get("service_query"), str)
-                and cleaned_args.get("service_query", "").strip()
-                and cleaned_args.get("service_query").strip() != service_value.strip()
-            ):
-                cleaned_args["service_query"] = service_value.strip()
+            specialist_referent = referents.get("specialist")
+            if isinstance(specialist_referent, dict):
+                specialist_name = specialist_referent.get("value")
+                if (
+                    isinstance(specialist_name, str)
+                    and specialist_name.strip()
+                    and isinstance(cleaned_args.get("specialist_name"), str)
+                    and cleaned_args.get("specialist_name", "").strip()
+                    and cleaned_args.get("specialist_name").strip() != specialist_name.strip()
+                ):
+                    cleaned_args["specialist_name"] = specialist_name.strip()
+                    sanitized = True
+
+                specialist_id = specialist_referent.get("entity_id")
+                if (
+                    isinstance(specialist_id, str)
+                    and specialist_id.strip()
+                    and isinstance(cleaned_args.get("specialist_id"), str)
+                    and cleaned_args.get("specialist_id", "").strip()
+                    and cleaned_args.get("specialist_id").strip() != specialist_id.strip()
+                ):
+                    cleaned_args["specialist_id"] = specialist_id.strip()
+                    sanitized = True
+
+        while True:
+            normalized_args, error = validate_tool_args_shape(
+                tool_action=sanitized_payload.get("tool_action"),
+                tool_args=cleaned_args,
+            )
+            if error is None:
+                sanitized_payload["tool_args"] = normalized_args or {}
+                sanitized = sanitized or sanitized_payload["tool_args"] != raw_tool_args
+                break
+            if error.startswith("tool_args_unknown_field:") or error.startswith("tool_args_type_invalid:"):
+                field = error.split(":", 1)[1].strip()
+                if field and field in cleaned_args:
+                    cleaned_args.pop(field, None)
+                    sanitized = True
+                    continue
+            return sanitized_payload, sanitized
+
+    def _token(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip().casefold()
+        return cleaned or None
+
+    tool_action = _token(sanitized_payload.get("tool_action"))
+    subject_kind = _token(sanitized_payload.get("subject_kind"))
+    capability = _token(sanitized_payload.get("capability"))
+    reason = _token(sanitized_payload.get("reason"))
+    next_question = _token(sanitized_payload.get("next_question"))
+    open_questions = {
+        _token(item)
+        for item in sanitized_payload.get("open_questions") or []
+        if _token(item) is not None
+    }
+    if (
+        tool_action == "calendar.get_booking"
+        and subject_kind == "booking"
+        and capability == "booking_manage"
+        and reason is not None
+        and reason.startswith("calendar_get_booking_collect_reference")
+        and (next_question == "name" or "name" in open_questions)
+    ):
+        for field_name in (
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+        ):
+            if sanitized_payload.pop(field_name, None) is not None:
                 sanitized = True
 
-        specialist_referent = referents.get("specialist")
-        if isinstance(specialist_referent, dict):
-            specialist_name = specialist_referent.get("value")
-            if (
-                isinstance(specialist_name, str)
-                and specialist_name.strip()
-                and isinstance(cleaned_args.get("specialist_name"), str)
-                and cleaned_args.get("specialist_name", "").strip()
-                and cleaned_args.get("specialist_name").strip() != specialist_name.strip()
-            ):
-                cleaned_args["specialist_name"] = specialist_name.strip()
-                sanitized = True
-
-            specialist_id = specialist_referent.get("entity_id")
-            if (
-                isinstance(specialist_id, str)
-                and specialist_id.strip()
-                and isinstance(cleaned_args.get("specialist_id"), str)
-                and cleaned_args.get("specialist_id", "").strip()
-                and cleaned_args.get("specialist_id").strip() != specialist_id.strip()
-            ):
-                cleaned_args["specialist_id"] = specialist_id.strip()
-                sanitized = True
-
-    while True:
-        normalized_args, error = validate_tool_args_shape(
-            tool_action=sanitized_payload.get("tool_action"),
-            tool_args=cleaned_args,
-        )
-        if error is None:
-            sanitized_payload["tool_args"] = normalized_args or {}
-            return sanitized_payload, sanitized or sanitized_payload["tool_args"] != raw_tool_args
-        if error.startswith("tool_args_unknown_field:") or error.startswith("tool_args_type_invalid:"):
-            field = error.split(":", 1)[1].strip()
-            if field and field in cleaned_args:
-                cleaned_args.pop(field, None)
-                sanitized = True
-                continue
-        return sanitized_payload, sanitized
+    return sanitized_payload, sanitized
 
 
 def _resolve_specialist_hint_timeout_seconds(timing_context: dict | None) -> float:
@@ -1941,6 +1977,11 @@ intent=check_booking, action=fact, tool_action=calendar.get_booking, reason=cale
 If customer referent is missing, set expected_reply_type=name, next_question=name, open_questions=[name].
 If customer referent is already grounded but booking reference is still missing, set
 expected_reply_type=time, next_question=datetime, open_questions=[datetime].
+For calendar.get_booking reference follow-up with next_question=name, omit stale
+pending_question_act/pending_question_target/active_question_relation carried from
+old booking-create collect. Forbidden: pending_question_target=time or
+active_question_relation=ask_about_requested_slot with
+reason=calendar_get_booking_collect_reference and next_question=name.
 subject_kind values: service, specialist, branch, booking, general.
 capability values: pricing, duration, location, hours, promotions, bookability,
 live_availability, booking_manage, consultation, portfolio, other.

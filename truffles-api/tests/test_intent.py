@@ -971,6 +971,58 @@ class TestPolicyCoreTimeoutRetry:
         }
         assert result["payload"]["tool_args"]["specialist_name"] == "Айгерим"
 
+    def test_policy_core_strips_stale_time_axes_from_check_booking_reference_followup(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "intent": "booking",
+                "action": "fact",
+                "tool_action": "calendar.get_booking",
+                "tool_args": {},
+                "pack_refs": [],
+                "slots": {},
+                "next_question": "name",
+                "open_questions": ["name"],
+                "needs_manager": False,
+                "reason": "calendar_get_booking_collect_reference",
+                "subject_kind": "booking",
+                "capability": "booking_manage",
+                "resolution_mode": "direct",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Когда я записан?",
+                expected_reply_type="name",
+                current_goal="booking",
+                slot_state={"service": "наращивание гелем"},
+                memory_profile={
+                    "pending_question_contract": {
+                        "expected_reply_type": "name",
+                        "reason": "calendar_get_booking_collect_reference",
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                    },
+                    "semantic_contract": {
+                        "subject_kind": "booking",
+                        "capability": "booking_manage",
+                        "resolution_mode": "direct",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["tool_action"] == "calendar.get_booking"
+        assert result["payload"]["next_question"] == "name"
+        assert result["payload"].get("pending_question_act") is None
+        assert result["payload"].get("pending_question_target") is None
+        assert result["payload"].get("active_question_relation") is None
+
     def test_policy_core_rejects_conflicting_service_shadow_against_canonical_referent(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = self._policy_payload()
@@ -1227,6 +1279,9 @@ class TestPolicyCoreTimeoutRetry:
         assert 'forbidden: `intent="master_query"`, `action="collect"`' in prompt
         assert 'Не возвращай `master_query` с generic `next_question="datetime"`' in prompt
         assert 'не спрашивай `"На какую дату и время вам удобно?"`' in prompt
+        assert 'Omit `pending_question_act`, `pending_question_target`, `active_question_relation`' in prompt
+        assert '`pending_question_target="time"`' in prompt
+        assert '`reason="calendar_get_booking_collect_reference"`' in prompt
 
     def test_policy_core_prompt_keeps_customer_name_distinct_from_specialist_preference(self):
         prompt = _load_policy_core_prompt()
