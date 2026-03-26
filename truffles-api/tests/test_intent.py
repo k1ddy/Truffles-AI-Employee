@@ -829,10 +829,7 @@ class TestPolicyCoreTimeoutRetry:
             "preferred_master",
             "parking_near",
         ]
-        assert memory_payload.get("profile", {}).get("current_referents") == {
-            "service": "маникюр",
-            "booking_ref": "ref-123",
-        }
+        assert "current_referents" not in (memory_payload.get("profile") or {})
         assert memory_payload.get("profile", {}).get("pending_question_contract") == {
             "next_question": "datetime",
             "open_questions": ["datetime"],
@@ -853,6 +850,31 @@ class TestPolicyCoreTimeoutRetry:
             {"key": "preferred_master", "value": "Алия"},
             {"key": "parking_note", "value": "Рядом со входом", "source": "booking_slot"},
         ]
+
+    def test_policy_core_backfills_canonical_memory_from_legacy_args(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                current_goal="booking",
+                slot_state={"service": "маникюр", "datetime": "завтра 15:00"},
+            )
+
+        assert result["ok"] is True
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        assert "expected_reply_type" not in policy_input
+        assert "current_goal" not in policy_input
+        assert policy_input["slot_state"] == {"service": "маникюр", "datetime": "завтра 15:00"}
+        assert policy_input["memory"]["profile"]["active_goal"] == "booking"
+        assert policy_input["memory"]["profile"]["pending_question_contract"] == {
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
 
     def test_policy_core_preserves_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1293,7 +1315,7 @@ class TestPolicyCoreTimeoutRetry:
         assert '`active_question_relation="referent_followup"`' in prompt
         assert "Forbidden: generic `subject_kind=\"service\"`" in prompt
 
-    def test_policy_core_memory_profile_keeps_interaction_state_and_customer_referent(self):
+    def test_policy_core_memory_profile_strips_duplicate_semantic_carriers(self):
         normalized = _normalize_policy_core_memory_profile(
             {
                 "active_goal": " booking ",
@@ -1331,12 +1353,6 @@ class TestPolicyCoreTimeoutRetry:
         assert normalized == {
             "active_goal": "booking",
             "active_slots": ["service", "datetime", "phone"],
-            "current_referents": {
-                "service": "Маникюр",
-                "specialist": "Айгерим",
-                "customer": "Марина",
-                "booking_ref": "BK-1",
-            },
             "pending_question_contract": {
                 "next_question": "datetime",
                 "open_questions": ["datetime"],
@@ -1345,17 +1361,6 @@ class TestPolicyCoreTimeoutRetry:
                 "pending_question_act": "ask_about_requested_slot",
                 "pending_question_target": "time",
                 "active_question_relation": "ask_about_requested_slot",
-            },
-            "interaction_state": {
-                "resume_slot": "datetime",
-                "interaction_target": "specialist",
-                "interaction_relation": "referent_followup",
-                "interaction_owner": "llm_policy_core_booking",
-                "grounded_referents": {
-                    "service": "Маникюр",
-                    "specialist": "Айгерим",
-                    "customer": "Марина",
-                },
             },
         }
 

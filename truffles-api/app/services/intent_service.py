@@ -1375,17 +1375,6 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             seen_items.add(fingerprint)
         if cleaned_items:
             normalized["retrieved_items"] = cleaned_items
-    current_referents = profile.get("current_referents")
-    if isinstance(current_referents, dict):
-        cleaned_referents: dict[str, str] = {}
-        for key in ("service", "specialist", "branch", "booking_ref", "customer"):
-            value = current_referents.get(key)
-            if isinstance(value, str) and value.strip():
-                cleaned_referents[key] = " ".join(value.split())[
-                    :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-                ]
-        if cleaned_referents:
-            normalized["current_referents"] = cleaned_referents
     pending_question_contract = profile.get("pending_question_contract")
     if isinstance(pending_question_contract, dict):
         cleaned_pending: dict[str, Any] = {}
@@ -1469,52 +1458,6 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             ]
         if cleaned_pending:
             normalized["pending_question_contract"] = cleaned_pending
-    interaction_state = profile.get("interaction_state")
-    if isinstance(interaction_state, dict):
-        cleaned_interaction: dict[str, Any] = {}
-        for field_name in ("resume_slot", "interaction_target", "interaction_relation"):
-            raw_value = interaction_state.get(field_name)
-            if not isinstance(raw_value, str) or not raw_value.strip():
-                continue
-            token = raw_value.strip().casefold()
-            if field_name == "resume_slot":
-                token = {"time": "datetime", "date": "datetime"}.get(token, token)
-                if token not in {"service", "datetime", "name", "phone"}:
-                    continue
-            elif field_name == "interaction_target":
-                if token not in {"time", "specialist"}:
-                    continue
-            elif field_name == "interaction_relation":
-                if token not in {
-                    "fill_requested_slot",
-                    "ask_about_requested_slot",
-                    "slot_constraint",
-                    "slot_compare",
-                    "mixed_fill_plus_question",
-                    "referent_followup",
-                    "generic_info_interrupt",
-                    "specialist_availability_interrupt",
-                    "specialist_availability_followup",
-                    "tool_result_followup_specialist_missing",
-                }:
-                    continue
-            cleaned_interaction[field_name] = token
-        interaction_owner = interaction_state.get("interaction_owner")
-        if isinstance(interaction_owner, str) and interaction_owner.strip():
-            cleaned_interaction["interaction_owner"] = interaction_owner.strip()[:80]
-        grounded_referents = interaction_state.get("grounded_referents")
-        if isinstance(grounded_referents, dict):
-            cleaned_grounded: dict[str, str] = {}
-            for key in ("service", "specialist", "branch", "booking_ref", "customer"):
-                value = grounded_referents.get(key)
-                if isinstance(value, str) and value.strip():
-                    cleaned_grounded[key] = " ".join(value.split())[
-                        :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-                    ]
-            if cleaned_grounded:
-                cleaned_interaction["grounded_referents"] = cleaned_grounded
-        if cleaned_interaction:
-            normalized["interaction_state"] = cleaned_interaction
     semantic_contract = profile.get("semantic_contract")
     if isinstance(semantic_contract, dict):
         cleaned_contract: dict[str, Any] = {}
@@ -1680,6 +1623,27 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
         if cleaned_consult_state:
             normalized["consult_state"] = cleaned_consult_state
     return normalized or None
+
+
+def _build_policy_core_pending_contract_from_expected_reply_type(
+    expected_reply_type: str | None,
+) -> dict[str, Any] | None:
+    if not isinstance(expected_reply_type, str) or not expected_reply_type.strip():
+        return None
+    expected_token = expected_reply_type.strip().casefold()
+    next_question = {
+        "service_choice": "service",
+        "time": "datetime",
+        "name": "name",
+        "phone": "phone",
+    }.get(expected_token)
+    if next_question is None:
+        return None
+    return {
+        "expected_reply_type": expected_token,
+        "next_question": next_question,
+        "open_questions": [next_question],
+    }
 
 
 ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
@@ -2695,11 +2659,23 @@ def route_llm_policy_core(
         "catalog.location",
         "catalog.portfolio",
     ]
+    normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile) or {}
+    if (
+        isinstance(current_goal, str)
+        and current_goal.strip()
+        and not normalized_memory_profile.get("active_goal")
+    ):
+        normalized_memory_profile["active_goal"] = current_goal.strip().casefold()
+    if not normalized_memory_profile.get("pending_question_contract"):
+        pending_contract = _build_policy_core_pending_contract_from_expected_reply_type(
+            expected_reply_type,
+        )
+        if pending_contract:
+            normalized_memory_profile["pending_question_contract"] = pending_contract
+
     policy_input: dict[str, Any] = {
         "task": "llm_policy_core",
         "message": message,
-        "expected_reply_type": expected_reply_type,
-        "current_goal": current_goal,
         "slot_state": slot_state or {},
         "allowed": {
             "tool_actions": list(allowed_tool_actions),
@@ -2708,7 +2684,6 @@ def route_llm_policy_core(
         },
     }
     normalized_memory_summary = _normalize_policy_core_memory_summary(memory_summary)
-    normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile)
     if normalized_memory_summary or normalized_memory_profile:
         policy_input["memory"] = {}
         if normalized_memory_summary:

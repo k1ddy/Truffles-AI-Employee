@@ -9,8 +9,6 @@
 {
   "task": "llm_policy_core",
   "message": "...",
-  "expected_reply_type": "service_choice|time|name|phone|null",
-  "current_goal": "booking|info|consult|other|null",
   "slot_state": {"service": "", "datetime": "", "name": "", "phone": ""},
   "memory": {
     "summary": "...",
@@ -23,12 +21,6 @@
         "pending_question_act": "ask_about_requested_slot",
         "pending_question_target": "time",
         "active_question_relation": "ask_about_requested_slot"
-      },
-      "interaction_state": {
-        "resume_slot": "datetime",
-        "interaction_target": "time",
-        "interaction_relation": "ask_about_requested_slot",
-        "grounded_referents": {"service": "маникюр", "specialist": "Айгерим"}
       },
       "semantic_contract": {
         "subject_kind": "service",
