@@ -753,6 +753,45 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
 
     cleaned_args = dict(raw_tool_args)
     sanitized = False
+    referents = sanitized_payload.get("referents")
+    if isinstance(referents, dict):
+        service_referent = referents.get("service")
+        if isinstance(service_referent, dict):
+            service_value = service_referent.get("value")
+            if (
+                isinstance(service_value, str)
+                and service_value.strip()
+                and isinstance(cleaned_args.get("service_query"), str)
+                and cleaned_args.get("service_query", "").strip()
+                and cleaned_args.get("service_query").strip() != service_value.strip()
+            ):
+                cleaned_args["service_query"] = service_value.strip()
+                sanitized = True
+
+        specialist_referent = referents.get("specialist")
+        if isinstance(specialist_referent, dict):
+            specialist_name = specialist_referent.get("value")
+            if (
+                isinstance(specialist_name, str)
+                and specialist_name.strip()
+                and isinstance(cleaned_args.get("specialist_name"), str)
+                and cleaned_args.get("specialist_name", "").strip()
+                and cleaned_args.get("specialist_name").strip() != specialist_name.strip()
+            ):
+                cleaned_args["specialist_name"] = specialist_name.strip()
+                sanitized = True
+
+            specialist_id = specialist_referent.get("entity_id")
+            if (
+                isinstance(specialist_id, str)
+                and specialist_id.strip()
+                and isinstance(cleaned_args.get("specialist_id"), str)
+                and cleaned_args.get("specialist_id", "").strip()
+                and cleaned_args.get("specialist_id").strip() != specialist_id.strip()
+            ):
+                cleaned_args["specialist_id"] = specialist_id.strip()
+                sanitized = True
+
     while True:
         normalized_args, error = validate_tool_args_shape(
             tool_action=sanitized_payload.get("tool_action"),

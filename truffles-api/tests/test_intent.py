@@ -605,6 +605,64 @@ class TestPolicyCoreTimeoutRetry:
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
 
+    def test_sanitizes_service_query_shadow_to_referent_for_policy_fact(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "intent": "pricing",
+                "action": "fact",
+                "tool_action": "catalog.service_query",
+                "tool_args": {"service_query": "маникюр с дизайном"},
+                "pack_refs": [],
+                "slots": {"service": "маникюр"},
+                "next_question": "name",
+                "open_questions": ["name"],
+                "needs_manager": False,
+                "reason": "pricing_interrupt_keep_name_collect",
+                "referents": {
+                    "service": {
+                        "value": "маникюр",
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "carryover",
+                    }
+                },
+                "subject_kind": "service",
+                "capability": "pricing",
+                "temporal_scope": "specific_time",
+                "resolution_mode": "policy_fact",
+                "pending_question_act": "fill_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "generic_info_interrupt",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Сколько стоит маникюр с дизайном?",
+                expected_reply_type="name",
+                current_goal="booking",
+                slot_state={"service": "маникюр", "datetime": "завтра 15:00"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "current_referents": {"service": "маникюр"},
+                    "pending_question_contract": {
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                        "expected_reply_type": "name",
+                        "reason": "collect:name",
+                        "pending_question_act": "fill_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "fill_requested_slot",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["tool_args_sanitized"] is True
+        assert result["payload"]["tool_args"] == {"service_query": "маникюр"}
+
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(
