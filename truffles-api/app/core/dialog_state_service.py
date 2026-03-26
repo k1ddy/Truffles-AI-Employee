@@ -1426,53 +1426,55 @@ class DialogStateService:
             if isinstance(working_context.get(runtime_key), dict)
             else {}
         )
+        dialog_state_payload = runtime_payload.get("dialog_state")
+        has_dialog_state_payload = isinstance(dialog_state_payload, dict)
         runtime_has_canonical_question = bool(
             isinstance(runtime_payload.get("pending_question_contract"), dict)
             or (
-                isinstance(runtime_payload.get("dialog_state"), dict)
-                and isinstance(
-                    runtime_payload.get("dialog_state", {}).get("pending_question_contract"),
-                    dict,
-                )
+                has_dialog_state_payload
+                and isinstance(dialog_state_payload.get("pending_question_contract"), dict)
             )
         )
         legacy_expected_reply_type = (
             working_context.get("expected_reply_type")
-            if not runtime_has_canonical_question
+            if not runtime_has_canonical_question and not has_dialog_state_payload
             else None
         )
         legacy_expected_reply_reason = (
             working_context.get("expected_reply_reason")
-            if not runtime_has_canonical_question
+            if not runtime_has_canonical_question and not has_dialog_state_payload
             else None
         )
         booking_payload = self.normalize_booking_payload(runtime_payload.get("booking"))
         if booking_payload is None:
             booking_payload = self.normalize_booking_payload(working_context.get("booking"))
-        pending_contract = self.project_pending_question_contract_with_projection_fallback(
-            runtime_payload.get("pending_question_contract"),
-            expected_reply_type=runtime_payload.get("expected_reply_type")
-            or legacy_expected_reply_type,
-            expected_reply_reason=runtime_payload.get("expected_reply_reason")
-            or legacy_expected_reply_reason,
-        ) or {}
-        expected_projections = self.project_expected_reply_projections(
-            expected_reply_type=pending_contract.get("expected_reply_type")
-            or runtime_payload.get("expected_reply_type")
-            or legacy_expected_reply_type,
-            expected_reply_reason=pending_contract.get("reason")
-            or runtime_payload.get("expected_reply_reason")
-            or legacy_expected_reply_reason,
-        )
-        expected_reply_type = expected_projections.expected_reply_type
-        expected_reply_reason = expected_projections.expected_reply_reason
-        current_goal = self._normalize_projection_token(
+        pending_contract = {}
+        expected_reply_type = None
+        expected_reply_reason = None
+        legacy_or_shadow_goal = self._normalize_projection_token(
             runtime_payload.get("current_goal")
             or (None if runtime_payload else working_context.get("current_goal"))
         )
+        current_goal = legacy_or_shadow_goal if not has_dialog_state_payload else None
 
-        dialog_state_payload = runtime_payload.get("dialog_state")
         if not isinstance(dialog_state_payload, dict):
+            pending_contract = self.project_pending_question_contract_with_projection_fallback(
+                runtime_payload.get("pending_question_contract"),
+                expected_reply_type=runtime_payload.get("expected_reply_type")
+                or legacy_expected_reply_type,
+                expected_reply_reason=runtime_payload.get("expected_reply_reason")
+                or legacy_expected_reply_reason,
+            ) or {}
+            expected_projections = self.project_expected_reply_projections(
+                expected_reply_type=pending_contract.get("expected_reply_type")
+                or runtime_payload.get("expected_reply_type")
+                or legacy_expected_reply_type,
+                expected_reply_reason=pending_contract.get("reason")
+                or runtime_payload.get("expected_reply_reason")
+                or legacy_expected_reply_reason,
+            )
+            expected_reply_type = expected_projections.expected_reply_type
+            expected_reply_reason = expected_projections.expected_reply_reason
             fallback_next_question = (
                 pending_contract.get("next_question")
                 or _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(expected_reply_type or "")
@@ -1522,6 +1524,8 @@ class DialogStateService:
         )
         if dialog_goal:
             current_goal = dialog_goal
+        elif current_goal is None:
+            current_goal = legacy_or_shadow_goal
 
         if not booking_payload and working_context.get("pending_resume"):
             restored = self.restore_pending_resume_payload(
