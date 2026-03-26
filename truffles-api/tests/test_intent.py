@@ -1032,6 +1032,22 @@ class TestPolicyCoreTimeoutRetry:
         assert '`subject_kind="booking"`' in prompt
         assert "alternate-time availability follow-up" in prompt
 
+    def test_policy_core_prompt_initial_booking_prompt_keeps_requested_slot_contract(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я хочу записаться на маникюр."' in prompt
+        assert "это canonical `ask_about_requested_slot(time)`" in prompt
+        assert "Не оставляй `active_question_relation` пустым на первом booking prompt." in prompt
+        assert "не используй `fill_requested_slot` для первого booking prompt" in prompt
+
+    def test_policy_core_prompt_reschedule_without_reference_escalates(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я хочу изменить время записи."' in prompt
+        assert '`action=handoff`, `tool_action="handoff"`' in prompt
+        assert '`capability="booking_manage"`' in prompt
+        assert "Не перезапускай generic `next_question=\"datetime\"` collect" in prompt
+
     def test_policy_core_prompt_keeps_customer_name_distinct_from_specialist_preference(self):
         prompt = _load_policy_core_prompt()
 
@@ -1130,8 +1146,6 @@ class TestPolicyCoreTimeoutRetry:
         assert response_format["json_schema"]["strict"] is True
         schema = response_format["json_schema"]["schema"]
         assert schema["type"] == "object"
-        assert schema["properties"]["tool_args"]["additionalProperties"] is False
-        assert schema["properties"]["slots"]["additionalProperties"] is False
         assert "next_question" in schema["required"]
         assert "reason" in schema["required"]
         assert "goal" in schema["required"]
@@ -1146,7 +1160,6 @@ class TestPolicyCoreTimeoutRetry:
         assert "resolver_id" in schema["required"]
         assert "resolver_version" in schema["required"]
         assert "referents" in schema["required"]
-        assert schema["properties"]["slots"]["required"] == ["service", "datetime", "name", "phone"]
         assert "entity_refs" in schema["properties"]
         assert "referents" in schema["properties"]
         assert "subject_kind" in schema["properties"]
@@ -1158,15 +1171,42 @@ class TestPolicyCoreTimeoutRetry:
         assert "active_question_relation" in schema["properties"]
         assert "resolver_id" in schema["properties"]
         assert "resolver_version" in schema["properties"]
-        assert schema["properties"]["referents"]["required"] == [
-            "service",
-            "specialist",
-            "branch",
-            "booking_ref",
-            "customer",
-        ]
-        assert schema["properties"]["referents"]["additionalProperties"] is False
         assert schema["properties"]["tool_action"]["enum"] == ["calendar.book_slot"]
+        tool_args_schema = schema["properties"]["tool_args"]
+        slots_schema = schema["properties"]["slots"]
+        referents_schema = schema["properties"]["referents"]
+        assert "anyOf" in tool_args_schema
+        assert "anyOf" in slots_schema
+        assert "anyOf" in referents_schema
+        assert any(
+            variant["required"] == []
+            and variant["properties"] == {}
+            and variant["additionalProperties"] is False
+            for variant in tool_args_schema["anyOf"]
+        )
+        assert any(
+            variant["required"] == ["service"]
+            and list(variant["properties"].keys()) == ["service"]
+            for variant in slots_schema["anyOf"]
+        )
+        assert any(
+            variant["required"] == ["service"]
+            and list(variant["properties"].keys()) == ["service"]
+            for variant in referents_schema["anyOf"]
+        )
+        assert any(
+            variant["required"]
+            == [
+                "service_query",
+                "start_at",
+                "end_at",
+                "specialist_id",
+                "specialist_name",
+                "customer_name",
+                "customer_phone",
+            ]
+            for variant in tool_args_schema["anyOf"]
+        )
 
 
 class TestPolicyCoreErrorClassification:

@@ -4,6 +4,7 @@ import os
 import re
 import time
 from enum import Enum
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Iterable, Tuple
 
@@ -412,6 +413,120 @@ def _policy_core_uses_response_format(error: Exception) -> bool:
     )
 
 
+def _build_required_object_schema(
+    properties: dict[str, Any],
+    *,
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    required_fields = list(required) if required is not None else list(properties.keys())
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required_fields,
+        "properties": dict(properties),
+    }
+
+
+def _build_sparse_object_variants(
+    properties: dict[str, Any],
+    *,
+    include_empty: bool = True,
+) -> list[dict[str, Any]]:
+    ordered_keys = list(properties.keys())
+    variants: list[dict[str, Any]] = []
+    start_size = 0 if include_empty else 1
+    for size in range(start_size, len(ordered_keys) + 1):
+        for subset in combinations(ordered_keys, size):
+            subset_keys = list(subset)
+            variants.append(
+                _build_required_object_schema(
+                    {key: properties[key] for key in subset_keys},
+                    required=subset_keys,
+                )
+            )
+    return variants
+
+
+def _build_sparse_object_anyof(
+    properties: dict[str, Any],
+    *,
+    include_empty: bool = True,
+) -> dict[str, Any]:
+    return {
+        "anyOf": _build_sparse_object_variants(
+            properties,
+            include_empty=include_empty,
+        )
+    }
+
+
+def _build_policy_core_tool_args_schema(
+    *,
+    nullable_string: dict[str, Any],
+) -> dict[str, Any]:
+    text_list_or_null = {
+        "anyOf": [
+            {"type": "array", "items": {"type": "string"}},
+            {"type": "null"},
+        ]
+    }
+    number_or_text_or_null = {
+        "anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]
+    }
+    variants: list[dict[str, Any]] = [_build_required_object_schema({}, required=[])]
+    variants.extend(
+        _build_sparse_object_variants(
+            {
+                "info_ref": nullable_string,
+                "info_refs": text_list_or_null,
+            },
+            include_empty=False,
+        )
+    )
+    variants.extend(
+        [
+            _build_required_object_schema({"service_query": nullable_string}),
+            _build_required_object_schema({"consult_question": nullable_string}),
+            _build_required_object_schema({"appointment_id": nullable_string}),
+            _build_required_object_schema(
+                {
+                    "service_query": nullable_string,
+                    "date": nullable_string,
+                    "start_at": nullable_string,
+                    "duration_min": number_or_text_or_null,
+                    "specialist_id": nullable_string,
+                    "specialist_name": nullable_string,
+                }
+            ),
+            _build_required_object_schema(
+                {
+                    "service_query": nullable_string,
+                    "start_at": nullable_string,
+                    "end_at": nullable_string,
+                    "specialist_id": nullable_string,
+                    "specialist_name": nullable_string,
+                    "customer_name": nullable_string,
+                    "customer_phone": nullable_string,
+                }
+            ),
+            _build_required_object_schema(
+                {
+                    "appointment_id": nullable_string,
+                    "start_at": nullable_string,
+                    "end_at": nullable_string,
+                }
+            ),
+            _build_required_object_schema(
+                {
+                    "appointment_id": nullable_string,
+                    "reason": nullable_string,
+                }
+            ),
+        ]
+    )
+    return {"anyOf": variants}
+
+
 def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[str, Any]:
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
     nullable_string_enum = lambda values: {
@@ -433,6 +548,23 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             {"type": "null"},
         ]
     }
+    sparse_slots_schema = _build_sparse_object_anyof(
+        {
+            "service": nullable_string,
+            "datetime": nullable_string,
+            "name": nullable_string,
+            "phone": nullable_string,
+        }
+    )
+    sparse_referents_schema = _build_sparse_object_anyof(
+        {
+            "service": referent_payload_schema,
+            "specialist": referent_payload_schema,
+            "branch": referent_payload_schema,
+            "booking_ref": referent_payload_schema,
+            "customer": referent_payload_schema,
+        }
+    )
     schema = {
         "type": "object",
         "additionalProperties": False,
@@ -481,61 +613,9 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             },
             "action": {"type": "string", "enum": ["fact", "collect", "handoff"]},
             "tool_action": {"type": "string", "enum": allowed_tool_actions},
-            "tool_args": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [
-                    "service_query",
-                    "consult_question",
-                    "date",
-                    "start_at",
-                    "duration_min",
-                    "specialist_id",
-                    "specialist_name",
-                    "customer_name",
-                    "customer_phone",
-                    "appointment_id",
-                    "end_at",
-                    "reason",
-                    "info_ref",
-                    "info_refs",
-                ],
-                "properties": {
-                    "service_query": nullable_string,
-                    "consult_question": nullable_string,
-                    "date": nullable_string,
-                    "start_at": nullable_string,
-                    "duration_min": {
-                        "anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]
-                    },
-                    "specialist_id": nullable_string,
-                    "specialist_name": nullable_string,
-                    "customer_name": nullable_string,
-                    "customer_phone": nullable_string,
-                    "appointment_id": nullable_string,
-                    "end_at": nullable_string,
-                    "reason": nullable_string,
-                    "info_ref": nullable_string,
-                    "info_refs": {
-                        "anyOf": [
-                            {"type": "array", "items": {"type": "string"}},
-                            {"type": "null"},
-                        ]
-                    },
-                },
-            },
+            "tool_args": _build_policy_core_tool_args_schema(nullable_string=nullable_string),
             "pack_refs": {"type": "array", "items": {"type": "string"}},
-            "slots": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["service", "datetime", "name", "phone"],
-                "properties": {
-                    "service": nullable_string,
-                    "datetime": nullable_string,
-                    "name": nullable_string,
-                    "phone": nullable_string,
-                },
-            },
+            "slots": sparse_slots_schema,
             "next_question": nullable_string_enum(["service", "datetime", "name", "phone"]),
             "open_questions": {"type": "array", "items": {"type": "string"}},
             "needs_manager": {"type": "boolean"},
@@ -572,18 +652,7 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
                     },
                 },
             },
-            "referents": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["service", "specialist", "branch", "booking_ref", "customer"],
-                "properties": {
-                    "service": referent_payload_schema,
-                    "specialist": referent_payload_schema,
-                    "branch": referent_payload_schema,
-                    "booking_ref": referent_payload_schema,
-                    "customer": referent_payload_schema,
-                },
-            },
+            "referents": sparse_referents_schema,
             "subject_kind": nullable_string_enum(
                 ["service", "specialist", "branch", "booking", "general"]
             ),

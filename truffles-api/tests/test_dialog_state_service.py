@@ -2911,6 +2911,104 @@ def test_dialog_state_service_omits_empty_pending_question_contract_in_runtime_p
     assert "pending_question_contract" not in updated["consultant_runtime"]
 
 
+def test_dialog_state_service_clears_expected_reply_contract_on_handoff() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 26, 12, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "current_referents": {
+                    "service": "Маникюр",
+                    "specialist": None,
+                    "branch": None,
+                    "booking": None,
+                    "customer": None,
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "interaction_state": {
+                    "resume_slot": "datetime",
+                    "interaction_target": "time",
+                    "interaction_relation": "ask_about_requested_slot",
+                    "interaction_owner": "booking_time_followup",
+                    "grounded_referents": {"service": "Маникюр"},
+                    "confirmation_state": None,
+                    "degrade_reason": None,
+                },
+                "projections": {
+                    "expected_reply_type": "time",
+                    "expected_reply_reason": "collect:datetime",
+                    "session_memory_interaction_state": {
+                        "resume_slot": "datetime",
+                        "interaction_target": "time",
+                        "interaction_relation": "ask_about_requested_slot",
+                        "interaction_owner": "booking_time_followup",
+                        "grounded_referents": {"service": "Маникюр"},
+                        "confirmation_state": None,
+                        "degrade_reason": None,
+                    },
+                },
+                "meta": {"writer": "dialog_state_service", "current_goal": "booking"},
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-03-29T19:00:00+00:00",
+                "last_question": "datetime",
+            },
+            "expected_reply_type": "time",
+            "expected_reply_reason": "collect:datetime",
+            "current_goal": "booking",
+        }
+    }
+    decision = planner.build_from_policy_override(
+        {
+            "action": "handoff",
+            "intent": "booking",
+            "tool_action": "handoff",
+            "subject_kind": "booking",
+            "capability": "booking_manage",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="ask_about_requested_slot",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"handoff_requested": True},
+        now=now,
+    )
+
+    runtime_payload = updated["consultant_runtime"]
+    assert runtime_payload["booking"]["service"] == "Маникюр"
+    assert "expected_reply_type" not in runtime_payload
+    assert "expected_reply_reason" not in runtime_payload
+    assert "pending_question_contract" not in runtime_payload
+    assert "current_goal" not in runtime_payload
+    assert "expected_reply_type" not in updated
+    assert "expected_reply_reason" not in updated
+    assert "current_goal" not in updated
+    assert dialog_state.pending_question_contract.next_question is None
+    assert dialog_state.projections.expected_reply_type is None
+    assert booking_payload["service"] == "Маникюр"
+
+
 def test_dialog_state_service_persists_specialist_followup_referent_on_collect() -> None:
     service = DialogStateService()
     planner = TurnPlanner()

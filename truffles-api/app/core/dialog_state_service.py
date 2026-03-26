@@ -1637,6 +1637,10 @@ class DialogStateService:
         current_goal = None
         if clear_booking:
             merged_booking = None
+        elif decision.outcome == "HANDOFF":
+            expected_reply_type = None
+            expected_reply_reason = None
+            current_goal = None
         elif decision.outcome == "COLLECT":
             next_slot = self._normalize_projection_token(
                 execution_payload.get("next_slot")

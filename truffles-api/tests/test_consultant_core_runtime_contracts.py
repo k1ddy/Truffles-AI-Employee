@@ -1829,6 +1829,154 @@ def test_turn_executor_projects_specialist_referent_into_tool_args(monkeypatch) 
     }
 
 
+def test_turn_executor_prunes_legacy_info_args_when_resolving_catalog_service_query(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _execute_tool_action(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Маникюр длится около 60 минут.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.service_query",
+                "tool_decision": "duration",
+            },
+            trace={"stage": "tool_registry", "decision": "duration"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "duration",
+            "action": "fact",
+            "tool_action": "info",
+            "tool_args": {"info_ref": "duration"},
+            "pack_refs": ["duration"],
+            "slots": {"service": "маникюр"},
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "risk_signals": [],
+            "reason": "duration_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "duration",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Как долго длится маникюр?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert captured["tool_action"] == "catalog.service_query"
+    assert captured["tool_args"] == {"service_query": "маникюр"}
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "duration"
+    assert result.meta.get("resolved_tool_action") == "catalog.service_query"
+    assert result.meta.get("tool_execution_projection") == {
+        "projection_source": "semantic_contract",
+        "service_query": "маникюр",
+    }
+
+
+def test_turn_executor_does_not_project_service_shadow_into_catalog_location(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _execute_tool_action(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Мы находимся на Абая 10.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.location",
+                "tool_decision": "location",
+            },
+            trace={"stage": "tool_registry", "decision": "location"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = TurnPlanner().build_from_policy_override(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "tool_args": {},
+            "pack_refs": ["location"],
+            "slots": {"service": "маникюр"},
+            "open_questions": ["service"],
+            "needs_manager": False,
+            "risk_signals": [],
+            "reason": "location_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                }
+            },
+            "subject_kind": "branch",
+            "capability": "location",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Какой адрес вашего салона?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert captured["tool_action"] == "catalog.location"
+    assert captured["tool_args"] == {}
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "location"
+    assert result.meta.get("tool_execution_projection") is None
+
+
 def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(monkeypatch) -> None:
     captured: dict[str, str] = {}
 

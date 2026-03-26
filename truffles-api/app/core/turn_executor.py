@@ -11,6 +11,7 @@ from app.core.boundary_validator import BoundaryOverride, BoundaryValidator
 from app.core.dialog_state_service import DialogState, DialogStateService
 from app.core.response_realizer import ReplyEnvelope, ResponseRealizer
 from app.core.turn_planner import DecisionOutcome, PolicyDecision, TurnPlanner
+from app.schemas.intent import validate_tool_args_shape
 from app.schemas.turn_outcome import TurnOutcome, TurnOutcomeObservability
 
 ToolStatus = Literal["ok", "degraded", "blocked", "skipped"]
@@ -403,11 +404,6 @@ class TurnExecutor:
             service_name=service_name,
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
-        projected_tool_args, tool_execution_projection = self._build_tool_execution_projection(
-            decision=decision,
-            semantic_contract=semantic_contract,
-            service_name=service_name,
-        )
         fact_refs = {
             str(item).strip().casefold()
             for item in (
@@ -464,6 +460,12 @@ class TurnExecutor:
             decision=decision,
             fact_refs=fact_refs,
             service_name=service_name,
+        )
+        projected_tool_args, tool_execution_projection = self._build_tool_execution_projection(
+            decision=decision,
+            semantic_contract=semantic_contract,
+            service_name=service_name,
+            tool_action=resolved_tool_action,
         )
         if db is not None and branch_id is not None and is_tool_action(resolved_tool_action):
             service_query = self._resolve_fact_service_query(
@@ -590,10 +592,13 @@ class TurnExecutor:
         decision: PolicyDecision,
         semantic_contract: dict[str, Any] | None,
         service_name: str | None = None,
+        tool_action: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         projected_args = dict(decision.tool_args) if isinstance(decision.tool_args, dict) else {}
         referents = self._semantic_referents(semantic_contract)
-        projection: dict[str, Any] = {"projection_source": "semantic_contract"}
+        resolved_tool_action = self._normalize_fact_hint(tool_action) or self._normalize_fact_hint(
+            decision.tool_action
+        )
 
         service_payload = referents.get("service") if isinstance(referents.get("service"), dict) else {}
         projected_service = self._normalize_execution_text(
@@ -601,9 +606,13 @@ class TurnExecutor:
             or service_name
             or projected_args.get("service_query")
         )
-        if projected_service:
+        if projected_service and resolved_tool_action in {
+            "calendar.list_slots",
+            "calendar.book_slot",
+            "catalog.service_query",
+            "catalog.portfolio",
+        }:
             projected_args["service_query"] = projected_service
-            projection["service_query"] = projected_service
 
         specialist_payload = (
             referents.get("specialist")
@@ -613,22 +622,59 @@ class TurnExecutor:
         projected_specialist_name = self._normalize_execution_text(
             specialist_payload.get("value") or projected_args.get("specialist_name")
         )
-        if projected_specialist_name:
+        if projected_specialist_name and resolved_tool_action in {
+            "calendar.list_slots",
+            "calendar.book_slot",
+        }:
             projected_args["specialist_name"] = projected_specialist_name
-            projection["specialist_name"] = projected_specialist_name
 
         projected_specialist_id = self._normalize_execution_text(
             specialist_payload.get("entity_id") or projected_args.get("specialist_id")
         )
-        if projected_specialist_id and self._looks_like_uuid(projected_specialist_id):
+        if (
+            projected_specialist_id
+            and resolved_tool_action in {"calendar.list_slots", "calendar.book_slot"}
+            and self._looks_like_uuid(projected_specialist_id)
+        ):
             projected_args["specialist_id"] = projected_specialist_id
-            projection["specialist_id"] = projected_specialist_id
         else:
             projected_args.pop("specialist_id", None)
 
+        projected_args = self._sanitize_projected_tool_args(
+            tool_action=resolved_tool_action,
+            projected_args=projected_args,
+        )
+        projection: dict[str, Any] = {"projection_source": "semantic_contract"}
+        for key in ("service_query", "specialist_name", "specialist_id"):
+            value = projected_args.get(key)
+            if isinstance(value, str) and value.strip():
+                projection[key] = value.strip()
         if len(projection) == 1:
             return projected_args, {}
         return projected_args, projection
+
+    @staticmethod
+    def _sanitize_projected_tool_args(
+        *,
+        tool_action: str | None,
+        projected_args: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not projected_args:
+            return {}
+        cleaned_args = dict(projected_args)
+        while True:
+            normalized_args, error = validate_tool_args_shape(
+                tool_action=tool_action,
+                tool_args=cleaned_args,
+            )
+            if error is None:
+                return normalized_args or {}
+            if not error.startswith("tool_args_unknown_field:"):
+                return cleaned_args
+            unknown_key = error.split(":", 1)[1].strip()
+            if not unknown_key or unknown_key not in cleaned_args:
+                return cleaned_args
+            cleaned_args.pop(unknown_key, None)
 
     @classmethod
     def _normalize_semantic_entity_refs(cls, value: Any) -> list[dict[str, Any]]:

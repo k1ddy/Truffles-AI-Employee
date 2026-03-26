@@ -65,6 +65,87 @@ def test_validate_llm_policy_core_output_accepts_semantic_envelope_fields():
     assert contract.resolution_mode == "referent_followup"
 
 
+def test_validate_llm_policy_core_output_accepts_sparse_location_projection():
+    payload = {
+        "intent": "location",
+        "action": "fact",
+        "tool_action": "catalog.location",
+        "tool_args": {},
+        "pack_refs": ["location"],
+        "slots": {},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.72,
+        "reason": "location_interrupt",
+        "goal": "info",
+        "entity_refs": [],
+        "referents": {},
+        "subject_kind": "branch",
+        "capability": "location",
+        "temporal_scope": "none",
+        "resolution_mode": "direct",
+        "resolver_id": "llm_policy_core",
+        "resolver_version": "v1",
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.tool_action == "catalog.location"
+    assert contract.tool_args == {}
+    assert contract.referents == {}
+
+
+def test_validate_llm_policy_core_output_accepts_sparse_booking_collect_projection():
+    payload = {
+        "intent": "booking",
+        "action": "collect",
+        "tool_action": "collect",
+        "tool_args": {},
+        "pack_refs": [],
+        "slots": {"service": "маникюр"},
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.88,
+        "reason": "collect:datetime",
+        "goal": "booking",
+        "entity_refs": [
+            {
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "value": "маникюр",
+                "source_ref": "message",
+            }
+        ],
+        "referents": {
+            "service": {
+                "value": "маникюр",
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "source_ref": "message",
+            }
+        },
+        "subject_kind": "service",
+        "capability": "bookability",
+        "temporal_scope": "specific_time",
+        "resolution_mode": "clarify_missing_time",
+        "resolver_id": "llm_policy_core",
+        "resolver_version": "v1",
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.slots == {"service": "маникюр"}
+    assert contract.next_question == "datetime"
+    assert contract.referents["service"]["entity_id"] == "svc:manicure"
+
+
 def test_validate_llm_policy_core_output_invalid():
     payload = {"action": "", "tool_action": "info", "slots": {}, "confidence": 1.2}
 
