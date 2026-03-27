@@ -8,10 +8,25 @@ type KnowledgeBranchReadinessPanelProps = {
     state: KnowledgeBranchReadinessState;
 };
 
+function formatStageTimestamp(value?: string | null): string {
+    if (!value) {
+        return "—";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+    return parsed.toLocaleString("ru-RU");
+}
+
 export default function KnowledgeBranchReadinessPanel({
     state,
 }: KnowledgeBranchReadinessPanelProps) {
     const branch = state.selectedBranchContext;
+    const liveMatchesCandidate = Boolean(
+        state.currentVersionId
+        && state.currentVersionId === state.currentActiveVersionId,
+    );
 
     return (
         <div className="card-surface p-5" data-testid="knowledge-branch-readiness">
@@ -46,13 +61,35 @@ export default function KnowledgeBranchReadinessPanel({
                     Эффективные часы работы: {state.effectiveHoursSummary}
                 </div>
                 <div className="rounded-lg border border-border/60 px-3 py-2">
-                    Источник часов: {state.effectiveHoursSource} · версия публикации: {state.currentVersionId ?? "не опубликована"}
+                    Источник часов для workspace: {state.effectiveHoursSource} · published candidate: {state.currentVersionId ?? "не опубликована"}
                 </div>
                 <div className="rounded-lg border border-border/60 px-3 py-2">
-                    Синхронизация знаний: <span className={`rounded-full px-2 py-0.5 ${state.currentSyncStatusClass}`}>{state.currentSyncStatusLabel}</span>
+                    Live версия: <span className="font-mono">{state.currentActiveVersionId ?? "ещё не активирована"}</span>
                 </div>
                 <div className="rounded-lg border border-border/60 px-3 py-2">
-                    Safe mode: {state.currentSafeMode ? "включен" : "выключен"}
+                    Published candidate: <span className="font-mono">{state.currentVersionId ?? "не опубликована"}</span>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                        {liveMatchesCandidate
+                            ? "Candidate уже совпадает с live."
+                            : state.hasPublishedCandidate
+                                ? "Новая версия доступна для preview и ждёт live activation."
+                                : "Отдельного candidate сейчас нет."}
+                    </div>
+                </div>
+                <div className="rounded-lg border border-border/60 px-3 py-2">
+                    Обновление для клиентов: <span className={`rounded-full px-2 py-0.5 ${state.currentSyncStatusClass}`}>{state.currentSyncStatusLabel}</span>
+                </div>
+                <div className="rounded-lg border border-border/60 px-3 py-2">
+                    Этап activation: {state.currentActivationStageLabel ?? "ещё не определён"}
+                </div>
+                <div className="rounded-lg border border-border/60 px-3 py-2">
+                    В очереди: {formatStageTimestamp(state.currentActivationQueuedAt)}
+                </div>
+                <div className="rounded-lg border border-border/60 px-3 py-2">
+                    Heartbeat: {formatStageTimestamp(state.currentActivationHeartbeatAt)}
+                </div>
+                <div className="rounded-lg border border-border/60 px-3 py-2">
+                    Попытка activation: {state.currentActivationAttemptCount ?? "—"}
                 </div>
             </div>
             <div className="mt-2 text-xs text-muted-foreground">
@@ -78,7 +115,7 @@ export default function KnowledgeBranchReadinessPanel({
                                 disabled={state.isRetrySyncPending}
                                 data-testid="knowledge-sync-retry"
                             >
-                                {state.isRetrySyncPending ? "Повторяем..." : "Повторить синхронизацию"}
+                                {state.isRetrySyncPending ? "Повторяем..." : "Повторить обновление для клиентов"}
                             </button>
                         </div>
                     ) : null}

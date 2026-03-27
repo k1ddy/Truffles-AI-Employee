@@ -25,7 +25,7 @@ def test_build_runtime_truth_missing_branch():
     assert runtime_truth.truth == {}
 
 
-def test_build_runtime_truth_uses_published_pack(monkeypatch):
+def test_build_runtime_truth_uses_active_pack(monkeypatch):
     client_id = uuid4()
     branch_id = uuid4()
     payload = {
@@ -38,11 +38,11 @@ def test_build_runtime_truth_uses_published_pack(monkeypatch):
 
     expected_branch_id = branch_id
 
-    def _fake_get_current_published(_db, branch_id):
+    def _fake_get_active_knowledge_version(_db, branch_id):
         assert branch_id == expected_branch_id
         return version
 
-    monkeypatch.setattr(knowledge_runtime, "get_current_published", _fake_get_current_published)
+    monkeypatch.setattr(knowledge_runtime, "get_active_knowledge_version", _fake_get_active_knowledge_version)
 
     runtime_truth = knowledge_runtime.build_runtime_truth(
         db=Mock(),
@@ -51,7 +51,7 @@ def test_build_runtime_truth_uses_published_pack(monkeypatch):
         branch_id=branch_id,
         allow_fallback=False,
     )
-    assert runtime_truth.source == "knowledge_versions"
+    assert runtime_truth.source == "knowledge_active_version"
     assert runtime_truth.truth == {"salon": {"name": "Test"}}
     assert runtime_truth.compiled_hash == "hash-1"
     assert runtime_truth.version_id == str(version.id)
@@ -62,7 +62,7 @@ def test_load_yaml_truth_uses_runtime_truth():
         truth={"salon": {"name": "FromDB"}},
         client_slug="demo_salon",
         branch_id=uuid4(),
-        source="knowledge_versions",
+        source="knowledge_active_version",
         allow_fallback=False,
     )
     set_runtime_truth(runtime_truth)
@@ -78,7 +78,7 @@ def test_load_yaml_truth_uses_runtime_truth_for_generic_slug():
         truth={"salon": {"name": "GenericFromDB"}},
         client_slug="generic",
         branch_id=uuid4(),
-        source="knowledge_versions",
+        source="knowledge_active_version",
         allow_fallback=False,
     )
     set_runtime_truth(runtime_truth)
@@ -94,7 +94,7 @@ def test_load_yaml_truth_blocks_slug_mismatch_without_fallback():
         truth={"salon": {"name": "TenantScoped"}},
         client_slug="generic",
         branch_id=uuid4(),
-        source="knowledge_versions",
+        source="knowledge_active_version",
         allow_fallback=False,
     )
     set_runtime_truth(runtime_truth)

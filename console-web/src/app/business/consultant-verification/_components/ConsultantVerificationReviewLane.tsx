@@ -31,6 +31,7 @@ type ConsultantVerificationReviewLaneProps = {
     onReplayWeakPrompt: (prompt: string) => void;
     findingNote: string;
     onFindingNoteChange: (value: string) => void;
+    teamToolsEnabled: boolean;
     onCreateFinding: () => void;
     createFindingPending: boolean;
     sessions: ConsultantVerificationSessionListResponse["items"];
@@ -62,6 +63,7 @@ export default function ConsultantVerificationReviewLane({
     onReplayWeakPrompt,
     findingNote,
     onFindingNoteChange,
+    teamToolsEnabled,
     onCreateFinding,
     createFindingPending,
     sessions,
@@ -140,32 +142,41 @@ export default function ConsultantVerificationReviewLane({
                     </div>
                 </article>
 
-                <article className="mt-4 rounded-xl border border-border/60 bg-muted/10 p-3" data-testid="consultant-verification-flag-finding">
-                    <p className="text-sm font-semibold text-foreground">Зафиксировать слабое место</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                        Если этот ответ выглядит слабым или подозрительным, превратите его в trackable finding с видимым статусом.
-                    </p>
-                    <textarea
-                        value={findingNote}
-                        onChange={(event) => onFindingNoteChange(event.target.value)}
-                        rows={3}
-                        className="mt-3 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none ring-0 transition focus:border-foreground"
-                        placeholder="Коротко опишите, что именно выглядит плохо или почему владельцу это не понравится."
-                        disabled={isBusy || !inspectedTurn}
-                        data-testid="consultant-verification-finding-note"
-                    />
-                    <div className="mt-3 flex items-center justify-end">
-                        <button
-                            type="button"
-                            className="btn-ghost"
-                            onClick={onCreateFinding}
+                {teamToolsEnabled ? (
+                    <article className="mt-4 rounded-xl border border-border/60 bg-muted/10 p-3" data-testid="consultant-verification-flag-finding">
+                        <p className="text-sm font-semibold text-foreground">Зафиксировать слабое место</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            Если этот ответ выглядит слабым или подозрительным, превратите его в trackable finding с видимым статусом.
+                        </p>
+                        <textarea
+                            value={findingNote}
+                            onChange={(event) => onFindingNoteChange(event.target.value)}
+                            rows={3}
+                            className="mt-3 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none ring-0 transition focus:border-foreground"
+                            placeholder="Коротко опишите, что именно выглядит плохо или почему владельцу это не понравится."
                             disabled={isBusy || !inspectedTurn}
-                            data-testid="consultant-verification-create-finding"
-                        >
-                            {createFindingPending ? "Фиксирую..." : "Зафиксировать проблему"}
-                        </button>
-                    </div>
-                </article>
+                            data-testid="consultant-verification-finding-note"
+                        />
+                        <div className="mt-3 flex items-center justify-end">
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={onCreateFinding}
+                                disabled={isBusy || !inspectedTurn}
+                                data-testid="consultant-verification-create-finding"
+                            >
+                                {createFindingPending ? "Фиксирую..." : "Зафиксировать проблему"}
+                            </button>
+                        </div>
+                    </article>
+                ) : (
+                    <article className="mt-4 rounded-xl border border-border/60 bg-muted/10 p-3" data-testid="consultant-verification-team-tools-note">
+                        <p className="text-sm font-semibold text-foreground">Командные follow-up инструменты</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            Preview-chat уже доступен. Compare, findings и remediation подключаются отдельно и не блокируют эту проверку.
+                        </p>
+                    </article>
+                )}
 
                 <details className="mt-4 rounded-xl border border-border/60 bg-muted/10 p-3" data-testid="consultant-verification-advanced-details">
                     <summary className="cursor-pointer text-sm font-semibold text-foreground">Детали для команды</summary>
@@ -198,23 +209,25 @@ export default function ConsultantVerificationReviewLane({
                 onReplayWeakPrompt={onReplayWeakPrompt}
             />
 
-            <ConsultantVerificationTeamToolsPanel
-                defaultOpen={defaultOpen}
-                sessions={sessions}
-                sessionsLoading={sessionsLoading}
-                sessionsError={sessionsError}
-                selectedSessionId={selectedSessionId}
-                selectedSessionIndex={selectedSessionIndex >= 0 ? selectedSessionIndex : 0}
-                onSelectSession={onSelectSession}
-                compareReadiness={compareReadiness}
-                compareCases={compareCases}
-                isBusy={isBusy}
-                canCompareLastPrompt={canCompareLastPrompt}
-                onCompareLastPrompt={onCompareLastPrompt}
-                findings={findings}
-                onUpdateFindingStatus={(findingId, status) => onUpdateFindingStatus(findingId, status)}
-                onRetestFinding={onRetestFinding}
-            />
+            {teamToolsEnabled ? (
+                <ConsultantVerificationTeamToolsPanel
+                    defaultOpen={defaultOpen}
+                    sessions={sessions}
+                    sessionsLoading={sessionsLoading}
+                    sessionsError={sessionsError}
+                    selectedSessionId={selectedSessionId}
+                    selectedSessionIndex={selectedSessionIndex >= 0 ? selectedSessionIndex : 0}
+                    onSelectSession={onSelectSession}
+                    compareReadiness={compareReadiness}
+                    compareCases={compareCases}
+                    isBusy={isBusy}
+                    canCompareLastPrompt={canCompareLastPrompt}
+                    onCompareLastPrompt={onCompareLastPrompt}
+                    findings={findings}
+                    onUpdateFindingStatus={(findingId, status) => onUpdateFindingStatus(findingId, status)}
+                    onRetestFinding={onRetestFinding}
+                />
+            ) : null}
         </aside>
     );
 }

@@ -178,6 +178,42 @@ QDRANT_HEALTH_LATENCY_MS = _get_or_create_metric(
     "Qdrant health check latency in ms.",
     (),
 )
+KNOWLEDGE_ACTIVATION_HEALTH_STATUS = _get_or_create_metric(
+    Gauge,
+    "health_check_knowledge_activation_status",
+    "Knowledge activation health status (1=healthy, 0=degraded).",
+    (),
+)
+KNOWLEDGE_ACTIVATION_JOBS_TOTAL = _get_or_create_metric(
+    Gauge,
+    "knowledge_activation_jobs_total",
+    "Latest knowledge activation jobs by resolved state.",
+    ("state",),
+)
+KNOWLEDGE_ACTIVATION_FAILED_24H_TOTAL = _get_or_create_metric(
+    Gauge,
+    "knowledge_activation_failed_24h_total",
+    "Latest knowledge activation jobs failed or stuck within the last 24 hours.",
+    (),
+)
+KNOWLEDGE_ACTIVATION_STALE_RUNNING_TOTAL = _get_or_create_metric(
+    Gauge,
+    "knowledge_activation_stale_running_total",
+    "Knowledge activation jobs still marked running after heartbeat expiry.",
+    (),
+)
+KNOWLEDGE_ACTIVATION_OLDEST_QUEUED_AGE_SECONDS = _get_or_create_metric(
+    Gauge,
+    "knowledge_activation_oldest_queued_age_seconds",
+    "Age in seconds of the oldest queued knowledge activation job.",
+    (),
+)
+KNOWLEDGE_ACTIVATION_OLDEST_RUNNING_HEARTBEAT_AGE_SECONDS = _get_or_create_metric(
+    Gauge,
+    "knowledge_activation_oldest_running_heartbeat_age_seconds",
+    "Age in seconds of the oldest active knowledge activation heartbeat.",
+    (),
+)
 
 # HTTP request metrics
 HTTP_REQUEST_COUNT = _get_or_create_metric(
@@ -406,6 +442,49 @@ def set_outbox_backlog(counts: dict[str, int]) -> None:
         OUTBOX_BACKLOG.clear()
     for client_slug, backlog in counts.items():
         OUTBOX_BACKLOG.labels(client_slug=_normalize_client_slug(client_slug)).set(max(int(backlog), 0))
+
+
+def set_knowledge_activation_health(snapshot: dict | None) -> None:
+    counts = snapshot.get("counts", {}) if isinstance(snapshot, dict) else {}
+    if not isinstance(counts, dict):
+        counts = {}
+    if KNOWLEDGE_ACTIVATION_HEALTH_STATUS is not None:
+        status = str(snapshot.get("status") if isinstance(snapshot, dict) else "" or "").strip().lower()
+        KNOWLEDGE_ACTIVATION_HEALTH_STATUS.set(1 if status == "healthy" else 0)
+
+    if KNOWLEDGE_ACTIVATION_JOBS_TOTAL is not None:
+        for state in ("queued", "running", "ready", "failed", "stuck"):
+            KNOWLEDGE_ACTIVATION_JOBS_TOTAL.labels(state=state).set(max(int(counts.get(state) or 0), 0))
+
+    if KNOWLEDGE_ACTIVATION_FAILED_24H_TOTAL is not None:
+        KNOWLEDGE_ACTIVATION_FAILED_24H_TOTAL.set(
+            max(int((snapshot or {}).get("failed_24h") or 0), 0)
+            if isinstance(snapshot, dict)
+            else 0
+        )
+
+    if KNOWLEDGE_ACTIVATION_STALE_RUNNING_TOTAL is not None:
+        KNOWLEDGE_ACTIVATION_STALE_RUNNING_TOTAL.set(
+            max(int((snapshot or {}).get("stale_running") or 0), 0)
+            if isinstance(snapshot, dict)
+            else 0
+        )
+
+    if KNOWLEDGE_ACTIVATION_OLDEST_QUEUED_AGE_SECONDS is not None:
+        oldest_queued = 0
+        if isinstance(snapshot, dict):
+            raw_oldest_queued = snapshot.get("oldest_queued_age_seconds")
+            if isinstance(raw_oldest_queued, (int, float)) and raw_oldest_queued >= 0:
+                oldest_queued = raw_oldest_queued
+        KNOWLEDGE_ACTIVATION_OLDEST_QUEUED_AGE_SECONDS.set(oldest_queued)
+
+    if KNOWLEDGE_ACTIVATION_OLDEST_RUNNING_HEARTBEAT_AGE_SECONDS is not None:
+        oldest_running = 0
+        if isinstance(snapshot, dict):
+            raw_oldest_running = snapshot.get("oldest_running_heartbeat_age_seconds")
+            if isinstance(raw_oldest_running, (int, float)) and raw_oldest_running >= 0:
+                oldest_running = raw_oldest_running
+        KNOWLEDGE_ACTIVATION_OLDEST_RUNNING_HEARTBEAT_AGE_SECONDS.set(oldest_running)
 
 
 def get_trace_id() -> str | None:

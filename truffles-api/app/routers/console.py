@@ -54,6 +54,7 @@ from app.models import (
     ConversationHumanLock,
     DomainCapabilityTemplate,
     Handover,
+    KnowledgeActivationJob,
     KnowledgeVersion,
     LearnedResponse,
     MarketingCampaign,
@@ -209,6 +210,14 @@ from app.schemas.console import (
     ConsoleIntegrationBranchActionRequest,
     ConsoleIntegrationBranchActionResponse,
     ConsoleIntegrationsListResponse,
+    ConsoleKnowledgeActivationCounts,
+    ConsoleKnowledgeActivationHealth,
+    ConsoleKnowledgeActivationHealthThresholds,
+    ConsoleKnowledgeActivationOpsCounts,
+    ConsoleKnowledgeActivationOpsItem,
+    ConsoleKnowledgeActivationOpsListResponse,
+    ConsoleKnowledgeActivationRetryRequest,
+    ConsoleKnowledgeActivationRetryResponse,
     ConsoleKnowledgeCurrentResponse,
     ConsoleKnowledgeHistoryItem,
     ConsoleKnowledgeHistoryResponse,
@@ -747,6 +756,7 @@ from app.services.console_saved_views import (
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.health_service import build_knowledge_activation_health_snapshot
 from app.services.human_lock_service import (
     HUMAN_LOCK_SCOPE_CONVERSATION,
     HUMAN_LOCK_SCOPE_REMOTE,
@@ -759,14 +769,22 @@ from app.services.human_lock_service import (
 from app.services.integration_guardrails_service import run_integration_watchdog_scoped
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
-    enqueue_knowledge_sync_event,
+    coarse_sync_status_from_activation_state,
+    create_knowledge_activation_job,
+    get_active_knowledge_version,
     get_current_published,
     get_latest_draft,
+    get_latest_knowledge_activation_job,
+    knowledge_activation_stage_label,
+    knowledge_activation_state_label,
     knowledge_sync_status_label,
     list_history,
+    list_latest_knowledge_activation_jobs,
     mark_knowledge_version_sync_pending,
     normalize_knowledge_sync_status,
     publish_version,
+    resolve_knowledge_activation_stage,
+    resolve_knowledge_activation_state,
     restore_version,
     sync_published_branch_docs,
     upsert_draft,
@@ -3341,8 +3359,8 @@ def _reject_unknown_query_params(request: Request, allowed: set[str]) -> None:
     )
 
 
-def _validate_limit(limit: int) -> None:
-    _validate_limit_util(
+def _validate_limit(limit: int | object) -> int:
+    return _validate_limit_util(
         limit,
         min_value=1,
         max_value=100,
@@ -9648,6 +9666,20 @@ _REMINDER_RETRY_STATUS_MAP = {
     "all": ["PENDING", "FAILED"],
 }
 
+_ACTIVATION_STATUS_VALUES = {
+    "queued",
+    "running",
+    "ready",
+    "failed",
+    "stuck",
+}
+
+_ACTIVATION_RETRY_STATUS_MAP = {
+    "failed": ["failed"],
+    "stuck": ["stuck"],
+    "all": ["failed", "stuck"],
+}
+
 _OPS_JOB_DEFINITIONS = {
     "outbox_process": {
         "label": "Outbox Process",
@@ -9768,6 +9800,24 @@ def _parse_reminder_retry_status_param(status: str) -> list[str]:
     return _REMINDER_RETRY_STATUS_MAP[normalized]
 
 
+def _parse_knowledge_activation_status_param(status: Optional[str]) -> Optional[list[str]]:
+    if not status:
+        return ["failed"]
+    normalized = status.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _ACTIVATION_STATUS_VALUES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    return [normalized]
+
+
+def _parse_knowledge_activation_retry_status_param(status: str) -> list[str]:
+    normalized = (status or "").strip().lower()
+    if normalized not in _ACTIVATION_RETRY_STATUS_MAP:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid retry status")
+    return _ACTIVATION_RETRY_STATUS_MAP[normalized]
+
+
 def _truncate_preview(value: Optional[str], limit: int = 120) -> Optional[str]:
     if not value:
         return None
@@ -9846,6 +9896,71 @@ def _build_outbox_item(row: OutboxMessage) -> ConsoleOutboxItem:
         remote_jid=summary.get("remote_jid"),
         instance_id=summary.get("instance_id"),
         forwarded_to_telegram=summary.get("forwarded_to_telegram"),
+    )
+
+
+def _build_knowledge_activation_health_payload(snapshot: dict) -> ConsoleKnowledgeActivationHealth:
+    thresholds = snapshot.get("thresholds", {})
+    if not isinstance(thresholds, dict):
+        thresholds = {}
+    counts = snapshot.get("counts", {})
+    if not isinstance(counts, dict):
+        counts = {}
+    return ConsoleKnowledgeActivationHealth(
+        status=str(snapshot.get("status") or "healthy"),
+        metric_basis=str(snapshot.get("metric_basis") or "latest_activation_job_per_version"),
+        counts=ConsoleKnowledgeActivationCounts(
+            queued=int(counts.get("queued") or 0),
+            running=int(counts.get("running") or 0),
+            ready=int(counts.get("ready") or 0),
+            failed=int(counts.get("failed") or 0),
+            stuck=int(counts.get("stuck") or 0),
+        ),
+        failed_24h=int(snapshot.get("failed_24h") or 0),
+        stale_running=int(snapshot.get("stale_running") or 0),
+        oldest_queued_age_seconds=(
+            int(snapshot["oldest_queued_age_seconds"])
+            if isinstance(snapshot.get("oldest_queued_age_seconds"), (int, float))
+            else None
+        ),
+        oldest_running_heartbeat_age_seconds=(
+            int(snapshot["oldest_running_heartbeat_age_seconds"])
+            if isinstance(snapshot.get("oldest_running_heartbeat_age_seconds"), (int, float))
+            else None
+        ),
+        thresholds=ConsoleKnowledgeActivationHealthThresholds(
+            queued_warning=int(thresholds.get("queued_warning") or 0),
+            queued_critical=int(thresholds.get("queued_critical") or 0),
+            failed_24h_warning=int(thresholds.get("failed_24h_warning") or 0),
+            failed_24h_critical=int(thresholds.get("failed_24h_critical") or 0),
+            stuck_warning=int(thresholds.get("stuck_warning") or 0),
+            stuck_critical=int(thresholds.get("stuck_critical") or 0),
+            oldest_queued_warning_seconds=int(thresholds.get("oldest_queued_warning_seconds") or 0),
+            oldest_queued_critical_seconds=int(thresholds.get("oldest_queued_critical_seconds") or 0),
+            stale_running_critical=int(thresholds.get("stale_running_critical") or 1),
+        ),
+    )
+
+
+def _build_knowledge_activation_ops_item(row: KnowledgeActivationJob) -> ConsoleKnowledgeActivationOpsItem:
+    state = resolve_knowledge_activation_state(row)
+    stage = resolve_knowledge_activation_stage(row)
+    return ConsoleKnowledgeActivationOpsItem(
+        id=row.id,
+        branch_id=row.branch_id,
+        version_id=row.version_id,
+        state=state,
+        state_label=knowledge_activation_state_label(state),
+        stage=stage,
+        stage_label=knowledge_activation_stage_label(stage),
+        source=str(row.source or ""),
+        attempt_count=int(row.attempt_count or 0),
+        queued_at=row.queued_at.isoformat() if row.queued_at else None,
+        started_at=row.started_at.isoformat() if row.started_at else None,
+        heartbeat_at=row.heartbeat_at.isoformat() if row.heartbeat_at else None,
+        finished_at=row.finished_at.isoformat() if row.finished_at else None,
+        last_error=row.last_error,
+        error_code=row.error_code,
     )
 
 
@@ -11524,7 +11639,7 @@ async def list_queue_state_views(
 @router.get(
     "/queue-state/views/{view_id}",
     response_model=ConsoleSavedView,
-    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
 )
 async def get_queue_state_view(
     view_id: UUID,
@@ -11852,7 +11967,7 @@ async def list_cases(
             "limit",
         },
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     assigned_to_me = _parse_bool_param(
         "assigned_to_me",
         request.query_params.get("assigned_to_me"),
@@ -13512,13 +13627,13 @@ async def get_case_messages(
     case_id: UUID,
     request: Request,
     cursor: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db)
 ) -> ConsoleMessageListResponse:
     context = get_console_context(request, db)
     require_console_permission(context, "inbox", "read")
     _reject_unknown_query_params(request, {"cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     
     case = db.query(Handover).filter(Handover.id == case_id, Handover.client_id == context.client.id).first()
     if not case:
@@ -13607,7 +13722,7 @@ async def stream_case_updates(
         .order_by(Message.created_at.desc())
         .first()
     )
-    last_case_updated_at = case.updated_at or case.created_at
+    last_case_updated_at = getattr(case, "updated_at", None) or case.created_at
     last_message_created_at = latest_message.created_at if latest_message else None
     last_message_id = str(latest_message.id) if latest_message else None
 
@@ -13658,7 +13773,7 @@ async def stream_case_updates(
                 .first()
             )
 
-            refreshed_case_updated_at = refreshed_case.updated_at or refreshed_case.created_at
+            refreshed_case_updated_at = getattr(refreshed_case, "updated_at", None) or refreshed_case.created_at
             refreshed_message_created_at = refreshed_message.created_at if refreshed_message else None
             refreshed_message_id = str(refreshed_message.id) if refreshed_message else None
 
@@ -15827,7 +15942,7 @@ async def list_business_incidents(
 @router.get(
     "/business/consultant-verification/overview",
     response_model=ConsoleConsultantVerificationOverviewResponse,
-    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def get_business_consultant_verification_overview(
     request: Request,
@@ -15851,7 +15966,7 @@ async def get_business_consultant_verification_overview(
 @router.get(
     "/business/consultant-verification/sessions",
     response_model=ConsoleConsultantVerificationSessionListResponse,
-    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def list_business_consultant_verification_sessions(
     request: Request,
@@ -15900,7 +16015,7 @@ async def create_business_consultant_verification_session(
 @router.get(
     "/business/consultant-verification/sessions/{session_id}",
     response_model=ConsoleConsultantVerificationSessionResponse,
-    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def get_business_consultant_verification_session(
     session_id: UUID,
@@ -15953,7 +16068,7 @@ async def append_business_consultant_verification_message(
 @router.get(
     "/business/consultant-verification/findings",
     response_model=ConsoleConsultantVerificationFindingListResponse,
-    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def list_business_consultant_verification_findings(
     request: Request,
@@ -15980,7 +16095,7 @@ async def list_business_consultant_verification_findings(
 @router.get(
     "/business/consultant-verification/readiness",
     response_model=ConsoleConsultantVerificationReadinessResponse,
-    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def get_business_consultant_verification_readiness(
     request: Request,
@@ -17746,13 +17861,202 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     else:
         overall_status = "ok"
 
+    try:
+        activation_snapshot = build_knowledge_activation_health_snapshot(db)
+    except Exception:
+        activation_snapshot = None
+    if overall_status == "ok" and isinstance(activation_snapshot, dict) and activation_snapshot.get("status") in {"warning", "critical"}:
+        overall_status = "degraded"
+
     return ConsoleHealthResponse(
         status=overall_status,
         version=os.getenv("APP_VERSION", "dev"),
         database=db_status,
         redis=redis_status,
         outbox_backlog=backlog,
+        knowledge_activation=(
+            _build_knowledge_activation_health_payload(activation_snapshot)
+            if isinstance(activation_snapshot, dict)
+            else None
+        ),
     )
+
+
+@router.get(
+    "/ops/knowledge-activation",
+    response_model=ConsoleKnowledgeActivationOpsListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_knowledge_activation_jobs(
+    request: Request,
+    status: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeActivationOpsListResponse:
+    """List latest knowledge activation jobs for ops."""
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="read")
+
+    _reject_unknown_query_params(request, {"status", "cursor", "limit"})
+    limit = _validate_limit(limit)
+
+    status_filters = _parse_knowledge_activation_status_param(status)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    branch_scope = set(allowed_branch_ids) if allowed_branch_ids is not None else None
+    activation_health = build_knowledge_activation_health_snapshot(
+        db,
+        client_id=context.client.id,
+        branch_ids=branch_scope,
+    )
+    if allowed_branch_ids is not None and not allowed_branch_ids:
+        counts = activation_health.get("counts", {}) if isinstance(activation_health, dict) else {}
+        return ConsoleKnowledgeActivationOpsListResponse(
+            items=[],
+            cursor=None,
+            has_more=False,
+            counts=ConsoleKnowledgeActivationOpsCounts(
+                queued=int(counts.get("queued") or 0),
+                running=int(counts.get("running") or 0),
+                ready=int(counts.get("ready") or 0),
+                failed=int(counts.get("failed") or 0),
+                stuck=int(counts.get("stuck") or 0),
+                total=sum(int(counts.get(key) or 0) for key in ("queued", "running", "ready", "failed", "stuck")),
+            ),
+        )
+
+    cursor_date = _parse_cursor_param(cursor)
+    rows = list_latest_knowledge_activation_jobs(
+        db,
+        client_id=context.client.id,
+        branch_ids=branch_scope,
+        before=cursor_date,
+    )
+    if status_filters:
+        rows = [
+            row
+            for row in rows
+            if resolve_knowledge_activation_state(row) in status_filters
+        ]
+
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+    counts = activation_health.get("counts", {}) if isinstance(activation_health, dict) else {}
+
+    return ConsoleKnowledgeActivationOpsListResponse(
+        items=[_build_knowledge_activation_ops_item(row) for row in items_rows],
+        cursor=next_cursor,
+        has_more=has_more,
+        counts=ConsoleKnowledgeActivationOpsCounts(
+            queued=int(counts.get("queued") or 0),
+            running=int(counts.get("running") or 0),
+            ready=int(counts.get("ready") or 0),
+            failed=int(counts.get("failed") or 0),
+            stuck=int(counts.get("stuck") or 0),
+            total=sum(int(counts.get(key) or 0) for key in ("queued", "running", "ready", "failed", "stuck")),
+        ),
+    )
+
+
+@router.post(
+    "/ops/knowledge-activation/retry",
+    response_model=ConsoleKnowledgeActivationRetryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def retry_knowledge_activation_jobs(
+    body: ConsoleKnowledgeActivationRetryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeActivationRetryResponse:
+    """Create new queued activation attempts for failed or stuck jobs."""
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="write")
+
+    ids = [entry for entry in (body.ids or []) if entry]
+    if not ids:
+        _validate_limit(body.limit or 100)
+
+    retry_states = set(_parse_knowledge_activation_retry_status_param(body.status))
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None and not allowed_branch_ids:
+        return ConsoleKnowledgeActivationRetryResponse(success=True, retried=0, skipped=len(ids))
+
+    latest_rows = list_latest_knowledge_activation_jobs(
+        db,
+        client_id=context.client.id,
+        branch_ids=set(allowed_branch_ids) if allowed_branch_ids is not None else None,
+    )
+    eligible_rows = [
+        row
+        for row in latest_rows
+        if resolve_knowledge_activation_state(row) in retry_states
+    ]
+    if ids:
+        requested_ids = set(ids)
+        rows = [row for row in eligible_rows if row.id in requested_ids]
+        if not rows:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Knowledge activation jobs not found")
+        skipped = max(0, len(requested_ids) - len(rows))
+    else:
+        rows = eligible_rows[: body.limit or 100]
+        skipped = 0
+
+    branch_ids = {row.branch_id for row in rows}
+    version_ids = {row.version_id for row in rows}
+    branch_map = {
+        row.id: row
+        for row in (
+            db.query(Branch)
+            .filter(Branch.client_id == context.client.id, Branch.id.in_(branch_ids))
+            .all()
+            if branch_ids
+            else []
+        )
+    }
+    version_map = {
+        row.id: row
+        for row in (
+            db.query(KnowledgeVersion)
+            .filter(KnowledgeVersion.client_id == context.client.id, KnowledgeVersion.id.in_(version_ids))
+            .all()
+            if version_ids
+            else []
+        )
+    }
+
+    retried = 0
+    for row in rows:
+        branch = branch_map.get(row.branch_id)
+        version = version_map.get(row.version_id)
+        if branch is None or version is None:
+            skipped += 1
+            continue
+        create_knowledge_activation_job(
+            db,
+            branch=branch,
+            version=version,
+            actor_id=context.agent.id,
+            source="console_ops_retry",
+        )
+        retried += 1
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="knowledge_activation_retry",
+        entity_type="knowledge_activation",
+        payload={
+            "retried": retried,
+            "skipped": skipped,
+            "ids": [str(entry) for entry in ids] if ids else None,
+            "status": body.status,
+        },
+        client_id=context.client.id,
+    )
+    db.commit()
+
+    return ConsoleKnowledgeActivationRetryResponse(success=True, retried=retried, skipped=skipped)
 
 
 @router.get(
@@ -17764,7 +18068,7 @@ async def list_outbox(
     request: Request,
     status: Optional[str] = None,
     cursor: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ConsoleOutboxListResponse:
     """List outbox queue entries for ops."""
@@ -17772,7 +18076,7 @@ async def list_outbox(
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"status", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     status_filters = _parse_outbox_status_param(status)
 
@@ -17906,7 +18210,7 @@ async def list_reminders(
     status: Optional[str] = None,
     template: Optional[str] = None,
     cursor: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ConsoleReminderListResponse:
     """List reminder jobs with diagnostics and linked outbox state."""
@@ -17914,7 +18218,7 @@ async def list_reminders(
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"status", "template", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     status_filters = _parse_reminder_status_param(status)
     template_filter = template.strip() if template and template.strip() else None
@@ -18147,14 +18451,14 @@ async def get_ops_jobs_catalog(
 async def list_ops_jobs(
     request: Request,
     cursor: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ConsoleOpsJobListResponse:
     context = get_console_context(request, db)
     _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = db.query(ConsoleOpsJob).filter(ConsoleOpsJob.client_id == context.client.id)
     allowed_branch_ids = _resolve_branch_scope(context)
@@ -18360,7 +18664,7 @@ async def list_audit_events(
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
     cursor: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ConsoleAuditListResponse:
     """List audit events for the current client."""
@@ -18371,7 +18675,7 @@ async def list_audit_events(
     require_console_permission(context, "audit", "read")
     
     _reject_unknown_query_params(request, {"entity_type", "entity_id", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = db.query(AuditEvent).filter(AuditEvent.client_id == context.client.id)
 
@@ -18536,8 +18840,8 @@ def _derive_stale_view_rate(
 )
 async def get_metrics_daily(
     request: Request,
-    date: Optional[str] = None,
-    trend_days: Optional[int] = None,
+    date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    trend_days: Optional[int] = Query(None, ge=3, le=60),
     db: Session = Depends(get_db),
 ) -> ConsoleMetricsDailyResponse:
     """Get daily metrics for cases."""
@@ -19306,20 +19610,119 @@ async def create_console_confirmation(
         expires_at=confirmation.expires_at.isoformat(),
     )
 
+def _fallback_activation_state_from_version(
+    version: KnowledgeVersion | None,
+    *,
+    active_version: KnowledgeVersion | None = None,
+) -> str:
+    if active_version is not None:
+        if version is None or getattr(active_version, "id", None) == getattr(version, "id", None):
+            return "ready"
+    if version is None:
+        return "not_started"
+    sync_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
+    if sync_status == "ready":
+        return "ready"
+    if sync_status == "failed":
+        return "failed"
+    return "queued"
+
+
+def _fallback_activation_stage_from_version(
+    version: KnowledgeVersion | None,
+    *,
+    active_version: KnowledgeVersion | None = None,
+) -> str | None:
+    if active_version is not None and version is None:
+        return "ready"
+    if version is None:
+        return None
+    if active_version is not None and getattr(active_version, "id", None) == getattr(version, "id", None):
+        return "ready"
+    sync_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
+    if sync_status == "ready":
+        return "ready"
+    if sync_status == "failed":
+        return "failed"
+    return "queued"
+
+
 def _serialize_knowledge_sync_state(
     version: KnowledgeVersion | None,
     *,
     branch: Branch | None = None,
+    active_version: KnowledgeVersion | None = None,
+    job: KnowledgeActivationJob | None = None,
 ) -> dict[str, Any]:
-    status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
-    completed_at = getattr(version, "sync_completed_at", None)
-    if status == "pending" and version is None:
-        status = "pending"
+    activation_status = (
+        resolve_knowledge_activation_state(job)
+        if job is not None
+        else _fallback_activation_state_from_version(version, active_version=active_version)
+    )
+    activation_stage = (
+        resolve_knowledge_activation_stage(job)
+        if job is not None
+        else _fallback_activation_stage_from_version(version, active_version=active_version)
+    )
+    sync_status = coarse_sync_status_from_activation_state(activation_status)
+    activation_finished_at = (
+        getattr(job, "finished_at", None)
+        if job is not None
+        else getattr(version, "sync_completed_at", None)
+    )
+    activation_error_message = (
+        getattr(job, "last_error", None)
+        if job is not None and getattr(job, "last_error", None)
+        else getattr(version, "sync_error", None) if version is not None else None
+    )
+    active_updated_at = None
+    if active_version is not None:
+        active_timestamp = getattr(active_version, "published_at", None) or getattr(active_version, "created_at", None)
+        if isinstance(active_timestamp, datetime):
+            active_updated_at = active_timestamp.isoformat()
     return {
-        "sync_status": status if version is not None else None,
-        "sync_status_label": knowledge_sync_status_label(status) if version is not None else None,
-        "sync_error": getattr(version, "sync_error", None) if version is not None else None,
-        "sync_completed_at": completed_at.isoformat() if isinstance(completed_at, datetime) else None,
+        "active_version_id": getattr(active_version, "id", None) if active_version is not None else getattr(branch, "active_knowledge_version_id", None),
+        "active_updated_at": active_updated_at,
+        "activation_status": activation_status if version is not None or active_version is not None else None,
+        "activation_status_label": knowledge_activation_state_label(activation_status)
+        if version is not None or active_version is not None or job is not None
+        else None,
+        "activation_job_id": getattr(job, "id", None) if job is not None else None,
+        "activation_stage": activation_stage,
+        "activation_stage_label": knowledge_activation_stage_label(activation_stage)
+        if activation_stage is not None
+        else None,
+        "activation_error_code": getattr(job, "error_code", None) if job is not None else None,
+        "activation_error_message": activation_error_message,
+        "activation_queued_at": (
+            job.queued_at.isoformat()
+            if job is not None and isinstance(getattr(job, "queued_at", None), datetime)
+            else None
+        ),
+        "activation_started_at": (
+            job.started_at.isoformat()
+            if job is not None and isinstance(getattr(job, "started_at", None), datetime)
+            else None
+        ),
+        "activation_heartbeat_at": (
+            job.heartbeat_at.isoformat()
+            if job is not None and isinstance(getattr(job, "heartbeat_at", None), datetime)
+            else None
+        ),
+        "activation_finished_at": (
+            activation_finished_at.isoformat()
+            if isinstance(activation_finished_at, datetime)
+            else None
+        ),
+        "activation_attempt_count": int(getattr(job, "attempt_count", 0) or 0) if job is not None else None,
+        "sync_status": sync_status,
+        "sync_status_label": knowledge_sync_status_label(sync_status) if sync_status else None,
+        "sync_error": activation_error_message,
+        "sync_completed_at": (
+            activation_finished_at.isoformat()
+            if isinstance(activation_finished_at, datetime)
+            else None
+        ),
         "knowledge_safe_mode": bool(getattr(branch, "knowledge_safe_mode", False)) if branch is not None else False,
         "knowledge_safe_mode_reason": getattr(branch, "knowledge_safe_mode_reason", None) if branch is not None else None,
         "knowledge_safe_mode_at": (
@@ -19345,35 +19748,32 @@ def _queue_knowledge_version_sync(
     event_type: str,
     audit_payload: dict[str, Any],
     source: str,
-) -> None:
+) -> KnowledgeActivationJob:
     now = datetime.now(timezone.utc)
     mark_knowledge_version_sync_pending(version)
-    branch.knowledge_safe_mode = False
-    branch.knowledge_safe_mode_reason = None
-    branch.knowledge_safe_mode_at = now
-    queued = enqueue_knowledge_sync_event(
+    job = create_knowledge_activation_job(
         db,
-        client=context.client,
         branch=branch,
         version=version,
         actor_id=context.agent.id,
-        actor_name=context.agent.name,
         source=source,
     )
-    if not queued:
-        raise RuntimeError("knowledge_sync_enqueue_failed")
+    branch.knowledge_safe_mode = False
+    branch.knowledge_safe_mode_reason = None
+    branch.knowledge_safe_mode_at = now
     record_audit_event(
         db,
         actor=context.agent,
         event_type=event_type,
         entity_type="branch",
         entity_id=branch.id,
-        payload={**audit_payload, "sync_status": "pending"},
+        payload={**audit_payload, "sync_status": "pending", "activation_job_id": str(job.id)},
         client_id=context.client.id,
         branch_id=branch.id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    return job
 
 
 @router.get(
@@ -19389,7 +19789,13 @@ async def get_knowledge_current(
     require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     version = get_current_published(db, branch_id=branch.id)
+    active_version = get_active_knowledge_version(db, branch_id=branch.id)
     draft = get_latest_draft(db, branch_id=branch.id)
+    activation_job = get_latest_knowledge_activation_job(
+        db,
+        branch_id=branch.id,
+        version_id=version.id if version is not None else None,
+    )
 
     def _version_content(row: KnowledgeVersion | None) -> str | None:
         if not row or not isinstance(row.payload_json, dict):
@@ -19408,9 +19814,19 @@ async def get_knowledge_current(
             version_id=None,
             payload=None,
             content=None,
-            **_serialize_knowledge_sync_state(None, branch=branch),
+            **_serialize_knowledge_sync_state(
+                None,
+                branch=branch,
+                active_version=active_version,
+                job=activation_job,
+            ),
         )
-    sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+    sync_state = _serialize_knowledge_sync_state(
+        version,
+        branch=branch,
+        active_version=active_version,
+        job=activation_job,
+    )
     return ConsoleKnowledgeCurrentResponse(
         version_id=version.id if version else None,
         payload=version.payload_json if version else None,
@@ -19531,6 +19947,7 @@ async def publish_knowledge(
         else None
     )
     current = get_current_published(db, branch_id=branch.id)
+    active_version = get_active_knowledge_version(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
     payload, errors, warnings, _diff = validate_draft(
         body.draft_text,
@@ -19561,7 +19978,7 @@ async def publish_knowledge(
                     "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
                 },
             )
-        compare_required = bool(current) and _resolve_consultant_verification_enabled(context)
+        compare_required = bool(active_version) and _resolve_consultant_verification_enabled(context)
         if compare_required:
             has_compare = has_recent_knowledge_compare_preflight(
                 db=db,
@@ -19597,7 +20014,7 @@ async def publish_knowledge(
             actor_id=context.agent.id,
             source_version_id=current.id if current else None,
         )
-        _queue_knowledge_version_sync(
+        activation_job = _queue_knowledge_version_sync(
             db=db,
             context=context,
             branch=branch,
@@ -19622,19 +20039,26 @@ async def publish_knowledge(
         ) from exc
     except RuntimeError as exc:
         _rollback_if_possible(db)
-        if str(exc) == "knowledge_sync_enqueue_failed":
-            raise ConsoleAPIError(
-                503,
-                "KNOWLEDGE_SYNC_QUEUE_FAILED",
-                "Knowledge published, but sync queue is unavailable",
-            ) from exc
         raise
 
     return ConsoleKnowledgePublishResponse(
         success=True,
         version_id=version.id,
         published_at=version.published_at.isoformat() if version.published_at else None,
-        message="Версия опубликована. Синхронизация выполняется.",
+        message="Версия опубликована. Обновление для клиентов выполняется отдельно.",
+        active_version_id=getattr(branch, "active_knowledge_version_id", None),
+        activation_status="queued",
+        activation_status_label=knowledge_activation_state_label("queued"),
+        activation_job_id=activation_job.id,
+        activation_stage="queued",
+        activation_stage_label=knowledge_activation_stage_label("queued"),
+        activation_error_code=None,
+        activation_error_message=None,
+        activation_queued_at=activation_job.queued_at.isoformat() if activation_job.queued_at else None,
+        activation_started_at=None,
+        activation_heartbeat_at=activation_job.heartbeat_at.isoformat() if activation_job.heartbeat_at else None,
+        activation_finished_at=None,
+        activation_attempt_count=activation_job.attempt_count,
         sync_status="pending",
         sync_status_label=knowledge_sync_status_label("pending"),
         sync_error=None,
@@ -19658,6 +20082,15 @@ async def list_knowledge_history(
     require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     items = list_history(db, branch_id=branch.id)
+    activation_jobs_by_version = {
+        item.id: get_latest_knowledge_activation_job(
+            db,
+            branch_id=branch.id,
+            version_id=item.id,
+        )
+        for item in items
+        if item.id is not None
+    }
     return ConsoleKnowledgeHistoryResponse(
         items=[
             ConsoleKnowledgeHistoryItem(
@@ -19666,6 +20099,73 @@ async def list_knowledge_history(
                 created_at=item.created_at.isoformat() if item.created_at else None,
                 published_at=item.published_at.isoformat() if item.published_at else None,
                 summary=item.summary,
+                is_active=item.id == getattr(branch, "active_knowledge_version_id", None),
+                activation_status=(
+                    resolve_knowledge_activation_state(activation_jobs_by_version.get(item.id))
+                    if item.id and activation_jobs_by_version.get(item.id) is not None
+                    else _fallback_activation_state_from_version(
+                        item,
+                        active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                    )
+                ),
+                activation_status_label=(
+                    knowledge_activation_state_label(resolve_knowledge_activation_state(activation_jobs_by_version.get(item.id)))
+                    if item.id and activation_jobs_by_version.get(item.id) is not None
+                    else knowledge_activation_state_label(
+                        _fallback_activation_state_from_version(
+                            item,
+                            active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                        )
+                    )
+                ),
+                activation_job_id=(
+                    getattr(activation_jobs_by_version.get(item.id), "id", None)
+                    if item.id
+                    else None
+                ),
+                activation_stage=(
+                    resolve_knowledge_activation_stage(activation_jobs_by_version.get(item.id))
+                    if item.id and activation_jobs_by_version.get(item.id) is not None
+                    else _fallback_activation_stage_from_version(
+                        item,
+                        active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                    )
+                ),
+                activation_stage_label=(
+                    knowledge_activation_stage_label(resolve_knowledge_activation_stage(activation_jobs_by_version.get(item.id)))
+                    if item.id and resolve_knowledge_activation_stage(activation_jobs_by_version.get(item.id)) is not None
+                    else knowledge_activation_stage_label(
+                        _fallback_activation_stage_from_version(
+                            item,
+                            active_version=item if item.id == getattr(branch, "active_knowledge_version_id", None) else None,
+                        )
+                    )
+                ),
+                activation_error_code=(
+                    getattr(activation_jobs_by_version.get(item.id), "error_code", None)
+                    if item.id
+                    else None
+                ),
+                activation_error_message=(
+                    getattr(activation_jobs_by_version.get(item.id), "last_error", None)
+                    if item.id
+                    else getattr(item, "sync_error", None)
+                ),
+                activation_queued_at=(
+                    activation_jobs_by_version.get(item.id).queued_at.isoformat()
+                    if item.id and isinstance(getattr(activation_jobs_by_version.get(item.id), "queued_at", None), datetime)
+                    else None
+                ),
+                activation_heartbeat_at=(
+                    activation_jobs_by_version.get(item.id).heartbeat_at.isoformat()
+                    if item.id and isinstance(getattr(activation_jobs_by_version.get(item.id), "heartbeat_at", None), datetime)
+                    else None
+                ),
+                activation_attempt_count=(
+                    getattr(activation_jobs_by_version.get(item.id), "attempt_count", None)
+                    if item.id
+                    else None
+                ),
                 sync_status=normalize_knowledge_sync_status(getattr(item, "sync_status", None)),
                 sync_status_label=knowledge_sync_status_label(getattr(item, "sync_status", None)),
                 sync_error=getattr(item, "sync_error", None),
@@ -19714,25 +20214,48 @@ async def retry_knowledge_version_sync(
     if not version:
         raise ConsoleAPIError(404, "NOT_FOUND", "Published knowledge version not found")
 
-    current_status = normalize_knowledge_sync_status(getattr(version, "sync_status", None))
-    if current_status == "ready" and not branch.knowledge_safe_mode:
-        sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+    activation_job = get_latest_knowledge_activation_job(
+        db,
+        branch_id=branch.id,
+        version_id=version.id,
+    )
+    activation_status = (
+        resolve_knowledge_activation_state(activation_job)
+        if activation_job is not None
+        else _fallback_activation_state_from_version(
+            version,
+            active_version=get_active_knowledge_version(db, branch_id=branch.id),
+        )
+    )
+    if (
+        activation_status == "ready"
+        and getattr(branch, "active_knowledge_version_id", None) == version.id
+        and not branch.knowledge_safe_mode
+    ):
+        sync_state = _serialize_knowledge_sync_state(version, branch=branch, active_version=version, job=activation_job)
         return ConsoleKnowledgeSyncRetryResponse(
             success=True,
             version_id=version.id,
+            active_version_id=getattr(branch, "active_knowledge_version_id", None),
             message="Синхронизация уже актуальна.",
             **sync_state,
         )
-    if current_status == "pending" and not branch.knowledge_safe_mode:
-        sync_state = _serialize_knowledge_sync_state(version, branch=branch)
+    if activation_status in {"queued", "running"} and not branch.knowledge_safe_mode:
+        sync_state = _serialize_knowledge_sync_state(
+            version,
+            branch=branch,
+            active_version=get_active_knowledge_version(db, branch_id=branch.id),
+            job=activation_job,
+        )
         return ConsoleKnowledgeSyncRetryResponse(
             success=True,
             version_id=version.id,
+            active_version_id=getattr(branch, "active_knowledge_version_id", None),
             message="Синхронизация уже выполняется.",
             **sync_state,
         )
     try:
-        _queue_knowledge_version_sync(
+        activation_job = _queue_knowledge_version_sync(
             db=db,
             context=context,
             branch=branch,
@@ -19744,16 +20267,23 @@ async def retry_knowledge_version_sync(
         db.commit()
     except RuntimeError as exc:
         _rollback_if_possible(db)
-        if str(exc) == "knowledge_sync_enqueue_failed":
-            raise ConsoleAPIError(
-                503,
-                "KNOWLEDGE_SYNC_QUEUE_FAILED",
-                "Knowledge sync queue is unavailable",
-            ) from exc
         raise
     return ConsoleKnowledgeSyncRetryResponse(
         success=True,
         version_id=version.id,
+        active_version_id=getattr(branch, "active_knowledge_version_id", None),
+        activation_status="queued",
+        activation_status_label=knowledge_activation_state_label("queued"),
+        activation_job_id=activation_job.id,
+        activation_stage="queued",
+        activation_stage_label=knowledge_activation_stage_label("queued"),
+        activation_error_code=None,
+        activation_error_message=None,
+        activation_queued_at=activation_job.queued_at.isoformat() if activation_job.queued_at else None,
+        activation_started_at=None,
+        activation_heartbeat_at=activation_job.heartbeat_at.isoformat() if activation_job.heartbeat_at else None,
+        activation_finished_at=None,
+        activation_attempt_count=activation_job.attempt_count,
         sync_status="pending",
         sync_status_label=knowledge_sync_status_label("pending"),
         sync_error=None,
@@ -19817,7 +20347,7 @@ async def rollback_knowledge(
             source_version=version,
             actor_id=context.agent.id,
         )
-        _queue_knowledge_version_sync(
+        activation_job = _queue_knowledge_version_sync(
             db=db,
             context=context,
             branch=branch,
@@ -19840,12 +20370,6 @@ async def rollback_knowledge(
         ) from exc
     except RuntimeError as exc:
         _rollback_if_possible(db)
-        if str(exc) == "knowledge_sync_enqueue_failed":
-            raise ConsoleAPIError(
-                503,
-                "KNOWLEDGE_SYNC_QUEUE_FAILED",
-                "Knowledge rollback published, but sync queue is unavailable",
-            ) from exc
         raise
     mark_confirmation_used(
         db,
@@ -19861,7 +20385,20 @@ async def rollback_knowledge(
     return ConsoleKnowledgeRollbackResponse(
         success=True,
         version_id=restored.id,
-        message="Версия восстановлена. Синхронизация выполняется.",
+        message="Версия восстановлена. Обновление для клиентов выполняется отдельно.",
+        active_version_id=getattr(branch, "active_knowledge_version_id", None),
+        activation_status="queued",
+        activation_status_label=knowledge_activation_state_label("queued"),
+        activation_job_id=activation_job.id,
+        activation_stage="queued",
+        activation_stage_label=knowledge_activation_stage_label("queued"),
+        activation_error_code=None,
+        activation_error_message=None,
+        activation_queued_at=activation_job.queued_at.isoformat() if activation_job.queued_at else None,
+        activation_started_at=None,
+        activation_heartbeat_at=activation_job.heartbeat_at.isoformat() if activation_job.heartbeat_at else None,
+        activation_finished_at=None,
+        activation_attempt_count=activation_job.attempt_count,
         sync_status="pending",
         sync_status_label=knowledge_sync_status_label("pending"),
         sync_error=None,
@@ -20105,7 +20642,7 @@ async def list_companies(
     context = get_console_context(request, db, require_selection=False)
     _require_platform_admin(context)
     _reject_unknown_query_params(request, {"cursor", "limit", "q"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = db.query(Company)
     query_value = _normalize_search_query("q", q) if q else None
@@ -20196,7 +20733,7 @@ async def list_clients(
             "service_state",
         },
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     accessible_client_ids = _accessible_client_ids(context)
     accessible_clients_hash = _hash_uuid_values(accessible_client_ids)
@@ -20409,7 +20946,7 @@ async def list_branches(
     )
     _require_platform_admin(context)
     _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "client_id", "branch_id", "lifecycle"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
@@ -20511,11 +21048,11 @@ async def list_branches(
 async def get_tenants_portfolio(
     request: Request,
     cursor: Optional[str] = None,
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
     q: Optional[str] = None,
     company_id: Optional[str] = None,
     lifecycle: Optional[str] = None,
-    attention_limit: int = 20,
+    attention_limit: int = Query(20, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -20539,8 +21076,8 @@ async def get_tenants_portfolio(
                 "include_low",
             },
         )
-        _validate_limit(limit)
-        _validate_limit(attention_limit)
+        limit = _validate_limit(limit)
+        attention_limit = _validate_limit(attention_limit)
         lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
 
         clients_request = _request_with_query_params(
@@ -20603,8 +21140,8 @@ async def get_tenants_company_cockpit(
     client_id: Optional[str] = None,
     include_branches: Optional[str] = None,
     lifecycle: Optional[str] = None,
-    client_limit: int = 20,
-    branch_limit: int = 20,
+    client_limit: int = Query(20, ge=1, le=100),
+    branch_limit: int = Query(20, ge=1, le=100),
     client_cursor: Optional[str] = None,
     branch_cursor: Optional[str] = None,
     client_q: Optional[str] = None,
@@ -20628,8 +21165,8 @@ async def get_tenants_company_cockpit(
                 "branch_q",
             },
         )
-        _validate_limit(client_limit)
-        _validate_limit(branch_limit)
+        client_limit = _validate_limit(client_limit)
+        branch_limit = _validate_limit(branch_limit)
         lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
         include_branches_mode = _parse_bool_param("include_branches", include_branches, default=True)
 
@@ -20712,7 +21249,7 @@ async def list_tenants_weekly_snapshots(
     context = get_console_context(request, db, require_selection=False)
     _require_platform_admin(context)
     _reject_unknown_query_params(request, {"client_id", "week_key", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     client_uuid = _parse_uuid_param("client_id", client_id)
     if client_uuid is None:
@@ -21210,22 +21747,19 @@ async def preview_marketing_campaign(
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
 )
 async def get_marketing_campaign_audience(
-    campaign_id: str,
+    campaign_id: UUID,
     request: Request,
     include_suppressed: bool = True,
-    limit: int = Query(_MARKETING_AUDIENCE_LIMIT_DEFAULT),
+    limit: int = Query(_MARKETING_AUDIENCE_LIMIT_DEFAULT, ge=1, le=_MARKETING_AUDIENCE_LIMIT_MAX),
     db: Session = Depends(get_db),
 ) -> ConsoleMarketingCampaignAudienceResponse:
     context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
     _require_marketing_access(context, action="view audience")
     _reject_unknown_query_params(request, {"include_suppressed", "limit"})
 
-    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
-    if campaign_uuid is None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
     limit_value = _normalize_marketing_audience_limit(limit)
 
-    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    campaign = _resolve_marketing_campaign(context, db, campaign_id)
     _resolve_marketing_branch(context, db, campaign.branch_id)
     items = fetch_marketing_audience_preview(
         db,
@@ -21345,16 +21879,13 @@ async def approve_marketing_campaign(
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
 )
 async def get_marketing_campaign_preflight(
-    campaign_id: str,
+    campaign_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
 ) -> ConsoleMarketingCampaignPreflightResponse:
     context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
     _require_marketing_access(context, action="view preflight")
-    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
-    if campaign_uuid is None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
-    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    campaign = _resolve_marketing_campaign(context, db, campaign_id)
     _resolve_marketing_branch(context, db, campaign.branch_id)
 
     refresh_marketing_campaign_lifecycle(db, campaign=campaign)
@@ -21545,19 +22076,15 @@ async def execute_marketing_campaign(
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
 )
 async def get_marketing_campaign_diagnostics(
-    campaign_id: str,
+    campaign_id: UUID,
     request: Request,
-    sample_limit: Optional[int] = Query(None),
+    sample_limit: Optional[int] = Query(None, ge=1, le=_MARKETING_SAMPLE_LIMIT_MAX),
     db: Session = Depends(get_db),
 ) -> ConsoleMarketingCampaignDiagnosticsResponse:
     context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
     _require_marketing_access(context, action="view diagnostics")
 
-    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
-    if campaign_uuid is None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
-
-    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    campaign = _resolve_marketing_campaign(context, db, campaign_id)
     _resolve_marketing_branch(context, db, campaign.branch_id)
     sample_limit_value = _normalize_marketing_sample_limit(sample_limit)
     refresh_marketing_campaign_lifecycle(db, campaign=campaign)
@@ -21702,7 +22229,7 @@ async def list_provider_lifecycle(
         request,
         {"stale_after_minutes", "cursor", "limit", "only_problematic", "company_id", "client_id", "branch_id"},
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     only_problematic_mode = _parse_bool_param("only_problematic", only_problematic, default=False)
     cursor_date = _parse_cursor_param(cursor)
@@ -21904,7 +22431,7 @@ async def list_integrations(
         request,
         {"stale_after_minutes", "cursor", "limit", "company_id", "client_id", "branch_id"},
     )
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
@@ -22376,7 +22903,7 @@ async def run_integration_reconcile_for_branch(
 )
 async def list_fleet_attention(
     request: Request,
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -22386,7 +22913,7 @@ async def list_fleet_attention(
     db: Session = Depends(get_db),
 ) -> ConsoleFleetAttentionResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_low"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
     normalized_include_low = include_low
@@ -22431,11 +22958,11 @@ async def list_fleet_attention(
 )
 async def list_admin_incidents(
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ConsoleIncidentListResponse:
     _reject_unknown_query_params(request, {"limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     context = get_console_context(
         request,
@@ -22467,9 +22994,9 @@ async def list_admin_incidents(
 )
 async def get_admin_control_tower_overview(
     request: Request,
-    attention_limit: int = 20,
-    incident_limit: int = 20,
-    ops_jobs_limit: int = 20,
+    attention_limit: int = Query(20, ge=1, le=100),
+    incident_limit: int = Query(20, ge=1, le=100),
+    ops_jobs_limit: int = Query(20, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -22488,9 +23015,9 @@ async def get_admin_control_tower_overview(
             "include_low",
         },
     )
-    _validate_limit(attention_limit)
-    _validate_limit(incident_limit)
-    _validate_limit(ops_jobs_limit)
+    attention_limit = _validate_limit(attention_limit)
+    incident_limit = _validate_limit(incident_limit)
+    ops_jobs_limit = _validate_limit(ops_jobs_limit)
 
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -22594,12 +23121,12 @@ async def get_admin_control_tower_overview(
 )
 async def get_admin_control_tower_readiness_board(
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     include_ready: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerReadinessBoardResponse:
     _reject_unknown_query_params(request, {"limit", "include_ready"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_ready_mode = _parse_bool_param("include_ready", include_ready, default=False)
 
     context = get_console_context(
@@ -22632,7 +23159,7 @@ async def get_admin_control_tower_readiness_board(
 )
 async def get_admin_control_tower_drift_board(
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -22642,7 +23169,7 @@ async def get_admin_control_tower_drift_board(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerDriftBoardResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "only_problematic"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     only_problematic_mode = _parse_bool_param(
         "only_problematic",
         only_problematic,
@@ -22682,7 +23209,7 @@ async def get_admin_control_tower_drift_board(
 )
 async def get_admin_control_tower_action_center(
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -22692,7 +23219,7 @@ async def get_admin_control_tower_action_center(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerActionCenterResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -22728,7 +23255,7 @@ async def get_admin_control_tower_action_center(
 )
 async def get_admin_control_tower_migration_program(
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -22738,7 +23265,7 @@ async def get_admin_control_tower_migration_program(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerMigrationProgramResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -22775,7 +23302,7 @@ async def get_admin_control_tower_migration_program(
 async def get_admin_control_tower_migration_wave_detail(
     wave: Literal["canary", "cohort", "fleet"],
     request: Request,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     stale_after_minutes: int = Query(
         _INTEGRATION_DEFAULT_STALE_MINUTES,
         ge=_INTEGRATION_MIN_STALE_MINUTES,
@@ -22785,7 +23312,7 @@ async def get_admin_control_tower_migration_wave_detail(
     db: Session = Depends(get_db),
 ) -> ConsoleAdminControlTowerMigrationWaveDetailResponse:
     _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_p2"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
     include_p2_mode = _parse_bool_param("include_p2", include_p2, default=True)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
@@ -23640,7 +24167,7 @@ async def list_branch_changes(
     branch_id: Optional[UUID] = None,
     status: Optional[str] = None,
     cursor: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> ConsoleBranchChangeListResponse:
     context = get_console_context(request, db, require_selection=False)
@@ -23651,7 +24178,7 @@ async def list_branch_changes(
         message="Only owner/admin can access provisioning",
     )
     _reject_unknown_query_params(request, {"branch_id", "status", "cursor", "limit"})
-    _validate_limit(limit)
+    limit = _validate_limit(limit)
 
     query = _query_branch_changes_for_context(
         db=db,
@@ -25506,8 +26033,6 @@ def _resolve_policy_registry_scope(
         if not branch:
             raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
         return normalized_scope, branch.id
-    if branch_id is not None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
     return normalized_scope, None
 
 
@@ -25530,25 +26055,17 @@ def _resolve_sla_profile_scope(
             raise ConsoleAPIError(400, "INVALID_PARAM", "domain_key must match [a-z0-9_-]+")
 
     if normalized_scope == "global":
-        if normalized_domain is not None or branch_id is not None:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "global scope does not accept domain_key/branch_id")
         return normalized_scope, None, None, None, None
 
     if normalized_scope == "domain":
         if normalized_domain is None:
             raise ConsoleAPIError(400, "INVALID_PARAM", "domain_key required for domain scope")
-        if branch_id is not None:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "domain scope does not accept branch_id")
         return normalized_scope, None, normalized_domain, None, None
 
     if context.client is None:
         raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Select client for client/branch scope")
-    if normalized_domain is not None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "domain_key only valid for domain scope")
 
     if normalized_scope == "client":
-        if branch_id is not None:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
         return normalized_scope, context.client.company_id, None, context.client.id, None
 
     if not branch_id:

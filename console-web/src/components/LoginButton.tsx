@@ -2,6 +2,9 @@
 
 import { signIn, signOut, useSession } from "next-auth/react"
 
+import { clearConsoleContextScope } from "@/lib/console-context-storage"
+import { emitConsoleClientEvent, readConsoleScopePresence } from "@/lib/console-client-events"
+
 export default function LoginButton() {
     const { data: session } = useSession()
 
@@ -11,10 +14,20 @@ export default function LoginButton() {
                 <p className="text-sm text-muted-foreground">Вы вошли</p>
                 <button
                     onClick={() => {
+                        const scopePresenceBeforeLogout = readConsoleScopePresence()
+                        void emitConsoleClientEvent(
+                            {
+                                event_type: "scope_cleared_explicit_logout",
+                                surface: "login_button",
+                                gate_kind: "none",
+                                reason_code: "explicit_logout",
+                                path: typeof window !== "undefined" ? window.location.pathname : "/",
+                                scope_presence: scopePresenceBeforeLogout,
+                            },
+                            { keepalive: true },
+                        )
                         if (typeof window !== "undefined") {
-                            window.localStorage.removeItem("console:company_id")
-                            window.localStorage.removeItem("console:client_id")
-                            window.localStorage.removeItem("console:branch_id")
+                            clearConsoleContextScope()
                             const inboxWorkspacePrefixes = [
                                 "console:inbox:case-list:v1:",
                                 "console:inbox:selected-case:v1:",

@@ -8,6 +8,7 @@ from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging, start_span
 from app.models import Handover
 from app.services.health_service import (
+    build_knowledge_activation_health_snapshot,
     build_outbox_health_snapshot,
     check_and_alert_health,
     check_and_heal_conversations,
@@ -104,6 +105,11 @@ async def _run_sentinel_health_checks(db) -> dict:
     # Outbox check
     try:
         checks["outbox"] = build_outbox_health_snapshot(db)
+    except Exception:
+        pass
+
+    try:
+        checks["knowledge_activation"] = build_knowledge_activation_health_snapshot(db)
     except Exception:
         pass
     

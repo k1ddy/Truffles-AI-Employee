@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.routers import calendar, console
 
+
 def _extract_methods(spec: dict) -> set[tuple[str, str]]:
     methods: set[tuple[str, str]] = set()
     paths = spec.get("paths") or {}
@@ -47,15 +48,63 @@ def _build_app(canonical_info: dict) -> FastAPI:
     return app
 
 
+def _strip_query_nullability(schema: dict) -> None:
+    paths = schema.get("paths") or {}
+    if not isinstance(paths, dict):
+        return
+
+    def _normalize_parameter(parameter: dict) -> None:
+        if not isinstance(parameter, dict):
+            return
+        if parameter.get("in") != "query":
+            return
+        param_schema = parameter.get("schema")
+        if not isinstance(param_schema, dict):
+            return
+        any_of = param_schema.get("anyOf")
+        if not isinstance(any_of, list):
+            return
+        non_null_variants = [
+            item
+            for item in any_of
+            if not (isinstance(item, dict) and item.get("type") == "null")
+        ]
+        if len(non_null_variants) != 1 or len(non_null_variants) == len(any_of):
+            return
+        replacement = dict(non_null_variants[0])
+        for key, value in param_schema.items():
+            if key == "anyOf" or key in replacement:
+                continue
+            replacement[key] = value
+        parameter["schema"] = replacement
+
+    def _normalize_parameters(parameters: object) -> None:
+        if not isinstance(parameters, list):
+            return
+        for parameter in parameters:
+            _normalize_parameter(parameter)
+
+    for path_item in paths.values():
+        if not isinstance(path_item, dict):
+            continue
+        _normalize_parameters(path_item.get("parameters"))
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            _normalize_parameters(operation.get("parameters"))
+
+
 def generate_openapi(canonical_info: dict) -> dict:
     app = _build_app(canonical_info)
-    return get_openapi(
+    schema = get_openapi(
         title=app.title,
         version=app.version,
         openapi_version=app.openapi_version,
         description=app.description,
         routes=app.routes,
     )
+    _strip_query_nullability(schema)
+    return schema
 
 
 def _write_openapi(schema: dict, output_file: str) -> None:

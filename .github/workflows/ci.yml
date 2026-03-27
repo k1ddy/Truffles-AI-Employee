@@ -18,6 +18,14 @@ on:
         description: "Run k6 console load smoke"
         type: boolean
         default: false
+      knowledge_activation_closeout_client_slug:
+        description: "Optional knowledge activation closeout client slug override"
+        type: string
+        default: ""
+      knowledge_activation_closeout_branch_slug:
+        description: "Optional knowledge activation closeout branch slug override"
+        type: string
+        default: ""
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -106,8 +114,11 @@ jobs:
               - "scripts/restart_api.sh"
               - "scripts/restart_workers.sh"
               - "scripts/restart_release.sh"
+              - "scripts/restart_knowledge_activation_service.sh"
+              - "scripts/knowledge_activation_postdeploy.sh"
               - "scripts/restart_console_web.sh"
               - "scripts/check_migration_governance.py"
+              - "ops/knowledge_activation_closeout.py"
               - "knowledge/**"
             livecheck_required:
               - "truffles-api/app/**"
@@ -118,6 +129,8 @@ jobs:
               - "scripts/restart_api.sh"
               - "scripts/restart_workers.sh"
               - "scripts/restart_release.sh"
+              - "scripts/restart_knowledge_activation_service.sh"
+              - "scripts/knowledge_activation_postdeploy.sh"
               - "scripts/check_migration_governance.py"
               - "knowledge/**"
               - "ops/**"
@@ -918,7 +931,7 @@ jobs:
     if: ${{ always() && needs.changes.outputs.deploy_required == 'true' }}
     needs: [build-push, changes]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       deployed: ${{ steps.deploy_gate.outputs.deployed }}
     concurrency:
@@ -954,193 +967,427 @@ jobs:
           echo "build-push result: ${{ needs.build-push.result }}" >&2
           exit 1
 
+      - name: Configure SSH for deploy
+        if: ${{ steps.deploy_gate.outputs.deployed == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          KEY_RAW="${{ secrets.SSH_PRIVATE_KEY }}"
+          export KEY_RAW
+          python3 - <<'PY'
+          import base64
+          import os
+          import subprocess
+          from pathlib import Path
+
+          raw = os.environ.get("KEY_RAW", "")
+          key_path = Path.home() / ".ssh" / "id_rsa"
+
+          def normalize(content: str) -> str:
+              content = content.replace("\r", "")
+              if content.startswith('"') and content.endswith('"'):
+                  content = content[1:-1]
+              if not content.endswith("\n"):
+                  content += "\n"
+              return content
+
+          def try_write(content: str) -> bool:
+              key_path.write_text(normalize(content))
+              key_path.chmod(0o600)
+              try:
+                  subprocess.check_output(
+                      ["ssh-keygen", "-yf", str(key_path)],
+                      stderr=subprocess.STDOUT,
+                  )
+                  return True
+              except subprocess.CalledProcessError:
+                  return False
+
+          candidates = [raw, raw.replace("\r", "")]
+          if "\\n" in raw and "\n" not in raw:
+              candidates.append(raw.replace("\\n", "\n"))
+              candidates.append(raw.replace("\\n", "\n").replace("\r", ""))
+          if "\\n" in raw or "\\r" in raw:
+              try:
+                  candidates.append(raw.encode("utf-8").decode("unicode_escape"))
+              except Exception:
+                  pass
+          for b64 in {
+              raw,
+              raw.replace("\n", ""),
+              raw.replace("\r", ""),
+              raw.replace("\\n", ""),
+              raw.replace(" ", ""),
+          }:
+              try:
+                  decoded = base64.b64decode(b64)
+              except Exception:
+                  continue
+              try:
+                  candidates.append(decoded.decode("utf-8"))
+              except UnicodeDecodeError:
+                  candidates.append(decoded.decode("utf-8", errors="ignore"))
+
+          seen = set()
+          for candidate in candidates:
+              if not candidate or not candidate.strip():
+                  continue
+              if candidate in seen:
+                  continue
+              seen.add(candidate)
+              if try_write(candidate):
+                  print("KEY_OK")
+                  raise SystemExit(0)
+
+          print("KEY_INVALID")
+          raise SystemExit(1)
+          PY
+          ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
       - name: Deploy to VPS
         if: ${{ steps.deploy_gate.outputs.deployed == 'true' }}
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 20m
-          script: |
-            set -euo pipefail
-            REPO_ROOT="/home/zhan/truffles-main"
-            if [ ! -d "${REPO_ROOT}/.git" ]; then
-              echo "ERROR: runtime repo not found on host: ${REPO_ROOT}" >&2
-              exit 1
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.knowledge_activation_closeout_client_slug || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.knowledge_activation_closeout_branch_slug || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG || '' }}
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_VAR: ${{ vars.KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG || '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/knowledge-activation-proof
+          RUN_TOKEN="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CLOSEOUT_CLIENT_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_INPUT:-}"
+          if [ -z "${CLOSEOUT_CLIENT_SLUG}" ]; then
+            CLOSEOUT_CLIENT_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_VAR:-}"
+          fi
+          CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_INPUT:-}"
+          if [ -z "${CLOSEOUT_BRANCH_SLUG}" ]; then
+            CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_VAR:-}"
+          fi
+          DEFAULT_CLOSEOUT_CLIENT_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_VAR:-demo_salon}"
+          DEFAULT_CLOSEOUT_BRANCH_SLUG="${KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_VAR:-main}"
+          SSH=(ssh -i ~/.ssh/id_rsa -p "${SERVER_PORT}" -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 "${SERVER_USER}@${SERVER_HOST}")
+          if ! timeout 30s "${SSH[@]}" "echo deploy-ready" >/dev/null 2>&1; then
+            echo "ERROR: deploy ssh preflight failed (auth/connectivity)." >&2
+            exit 1
+          fi
+          REMOTE_SCRIPT="$(mktemp)"
+          cleanup_remote_script() {
+            rm -f "${REMOTE_SCRIPT}"
+          }
+          trap cleanup_remote_script EXIT
+          cat > "${REMOTE_SCRIPT}" <<'REMOTE'
+          set -euo pipefail
+          RUN_TOKEN="${RUN_TOKEN:?}"
+          ACTIVATION_CLOSEOUT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_CLIENT_SLUG:-}"
+          ACTIVATION_CLOSEOUT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_BRANCH_SLUG:-}"
+          ACTIVATION_PROOF_DIR="/tmp/knowledge-activation-postdeploy-${RUN_TOKEN}"
+          ACTIVATION_PROOF_TAR="/tmp/knowledge-activation-postdeploy-${RUN_TOKEN}.tar.gz"
+          rm -rf "${ACTIVATION_PROOF_DIR}" "${ACTIVATION_PROOF_TAR}"
+          mkdir -p "${ACTIVATION_PROOF_DIR}"
+          REPO_ROOT="/home/zhan/truffles-main"
+          if [ ! -d "${REPO_ROOT}/.git" ]; then
+            echo "ERROR: runtime repo not found on host: ${REPO_ROOT}" >&2
+            exit 1
+          fi
+          # Fetch only main and don't fail deploy on stale/permission-broken
+          # refs under origin/* (feature refs can be owned by another user).
+          if ! git -C "${REPO_ROOT}" fetch --quiet origin main; then
+            echo "WARN: runtime repo fetch origin main failed; continuing with clean deploy clone" >&2
+          fi
+          DEPLOY_ORIGIN_URL="$(git -C "${REPO_ROOT}" config --get remote.origin.url)"
+          if [ -z "${DEPLOY_ORIGIN_URL}" ]; then
+            echo "ERROR: cannot resolve remote.origin.url in ${REPO_ROOT}" >&2
+            exit 1
+          fi
+          DEPLOY_SOURCE_PARENT="$(mktemp -d /tmp/truffles-main-deploy-XXXXXX)"
+          DEPLOY_SOURCE_ROOT="${DEPLOY_SOURCE_PARENT}/repo"
+          cleanup_deploy_source() {
+            if [ -n "${DEPLOY_SOURCE_PARENT:-}" ] && [ -d "${DEPLOY_SOURCE_PARENT}" ]; then
+              rm -rf "${DEPLOY_SOURCE_PARENT}"
             fi
-            # Fetch only main and don't fail deploy on stale/permission-broken
-            # refs under origin/* (feature refs can be owned by another user).
-            if ! git -C "${REPO_ROOT}" fetch --quiet origin main; then
-              echo "WARN: runtime repo fetch origin main failed; continuing with clean deploy clone" >&2
+          }
+          package_activation_proof() {
+            if [ -d "${ACTIVATION_PROOF_DIR}" ]; then
+              tar -czf "${ACTIVATION_PROOF_TAR}" -C /tmp "$(basename "${ACTIVATION_PROOF_DIR}")" >/dev/null 2>&1 || true
             fi
-            DEPLOY_ORIGIN_URL="$(git -C "${REPO_ROOT}" config --get remote.origin.url)"
-            if [ -z "${DEPLOY_ORIGIN_URL}" ]; then
-              echo "ERROR: cannot resolve remote.origin.url in ${REPO_ROOT}" >&2
-              exit 1
+          }
+          cleanup() {
+            package_activation_proof
+            cleanup_deploy_source
+          }
+          trap cleanup EXIT
+          clone_attempt=1
+          clone_max_attempts=3
+          clone_ok=0
+          while [ "${clone_attempt}" -le "${clone_max_attempts}" ]; do
+            rm -rf "${DEPLOY_SOURCE_ROOT}"
+            if git clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"; then
+              clone_ok=1
+              break
             fi
-            DEPLOY_SOURCE_PARENT="$(mktemp -d /tmp/truffles-main-deploy-XXXXXX)"
-            DEPLOY_SOURCE_ROOT="${DEPLOY_SOURCE_PARENT}/repo"
-            cleanup_deploy_source() {
-              if [ -n "${DEPLOY_SOURCE_PARENT:-}" ] && [ -d "${DEPLOY_SOURCE_PARENT}" ]; then
-                rm -rf "${DEPLOY_SOURCE_PARENT}"
-              fi
-            }
-            trap cleanup_deploy_source EXIT
-            clone_attempt=1
-            clone_max_attempts=3
-            clone_ok=0
-            while [ "${clone_attempt}" -le "${clone_max_attempts}" ]; do
-              rm -rf "${DEPLOY_SOURCE_ROOT}"
-              if git clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"; then
-                clone_ok=1
-                break
-              fi
-              echo "WARN: deploy clone attempt ${clone_attempt}/${clone_max_attempts} failed via default transport" >&2
-              rm -rf "${DEPLOY_SOURCE_ROOT}"
-              if git -c http.version=HTTP/1.1 clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"; then
-                clone_ok=1
-                echo "INFO: deploy clone recovered via HTTP/1.1 on attempt ${clone_attempt}" >&2
-                break
-              fi
-              echo "WARN: deploy clone attempt ${clone_attempt}/${clone_max_attempts} failed via HTTP/1.1 fallback" >&2
-              clone_attempt=$((clone_attempt + 1))
-              sleep 2
-            done
-            if [ "${clone_ok}" -ne 1 ]; then
-              echo "ERROR: failed to clone deploy source from origin/main after ${clone_max_attempts} attempts" >&2
-              exit 1
+            echo "WARN: deploy clone attempt ${clone_attempt}/${clone_max_attempts} failed via default transport" >&2
+            rm -rf "${DEPLOY_SOURCE_ROOT}"
+            if git -c http.version=HTTP/1.1 clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"; then
+              clone_ok=1
+              echo "INFO: deploy clone recovered via HTTP/1.1 on attempt ${clone_attempt}" >&2
+              break
             fi
-            git -C "${DEPLOY_SOURCE_ROOT}" checkout -f main
-            git -C "${DEPLOY_SOURCE_ROOT}" reset --hard origin/main
-            git -C "${DEPLOY_SOURCE_ROOT}" clean -fd
-            echo "Deploy source HEAD after sync: $(git -C "${DEPLOY_SOURCE_ROOT}" rev-parse HEAD)"
+            echo "WARN: deploy clone attempt ${clone_attempt}/${clone_max_attempts} failed via HTTP/1.1 fallback" >&2
+            clone_attempt=$((clone_attempt + 1))
+            sleep 2
+          done
+          if [ "${clone_ok}" -ne 1 ]; then
+            echo "ERROR: failed to clone deploy source from origin/main after ${clone_max_attempts} attempts" >&2
+            exit 1
+          fi
+          git -C "${DEPLOY_SOURCE_ROOT}" checkout -f main
+          git -C "${DEPLOY_SOURCE_ROOT}" reset --hard origin/main
+          git -C "${DEPLOY_SOURCE_ROOT}" clean -fd
+          echo "Deploy source HEAD after sync: $(git -C "${DEPLOY_SOURCE_ROOT}" rev-parse HEAD)"
 
-            export ALLOWLIST="77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net"
-            ENV_FILES=(
-              "/home/zhan/infrastructure/.env"
-              "/home/zhan/.env"
-              "/home/zhan/truffles-main/.env"
-              "/home/zhan/truffles-main/truffles-api/.env"
-            )
+          export ALLOWLIST="77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net"
+          ENV_FILES=(
+            "/home/zhan/infrastructure/.env"
+            "/home/zhan/.env"
+            "/home/zhan/truffles-main/.env"
+            "/home/zhan/truffles-main/truffles-api/.env"
+          )
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          allowlist = os.environ.get("ALLOWLIST", "")
+          if not allowlist:
+              raise SystemExit("ALLOWLIST missing in deploy environment")
+          paths = [
+              "/home/zhan/infrastructure/.env",
+              "/home/zhan/.env",
+              "/home/zhan/truffles-main/.env",
+              "/home/zhan/truffles-main/truffles-api/.env",
+          ]
+
+          for path in paths:
+              env_path = Path(path)
+              if not env_path.exists():
+                  print(f"ENV_FILE missing: {path}")
+                  continue
+              try:
+                  text = env_path.read_text()
+              except Exception as exc:
+                  print(f"ENV_FILE read failed: {path}: {exc}")
+                  continue
+              lines = text.splitlines()
+              updated = False
+              for idx, line in enumerate(lines):
+                  if line.strip().startswith("OUTBOUND_ALLOWLIST_JIDS="):
+                      lines[idx] = f"OUTBOUND_ALLOWLIST_JIDS={allowlist}"
+                      updated = True
+              if not updated:
+                  lines.append(f"OUTBOUND_ALLOWLIST_JIDS={allowlist}")
+              new_text = "\n".join(lines)
+              if text.endswith("\n"):
+                  new_text += "\n"
+              try:
+                  env_path.write_text(new_text)
+              except Exception as exc:
+                  print(f"ENV_FILE write failed: {path}: {exc}")
+                  continue
+              print(f"ALLOWLIST in {path}:")
+              for line_no, line in enumerate(lines, 1):
+                  if "OUTBOUND_ALLOWLIST_JIDS=" in line:
+                      print(f"{line_no}:{line}")
+          PY
+          COMPOSE_FILE="/home/zhan/infrastructure/docker-compose.truffles.yml"
+          if [ -f "${COMPOSE_FILE}" ]; then
+            sed -i "s|OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${COMPOSE_FILE}"
+            sed -i "s|OUTBOUND_ALLOWLIST_JIDS:[[:space:]]*.*|OUTBOUND_ALLOWLIST_JIDS: ${ALLOWLIST}|" "${COMPOSE_FILE}"
+            echo "ALLOWLIST in ${COMPOSE_FILE}:"
+            grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${COMPOSE_FILE}" || true
+          fi
+          for ENV_FILE in "${ENV_FILES[@]}"; do
+            if [ -f "${ENV_FILE}" ]; then
+              echo "ALLOWLIST in ${ENV_FILE}:"
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+              ls -l "${ENV_FILE}" || true
+            else
+              echo "ENV_FILE missing: ${ENV_FILE}"
+            fi
+          done
+          if [ -f "${REPO_ROOT}/truffles-api/.env" ]; then
+            cp "${REPO_ROOT}/truffles-api/.env" "${DEPLOY_SOURCE_ROOT}/truffles-api/.env"
+          fi
+          if [ -f "${REPO_ROOT}/console-web/.env.local" ]; then
+            cp "${REPO_ROOT}/console-web/.env.local" "${DEPLOY_SOURCE_ROOT}/console-web/.env.local"
+          fi
+          RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_api.sh"
+          RELEASE_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_release.sh"
+          CONSOLE_RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_console_web.sh"
+          POSTDEPLOY_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/knowledge_activation_postdeploy.sh"
+          test -f "${RESTART_SCRIPT}"
+          test -f "${RELEASE_SCRIPT}"
+          test -f "${CONSOLE_RESTART_SCRIPT}"
+          test -f "${POSTDEPLOY_SCRIPT}"
+          grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
+          grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
+          grep -n 'env-file' "${RESTART_SCRIPT}" || true
+          grep -n 'docker compose' "${RESTART_SCRIPT}" || true
+          grep -n '^cd ' "${RESTART_SCRIPT}" || true
+          IMAGE_TAG=main
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            IMAGE_TAG=sha-${{ github.sha }}
+          fi
+          IMAGE_WITH_TAG=${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+          docker pull "${IMAGE_WITH_TAG}"
+          IMAGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_WITH_TAG}" | head -n1)"
+          if [ -z "${IMAGE_DIGEST}" ]; then
+            echo "ERROR: cannot resolve image digest from ${IMAGE_WITH_TAG}" >&2
+            exit 1
+          fi
+          IMAGE_NAME="${IMAGE_DIGEST}" PULL_IMAGE=0 \
+          RUN_MIGRATIONS=1 \
+          MIGRATION_BOOTSTRAP_MODE=auto \
+          API_WORKDIR="${DEPLOY_SOURCE_ROOT}/truffles-api" \
+          API_ENV_FILE="${DEPLOY_SOURCE_ROOT}/truffles-api/.env" \
+          OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net \
+          RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 \
+          KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 \
+          RUN_KNOWLEDGE_ACTIVATION_CANARY=0 \
+          REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+          EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
+          bash "${RELEASE_SCRIPT}"
+          REPO_ROOT="${DEPLOY_SOURCE_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
+          api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get("git_commit") or "").strip())')"
+          console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf "%s" "${NEXT_PUBLIC_BUILD_SHA:-unknown}"')"
+          if [ "${api_commit}" != "${{ github.sha }}" ]; then
+            echo "ERROR: deploy parity mismatch: api git_commit=${api_commit}, expected=${{ github.sha }}" >&2
+            exit 1
+          fi
+          if [ "${console_commit}" != "${{ github.sha }}" ]; then
+            echo "ERROR: deploy parity mismatch: console build sha=${console_commit}, expected=${{ github.sha }}" >&2
+            exit 1
+          fi
+          echo "Deploy parity OK: sha=${{ github.sha }}"
+          for ENV_FILE in "${ENV_FILES[@]}"; do
+            if [ -f "${ENV_FILE}" ]; then
+              echo "ALLOWLIST after restart in ${ENV_FILE}:"
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+            fi
+          done
+          docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
+          KNOWLEDGE_ACTIVATION_PROOF_OUTPUT_DIR="${ACTIVATION_PROOF_DIR}" \
+          KNOWLEDGE_ACTIVATION_PROOF_GUARD_JSON="${ACTIVATION_PROOF_DIR}/release_guard.json" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_CLIENT_SLUG}" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_BRANCH_SLUG}" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG="${ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG}" \
+          KNOWLEDGE_ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG="${ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG}" \
+          KNOWLEDGE_ACTIVATION_PROOF_REQUIRE_CLOSEOUT="${ACTIVATION_REQUIRE_CLOSEOUT}" \
+          bash "${POSTDEPLOY_SCRIPT}"
+          REMOTE
+          remote_env=(
+            "RUN_TOKEN=${RUN_TOKEN}"
+            "ACTIVATION_CLOSEOUT_CLIENT_SLUG=${CLOSEOUT_CLIENT_SLUG}"
+            "ACTIVATION_CLOSEOUT_BRANCH_SLUG=${CLOSEOUT_BRANCH_SLUG}"
+            "ACTIVATION_CLOSEOUT_DEFAULT_CLIENT_SLUG=${DEFAULT_CLOSEOUT_CLIENT_SLUG}"
+            "ACTIVATION_CLOSEOUT_DEFAULT_BRANCH_SLUG=${DEFAULT_CLOSEOUT_BRANCH_SLUG}"
+            "ACTIVATION_REQUIRE_CLOSEOUT=1"
+          )
+          remote_cmd=""
+          for assignment in "${remote_env[@]}"; do
+            printf -v remote_cmd '%s %q' "${remote_cmd}" "${assignment}"
+          done
+          remote_cmd="${remote_cmd# } bash -s"
+          run_status=0
+          if timeout 25m "${SSH[@]}" "${remote_cmd}" < "${REMOTE_SCRIPT}"; then
+            run_status=0
+          else
+            run_status=$?
+          fi
+          REMOTE_TAR="/tmp/knowledge-activation-postdeploy-${RUN_TOKEN}.tar.gz"
+          LOCAL_TAR="artifacts/knowledge-activation-proof/knowledge-activation-postdeploy-${RUN_TOKEN}.tar.gz"
+          download_status=1
+          attempt=1
+          max_attempts=5
+          while [ "${attempt}" -le "${max_attempts}" ]; do
+            if "${SSH[@]}" "cat ${REMOTE_TAR}" > "${LOCAL_TAR}" 2>/dev/null; then
+              if tar -tzf "${LOCAL_TAR}" >/dev/null 2>&1; then
+                download_status=0
+                break
+              fi
+            fi
+            if [ "${attempt}" -lt "${max_attempts}" ]; then
+              sleep 5
+            fi
+            attempt=$((attempt + 1))
+          done
+          if [ "${download_status}" -eq 0 ]; then
+            tar -xzf "${LOCAL_TAR}" -C artifacts/knowledge-activation-proof
+            EXTRACTED_DIR="artifacts/knowledge-activation-proof/knowledge-activation-postdeploy-${RUN_TOKEN}"
+            if [ -d "${EXTRACTED_DIR}" ]; then
+              cp "${EXTRACTED_DIR}/manifest.json" artifacts/knowledge-activation-proof/manifest.json 2>/dev/null || true
+              cp "${EXTRACTED_DIR}/summary.md" artifacts/knowledge-activation-proof/summary.md 2>/dev/null || true
+            fi
+          else
+            echo "Failed to download knowledge activation proof artifacts from ${REMOTE_TAR}" \
+              > artifacts/knowledge-activation-proof/download-error.txt
+          fi
+          if [ "${download_status}" -ne 0 ]; then
+            exit 1
+          fi
+          if [ "${run_status}" -ne 0 ]; then
+            exit "${run_status}"
+          fi
+
+      - name: Summarize knowledge activation proof
+        if: ${{ always() && steps.deploy_gate.outputs.deployed == 'true' }}
+        run: |
+          set -euo pipefail
+          manifest_path="artifacts/knowledge-activation-proof/manifest.json"
+          if [ -f "${manifest_path}" ]; then
             python3 - <<'PY'
-            import os
-            from pathlib import Path
+          import os
+          import json
+          from pathlib import Path
 
-            allowlist = os.environ.get("ALLOWLIST", "")
-            if not allowlist:
-                raise SystemExit("ALLOWLIST missing in deploy environment")
-            paths = [
-                "/home/zhan/infrastructure/.env",
-                "/home/zhan/.env",
-                "/home/zhan/truffles-main/.env",
-                "/home/zhan/truffles-main/truffles-api/.env",
-            ]
+          payload = json.loads(Path("artifacts/knowledge-activation-proof/manifest.json").read_text(encoding="utf-8"))
+          lines = [
+              "## Knowledge Activation Post-Deploy Proof",
+              "",
+              f"- overall_decision: `{payload.get('decision', 'unknown')}`",
+              f"- proof_mode: `{payload.get('proof_mode', 'unknown')}`",
+              f"- release_guard: `{payload.get('release_guard', {}).get('decision', 'missing')}`",
+              f"- closeout_status: `{payload.get('closeout', {}).get('status', 'unknown')}`",
+          ]
+          closeout_decision = payload.get("closeout", {}).get("decision")
+          if closeout_decision:
+              lines.append(f"- closeout_decision: `{closeout_decision}`")
+          target = payload.get("target") or {}
+          if target.get("client_slug") and target.get("branch_slug"):
+              lines.append(f"- closeout_target: `{target['client_slug']}` / `{target['branch_slug']}`")
+          reasons = payload.get("reasons") or []
+          if reasons:
+              lines.append(f"- reasons: `{', '.join(reasons)}`")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
+          else
+            {
+              echo "## Knowledge Activation Post-Deploy Proof"
+              echo
+              echo "- manifest: `missing`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
-            for path in paths:
-                env_path = Path(path)
-                if not env_path.exists():
-                    print(f"ENV_FILE missing: {path}")
-                    continue
-                try:
-                    text = env_path.read_text()
-                except Exception as exc:
-                    print(f"ENV_FILE read failed: {path}: {exc}")
-                    continue
-                lines = text.splitlines()
-                updated = False
-                for idx, line in enumerate(lines):
-                    if line.strip().startswith("OUTBOUND_ALLOWLIST_JIDS="):
-                        lines[idx] = f"OUTBOUND_ALLOWLIST_JIDS={allowlist}"
-                        updated = True
-                if not updated:
-                    lines.append(f"OUTBOUND_ALLOWLIST_JIDS={allowlist}")
-                new_text = "\n".join(lines)
-                if text.endswith("\n"):
-                    new_text += "\n"
-                try:
-                    env_path.write_text(new_text)
-                except Exception as exc:
-                    print(f"ENV_FILE write failed: {path}: {exc}")
-                    continue
-                print(f"ALLOWLIST in {path}:")
-                for line_no, line in enumerate(lines, 1):
-                    if "OUTBOUND_ALLOWLIST_JIDS=" in line:
-                        print(f"{line_no}:{line}")
-            PY
-            COMPOSE_FILE="/home/zhan/infrastructure/docker-compose.truffles.yml"
-            if [ -f "${COMPOSE_FILE}" ]; then
-              sed -i "s|OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${COMPOSE_FILE}"
-              sed -i "s|OUTBOUND_ALLOWLIST_JIDS:[[:space:]]*.*|OUTBOUND_ALLOWLIST_JIDS: ${ALLOWLIST}|" "${COMPOSE_FILE}"
-              echo "ALLOWLIST in ${COMPOSE_FILE}:"
-              grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${COMPOSE_FILE}" || true
-            fi
-            for ENV_FILE in "${ENV_FILES[@]}"; do
-              if [ -f "${ENV_FILE}" ]; then
-                echo "ALLOWLIST in ${ENV_FILE}:"
-                grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
-                ls -l "${ENV_FILE}" || true
-              else
-                echo "ENV_FILE missing: ${ENV_FILE}"
-              fi
-            done
-            if [ -f "${REPO_ROOT}/truffles-api/.env" ]; then
-              cp "${REPO_ROOT}/truffles-api/.env" "${DEPLOY_SOURCE_ROOT}/truffles-api/.env"
-            fi
-            if [ -f "${REPO_ROOT}/console-web/.env.local" ]; then
-              cp "${REPO_ROOT}/console-web/.env.local" "${DEPLOY_SOURCE_ROOT}/console-web/.env.local"
-            fi
-            RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_api.sh"
-            RELEASE_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_release.sh"
-            CONSOLE_RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_console_web.sh"
-            test -f "${RESTART_SCRIPT}"
-            test -f "${RELEASE_SCRIPT}"
-            test -f "${CONSOLE_RESTART_SCRIPT}"
-            grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
-            grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
-            grep -n 'env-file' "${RESTART_SCRIPT}" || true
-            grep -n 'docker compose' "${RESTART_SCRIPT}" || true
-            grep -n '^cd ' "${RESTART_SCRIPT}" || true
-            IMAGE_TAG=main
-            if [ "${{ github.ref }}" != "refs/heads/main" ]; then
-              IMAGE_TAG=sha-${{ github.sha }}
-            fi
-            IMAGE_WITH_TAG=${{ env.IMAGE_NAME }}:${IMAGE_TAG}
-            docker pull "${IMAGE_WITH_TAG}"
-            IMAGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_WITH_TAG}" | head -n1)"
-            if [ -z "${IMAGE_DIGEST}" ]; then
-              echo "ERROR: cannot resolve image digest from ${IMAGE_WITH_TAG}" >&2
-              exit 1
-            fi
-            IMAGE_NAME="${IMAGE_DIGEST}" PULL_IMAGE=0 \
-            RUN_MIGRATIONS=1 \
-            MIGRATION_BOOTSTRAP_MODE=auto \
-            API_WORKDIR="${DEPLOY_SOURCE_ROOT}/truffles-api" \
-            API_ENV_FILE="${DEPLOY_SOURCE_ROOT}/truffles-api/.env" \
-            OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net \
-            REQUIRE_GHCR=1 VERIFY_VERSION=1 \
-            EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
-            bash "${RELEASE_SCRIPT}"
-            REPO_ROOT="${DEPLOY_SOURCE_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
-            api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get("git_commit") or "").strip())')"
-            console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf "%s" "${NEXT_PUBLIC_BUILD_SHA:-unknown}"')"
-            if [ "${api_commit}" != "${{ github.sha }}" ]; then
-              echo "ERROR: deploy parity mismatch: api git_commit=${api_commit}, expected=${{ github.sha }}" >&2
-              exit 1
-            fi
-            if [ "${console_commit}" != "${{ github.sha }}" ]; then
-              echo "ERROR: deploy parity mismatch: console build sha=${console_commit}, expected=${{ github.sha }}" >&2
-              exit 1
-            fi
-            echo "Deploy parity OK: sha=${{ github.sha }}"
-            for ENV_FILE in "${ENV_FILES[@]}"; do
-              if [ -f "${ENV_FILE}" ]; then
-                echo "ALLOWLIST after restart in ${ENV_FILE}:"
-                grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
-              fi
-            done
-            docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
+      - name: Upload knowledge activation proof artifacts
+        if: ${{ always() && steps.deploy_gate.outputs.deployed == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-activation-proof
+          path: artifacts/knowledge-activation-proof
 
   console-contract-live:
     if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.console_contracts == 'true' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}
@@ -1326,13 +1573,43 @@ jobs:
               except Exception as exc:
                   return {}, 0, str(exc)
 
+          def _normalize_branch_items(items) -> list[dict]:
+              return [item for item in items if isinstance(item, dict) and item.get("id")]
+
+          def _branch_sort_key(item: dict) -> tuple[int, int, str, str]:
+              slug = str(item.get("slug") or "").strip().lower()
+              name = str(item.get("name") or "").strip().lower()
+              is_active = bool(item.get("is_active"))
+              return (
+                  0 if is_active else 1,
+                  0 if slug == "main" or "основной" in name else 1,
+                  slug,
+                  str(item.get("id") or ""),
+              )
+
+          def _choose_branch(branch_items: list[dict], preferred_id: str | None = None) -> str | None:
+              if preferred_id:
+                  for item in branch_items:
+                      if item.get("id") == preferred_id and bool(item.get("is_active")):
+                          return preferred_id
+              active_items = [item for item in branch_items if bool(item.get("is_active"))]
+              if active_items:
+                  return sorted(active_items, key=_branch_sort_key)[0].get("id")
+              if preferred_id:
+                  for item in branch_items:
+                      if item.get("id") == preferred_id:
+                          return preferred_id
+              if branch_items:
+                  return sorted(branch_items, key=_branch_sort_key)[0].get("id")
+              return None
+
           data, me_status, me_error = fetch_json("/me")
           if me_status != 200:
               print(f"Selection headers from /me failed: status={me_status}, error={me_error or 'n/a'}")
 
           client = data.get("client") or {}
           clients = data.get("clients") or []
-          branches = data.get("branches") or []
+          branches = _normalize_branch_items(data.get("branches") or [])
 
           client_id = client.get("id")
           if not client_id and clients:
@@ -1341,26 +1618,26 @@ jobs:
           if not client_id:
               client_id = fallback_client_id
 
-          branch_id = data.get("selected_branch_id")
-          if not branch_id and branches:
-              first_branch = branches[0] if isinstance(branches[0], dict) else {}
-              branch_id = first_branch.get("id")
+          branch_id = None
+          if fallback_branch_id:
+              branch_id = fallback_branch_id
 
-          if client_id and not branch_id:
+          if not branch_id:
+              branch_id = _choose_branch(branches, preferred_id=data.get("selected_branch_id"))
+
+          if client_id:
               scoped_data, scoped_status, scoped_error = fetch_json("/me", {"X-Client-Id": client_id})
               if scoped_status != 200:
                   print(
                       "Selection headers from /me with X-Client-Id failed: "
                       f"status={scoped_status}, error={scoped_error or 'n/a'}"
                   )
-              scoped_branches = scoped_data.get("branches") or []
-              branch_id = scoped_data.get("selected_branch_id") or branch_id
-              if not branch_id and scoped_branches:
-                  first_scoped_branch = scoped_branches[0] if isinstance(scoped_branches[0], dict) else {}
-                  branch_id = first_scoped_branch.get("id")
+              scoped_branches = _normalize_branch_items(scoped_data.get("branches") or [])
+              preferred_branch_id = fallback_branch_id or scoped_data.get("selected_branch_id") or data.get("selected_branch_id")
+              branch_id = _choose_branch(scoped_branches, preferred_id=preferred_branch_id) or branch_id
 
-          if client_id and not branch_id:
-              params = urllib.parse.urlencode({"client_id": client_id, "lifecycle": "active", "limit": 1})
+          if client_id and (not branch_id or branch_id == data.get("selected_branch_id")):
+              params = urllib.parse.urlencode({"client_id": client_id, "lifecycle": "active", "limit": 50})
               branch_data, branch_status, branch_error = fetch_json(
                   f"/admin/branches?{params}",
                   {"X-Client-Id": client_id},
@@ -1370,13 +1647,8 @@ jobs:
                       "Selection headers from /admin/branches failed: "
                       f"status={branch_status}, error={branch_error or 'n/a'}"
                   )
-              branch_items = branch_data.get("items") or []
-              if branch_items:
-                  first_admin_branch = branch_items[0] if isinstance(branch_items[0], dict) else {}
-                  branch_id = first_admin_branch.get("id")
-
-          if not branch_id:
-              branch_id = fallback_branch_id
+              branch_items = _normalize_branch_items(branch_data.get("items") or [])
+              branch_id = _choose_branch(branch_items, preferred_id=fallback_branch_id) or branch_id
 
           if not client_id or not branch_id:
               raise SystemExit(
@@ -1408,24 +1680,26 @@ jobs:
             --url https://api.truffles.kz \
             --include-method=GET \
             --phases examples,fuzzing,stateful \
-            --exclude-path /ops/outbox \
-            --exclude-path /ops/jobs \
-            --exclude-path /ops/jobs/catalog \
-            --exclude-path /ops/jobs/{job_id} \
-            --exclude-path /admin/companies \
-            --exclude-path /admin/clients \
-            --exclude-path /admin/branches \
-            --exclude-path /admin/integrations \
-            --exclude-path /admin/capabilities \
-            --exclude-path /admin/reference-packs \
-            --exclude-path /admin/onboarding-contract \
-            --exclude-path /admin/webhook-secret \
-            --exclude-path /knowledge/current \
-            --exclude-path /knowledge/history \
-            --exclude-path /inbox/macros \
-            --exclude-path /onboarding/status \
-            --exclude-path /onboarding/advance \
-            --exclude-path /learning/candidates \
+            --exclude-path /console/v1/calendar/google/connect \
+            --exclude-path /console/v1/calendar/google/callback \
+            --exclude-path /console/v1/ops/outbox \
+            --exclude-path /console/v1/ops/jobs \
+            --exclude-path /console/v1/ops/jobs/catalog \
+            --exclude-path /console/v1/ops/jobs/{job_id} \
+            --exclude-path /console/v1/admin/companies \
+            --exclude-path /console/v1/admin/clients \
+            --exclude-path /console/v1/admin/branches \
+            --exclude-path /console/v1/admin/integrations \
+            --exclude-path /console/v1/admin/capabilities \
+            --exclude-path /console/v1/admin/reference-packs \
+            --exclude-path /console/v1/admin/onboarding-contract \
+            --exclude-path /console/v1/admin/webhook-secret \
+            --exclude-path /console/v1/knowledge/current \
+            --exclude-path /console/v1/knowledge/history \
+            --exclude-path /console/v1/inbox/macros \
+            --exclude-path /console/v1/onboarding/status \
+            --exclude-path /console/v1/onboarding/advance \
+            --exclude-path /console/v1/learning/candidates \
             --checks all \
             --request-timeout 20 \
             --max-examples=3 \
@@ -1624,6 +1898,44 @@ jobs:
           OUTBOX_WORKER_INTERVAL_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_INTERVAL_SECONDS:-}"')
           OUTBOX_COALESCE_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_COALESCE_SECONDS:-}"')
           QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
+          ADMIN_HEALTH_JSON="$(curl -fsS http://localhost:8000/admin/health || true)"
+          if [ -n "${ADMIN_HEALTH_JSON}" ]; then
+            HEALTH_FLAGS="$(
+              ADMIN_HEALTH_JSON="${ADMIN_HEALTH_JSON}" python3 - <<'PY'
+          import json
+          import os
+
+          raw = os.environ.get("ADMIN_HEALTH_JSON", "")
+          try:
+              payload = json.loads(raw)
+          except Exception:
+              print("|")
+              raise SystemExit(0)
+
+          safety = payload.get("safety") or {}
+
+          def normalize_bool(value):
+              if value is True:
+                  return "1"
+              if value is False:
+                  return "0"
+              return ""
+
+          print(
+              f"{normalize_bool(safety.get('test_mode_enabled'))}|"
+              f"{normalize_bool(safety.get('outbox_worker_enabled'))}"
+          )
+          PY
+            )"
+            HEALTH_TEST_MODE="${HEALTH_FLAGS%%|*}"
+            HEALTH_OUTBOX_WORKER_ENABLED="${HEALTH_FLAGS#*|}"
+            if [ -n "${HEALTH_TEST_MODE}" ]; then
+              TEST_MODE="${HEALTH_TEST_MODE}"
+            fi
+            if [ -n "${HEALTH_OUTBOX_WORKER_ENABLED}" ]; then
+              OUTBOX_WORKER_ENABLED="${HEALTH_OUTBOX_WORKER_ENABLED}"
+            fi
+          fi
           QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
           if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
             QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"

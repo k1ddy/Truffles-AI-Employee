@@ -41,7 +41,7 @@ hostname; whoami; pwd; curl -s https://ifconfig.me
 | bge-m3 | text-embeddings-inference | Embeddings |
 | truffles-traefik | traefik:v2.11 | Reverse proxy |
 
-**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). Прод релиз выполняется через `/home/zhan/truffles-main/scripts/restart_release.sh` (внутри вызывает `restart_api.sh` + `restart_workers.sh`). В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
+**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). Прод релиз выполняется через `/home/zhan/truffles-main/scripts/restart_release.sh` (внутри вызывает `restart_api.sh` + `restart_workers.sh`, а при `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1` ещё и `restart_knowledge_activation_service.sh` + activation canary guard). В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
 
 ---
 
@@ -119,6 +119,11 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `GET /health` — статус сервиса
 - `POST /outbox/process` — обработка outbox (требует `OUTBOX_SERVICE_ENABLED=1`)
 
+### Knowledge Activation Service (shadow, internal)
+- URL: `http://127.0.0.1:8015`
+- `GET /health` — статус сервиса
+- `POST /knowledge-activation/process` — direct processing of `knowledge_activation_jobs` (требует `KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1`)
+
 ### Provider Gateway (shadow, internal)
 - URL: `http://127.0.0.1:8011`
 - `GET /health` — статус сервиса
@@ -143,6 +148,10 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `OUTBOX_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для повторов outbox (default: 2).
 - `OUTBOX_STALE_PROCESSING_SECONDS` — через сколько секунд PROCESSING считается зависшим и переходит обратно в очередь (default: 120).
 - `OUTBOX_SERVICE_ENABLED` — включает `POST /outbox/process` (shadow сервис).
+- `KNOWLEDGE_ACTIVATION_HEALTH_QUEUED_WARNING` / `KNOWLEDGE_ACTIVATION_HEALTH_QUEUED_CRITICAL` — пороги для queued activation jobs в health/alerts/metrics.
+- `KNOWLEDGE_ACTIVATION_HEALTH_FAILED_24H_WARNING` / `KNOWLEDGE_ACTIVATION_HEALTH_FAILED_24H_CRITICAL` — пороги для failed|stuck activation jobs за 24ч.
+- `KNOWLEDGE_ACTIVATION_HEALTH_STUCK_WARNING` / `KNOWLEDGE_ACTIVATION_HEALTH_STUCK_CRITICAL` — пороги для stuck activation jobs.
+- `KNOWLEDGE_ACTIVATION_HEALTH_OLDEST_QUEUED_WARNING_SECONDS` / `KNOWLEDGE_ACTIVATION_HEALTH_OLDEST_QUEUED_CRITICAL_SECONDS` — пороги возраста старейшей queued activation job.
 - `OUTBOX_SERVICE_TOKEN` — токен для outbox service (header `X-Outbox-Service-Token`).
 - `WEBHOOK_PIPELINE_BUDGET_MS` — бюджет (мс) для /webhook пайплайна (LLM/RAG gating) (default: 7000).
 - `CONSOLE_IDEMPOTENCY_TTL_SECONDS` — TTL незавершённых console idempotency ключей (default: 600).
@@ -549,20 +558,21 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 ssh -p 222 zhan@5.188.241.234 "sed -i 's/^APP_VERSION=.*/APP_VERSION=main/' /home/zhan/truffles-main/truffles-api/.env"
 
 # CI build/push → pull image (prod standard)
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash /home/zhan/truffles-main/scripts/restart_release.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 RUN_KNOWLEDGE_ACTIVATION_CANARY=1 KNOWLEDGE_ACTIVATION_CANARY_OUTPUT=/tmp/knowledge_activation_release_guard.json bash /home/zhan/truffles-main/scripts/restart_release.sh"
 
 # ❌ Запрещено на проде: локальная docker-compose build/run для API
 # restart_release.sh по умолчанию использует GHCR и требует GHCR-образ (REQUIRE_GHCR=1).
 # По умолчанию RUN_MIGRATIONS=1: SQL миграции применяются до переключения контейнера.
 ```
-`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
-Он резолвит immutable digest и применяет один image reference к `truffles-api`, `truffles-outbox`, `truffles-sentinel` с parity-check.
+`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`, `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1`, `KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1`, `RUN_KNOWLEDGE_ACTIVATION_CANARY=1`, `KNOWLEDGE_ACTIVATION_CANARY_OUTPUT`, `ACTIVATION_GUARD_PYTHON`.
+Он резолвит immutable digest и применяет один image reference к `truffles-api`, `truffles-outbox`, `truffles-sentinel`, а при `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1` и к `truffles-knowledge-activation-service`, после чего проверяет image parity и может записать `go|no_go` JSON артефакт через `truffles-api/scripts/knowledge_activation_release_guard.py`.
 `restart_api.sh` используется внутри release flow и поддерживает `EXPECTED_IMAGE`, `MIGRATION_BOOTSTRAP_MODE`.
 
 Точечный перезапуск только воркеров (если нужно отдельно):
 ```bash
 ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
 ```
+`restart_workers.sh` теперь поднимает `truffles-outbox`, `truffles-knowledge-activation`, `truffles-sentinel`.
 
 ### Knowledge Gateway (shadow)
 ```bash
@@ -576,12 +586,23 @@ ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.e
 ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8011/health"
 ```
 
+### Knowledge Activation Service (shadow)
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env PULL_IMAGE=1 REQUIRE_GHCR=1 EXPECTED_IMAGE=ghcr.io/k1ddy/truffles-ai-employee:main KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 VERIFY_HEALTH=1 bash /home/zhan/truffles-main/scripts/restart_knowledge_activation_service.sh"
+ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8015/health"
+ssh -p 222 zhan@5.188.241.234 "python3 /home/zhan/truffles-main/truffles-api/scripts/knowledge_activation_release_guard.py --output /tmp/knowledge_activation_release_guard.manual.json --pretty"
+```
+- P4 observability: `/metrics` now exports `health_check_knowledge_activation_status`, `knowledge_activation_jobs_total{state=*}`, `knowledge_activation_failed_24h_total`, `knowledge_activation_stale_running_total`, and queue-age gauges; `/admin/health/check` + sentinel include `checks.knowledge_activation`.
+- P5 rollout safety: `restart_knowledge_activation_service.sh` also supports `VERIFY_URL`, `VERIFY_RETRIES`, and `VERIFY_SLEEP_SECONDS`; canonical deploy/rollback SOP lives in `docs/runbooks/KNOWLEDGE_ACTIVATION_RELEASE.md`.
+- P6 closeout: `python3 /home/zhan/truffles-main/ops/knowledge_activation_closeout.py --client-slug <client> --branch-slug <branch> --guard-json /tmp/knowledge_activation_release_guard.json --output /tmp/knowledge_activation_closeout.json --pretty` reuses the P5 artifact and adds tenant preview/live invariants from Postgres truth.
+- P10 closeout hardening: `.github/workflows/ci.yml` now treats tenant closeout as hard-required on `main`; post-deploy proof still reuses `scripts/knowledge_activation_postdeploy.sh`, but the wrapper now resolves the canonical closeout target as `workflow_dispatch override -> repo vars -> repo-coded default demo_salon/main`, keeps partial explicit overrides invalid, and `ops/knowledge_activation_closeout.py` now treats owner-surface rollout as evidence (`owner_surface_enabled`) instead of a release blocker.
+
 ### Перезапуск API (без обновления кода)
 ```bash
-ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto bash /home/zhan/truffles-main/scripts/restart_release.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 RUN_KNOWLEDGE_ACTIVATION_CANARY=1 bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
 По умолчанию перезапуск идёт с GHCR `:main` (REQUIRE_GHCR=1); локальные образы на проде запрещены.
-`restart_release.sh` перезапускает API+workers в одном шаге и проверяет image parity.
+`restart_release.sh` перезапускает API+workers в одном шаге, а при `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1` включает activation service в тот же parity/canary contract. После deploy финальный go/no-go для одного rollout tenant теперь фиксируется `ops/knowledge_activation_closeout.py` и должен сохранить `knowledge_activation_closeout.json` рядом с P5 guard artifact.
 
 ### Запрос к БД
 ```bash

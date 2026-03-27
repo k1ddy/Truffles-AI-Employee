@@ -24,6 +24,7 @@ function challengeModeButtonClass(active: boolean): string {
 
 type ConsultantVerificationOwnerSetupLaneProps = {
     selectedSourceMode: ConsultantVerificationSourceMode;
+    availableSourceModes: ConsultantVerificationSourceMode[];
     selectedChallengeMode: ConsultantVerificationChallengeMode;
     selectedSessionSummary: ConsultantVerificationSessionResponse["session"] | null;
     isBusy: boolean;
@@ -39,6 +40,7 @@ type ConsultantVerificationOwnerSetupLaneProps = {
 
 export default function ConsultantVerificationOwnerSetupLane({
     selectedSourceMode,
+    availableSourceModes,
     selectedChallengeMode,
     selectedSessionSummary,
     isBusy,
@@ -74,18 +76,27 @@ export default function ConsultantVerificationOwnerSetupLane({
                 <div className="mt-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Версия данных</p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                        {(["live", "draft"] as const).map((mode) => (
-                            <button
-                                key={mode}
-                                type="button"
-                                onClick={() => onSelectSourceMode(mode)}
-                                className={`rounded-full border px-3 py-1.5 text-sm font-medium ${sourceModeButtonClass(selectedSourceMode === mode)}`}
-                                data-testid={`consultant-verification-source-${mode}`}
-                            >
-                                {getSourceModeLabel(mode)}
-                            </button>
-                        ))}
+                        {(["live", "published", "draft"] as const).map((mode) => {
+                            const disabled = !availableSourceModes.includes(mode);
+                            return (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    onClick={() => onSelectSourceMode(mode)}
+                                    className={`rounded-full border px-3 py-1.5 text-sm font-medium ${sourceModeButtonClass(selectedSourceMode === mode)} ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+                                    data-testid={`consultant-verification-source-${mode}`}
+                                    disabled={disabled}
+                                >
+                                    {getSourceModeLabel(mode)}
+                                </button>
+                            );
+                        })}
                     </div>
+                    {availableSourceModes.length === 0 ? (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                            Сначала сохраните draft, либо дождитесь live версии или published candidate для preview.
+                        </p>
+                    ) : null}
                 </div>
 
                 <div className="mt-4">

@@ -489,11 +489,10 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page).toHaveURL(urlPathPattern('/business/consultant-verification'));
         const featureGate = page.getByTestId('consultant-verification-feature-gate');
         if (await featureGate.isVisible().catch(() => false)) {
-            test.skip(true, 'consultant verification rollout disabled for current client');
+            test.skip(true, 'consultant verification preview is explicitly disabled for current client');
         }
 
         await expect(page.getByTestId('consultant-verification-workspace')).toBeVisible();
-        await expect(page.getByTestId('consultant-verification-team-tools')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-explainer')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-composer')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-scenario-library')).toBeVisible();
@@ -511,7 +510,15 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-summary-answered')).toBeVisible();
         await expect(page.getByTestId('consultant-verification-summary-gap')).toBeVisible();
 
+        const teamToolsGate = page.getByTestId('consultant-verification-team-tools-gate');
+        if (await teamToolsGate.isVisible().catch(() => false)) {
+            await expect(page.getByTestId('consultant-verification-team-tools-note')).toBeVisible();
+            await captureConsultantVerificationScreenshots(page);
+            return;
+        }
+
         const teamTools = page.getByTestId('consultant-verification-team-tools');
+        await expect(teamTools).toBeVisible();
         if (!(await page.getByTestId('consultant-verification-compare').isVisible().catch(() => false))) {
             await teamTools.locator('summary').click();
         }
@@ -938,6 +945,8 @@ test.describe('Owner/Admin Business Control', () => {
             await toJsonResponse(route, {
                 generated_at: '2026-03-15T11:30:00Z',
                 feature_enabled: true,
+                workspace_enabled: true,
+                team_tools_enabled: true,
                 status: 'ready',
                 status_label: 'Готово к проверке',
                 summary: 'Можно писать как клиент и проверять ответы по текущему branch.',
@@ -1114,11 +1123,227 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('consultant-verification-session-0')).toBeVisible();
     });
 
-    test('should block consultant verification workspace while sync is pending consultant verification readiness', async ({ page }) => {
+    test('should keep owner preview workspace available when team tools rollout is off consultant verification owner access consultant verification readiness', async ({ page }) => {
         const companyId = '11111111-1111-4111-8111-111111111111';
         const clientId = '22222222-2222-4222-8222-222222222222';
         const branchId = '33333333-3333-4333-8333-333333333333';
         const agentId = '44444444-4444-4444-8444-444444444444';
+        const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+        await page.route(/.*\/api\/auth\/session(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                user: { name: 'Owner', email: 'owner@example.com' },
+                accessToken: 'e2e-owner-token',
+                expires: '2030-01-01T00:00:00.000Z',
+            });
+        });
+        await page.route('**/api/proxy/me', async (route) => {
+            await toJsonResponse(route, {
+                agent: { id: agentId, role: 'owner', name: 'Owner' },
+                client: { id: clientId, company_id: companyId, name: 'Demo Salon', slug: 'demo_salon' },
+                selected_company_id: companyId,
+                selected_branch_id: branchId,
+                branches: [{ id: branchId, client_id: clientId, company_id: companyId, name: 'Almaty Downtown' }],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/overview(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                generated_at: '2026-03-15T11:30:00Z',
+                feature_enabled: false,
+                workspace_enabled: true,
+                team_tools_enabled: false,
+                status: 'ready',
+                status_label: 'Проверка консультанта доступна',
+                summary: 'Preview-chat доступен даже если compare governance еще выключен.',
+                verification_ready: true,
+                can_verify_now: true,
+                preview_status: 'ready',
+                preview_status_label: 'Проверка консультанта доступна',
+                preview_summary: 'Можно запускать preview по pinned snapshot.',
+                preview_truth_source: 'live',
+                preview_truth_version_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                live_truth_version_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                published_candidate_version_id: null,
+                available_source_modes: ['live'],
+                default_source_mode: 'live',
+                live_activation_status: 'ready',
+                live_activation_status_label: 'Готово',
+                live_activation_summary: 'Live activation уже завершен и не блокирует preview.',
+                live_activation_error: null,
+                live_activation_job_id: null,
+                blockers: [],
+                next_wave_summary: 'Следующий шаг — отдельно включать compare и findings.',
+                branch_selection_required: false,
+                selected_branch_id: branchId,
+                selected_branch_name: 'Almaty Downtown',
+                knowledge_last_published_at: '2026-03-15T11:00:00Z',
+                knowledge_stale_hours: 0,
+                knowledge_sync_status: 'ready',
+                knowledge_sync_status_label: 'Синхронизировано',
+                knowledge_sync_error: null,
+                knowledge_safe_mode: false,
+                knowledge_safe_mode_reason: null,
+                readiness_cards: [],
+                stress_test_examples: ['Сколько стоит маникюр?'],
+                scenario_catalog: [],
+                actions: [],
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/sessions(?:\?.*)?$/, async (route) => {
+            if (route.request().method() === 'GET') {
+                await toJsonResponse(route, { items: [] });
+                return;
+            }
+            await toJsonResponse(route, {
+                session: {
+                    id: sessionId,
+                    title: 'Owner preview',
+                    actor_agent_id: agentId,
+                    actor_role: 'owner',
+                    client_id: clientId,
+                    branch_id: branchId,
+                    source_mode: 'live',
+                    challenge_mode: 'as_client',
+                    status: 'active',
+                    turns_total: 0,
+                    latest_preview: {},
+                    created_at: '2026-03-15T11:30:00Z',
+                    updated_at: '2026-03-15T11:30:00Z',
+                    last_message_at: null,
+                    latest_business_verdict: null,
+                    latest_outcome: null,
+                },
+                turns: [],
+                summary: null,
+            });
+        });
+        await page.route(`**/api/proxy/business/consultant-verification/sessions/${sessionId}`, async (route) => {
+            await toJsonResponse(route, {
+                session: {
+                    id: sessionId,
+                    title: 'Owner preview',
+                    actor_agent_id: agentId,
+                    actor_role: 'owner',
+                    client_id: clientId,
+                    branch_id: branchId,
+                    source_mode: 'live',
+                    challenge_mode: 'as_client',
+                    status: 'active',
+                    turns_total: 2,
+                    latest_preview: {},
+                    created_at: '2026-03-15T11:30:00Z',
+                    updated_at: '2026-03-15T11:31:00Z',
+                    last_message_at: '2026-03-15T11:31:00Z',
+                    latest_business_verdict: 'answered',
+                    latest_outcome: 'fact',
+                },
+                turns: [
+                    {
+                        id: 'owner-turn-1',
+                        turn_index: 1,
+                        role: 'owner',
+                        content: 'Сколько стоит маникюр?',
+                        created_at: '2026-03-15T11:30:00Z',
+                    },
+                    {
+                        id: 'assistant-turn-1',
+                        turn_index: 2,
+                        role: 'assistant',
+                        content: 'Маникюр стоит 12 000 тенге.',
+                        created_at: '2026-03-15T11:31:00Z',
+                        business_verdict: 'answered',
+                        outcome: 'fact',
+                        source_refs: ['price_list'],
+                        would_book: false,
+                        would_handoff: false,
+                        gap_detected: false,
+                        decision_meta: { reason_code: 'FACT' },
+                        decision_trace: [{ step: 'fact' }],
+                    },
+                ],
+                summary: {
+                    assistant_turns_total: 1,
+                    answered_total: 1,
+                    needs_clarification_total: 0,
+                    handoff_total: 0,
+                    gap_detected_total: 0,
+                    replay_prompt_total: 1,
+                    weak_turns: [],
+                },
+            });
+        });
+        await page.route(`**/api/proxy/business/consultant-verification/sessions/${sessionId}/messages`, async (route) => {
+            await toJsonResponse(route, {
+                session: {
+                    id: sessionId,
+                    title: 'Owner preview',
+                    actor_agent_id: agentId,
+                    actor_role: 'owner',
+                    client_id: clientId,
+                    branch_id: branchId,
+                    source_mode: 'live',
+                    challenge_mode: 'as_client',
+                    status: 'active',
+                    turns_total: 2,
+                    latest_preview: {},
+                    created_at: '2026-03-15T11:30:00Z',
+                    updated_at: '2026-03-15T11:31:00Z',
+                    last_message_at: '2026-03-15T11:31:00Z',
+                    latest_business_verdict: 'answered',
+                    latest_outcome: 'fact',
+                },
+                turns: [
+                    {
+                        id: 'owner-turn-1',
+                        turn_index: 1,
+                        role: 'owner',
+                        content: 'Сколько стоит маникюр?',
+                        created_at: '2026-03-15T11:30:00Z',
+                    },
+                    {
+                        id: 'assistant-turn-1',
+                        turn_index: 2,
+                        role: 'assistant',
+                        content: 'Маникюр стоит 12 000 тенге.',
+                        created_at: '2026-03-15T11:31:00Z',
+                        business_verdict: 'answered',
+                        outcome: 'fact',
+                        source_refs: ['price_list'],
+                        would_book: false,
+                        would_handoff: false,
+                        gap_detected: false,
+                        decision_meta: { reason_code: 'FACT' },
+                        decision_trace: [{ step: 'fact' }],
+                    },
+                ],
+                summary: {
+                    assistant_turns_total: 1,
+                    answered_total: 1,
+                    needs_clarification_total: 0,
+                    handoff_total: 0,
+                    gap_detected_total: 0,
+                    replay_prompt_total: 1,
+                    weak_turns: [],
+                },
+            });
+        });
+
+        await page.goto(`${resolvedBaseURL}/business/consultant-verification`, { waitUntil: 'domcontentloaded' });
+        await expect(page.getByTestId('consultant-verification-workspace')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-team-tools-gate')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-team-tools-note')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-team-tools')).toBeHidden();
+        await page.getByTestId('consultant-verification-composer-input').fill('Сколько стоит маникюр?');
+        await page.getByTestId('consultant-verification-send').click();
+        await expect(page.getByTestId('consultant-verification-turn-2')).toContainText('12 000 тенге');
+    });
+
+    test('should keep consultant verification preview available while client update is pending consultant verification readiness', async ({ page }) => {
+        const companyId = '11111111-1111-4111-8111-111111111111';
+        const clientId = '22222222-2222-4222-8222-222222222222';
+        const branchId = '33333333-3333-4333-8333-333333333333';
+        const agentId = '44444444-4444-4444-8444-444444444444';
+        const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
         await page.route(/.*\/api\/auth\/session(?:\?.*)?$/, async (route) => {
             await toJsonResponse(route, {
@@ -1147,10 +1372,29 @@ test.describe('Owner/Admin Business Control', () => {
             await toJsonResponse(route, {
                 generated_at: '2026-03-15T11:30:00Z',
                 feature_enabled: true,
-                status: 'needs_attention',
-                status_label: 'Сначала завершите синхронизацию знаний',
-                summary: 'Пока опубликованная версия еще не синхронизирована, проверка консультанта не будет честной.',
-                next_wave_summary: 'Контур проверки уже включает safe simulation.',
+                workspace_enabled: true,
+                team_tools_enabled: false,
+                status: 'ready',
+                status_label: 'Проверка консультанта доступна',
+                summary: 'Можно запускать preview-проверку по pinned published snapshot.',
+                verification_ready: true,
+                can_verify_now: true,
+                preview_status: 'ready',
+                preview_status_label: 'Проверка консультанта доступна',
+                preview_summary: 'Preview уже доступен, а обновление для клиентов ещё выполняется отдельно.',
+                preview_truth_source: 'published',
+                preview_truth_version_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                live_truth_version_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                published_candidate_version_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                available_source_modes: ['published'],
+                default_source_mode: 'published',
+                live_activation_status: 'pending',
+                live_activation_status_label: 'Выполняется',
+                live_activation_summary: 'Обновление для клиентов ещё выполняется. Preview-проверка уже доступна на pinned snapshot.',
+                live_activation_error: null,
+                live_activation_job_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+                blockers: [],
+                next_wave_summary: 'Следующий шаг — отделить publish artifact от live activation pointer.',
                 branch_selection_required: false,
                 selected_branch_id: branchId,
                 selected_branch_name: 'Almaty Downtown',
@@ -1165,10 +1409,19 @@ test.describe('Owner/Admin Business Control', () => {
                     {
                         id: 'knowledge_readiness',
                         title: 'Актуальные знания бизнеса',
-                        summary: 'Версия уже опубликована, но синхронизация еще выполняется.',
+                        summary: 'Проверка будет опираться на pinned snapshot из `опубликованной версии`, а не на плавающий latest state.',
+                        state: 'ready',
+                        state_label: 'Готово',
+                        evidence_label: 'Доступен published candidate',
+                        href: '/knowledge',
+                    },
+                    {
+                        id: 'live_activation',
+                        title: 'Обновление для клиентов',
+                        summary: 'Обновление для клиентов ещё выполняется. Preview-проверка уже доступна на pinned snapshot.',
                         state: 'needs_attention',
-                        state_label: 'Нужно подготовить',
-                        evidence_label: 'Синхронизация выполняется',
+                        state_label: 'Выполняется',
+                        evidence_label: 'Выполняется',
                         href: '/knowledge',
                     },
                 ],
@@ -1176,28 +1429,80 @@ test.describe('Owner/Admin Business Control', () => {
                 scenario_catalog: [],
                 actions: [
                     {
-                        id: 'wait_for_knowledge_sync_before_verification',
-                        title: 'Дождитесь завершения синхронизации',
-                        description: 'Версия уже опубликована. Как только синхронизация завершится, можно возвращаться к проверке консультанта.',
+                        id: 'monitor_live_activation_progress',
+                        title: 'Обновление для клиентов ещё выполняется',
+                        description: 'Preview-проверка уже доступна, а live channels обновятся отдельно после завершения activation.',
                         href: '/knowledge',
-                        severity: 'warn',
+                        severity: 'info',
                     },
                 ],
             });
         });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/sessions(?:\?.*)?$/, async (route) => {
+            if (route.request().method() === 'GET') {
+                await toJsonResponse(route, { items: [] });
+                return;
+            }
+            await toJsonResponse(route, {
+                session: {
+                    id: sessionId,
+                    title: 'Preview pending activation',
+                    actor_agent_id: agentId,
+                    actor_role: 'owner',
+                    client_id: clientId,
+                    branch_id: branchId,
+                    source_mode: 'published',
+                    challenge_mode: 'as_client',
+                    status: 'active',
+                    turns_total: 0,
+                    latest_preview: {},
+                    created_at: '2026-03-15T11:30:00Z',
+                    updated_at: '2026-03-15T11:30:00Z',
+                    last_message_at: null,
+                    latest_business_verdict: null,
+                    latest_outcome: null,
+                },
+                turns: [],
+                summary: {
+                    assistant_turns_total: 0,
+                    answered_total: 0,
+                    needs_clarification_total: 0,
+                    handoff_total: 0,
+                    gap_detected_total: 0,
+                    replay_prompt_total: 0,
+                    weak_turns: [],
+                },
+            });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/findings(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, { items: [] });
+        });
+        await page.route(/.*\/api\/proxy\/business\/consultant-verification\/readiness(?:\?.*)?$/, async (route) => {
+            await toJsonResponse(route, {
+                readiness: {
+                    status: 'ready',
+                    status_label: 'Сравнение доступно',
+                    summary: 'Можно сравнить live и draft.',
+                    compare_required: false,
+                },
+            });
+        });
 
         await page.goto(`${resolvedBaseURL}/business/consultant-verification`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByTestId('consultant-verification-sync-warning')).toContainText('Синхронизация знаний еще выполняется');
-        await expect(page.getByTestId('consultant-verification-workspace')).toBeHidden();
-        await expect(page.getByTestId('consultant-verification-actions')).toContainText('Дождитесь завершения синхронизации');
+        await expect(page.getByTestId('consultant-verification-live-activation')).toContainText('Обновление для клиентов ещё выполняется');
+        await expect(page.getByTestId('consultant-verification-workspace')).toBeVisible();
+        await expect(page.getByTestId('consultant-verification-actions')).toContainText('Обновление для клиентов ещё выполняется');
     });
 
-    test('should clear stale safe mode after retry knowledge publish sync failure knowledge sync contradiction consultant verification sync state', async ({ page }) => {
+    test('should show knowledge activation observability after retry knowledge publish sync failure knowledge sync contradiction consultant verification sync state', async ({ page }) => {
         let syncQueued = false;
+        const liveVersionId = '88888888-8888-4888-8888-888888888888';
+        const candidateVersionId = '99999999-9999-4999-8999-999999999999';
 
         await mockKnowledgeWorkspace(page, {
             current: {
-                version_id: '99999999-9999-4999-8999-999999999999',
+                version_id: candidateVersionId,
+                active_version_id: liveVersionId,
                 payload: {
                     client_pack: {
                         salon: { name: 'Sync Risk Salon' },
@@ -1209,13 +1514,22 @@ test.describe('Owner/Admin Business Control', () => {
                     },
                 }, null, 2),
                 updated_at: '2026-03-15T10:00:00Z',
+                activation_status: 'failed',
+                activation_status_label: 'Обновление требует внимания',
+                activation_job_id: '77777777-7777-4777-8777-777777777777',
+                activation_stage: 'failed',
+                activation_stage_label: 'Activation завершилась ошибкой',
+                activation_error_message: 'timed out',
+                activation_queued_at: '2026-03-15T10:01:00Z',
+                activation_heartbeat_at: '2026-03-15T10:03:00Z',
+                activation_attempt_count: 1,
                 sync_status: 'failed',
                 sync_status_label: 'Синхронизация требует внимания',
                 sync_error: 'timed out',
                 knowledge_safe_mode: true,
                 knowledge_safe_mode_reason: 'timed out',
                 edit_base_source: 'published',
-                edit_base_version_id: '99999999-9999-4999-8999-999999999999',
+                edit_base_version_id: candidateVersionId,
                 edit_base_payload: {
                     client_pack: {
                         salon: { name: 'Sync Risk Salon' },
@@ -1230,24 +1544,60 @@ test.describe('Owner/Admin Business Control', () => {
             },
             history: [
                 {
-                    id: '99999999-9999-4999-8999-999999999999',
+                    id: candidateVersionId,
                     status: 'published',
-                    summary: 'Sync Risk Salon',
+                    summary: 'Candidate version',
                     published_at: '2026-03-15T10:00:00Z',
+                    is_active: false,
+                    activation_status: 'failed',
+                    activation_status_label: 'Обновление требует внимания',
+                    activation_stage: 'failed',
+                    activation_stage_label: 'Activation завершилась ошибкой',
+                    activation_error_message: 'timed out',
+                    activation_queued_at: '2026-03-15T10:01:00Z',
+                    activation_heartbeat_at: '2026-03-15T10:03:00Z',
+                    activation_attempt_count: 1,
                     sync_status: 'failed',
                     sync_status_label: 'Синхронизация требует внимания',
                     sync_error: 'timed out',
+                },
+                {
+                    id: liveVersionId,
+                    status: 'published',
+                    summary: 'Live version',
+                    published_at: '2026-03-10T09:00:00Z',
+                    is_active: true,
+                    activation_status: 'ready',
+                    activation_status_label: 'Обновление готово',
+                    activation_stage: 'ready',
+                    activation_stage_label: 'Activation завершена',
+                    activation_error_message: null,
+                    activation_queued_at: null,
+                    activation_heartbeat_at: null,
+                    activation_attempt_count: null,
+                    sync_status: 'ready',
+                    sync_status_label: 'Синхронизировано',
+                    sync_error: null,
                 },
             ],
             retrySyncResponse: () => {
                 syncQueued = true;
                 return {
                     success: true,
-                    version_id: '99999999-9999-4999-8999-999999999999',
+                    version_id: candidateVersionId,
+                    active_version_id: liveVersionId,
+                    activation_status: 'queued',
+                    activation_status_label: 'Обновление в очереди',
+                    activation_job_id: '77777777-7777-4777-8777-777777777777',
+                    activation_stage: 'queued',
+                    activation_stage_label: 'Ждёт запуска',
+                    activation_queued_at: '2026-03-15T10:06:00Z',
+                    activation_heartbeat_at: null,
+                    activation_attempt_count: 2,
                     sync_status: 'pending',
                     sync_status_label: 'Синхронизация выполняется',
                     sync_error: null,
-                    message: 'Синхронизация запущена повторно.',
+                    message: 'Обновление для клиентов запущено повторно.',
                     knowledge_safe_mode: false,
                     knowledge_safe_mode_reason: null,
                 };
@@ -1261,33 +1611,52 @@ test.describe('Owner/Admin Business Control', () => {
         await page.route(/.*\/api\/proxy\/knowledge\/current(?:\?.*)?$/, async (route) => {
             await toJsonResponse(route, syncQueued
                 ? {
-                    version_id: '99999999-9999-4999-8999-999999999999',
+                    version_id: candidateVersionId,
+                    active_version_id: liveVersionId,
                     payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
                     content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
                     updated_at: '2026-03-15T10:00:00Z',
+                    activation_status: 'queued',
+                    activation_status_label: 'Обновление в очереди',
+                    activation_job_id: '77777777-7777-4777-8777-777777777777',
+                    activation_stage: 'queued',
+                    activation_stage_label: 'Ждёт запуска',
+                    activation_queued_at: '2026-03-15T10:06:00Z',
+                    activation_heartbeat_at: null,
+                    activation_attempt_count: 2,
                     sync_status: 'pending',
                     sync_status_label: 'Синхронизация выполняется',
                     sync_error: null,
                     knowledge_safe_mode: false,
                     knowledge_safe_mode_reason: null,
                     edit_base_source: 'published',
-                    edit_base_version_id: '99999999-9999-4999-8999-999999999999',
+                    edit_base_version_id: candidateVersionId,
                     edit_base_payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
                     edit_base_content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
                     edit_base_updated_at: '2026-03-15T10:00:00Z',
                 }
                 : {
-                    version_id: '99999999-9999-4999-8999-999999999999',
+                    version_id: candidateVersionId,
+                    active_version_id: liveVersionId,
                     payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
                     content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
                     updated_at: '2026-03-15T10:00:00Z',
+                    activation_status: 'failed',
+                    activation_status_label: 'Обновление требует внимания',
+                    activation_job_id: '77777777-7777-4777-8777-777777777777',
+                    activation_stage: 'failed',
+                    activation_stage_label: 'Activation завершилась ошибкой',
+                    activation_error_message: 'timed out',
+                    activation_queued_at: '2026-03-15T10:01:00Z',
+                    activation_heartbeat_at: '2026-03-15T10:03:00Z',
+                    activation_attempt_count: 1,
                     sync_status: 'failed',
                     sync_status_label: 'Синхронизация требует внимания',
                     sync_error: 'timed out',
                     knowledge_safe_mode: true,
                     knowledge_safe_mode_reason: 'timed out',
                     edit_base_source: 'published',
-                    edit_base_version_id: '99999999-9999-4999-8999-999999999999',
+                    edit_base_version_id: candidateVersionId,
                     edit_base_payload: { client_pack: { salon: { name: 'Sync Risk Salon' } } },
                     edit_base_content: JSON.stringify({ client_pack: { salon: { name: 'Sync Risk Salon' } } }, null, 2),
                     edit_base_updated_at: '2026-03-15T10:00:00Z',
@@ -1298,26 +1667,56 @@ test.describe('Owner/Admin Business Control', () => {
             await toJsonResponse(route, {
                 items: [
                     {
-                        id: '99999999-9999-4999-8999-999999999999',
+                        id: candidateVersionId,
                         status: 'published',
-                        summary: 'Sync Risk Salon',
+                        summary: 'Candidate version',
                         published_at: '2026-03-15T10:00:00Z',
+                        is_active: false,
+                        activation_status: syncQueued ? 'queued' : 'failed',
+                        activation_status_label: syncQueued ? 'Обновление в очереди' : 'Обновление требует внимания',
+                        activation_stage: syncQueued ? 'queued' : 'failed',
+                        activation_stage_label: syncQueued ? 'Ждёт запуска' : 'Activation завершилась ошибкой',
+                        activation_error_message: syncQueued ? null : 'timed out',
+                        activation_queued_at: '2026-03-15T10:01:00Z',
+                        activation_heartbeat_at: syncQueued ? null : '2026-03-15T10:03:00Z',
+                        activation_attempt_count: syncQueued ? 2 : 1,
                         sync_status: syncQueued ? 'pending' : 'failed',
                         sync_status_label: syncQueued ? 'Синхронизация выполняется' : 'Синхронизация требует внимания',
                         sync_error: syncQueued ? null : 'timed out',
+                    },
+                    {
+                        id: liveVersionId,
+                        status: 'published',
+                        summary: 'Live version',
+                        published_at: '2026-03-10T09:00:00Z',
+                        is_active: true,
+                        activation_status: 'ready',
+                        activation_status_label: 'Обновление готово',
+                        activation_stage: 'ready',
+                        activation_stage_label: 'Activation завершена',
+                        activation_error_message: null,
+                        activation_queued_at: null,
+                        activation_heartbeat_at: null,
+                        activation_attempt_count: null,
+                        sync_status: 'ready',
+                        sync_status_label: 'Синхронизировано',
+                        sync_error: null,
                     },
                 ],
             });
         });
 
         await page.goto(`${resolvedBaseURL}/knowledge`, { waitUntil: 'domcontentloaded' });
-        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Синхронизация требует внимания');
-        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Safe mode: включен');
+        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Published candidate сохранен, но обновление для клиентов требует внимания команды');
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Live версия');
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Published candidate');
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText(liveVersionId);
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText(candidateVersionId);
         await page.getByTestId('knowledge-sync-retry').click();
-        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Синхронизация выполняется');
-        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Синхронизация выполняется');
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Обновление в очереди');
+        await expect(page.getByTestId('knowledge-sync-warning')).toContainText('Published candidate уже доступен для preview');
         await expect(page.getByTestId('knowledge-sync-retry')).toBeHidden();
-        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Safe mode: выключен');
+        await expect(page.getByTestId('knowledge-branch-readiness')).toContainText('Этап activation: Ждёт запуска');
         await expect(page.getByTestId('knowledge-sync-warning')).not.toContainText('Техническая причина: timed out');
     });
 

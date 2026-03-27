@@ -1,0 +1,41 @@
+# SESSION 2026-03-23-console-selection-gate-stabilization-a1 — Session 2026-03-23-console-selection-gate-stabilization-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-stabilization-a1.md
+- block_id: console-selection-gate-stabilization-a1
+- research_gate: required
+- root_cause_gate: required
+- reuse_gate: required
+- release_safety_gate: required
+- context_integrity_gate: required
+- branch: feat/2026-03-23-console-selection-gate-stabilization-a1
+- worktree: /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1
+- base_ref: origin/main
+- scope: Stabilize the multi-company selection gate so auth/session refresh failures stop erasing the last valid scope and the gate no longer renders as a heavy gray full-screen blur.
+- done:
+  - Created the canonical Task Package `docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-stabilization-a1.md` with RCA, one mandatory web search, release safety, residual debt, and next-block contract.
+  - Updated `console-web/src/components/ConsoleShell.tsx` so auth/session failures cancel + evict stale context-aware queries before `signOut`, while preserving the last valid local selection scope for the next login.
+  - Simplified the selection gate container from a full-screen blurred overlay to an inline centered blocker so the gate remains clearly interactive instead of looking like a frozen gray screen.
+  - Updated `console-web/src/components/LoginButton.tsx` to keep explicit logout as the single path that clears local console scope.
+  - Added `console-web/e2e/smoke.spec.ts` regression coverage proving the gate is interactive after forced scope reset, the chosen scope survives reload, and explicit logout still clears scope.
+  - Ran a local auth-failure simulation against the worktree build and confirmed a forced `RefreshAccessTokenError` returns the shell to logged-out state while preserving `company_id/client_id` in localStorage.
+  - Committed the hotfix as `37f148b7` (`fix(console): stabilize multi-company selection gate`), deployed `console-web` from this worktree with `bash scripts/restart_console_web.sh`, and verified the running container reports `NEXT_PUBLIC_BUILD_SHA=37f148b78d9da79d39be0a058880a64bbeb9bb9d`.
+  - Verified production health on `https://console.truffles.kz/api/health/full` after deploy (`status=healthy`, `frontend=ok`, `api.version=dbbf7c69`) and re-ran the targeted Playwright live regression against `https://console.truffles.kz` under `admin/admin` (`1 passed`).
+- next:
+  - Follow the server-owned console scope/session-state follow-up from the Task Package once this hotfix is merged and observed in production.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-03-23-console-selection-gate-stabilization-a1.md
+  - console-web/src/components/ConsoleShell.tsx
+  - console-web/src/components/LoginButton.tsx
+  - console-web/e2e/smoke.spec.ts
+  - Checks:
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && npm run lint -- --file src/components/ConsoleShell.tsx --file src/components/LoginButton.tsx --file e2e/smoke.spec.ts` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && npm run build` (`pass`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && PLAYWRIGHT_BASE_URL=http://localhost:3000 PLAYWRIGHT_WEB_SERVER=0 E2E_USERNAME=admin E2E_PASSWORD=admin npx playwright test e2e/smoke.spec.ts --project chromium --workers 1 --grep 'multi-company selection gate'` (`1 passed`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && node --input-type=module - <<'NODE' ... forced RefreshAccessTokenError simulation ... NODE` (`pass`; localStorage company/client preserved while login button becomes visible)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1 && bash scripts/restart_console_web.sh` (`Console web verify OK: SHA=37f148b78d9da79d39be0a058880a64bbeb9bb9d BUILD_TIME=2026-03-23T11:52:13Z`)
+    - `curl -si https://console.truffles.kz/api/health/full` (`HTTP/2 200`, `status=healthy`, `frontend=ok`, `api.version=dbbf7c69`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1/console-web && PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 E2E_USERNAME=admin E2E_PASSWORD=admin npx playwright test e2e/smoke.spec.ts --project chromium --workers 1 --grep 'multi-company selection gate'` (`1 passed`)
+    - `cd /home/zhan/worktrees/2026-03-23-console-selection-gate-stabilization-a1 && SESSION_AGENT=a1 SESSION_ALLOW_DONE=1 bash scripts/session_check.sh` (`Session OK`)
+- last_updated: 2026-03-23T17:00:00+05:00

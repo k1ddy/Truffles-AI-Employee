@@ -1390,8 +1390,8 @@ async def disable_specialist(
 @router.get("/slots", response_model=SlotsResponse)
 async def get_slots(
     request: Request,
-    specialist_id: str,
-    date: str,  # YYYY-MM-DD
+    specialist_id: UUID,
+    date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     duration: int = Query(60, ge=15, le=240),
     db: Session = Depends(get_db)
 ):
@@ -1408,7 +1408,7 @@ async def get_slots(
         raise ConsoleAPIError(400, "INVALID_DATE", "Date format must be YYYY-MM-DD")
     
     specialist = db.query(Specialist).filter(
-        Specialist.id == UUID(specialist_id),
+        Specialist.id == specialist_id,
         Specialist.client_id == context.client.id
     ).first()
     
@@ -2610,7 +2610,12 @@ async def update_booking_follow_up_governance(
 
 # ==================== Google Calendar OAuth ====================
 
-@router.get("/google/connect")
+@router.get(
+    "/google/connect",
+    status_code=307,
+    response_class=RedirectResponse,
+    responses={307: {"description": "Temporary redirect to Google OAuth"}},
+)
 async def google_connect(
     request: Request,
     db: Session = Depends(get_db)
@@ -2636,7 +2641,12 @@ async def google_connect(
     return RedirectResponse(url=auth_url)
 
 
-@router.get("/google/callback")
+@router.get(
+    "/google/callback",
+    status_code=307,
+    response_class=RedirectResponse,
+    responses={307: {"description": "Temporary redirect back to Console settings"}},
+)
 async def google_callback(
     code: str,
     state: str,

@@ -31,6 +31,7 @@ from app.models.conversation_human_lock import ConversationHumanLock
 from app.models.domain_capability_template import DomainCapabilityTemplate
 from app.models.handover import Handover
 from app.models.inbox_event import InboxEvent
+from app.models.knowledge_activation_job import KnowledgeActivationJob
 from app.models.knowledge_version import KnowledgeVersion
 from app.models.learned_response import LearnedResponse
 from app.models.marketing_campaign import MarketingCampaign
@@ -81,6 +82,7 @@ __all__ = [
     "MarketingDeliveryEvent",
     "Handover",
     "InboxEvent",
+    "KnowledgeActivationJob",
     "ClientSettings",
     "ConsoleConfirmation",
     "ConsoleBranchChange",

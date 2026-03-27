@@ -241,40 +241,76 @@ function resolveKnowledgeActionErrorMessage(error: unknown): string {
     return "Не удалось выполнить действие. Проверьте контекст и попробуйте снова.";
 }
 
-function knowledgeSyncStatusClass(status?: string | null): string {
+function knowledgeActivationStatusClass(status?: string | null): string {
     if (status === "ready") {
         return "bg-emerald-100 text-emerald-800";
     }
-    if (status === "failed") {
+    if (status === "failed" || status === "stuck") {
         return "bg-red-100 text-red-800";
     }
     return "bg-slate-100 text-slate-700";
 }
 
-function isKnowledgeSyncPending(status?: string | null): boolean {
-    return status === "pending";
+function isKnowledgeActivationPending(status?: string | null): boolean {
+    return status === "pending" || status === "queued" || status === "running";
 }
 
-function resolveKnowledgeSyncMessage(
+function resolveKnowledgeActivationMessage(
     status?: string | null,
+    options?: {
+        hasPublishedCandidate?: boolean;
+    },
 ): string {
-    if (status === "failed") {
-        return "Синхронизация требует внимания. Повторите ее перед проверкой консультанта.";
+    const hasPublishedCandidate = options?.hasPublishedCandidate ?? false;
+    if (status === "failed" || status === "stuck") {
+        return hasPublishedCandidate
+            ? "Published candidate сохранен, но обновление для клиентов требует внимания команды."
+            : "Обновление для клиентов требует внимания команды.";
     }
     if (status === "ready") {
-        return "Последняя версия опубликована и синхронизирована.";
+        return "Клиентские каналы уже работают на текущей live версии.";
     }
-    if (status === "pending") {
-        return "Синхронизация выполняется. Проверка консультанта откроется после завершения.";
+    if (status === "pending" || status === "queued" || status === "running") {
+        return hasPublishedCandidate
+            ? "Published candidate уже доступен для preview, а обновление для клиентов еще выполняется."
+            : "Обновление для клиентов еще выполняется.";
     }
-    return "Синхронизация еще не подтверждена.";
+    return "Live activation еще не запускалась.";
 }
 
-function resolveKnowledgeSyncDetails(error?: string | null): string | null {
-    if (!error || !error.trim()) {
+function resolveKnowledgeActivationDetails(
+    {
+        error,
+        stageLabel,
+        attemptCount,
+        heartbeatAt,
+        safeModeReason,
+    }: {
+        error?: string | null;
+        stageLabel?: string | null;
+        attemptCount?: number | null;
+        heartbeatAt?: string | null;
+        safeModeReason?: string | null;
+    },
+): string | null {
+    const details: string[] = [];
+    if (stageLabel) {
+        details.push(`Этап: ${stageLabel}`);
+    }
+    if (typeof attemptCount === "number" && attemptCount > 0) {
+        details.push(`Попытка: ${attemptCount}`);
+    }
+    if (heartbeatAt) {
+        details.push(`Heartbeat: ${formatTimestamp(heartbeatAt)}`);
+    }
+    const reason = (error ?? safeModeReason ?? "").trim();
+    if (reason) {
+        details.push(`Техническая причина: ${reason}`);
+    }
+    if (details.length === 0) {
         return null;
     }
-    return `Техническая причина: ${error}`;
+    return details.join(" · ");
 }
 
 function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
@@ -728,7 +764,8 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
         },
         enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
-        refetchInterval: (query) => (isKnowledgeSyncPending(query.state.data?.sync_status) ? 5000 : false),
+        refetchInterval: (query) =>
+            isKnowledgeActivationPending(query.state.data?.activation_status ?? query.state.data?.sync_status) ? 5000 : false,
     });
 
     const historyQuery = useQuery({
@@ -740,7 +777,9 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
         enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
         refetchInterval: (query) =>
-            (query.state.data?.items ?? []).some((item: { sync_status?: string | null }) => isKnowledgeSyncPending(item?.sync_status))
+            (query.state.data?.items ?? []).some((item: { activation_status?: string | null; sync_status?: string | null }) =>
+                isKnowledgeActivationPending(item?.activation_status ?? item?.sync_status)
+            )
                 ? 5000
                 : false,
     });
@@ -753,7 +792,7 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
         },
         enabled: !!session && !!meData && !apiUnavailable && canEdit && !branchSelectionRequired && !!selectedBranchId,
         retry: false,
-        refetchInterval: isKnowledgeSyncPending(currentQuery.data?.sync_status) ? 5000 : false,
+        refetchInterval: isKnowledgeActivationPending(currentQuery.data?.activation_status ?? currentQuery.data?.sync_status) ? 5000 : false,
     });
 
     const candidatesQuery = useQuery({
@@ -1103,17 +1142,35 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
     const editBaseUpdatedAt = currentQuery.data?.edit_base_updated_at ?? null;
     const draftUpdatedAt = currentQuery.data?.draft_updated_at ?? null;
     const hasSavedDraft = Boolean(currentQuery.data?.draft_version_id && draftServerText.trim().length > 0);
-    const currentSyncStatus = currentQuery.data?.sync_status ?? null;
-    const currentSyncStatusLabel = currentQuery.data?.sync_status_label ?? "Синхронизация не подтверждена";
-    const currentSyncError = currentQuery.data?.sync_error ?? null;
+    const currentPublishedVersionId = currentQuery.data?.version_id ?? null;
+    const currentActiveVersionId = currentQuery.data?.active_version_id ?? null;
+    const hasPublishedCandidate = Boolean(
+        currentPublishedVersionId
+        && currentPublishedVersionId !== currentActiveVersionId,
+    );
+    const currentSyncStatus = currentQuery.data?.activation_status ?? currentQuery.data?.sync_status ?? null;
+    const currentSyncStatusLabel =
+        currentQuery.data?.activation_status_label
+        ?? currentQuery.data?.sync_status_label
+        ?? "Обновление для клиентов не подтверждено";
+    const currentSyncError = currentQuery.data?.activation_error_message ?? currentQuery.data?.sync_error ?? null;
+    const currentActivationStage = currentQuery.data?.activation_stage ?? null;
+    const currentActivationStageLabel = currentQuery.data?.activation_stage_label ?? null;
+    const currentActivationHeartbeatAt = currentQuery.data?.activation_heartbeat_at ?? null;
+    const currentActivationQueuedAt = currentQuery.data?.activation_queued_at ?? null;
+    const currentActivationAttemptCount = currentQuery.data?.activation_attempt_count ?? null;
     const currentSafeMode = Boolean(currentQuery.data?.knowledge_safe_mode);
     const currentSafeModeReason = currentQuery.data?.knowledge_safe_mode_reason ?? null;
-    const currentSyncPending = isKnowledgeSyncPending(currentSyncStatus);
-    const currentSyncFailed = currentSyncStatus === "failed" || currentSafeMode;
+    const currentSyncPending = isKnowledgeActivationPending(currentSyncStatus);
+    const currentSyncFailed = currentSyncStatus === "failed" || currentSyncStatus === "stuck" || currentSafeMode;
     const currentSyncBlocked = currentSyncPending || currentSyncFailed;
-    const currentSyncDetails = currentSyncPending
-        ? null
-        : resolveKnowledgeSyncDetails(currentSyncError ?? currentSafeModeReason);
+    const currentSyncDetails = resolveKnowledgeActivationDetails({
+        error: currentSyncError,
+        stageLabel: currentActivationStageLabel,
+        attemptCount: currentActivationAttemptCount,
+        heartbeatAt: currentActivationHeartbeatAt,
+        safeModeReason: currentSafeModeReason,
+    });
 
     const historyItems = useMemo(
         () => extractHistoryItems(historyQuery.data),
@@ -1844,13 +1901,20 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
         consultantVerificationReadinessSummary: consultantVerificationReadiness?.summary ?? null,
         consultantVerificationReadinessErrorMessage,
         lastValidatedDraftHash,
-        currentVersionId: currentQuery.data?.version_id ?? null,
+        currentVersionId: currentPublishedVersionId,
+        currentActiveVersionId,
+        hasPublishedCandidate,
         currentSyncStatus,
         currentSyncStatusLabel,
-        currentSyncError,
-        knowledgeSyncStatusClass,
-        resolveKnowledgeSyncMessage,
-        resolveKnowledgeSyncDetails,
+        currentActivationStage,
+        currentActivationStageLabel,
+        currentActivationHeartbeatAt,
+        currentActivationQueuedAt,
+        currentActivationAttemptCount,
+        knowledgeSyncStatusClass: knowledgeActivationStatusClass,
+        resolveKnowledgeSyncMessage: (status?: string | null) =>
+            resolveKnowledgeActivationMessage(status, { hasPublishedCandidate }),
+        resolveKnowledgeSyncDetails: () => currentSyncDetails,
         ackWarnings,
         onAckWarningsChange: setAckWarnings,
         canEdit,
@@ -1863,7 +1927,7 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
         items: historyItems,
         selectedVersionId,
         onSelectVersion: setSelectedVersionId,
-        knowledgeSyncStatusClass,
+        knowledgeSyncStatusClass: knowledgeActivationStatusClass,
     };
 
     const rollbackStageProps = {
@@ -1983,11 +2047,18 @@ export function useKnowledgeStudioState({ session }: { session: SessionData }) {
             hasBranchWorkingHours,
             effectiveHoursSummary,
             effectiveHoursSource,
-            currentVersionId: currentQuery.data?.version_id ?? null,
+            currentVersionId: currentPublishedVersionId,
+            currentActiveVersionId,
+            hasPublishedCandidate,
             currentSyncStatus,
             currentSyncStatusLabel,
-            currentSyncStatusClass: knowledgeSyncStatusClass(currentSyncStatus),
-            currentSyncMessage: resolveKnowledgeSyncMessage(currentSyncStatus),
+            currentActivationStage,
+            currentActivationStageLabel,
+            currentActivationHeartbeatAt,
+            currentActivationQueuedAt,
+            currentActivationAttemptCount,
+            currentSyncStatusClass: knowledgeActivationStatusClass(currentSyncStatus),
+            currentSyncMessage: resolveKnowledgeActivationMessage(currentSyncStatus, { hasPublishedCandidate }),
             currentSafeMode,
             currentSyncBlocked,
             currentSyncFailed,

@@ -24,13 +24,17 @@ import {
     type IncidentListResponse,
 } from "@/lib/api-client";
 import {
-    clearConsoleContextScope,
     readConsoleContextScopeFromStorage,
     setConsoleBranchContext,
     setConsoleClientContext,
     setConsoleCompanyContext,
     writeConsoleContextScopeToStorage,
 } from "@/lib/console-context-storage";
+import {
+    emitConsoleClientEvent,
+    normalizeConsoleClientReasonCode,
+    type ConsoleSelectionGateKind,
+} from "@/lib/console-client-events";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import { QUERY_PROFILE_CONTEXT } from "@/lib/query-profiles";
 
@@ -939,6 +943,23 @@ function ContextBar({
     );
 }
 
+function getSelectionGateKind(
+    companySelectionRequired: boolean,
+    selectionRequired: boolean,
+    branchSelectionRequired: boolean,
+): ConsoleSelectionGateKind {
+    if (companySelectionRequired) {
+        return "company";
+    }
+    if (selectionRequired) {
+        return "client";
+    }
+    if (branchSelectionRequired) {
+        return "branch";
+    }
+    return "none";
+}
+
 function ContextHealthStrip({
     me,
     companyId,
@@ -1086,6 +1107,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
     const contentFrameClass = isInboxPage ? "h-full min-h-0" : "";
     const signOutTriggered = useRef(false);
+    const selectionGateTelemetryKeyRef = useRef<string | null>(null);
 
     const { data, isLoading, isFetching, error, refetch } = useQuery({
         queryKey: ["console-me"],
@@ -1097,29 +1119,84 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         ...QUERY_PROFILE_CONTEXT,
     });
 
+    const companies = data?.companies ?? [];
+    const companySelectionRequired = !!data?.company_selection_required;
+    const selectionRequired = !!data?.selection_required;
+    const branchSelectionRequired = !!data?.branch_selection_required;
+    const showGate = companySelectionRequired || selectionRequired || branchSelectionRequired;
+    const selectionGateKind = getSelectionGateKind(
+        companySelectionRequired,
+        selectionRequired,
+        branchSelectionRequired,
+    );
+
     useEffect(() => {
         if (signOutTriggered.current || status !== "authenticated") {
             return;
         }
 
-        if (sessionError || !accessToken) {
+        const signOutForExpiredSession = ({
+            reasonCode,
+            apiErrorCode,
+        }: {
+            reasonCode?: string | null;
+            apiErrorCode?: string | null;
+        }) => {
             signOutTriggered.current = true;
-            clearConsoleContextScope();
+            void emitConsoleClientEvent(
+                {
+                    event_type: "auth_session_expired_signout",
+                    surface: "console_shell",
+                    gate_kind: "none",
+                    reason_code: normalizeConsoleClientReasonCode(reasonCode),
+                    session_error: sessionError ?? null,
+                    api_error_code: apiErrorCode ?? null,
+                    company_selection_required: companySelectionRequired,
+                    selection_required: selectionRequired,
+                    branch_selection_required: branchSelectionRequired,
+                    path: pathname,
+                },
+                { keepalive: true },
+            );
+            // Preserve the last valid scope so multi-company users can recover after re-login
+            // without being forced back into a stale gray gate.
+            void queryClient.cancelQueries({
+                predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            });
+            queryClient.removeQueries({
+                predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            });
             toast.error("Сессия истекла. Войдите снова.");
-            signOut({ callbackUrl: "/" });
+            void signOut({ callbackUrl: "/" });
+        };
+
+        if (sessionError || !accessToken) {
+            signOutForExpiredSession({
+                reasonCode: sessionError ?? (accessToken ? null : "access_token_missing"),
+            });
             return;
         }
 
         if (error) {
             const parsed = parseApiError(error);
             if (AUTH_ERROR_CODES.has(parsed.code)) {
-                signOutTriggered.current = true;
-                clearConsoleContextScope();
-                toast.error("Сессия истекла. Войдите снова.");
-                signOut({ callbackUrl: "/" });
+                signOutForExpiredSession({
+                    reasonCode: parsed.code,
+                    apiErrorCode: parsed.code,
+                });
             }
         }
-    }, [accessToken, error, sessionError, status]);
+    }, [
+        accessToken,
+        branchSelectionRequired,
+        companySelectionRequired,
+        error,
+        pathname,
+        queryClient,
+        selectionRequired,
+        sessionError,
+        status,
+    ]);
 
     const role = data?.agent?.role ?? "manager";
     const canReadOps = canAccessConsole(role, "ops", "read");
@@ -1350,11 +1427,6 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         setHealthIncidentUiState({ hiddenUntilTs: Date.now() + HEALTH_INCIDENT_HIDE_MS });
     };
 
-    const companies = data?.companies ?? [];
-    const companySelectionRequired = !!data?.company_selection_required;
-    const selectionRequired = !!data?.selection_required;
-    const branchSelectionRequired = !!data?.branch_selection_required;
-    const showGate = companySelectionRequired || selectionRequired || branchSelectionRequired;
     const contextBusy = isSubmitting || (showGate && isFetching);
 
     const storedScope = readConsoleContextScopeFromStorage();
@@ -1368,6 +1440,38 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         ? (data?.clients ?? []).filter((client) => client.company_id === companyId)
         : (data?.clients ?? []);
 
+    useEffect(() => {
+        if (!data || !showGate) {
+            selectionGateTelemetryKeyRef.current = null;
+            return;
+        }
+
+        const nextKey = `${selectionGateKind}:${pathname}`;
+        if (selectionGateTelemetryKeyRef.current === nextKey) {
+            return;
+        }
+        selectionGateTelemetryKeyRef.current = nextKey;
+
+        void emitConsoleClientEvent({
+            event_type: "selection_gate_shown",
+            surface: "console_shell",
+            gate_kind: selectionGateKind,
+            reason_code: `${selectionGateKind}_selection_required`,
+            company_selection_required: companySelectionRequired,
+            selection_required: selectionRequired,
+            branch_selection_required: branchSelectionRequired,
+            path: pathname,
+        });
+    }, [
+        branchSelectionRequired,
+        companySelectionRequired,
+        data,
+        pathname,
+        selectionGateKind,
+        selectionRequired,
+        showGate,
+    ]);
+
     const handleSelectCompany = async (companyId: string) => {
         if (!companyId) {
             return;
@@ -1376,6 +1480,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             const companyName = companies.find((company) => company.id === companyId)?.name;
             setConsoleCompanyContext(companyId);
+            void emitConsoleClientEvent({
+                event_type: "selection_gate_confirmed",
+                surface: "console_shell",
+                gate_kind: "company",
+                reason_code: "user_confirm",
+                company_selection_required: companySelectionRequired,
+                selection_required: selectionRequired,
+                branch_selection_required: branchSelectionRequired,
+                path: pathname,
+            });
             await refetch();
             await markContextAwareQueriesStale();
             refetchActiveContextAwareQueries();
@@ -1396,6 +1510,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             const clientName = visibleClients.find((client) => client.id === clientId)?.name;
             const selectedClientCompanyId = visibleClients.find((client) => client.id === clientId)?.company_id;
             setConsoleClientContext(clientId, selectedClientCompanyId ?? companyId ?? null);
+            void emitConsoleClientEvent({
+                event_type: "selection_gate_confirmed",
+                surface: "console_shell",
+                gate_kind: "client",
+                reason_code: "user_confirm",
+                company_selection_required: companySelectionRequired,
+                selection_required: selectionRequired,
+                branch_selection_required: branchSelectionRequired,
+                path: pathname,
+            });
             await refetch();
             await markContextAwareQueriesStale();
             refetchActiveContextAwareQueries();
@@ -1415,6 +1539,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             const branchName = (data?.branches ?? []).find((branch) => branch.id === branchId)?.name;
             setConsoleBranchContext(branchId);
+            void emitConsoleClientEvent({
+                event_type: "selection_gate_confirmed",
+                surface: "console_shell",
+                gate_kind: "branch",
+                reason_code: "user_confirm",
+                company_selection_required: companySelectionRequired,
+                selection_required: selectionRequired,
+                branch_selection_required: branchSelectionRequired,
+                path: pathname,
+            });
             await refetch();
             await markContextAwareQueriesStale();
             refetchActiveContextAwareQueries();
@@ -1843,7 +1977,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             )}
                             {!isLoading && !error && data && showGate && (
                                 <div
-                                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+                                    className="flex min-h-[60vh] items-center justify-center p-6"
                                     data-testid="selection-gate-overlay"
                                 >
                                     <div className="pointer-events-auto max-w-xl w-full">

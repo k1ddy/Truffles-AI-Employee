@@ -1362,18 +1362,63 @@ class ConsoleHumanLockStatusResponse(BaseModel):
     status: ConsoleHumanLockStatus
 
 
+class ConsoleKnowledgeActivationHealthThresholds(BaseModel):
+    queued_warning: int
+    queued_critical: int
+    failed_24h_warning: int
+    failed_24h_critical: int
+    stuck_warning: int
+    stuck_critical: int
+    oldest_queued_warning_seconds: int
+    oldest_queued_critical_seconds: int
+    stale_running_critical: int
+
+
+class ConsoleKnowledgeActivationCounts(BaseModel):
+    queued: int
+    running: int
+    ready: int
+    failed: int
+    stuck: int
+
+
+class ConsoleKnowledgeActivationHealth(BaseModel):
+    status: str
+    metric_basis: str
+    counts: ConsoleKnowledgeActivationCounts
+    failed_24h: int
+    stale_running: int
+    oldest_queued_age_seconds: Optional[int] = None
+    oldest_running_heartbeat_age_seconds: Optional[int] = None
+    thresholds: ConsoleKnowledgeActivationHealthThresholds
+
+
 class ConsoleHealthResponse(BaseModel):
     status: str
     version: str
     database: str
     redis: str
     outbox_backlog: int
+    knowledge_activation: Optional[ConsoleKnowledgeActivationHealth] = None
 
 
 ConsoleBusinessSeverity = Literal["critical", "warn", "info"]
 ConsoleBusinessStatus = Literal["healthy", "degraded", "unhealthy"]
 ConsoleConsultantVerificationStatus = Literal["ready", "needs_attention", "not_enabled"]
 ConsoleConsultantVerificationCardState = Literal["ready", "needs_attention", "planned"]
+ConsoleConsultantVerificationSourceMode = Literal["live", "published", "draft"]
+ConsoleConsultantVerificationChallengeMode = Literal["as_client", "stress"]
+ConsoleConsultantVerificationLiveActivationStatus = Literal["ready", "pending", "failed", "not_started"]
+ConsoleKnowledgeActivationStatus = Literal["not_started", "queued", "running", "ready", "failed", "stuck"]
+ConsoleKnowledgeActivationStage = Literal[
+    "queued",
+    "syncing_branch_docs",
+    "applying_client_config",
+    "switching_active_pointer",
+    "finalizing",
+    "ready",
+    "failed",
+]
 ConsoleSubscriptionQuotaSource = Literal["company_billing_info", "client_config", "unknown"]
 ConsoleSubscriptionAlertLevel = Literal["normal", "warning_80", "limit_100"]
 ConsoleFactKind = Literal["fact", "estimate", "missing"]
@@ -1503,12 +1548,39 @@ class ConsoleConsultantVerificationReadinessCard(BaseModel):
     href: Optional[str] = None
 
 
+ConsoleConsultantVerificationBlockerCode = Literal[
+    "workspace_disabled",
+    "branch_required",
+    "preview_source_missing",
+]
+
+
 class ConsoleConsultantVerificationOverviewResponse(BaseModel):
     generated_at: str
     feature_enabled: bool = False
+    workspace_enabled: bool = False
+    team_tools_enabled: bool = False
     status: ConsoleConsultantVerificationStatus
     status_label: str
     summary: str
+    verification_ready: bool = False
+    can_verify_now: bool = False
+    preview_status: ConsoleConsultantVerificationStatus = "needs_attention"
+    preview_status_label: str = "Нужно внимание"
+    preview_summary: Optional[str] = None
+    preview_truth_source: Optional[ConsoleConsultantVerificationSourceMode] = None
+    preview_truth_version_id: Optional[UUID] = None
+    live_truth_version_id: Optional[UUID] = None
+    published_candidate_version_id: Optional[UUID] = None
+    available_source_modes: list[ConsoleConsultantVerificationSourceMode] = []
+    default_source_mode: Optional[ConsoleConsultantVerificationSourceMode] = None
+    live_activation_status: Optional[ConsoleConsultantVerificationLiveActivationStatus] = None
+    live_activation_status_label: Optional[str] = None
+    live_activation_summary: Optional[str] = None
+    live_activation_error: Optional[str] = None
+    live_activation_job_id: Optional[UUID] = None
+    blockers: list[str] = []
+    blocker_codes: list[ConsoleConsultantVerificationBlockerCode] = []
     next_wave_summary: str
     branch_selection_required: bool = False
     selected_branch_id: Optional[UUID] = None
@@ -1526,8 +1598,6 @@ class ConsoleConsultantVerificationOverviewResponse(BaseModel):
     actions: list[ConsoleBusinessActionItem] = []
 
 
-ConsoleConsultantVerificationSourceMode = Literal["live", "draft"]
-ConsoleConsultantVerificationChallengeMode = Literal["as_client", "stress"]
 ConsoleConsultantVerificationSessionStatus = Literal["active", "completed"]
 ConsoleConsultantVerificationOutcome = Literal["fact", "collect", "handoff"]
 ConsoleConsultantVerificationBusinessVerdict = Literal[
@@ -1972,6 +2042,52 @@ class ConsoleOutboxCounts(BaseModel):
     pending: int
     processing: int
     failed: int
+
+
+class ConsoleKnowledgeActivationOpsCounts(BaseModel):
+    queued: int
+    running: int
+    ready: int
+    failed: int
+    stuck: int
+    total: int
+
+
+class ConsoleKnowledgeActivationOpsItem(BaseModel):
+    id: UUID
+    branch_id: UUID
+    version_id: UUID
+    state: str
+    state_label: str
+    stage: Optional[str] = None
+    stage_label: Optional[str] = None
+    source: str
+    attempt_count: int
+    queued_at: Optional[str] = None
+    started_at: Optional[str] = None
+    heartbeat_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    last_error: Optional[str] = None
+    error_code: Optional[str] = None
+
+
+class ConsoleKnowledgeActivationOpsListResponse(BaseModel):
+    items: list[ConsoleKnowledgeActivationOpsItem]
+    cursor: Optional[str] = None
+    has_more: bool
+    counts: ConsoleKnowledgeActivationOpsCounts
+
+
+class ConsoleKnowledgeActivationRetryRequest(BaseModel):
+    ids: Optional[list[UUID]] = None
+    limit: Optional[int] = 100
+    status: Literal["failed", "stuck", "all"] = "all"
+
+
+class ConsoleKnowledgeActivationRetryResponse(BaseModel):
+    success: bool
+    retried: int
+    skipped: int
 
 
 class ConsoleOutboxItem(BaseModel):
@@ -3259,6 +3375,20 @@ class ConsoleKnowledgeCurrentResponse(BaseModel):
     payload: Optional[dict] = None
     content: Optional[str] = None
     updated_at: Optional[str] = None
+    active_version_id: Optional[UUID] = None
+    active_updated_at: Optional[str] = None
+    activation_status: Optional[ConsoleKnowledgeActivationStatus] = None
+    activation_status_label: Optional[str] = None
+    activation_job_id: Optional[UUID] = None
+    activation_stage: Optional[ConsoleKnowledgeActivationStage] = None
+    activation_stage_label: Optional[str] = None
+    activation_error_code: Optional[str] = None
+    activation_error_message: Optional[str] = None
+    activation_queued_at: Optional[str] = None
+    activation_started_at: Optional[str] = None
+    activation_heartbeat_at: Optional[str] = None
+    activation_finished_at: Optional[str] = None
+    activation_attempt_count: Optional[int] = None
     sync_status: Optional[str] = None
     sync_status_label: Optional[str] = None
     sync_error: Optional[str] = None
@@ -3300,6 +3430,19 @@ class ConsoleKnowledgePublishResponse(BaseModel):
     version_id: Optional[UUID] = None
     published_at: Optional[str] = None
     message: Optional[str] = None
+    active_version_id: Optional[UUID] = None
+    activation_status: Optional[ConsoleKnowledgeActivationStatus] = None
+    activation_status_label: Optional[str] = None
+    activation_job_id: Optional[UUID] = None
+    activation_stage: Optional[ConsoleKnowledgeActivationStage] = None
+    activation_stage_label: Optional[str] = None
+    activation_error_code: Optional[str] = None
+    activation_error_message: Optional[str] = None
+    activation_queued_at: Optional[str] = None
+    activation_started_at: Optional[str] = None
+    activation_heartbeat_at: Optional[str] = None
+    activation_finished_at: Optional[str] = None
+    activation_attempt_count: Optional[int] = None
     sync_status: str = "pending"
     sync_status_label: Optional[str] = None
     sync_error: Optional[str] = None
@@ -3315,6 +3458,17 @@ class ConsoleKnowledgeHistoryItem(BaseModel):
     created_at: Optional[str] = None
     published_at: Optional[str] = None
     summary: Optional[str] = None
+    is_active: bool = False
+    activation_status: Optional[ConsoleKnowledgeActivationStatus] = None
+    activation_status_label: Optional[str] = None
+    activation_job_id: Optional[UUID] = None
+    activation_stage: Optional[ConsoleKnowledgeActivationStage] = None
+    activation_stage_label: Optional[str] = None
+    activation_error_code: Optional[str] = None
+    activation_error_message: Optional[str] = None
+    activation_queued_at: Optional[str] = None
+    activation_heartbeat_at: Optional[str] = None
+    activation_attempt_count: Optional[int] = None
     sync_status: Optional[str] = None
     sync_status_label: Optional[str] = None
     sync_error: Optional[str] = None
@@ -3334,6 +3488,19 @@ class ConsoleKnowledgeRollbackResponse(BaseModel):
     success: bool
     version_id: Optional[UUID] = None
     message: Optional[str] = None
+    active_version_id: Optional[UUID] = None
+    activation_status: Optional[ConsoleKnowledgeActivationStatus] = None
+    activation_status_label: Optional[str] = None
+    activation_job_id: Optional[UUID] = None
+    activation_stage: Optional[ConsoleKnowledgeActivationStage] = None
+    activation_stage_label: Optional[str] = None
+    activation_error_code: Optional[str] = None
+    activation_error_message: Optional[str] = None
+    activation_queued_at: Optional[str] = None
+    activation_started_at: Optional[str] = None
+    activation_heartbeat_at: Optional[str] = None
+    activation_finished_at: Optional[str] = None
+    activation_attempt_count: Optional[int] = None
     sync_status: str = "pending"
     sync_status_label: Optional[str] = None
     sync_error: Optional[str] = None
@@ -3346,6 +3513,19 @@ class ConsoleKnowledgeRollbackResponse(BaseModel):
 class ConsoleKnowledgeSyncRetryResponse(BaseModel):
     success: bool
     version_id: UUID
+    active_version_id: Optional[UUID] = None
+    activation_status: Optional[ConsoleKnowledgeActivationStatus] = None
+    activation_status_label: Optional[str] = None
+    activation_job_id: Optional[UUID] = None
+    activation_stage: Optional[ConsoleKnowledgeActivationStage] = None
+    activation_stage_label: Optional[str] = None
+    activation_error_code: Optional[str] = None
+    activation_error_message: Optional[str] = None
+    activation_queued_at: Optional[str] = None
+    activation_started_at: Optional[str] = None
+    activation_heartbeat_at: Optional[str] = None
+    activation_finished_at: Optional[str] = None
+    activation_attempt_count: Optional[int] = None
     sync_status: str
     sync_status_label: Optional[str] = None
     sync_error: Optional[str] = None

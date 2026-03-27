@@ -35,11 +35,16 @@ def _build_context(
     *,
     branch_id=None,
     branch_restricted: bool = False,
+    client_config: dict | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         role=role,
         agent=SimpleNamespace(id=uuid4(), name="Owner"),
-        client=SimpleNamespace(id=uuid4(), slug="demo-salon", config={"consultant_verification_enabled": True}),
+        client=SimpleNamespace(
+            id=uuid4(),
+            slug="demo-salon",
+            config=client_config if client_config is not None else {"consultant_verification_enabled": True},
+        ),
         selected_branch_id=branch_id,
         effective_branch_id=branch_id,
         branch_restricted=branch_restricted,
@@ -160,6 +165,14 @@ def test_consultant_verification_routes_registered_in_openapi() -> None:
     assert "/console/v1/business/consultant-verification/readiness" in paths
     assert "/console/v1/business/consultant-verification/compare" in paths
     assert "/console/v1/knowledge/versions/{version_id}/retry-sync" in paths
+
+    assert "409" in (paths["/console/v1/business/consultant-verification/overview"]["get"]["responses"] or {})
+    assert "409" in (paths["/console/v1/business/consultant-verification/sessions"]["get"]["responses"] or {})
+    assert "409" in (
+        paths["/console/v1/business/consultant-verification/sessions/{session_id}"]["get"]["responses"] or {}
+    )
+    assert "409" in (paths["/console/v1/business/consultant-verification/findings"]["get"]["responses"] or {})
+    assert "409" in (paths["/console/v1/business/consultant-verification/readiness"]["get"]["responses"] or {})
 
 
 @pytest.mark.asyncio
@@ -763,8 +776,8 @@ async def test_run_consultant_verification_compare_marks_finding_retested(monkey
     )
     monkeypatch.setattr(
         verification_service,
-        "build_runtime_truth",
-        lambda *_args, **_kwargs: verification_service.RuntimeTruth(
+        "_resolve_live_runtime_truth",
+        lambda **_kwargs: verification_service.RuntimeTruth(
             truth={"facts": True},
             client_slug=context.client.slug,
             branch_id=branch_id,
@@ -833,6 +846,28 @@ async def test_run_consultant_verification_compare_marks_finding_retested(monkey
     db.commit.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_run_consultant_verification_compare_stays_gated_when_team_tools_disabled() -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={"consultant_verification_enabled": False},
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await verification_service.run_consultant_verification_compare(
+            db=Mock(),
+            context=context,
+            request=ConsoleConsultantVerificationCompareRequest(prompt="Сколько стоит?"),
+            allowed_branch_ids=[branch_id],
+            now=datetime.now(timezone.utc),
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+    assert "team tools" in exc_info.value.message.lower()
+
+
 def test_create_consultant_verification_session_requires_branch_selection() -> None:
     with pytest.raises(ConsoleAPIError) as exc_info:
         verification_service.create_consultant_verification_session(
@@ -844,6 +879,110 @@ def test_create_consultant_verification_session_requires_branch_selection() -> N
         )
 
     assert exc_info.value.code == "BRANCH_SELECTION_REQUIRED"
+
+
+def test_create_consultant_verification_session_pins_truth_snapshot(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={"consultant_verification_enabled": False},
+    )
+    now = datetime.now(timezone.utc)
+    db = Mock()
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_resolve_preview_truth_snapshot",
+        lambda **_kwargs: (
+            verification_service.RuntimeTruth(
+                truth={"draft": True},
+                client_slug=context.client.slug,
+                branch_id=branch_id,
+                source="knowledge_draft",
+                version_id="draft-version-1",
+                compiled_hash="compiled-1",
+            ),
+            {
+                "truth_source": "knowledge_draft",
+                "truth_version_id": "draft-version-1",
+                "truth_compiled_hash": "compiled-1",
+                "truth_payload_hash": "payload-hash-1",
+                "truth_payload": {"client_pack": {"salon": {"name": "Draft"}}},
+                "draft_hash": "draft-hash-1",
+                "branch_id": str(branch_id),
+            },
+        ),
+    )
+
+    response = verification_service.create_consultant_verification_session(
+        db=db,
+        context=context,
+        request=ConsoleConsultantVerificationSessionCreateRequest(source_mode="draft"),
+        allowed_branch_ids=[branch_id],
+        now=now,
+    )
+
+    session_row = db.add.call_args.args[0]
+    assert session_row.runtime_snapshot["truth_source"] == "knowledge_draft"
+    assert session_row.runtime_snapshot["truth_payload_hash"] == "payload-hash-1"
+    assert session_row.runtime_snapshot["draft_hash"] == "draft-hash-1"
+    assert session_row.runtime_snapshot["truth_payload"]["client_pack"]["salon"]["name"] == "Draft"
+    assert response.session.source_mode == "draft"
+    db.commit.assert_called_once()
+
+
+def test_resolve_verification_session_runtime_truth_prefers_pinned_snapshot(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(role="owner", branch_id=branch_id)
+    session_row = SimpleNamespace(
+        branch_id=branch_id,
+        runtime_snapshot={
+            "truth_source": "knowledge_draft",
+            "truth_version_id": "draft-version-1",
+            "truth_payload_hash": "payload-hash-1",
+            "truth_payload": {
+                "client_pack": {
+                    "salon": {"name": "Pinned Draft"},
+                },
+            },
+            "draft_hash": "draft-hash-1",
+        },
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_resolve_preview_truth_snapshot",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("fallback resolver should not run for pinned snapshot")),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "build_runtime_truth_from_payload",
+        lambda **_kwargs: verification_service.RuntimeTruth(
+            truth={"salon": {"name": "Pinned Draft"}},
+            client_slug=context.client.slug,
+            branch_id=branch_id,
+            source="knowledge_draft",
+            version_id="draft-version-1",
+            compiled_hash="compiled-1",
+        ),
+    )
+
+    runtime_truth, snapshot = verification_service._resolve_verification_session_runtime_truth(
+        db=Mock(),
+        context=context,
+        session_row=session_row,
+    )
+
+    assert runtime_truth.source == "knowledge_draft"
+    assert runtime_truth.version_id == "draft-version-1"
+    assert runtime_truth.truth["salon"]["name"] == "Pinned Draft"
+    assert snapshot["draft_hash"] == "draft-hash-1"
 
 
 @pytest.mark.asyncio
@@ -1076,6 +1215,11 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
         "_load_published_knowledge_for_branch",
         lambda **kwargs: captured.update(kwargs) or version,
     )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
 
     response = verification_service.build_consultant_verification_overview(
         db=Mock(),
@@ -1086,13 +1230,133 @@ def test_build_consultant_verification_overview_uses_selected_branch_knowledge(m
 
     assert captured["branch_id"] == branch_id
     assert response.status == "ready"
+    assert response.can_verify_now is True
     assert response.branch_selection_required is False
     assert response.selected_branch_id == branch_id
     assert response.selected_branch_name == "Almaty Downtown"
     assert response.knowledge_sync_status == "ready"
+    assert response.live_activation_status == "ready"
+    assert response.preview_truth_source == "live"
+    assert response.available_source_modes == ["live"]
+    assert response.blocker_codes == []
 
 
-def test_build_consultant_verification_overview_blocks_pending_knowledge_sync(monkeypatch) -> None:
+def test_build_consultant_verification_overview_unblocks_workspace_when_team_tools_rollout_is_off(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={"consultant_verification_enabled": False},
+    )
+    version = KnowledgeVersion(
+        id=uuid4(),
+        client_id=context.client.id,
+        branch_id=branch_id,
+        status="published",
+        payload_json={"client_pack": {"salon": {"name": "Demo"}}},
+        published_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+        sync_status="ready",
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_effective_capabilities",
+        lambda *_args, **_kwargs: CapabilitiesPayload(),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_reference_pack",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_build_scenario_catalog",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: version,
+    )
+
+    response = verification_service.build_consultant_verification_overview(
+        db=Mock(),
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=[branch_id],
+    )
+
+    assert response.feature_enabled is True
+    assert response.workspace_enabled is True
+    assert response.team_tools_enabled is False
+    assert response.status == "ready"
+    assert response.can_verify_now is True
+    assert response.blocker_codes == []
+    assert not any("rollout" in blocker.lower() for blocker in response.blockers)
+
+
+def test_build_consultant_verification_overview_returns_stable_blocker_codes(monkeypatch) -> None:
+    branch_id = uuid4()
+    context = _build_context(
+        role="owner",
+        branch_id=branch_id,
+        client_config={
+            "owner_consultant_verification": {
+                "workspace_enabled": False,
+            }
+        },
+    )
+
+    monkeypatch.setattr(
+        verification_service,
+        "_load_effective_capabilities",
+        lambda *_args, **_kwargs: CapabilitiesPayload(),
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_reference_pack",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_build_scenario_catalog",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_published_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+
+    response = verification_service.build_consultant_verification_overview(
+        db=Mock(),
+        context=context,
+        now=datetime.now(timezone.utc),
+        allowed_branch_ids=[branch_id],
+    )
+
+    assert response.feature_enabled is False
+    assert response.workspace_enabled is False
+    assert response.can_verify_now is False
+    assert response.blocker_codes == ["workspace_disabled", "preview_source_missing"]
+    assert response.blockers == [
+        "Интерактивный preview временно выключен для этого клиента.",
+        "Сохраните draft или опубликуйте live знания, чтобы открыть preview-проверку.",
+    ]
+
+
+def test_build_consultant_verification_overview_keeps_preview_available_while_activation_pending(monkeypatch) -> None:
     branch_id = uuid4()
     context = _build_context(role="owner", branch_id=branch_id)
     version = KnowledgeVersion(
@@ -1126,6 +1390,16 @@ def test_build_consultant_verification_overview_blocks_pending_knowledge_sync(mo
         "_load_published_knowledge_for_branch",
         lambda **_kwargs: version,
     )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "get_latest_knowledge_activation_job",
+        lambda *_args, **_kwargs: SimpleNamespace(id=uuid4(), state="queued"),
+    )
 
     response = verification_service.build_consultant_verification_overview(
         db=Mock(),
@@ -1134,12 +1408,17 @@ def test_build_consultant_verification_overview_blocks_pending_knowledge_sync(mo
         allowed_branch_ids=[branch_id],
     )
 
-    assert response.status == "needs_attention"
+    assert response.status == "ready"
+    assert response.can_verify_now is True
     assert response.knowledge_sync_status == "pending"
-    assert "синхронизац" in response.summary.lower()
+    assert response.live_activation_status == "pending"
+    assert response.preview_truth_source == "published"
+    assert response.available_source_modes == ["published"]
+    assert response.blocker_codes == []
+    assert "preview" in response.live_activation_summary.lower()
 
 
-def test_build_consultant_verification_overview_flags_failed_knowledge_sync(monkeypatch) -> None:
+def test_build_consultant_verification_overview_surfaces_activation_failure_without_blocking_preview(monkeypatch) -> None:
     branch_id = uuid4()
     context = _build_context(role="owner", branch_id=branch_id)
     context.branches[0].knowledge_safe_mode = True
@@ -1176,6 +1455,16 @@ def test_build_consultant_verification_overview_flags_failed_knowledge_sync(monk
         "_load_published_knowledge_for_branch",
         lambda **_kwargs: version,
     )
+    monkeypatch.setattr(
+        verification_service,
+        "_load_active_knowledge_for_branch",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verification_service,
+        "get_latest_knowledge_activation_job",
+        lambda *_args, **_kwargs: SimpleNamespace(id=uuid4(), state="failed", last_error="timed out"),
+    )
 
     response = verification_service.build_consultant_verification_overview(
         db=Mock(),
@@ -1184,8 +1473,14 @@ def test_build_consultant_verification_overview_flags_failed_knowledge_sync(monk
         allowed_branch_ids=[branch_id],
     )
 
-    assert response.status == "needs_attention"
+    assert response.status == "ready"
+    assert response.can_verify_now is True
     assert response.knowledge_sync_status == "failed"
     assert response.knowledge_sync_error == "timed out"
     assert response.knowledge_safe_mode is True
-    assert "синхронизац" in response.summary.lower()
+    assert response.live_activation_status == "failed"
+    assert response.live_activation_error == "timed out"
+    assert response.preview_truth_source == "published"
+    assert response.blocker_codes == []
+    assert response.available_source_modes == ["published"]
+    assert "preview" in response.live_activation_summary.lower()

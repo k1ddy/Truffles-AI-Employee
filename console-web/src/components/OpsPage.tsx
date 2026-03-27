@@ -29,6 +29,7 @@ interface HealthData {
     database: string;
     redis: string;
     outbox_backlog: number;
+    knowledge_activation?: KnowledgeActivationHealth | null;
 }
 
 interface MetricsData {
@@ -55,7 +56,79 @@ interface TelegramHealthData {
 }
 
 type OutboxStatusFilter = "failed" | "pending" | "processing" | "all";
+type KnowledgeActivationStatusFilter = "failed" | "stuck" | "queued" | "running" | "all";
 type ReminderStatusFilter = "failed" | "pending" | "sent" | "all";
+
+interface KnowledgeActivationCounts {
+    queued: number;
+    running: number;
+    ready: number;
+    failed: number;
+    stuck: number;
+}
+
+interface KnowledgeActivationHealthThresholds {
+    queued_warning: number;
+    queued_critical: number;
+    failed_24h_warning: number;
+    failed_24h_critical: number;
+    stuck_warning: number;
+    stuck_critical: number;
+    oldest_queued_warning_seconds: number;
+    oldest_queued_critical_seconds: number;
+    stale_running_critical: number;
+}
+
+interface KnowledgeActivationHealth {
+    status: string;
+    metric_basis: string;
+    counts: KnowledgeActivationCounts;
+    failed_24h: number;
+    stale_running: number;
+    oldest_queued_age_seconds: number | null;
+    oldest_running_heartbeat_age_seconds: number | null;
+    thresholds: KnowledgeActivationHealthThresholds;
+}
+
+interface KnowledgeActivationOpsCounts {
+    queued: number;
+    running: number;
+    ready: number;
+    failed: number;
+    stuck: number;
+    total: number;
+}
+
+interface KnowledgeActivationOpsItem {
+    id: string;
+    branch_id: string;
+    version_id: string;
+    state: string;
+    state_label: string;
+    stage: string | null;
+    stage_label: string | null;
+    source: string;
+    attempt_count: number;
+    queued_at: string | null;
+    started_at: string | null;
+    heartbeat_at: string | null;
+    finished_at: string | null;
+    last_error: string | null;
+    error_code: string | null;
+}
+
+interface KnowledgeActivationOpsListResponse {
+    items: KnowledgeActivationOpsItem[];
+    cursor: string | null;
+    has_more: boolean;
+    counts: KnowledgeActivationOpsCounts;
+}
+
+interface KnowledgeActivationRetryResponse {
+    success: boolean;
+    retried: number;
+    skipped: number;
+}
 
 interface OutboxCounts {
     pending: number;
@@ -282,6 +355,16 @@ async function fetchOutbox(status: OutboxStatusFilter): Promise<OutboxListRespon
     return response.data;
 }
 
+async function fetchKnowledgeActivation(status: KnowledgeActivationStatusFilter): Promise<KnowledgeActivationOpsListResponse> {
+    const response = await api.get("/ops/knowledge-activation", {
+        params: {
+            status,
+            limit: 50,
+        },
+    });
+    return response.data;
+}
+
 async function fetchReminders(status: ReminderStatusFilter, template?: string): Promise<ReminderListResponse> {
     const response = await api.get("/ops/reminders", {
         params: {
@@ -298,14 +381,22 @@ import { getSystemStatusLabel } from "@/utils/labels";
 function StatusBadge({ status }: { status: string }) {
     const styles: Record<string, string> = {
         ok: "bg-green-100 text-green-800",
+        healthy: "bg-green-100 text-green-800",
         connected: "bg-green-100 text-green-800",
         degraded: "bg-yellow-100 text-yellow-800",
+        warning: "bg-yellow-100 text-yellow-800",
+        critical: "bg-red-100 text-red-800",
         error: "bg-red-100 text-red-800",
         unhealthy: "bg-red-100 text-red-800",
     };
+    const labels: Record<string, string> = {
+        healthy: "норма",
+        warning: "внимание",
+        critical: "критично",
+    };
     return (
         <span className={`px-2 py-1 rounded text-xs font-medium ${styles[status] || "bg-muted text-muted-foreground"}`}>
-            {getSystemStatusLabel(status)}
+            {labels[status] || getSystemStatusLabel(status)}
         </span>
     );
 }
@@ -354,6 +445,16 @@ function outboxStatusLabel(status: string): string {
         return "отправлено";
     }
     return status;
+}
+
+function activationFilterRetryStatus(status: KnowledgeActivationStatusFilter): "failed" | "stuck" | "all" {
+    if (status === "failed") {
+        return "failed";
+    }
+    if (status === "stuck") {
+        return "stuck";
+    }
+    return "all";
 }
 
 function incidentStateChipClass(state: IncidentItem["incident_state"]): string {
@@ -448,6 +549,7 @@ export default function OpsPage() {
     const { handleError } = useErrorHandler();
     const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
     const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
+    const [knowledgeActivationStatus, setKnowledgeActivationStatus] = useState<KnowledgeActivationStatusFilter>("failed");
     const [reminderStatus, setReminderStatus] = useState<ReminderStatusFilter>("failed");
     const [reminderTemplate, setReminderTemplate] = useState<string>("");
     const [jobType, setJobType] = useState<OpsJobType>("outbox_process");
@@ -509,6 +611,20 @@ export default function OpsPage() {
     const { data: outboxData, isLoading: outboxLoading, error: outboxError, refetch: refetchOutbox } = useQuery({
         queryKey: ["ops-outbox", outboxStatus],
         queryFn: () => fetchOutbox(outboxStatus),
+        enabled: !!session && canReadOps && isFullOps,
+        refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
+    });
+
+    const {
+        data: knowledgeActivationData,
+        isLoading: knowledgeActivationLoading,
+        error: knowledgeActivationError,
+        refetch: refetchKnowledgeActivation,
+    } = useQuery({
+        queryKey: ["ops-knowledge-activation", knowledgeActivationStatus],
+        queryFn: () => fetchKnowledgeActivation(knowledgeActivationStatus),
         enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 30000,
         placeholderData: keepPreviousData,
@@ -579,6 +695,12 @@ export default function OpsPage() {
             handleError(remindersError);
         }
     }, [remindersError, handleError]);
+
+    useEffect(() => {
+        if (knowledgeActivationError) {
+            handleError(knowledgeActivationError);
+        }
+    }, [knowledgeActivationError, handleError]);
 
     useEffect(() => {
         if (opsJobsError) {
@@ -734,6 +856,29 @@ export default function OpsPage() {
         },
     });
 
+    const knowledgeActivationRetry = useMutation({
+        mutationFn: async (ids?: string[]) => {
+            const { data } = await api.post<KnowledgeActivationRetryResponse>("/ops/knowledge-activation/retry", {
+                ids: ids && ids.length > 0 ? ids : undefined,
+                limit: 100,
+                status: activationFilterRetryStatus(knowledgeActivationStatus),
+            });
+            return data;
+        },
+        onSuccess: (data) => {
+            if (data.success) {
+                toast.success(`Повторено activation jobs: ${data.retried}`);
+            } else {
+                toast.error("Не удалось поставить activation jobs в повтор");
+            }
+            void refetchKnowledgeActivation();
+            void refetchHealth();
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
     const runOpsJob = useMutation({
         mutationFn: async (payload: OpsJobRunRequest) => {
             const response = await opsApi.runJob(payload);
@@ -773,6 +918,17 @@ export default function OpsPage() {
             overdue: remindersData?.counts?.overdue_15m ?? 0,
         };
     }, [remindersData]);
+
+    const knowledgeActivationCounts = useMemo(() => {
+        return {
+            queued: knowledgeActivationData?.counts?.queued ?? 0,
+            running: knowledgeActivationData?.counts?.running ?? 0,
+            ready: knowledgeActivationData?.counts?.ready ?? 0,
+            failed: knowledgeActivationData?.counts?.failed ?? 0,
+            stuck: knowledgeActivationData?.counts?.stuck ?? 0,
+            total: knowledgeActivationData?.counts?.total ?? 0,
+        };
+    }, [knowledgeActivationData]);
 
     const opsCatalogItems = useMemo(
         () => (opsJobsCatalog?.items ?? []).filter((item) => item.job_type !== "incident_state"),
@@ -848,6 +1004,7 @@ export default function OpsPage() {
             }
             void refetchOpsJobs();
             void refetchOutbox();
+            void refetchKnowledgeActivation();
             void refetchIncidents();
         } catch (error) {
             handleError(error);
@@ -990,6 +1147,7 @@ export default function OpsPage() {
                             if (isFullOps) {
                                 void refetchIncidents();
                                 void refetchOutbox();
+                                void refetchKnowledgeActivation();
                                 void refetchReminders();
                                 void refetchOpsJobs();
                             }
@@ -1528,6 +1686,155 @@ export default function OpsPage() {
                         </div>
                     ) : (
                         <div className="text-sm text-muted-foreground">Очередь пуста</div>
+                    )}
+                </div>
+            )}
+
+            {isFullOps && (
+                <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-knowledge-activation-card">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-semibold">Активация знаний</h2>
+                            <p className="text-xs text-muted-foreground">
+                                Видимость по latest activation job на версию. Live переключается только после `ready`.
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                className="text-xs text-primary hover:text-primary/80"
+                                onClick={() => refetchKnowledgeActivation()}
+                            >
+                                Обновить queue
+                            </button>
+                            <StatusBadge status={health?.knowledge_activation?.status || "unknown"} />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                        <MetricCard label="В очереди" value={health?.knowledge_activation?.counts?.queued ?? 0} />
+                        <MetricCard label="В работе" value={health?.knowledge_activation?.counts?.running ?? 0} />
+                        <MetricCard label="С ошибкой 24ч" value={health?.knowledge_activation?.failed_24h ?? 0} />
+                        <MetricCard label="Зависло" value={health?.knowledge_activation?.counts?.stuck ?? 0} />
+                        <MetricCard
+                            label="Старейшая очередь"
+                            value={formatDurationSeconds(health?.knowledge_activation?.oldest_queued_age_seconds)}
+                            subtext={`stale worker: ${health?.knowledge_activation?.stale_running ?? 0}`}
+                        />
+                    </div>
+                    <div className="mb-4 flex flex-wrap items-center gap-2">
+                        {([
+                            { value: "failed", label: "С ошибкой", count: knowledgeActivationCounts.failed },
+                            { value: "stuck", label: "Зависло", count: knowledgeActivationCounts.stuck },
+                            { value: "queued", label: "В очереди", count: knowledgeActivationCounts.queued },
+                            { value: "running", label: "В работе", count: knowledgeActivationCounts.running },
+                            { value: "all", label: "Все", count: knowledgeActivationCounts.total },
+                        ] as const).map((item) => (
+                            <button
+                                key={item.value}
+                                type="button"
+                                onClick={() => setKnowledgeActivationStatus(item.value)}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                                    knowledgeActivationStatus === item.value
+                                        ? "border-primary text-primary"
+                                        : "border-border/60 text-muted-foreground hover:text-foreground"
+                                }`}
+                            >
+                                {item.label} · {item.count}
+                            </button>
+                        ))}
+                        {(knowledgeActivationStatus === "failed"
+                            || knowledgeActivationStatus === "stuck"
+                            || knowledgeActivationStatus === "all") && (
+                            <button
+                                type="button"
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={() => knowledgeActivationRetry.mutate(undefined)}
+                                disabled={knowledgeActivationRetry.isPending || !canWriteOps}
+                            >
+                                {knowledgeActivationRetry.isPending ? "Повтор..." : "Повторить failed/stuck"}
+                            </button>
+                        )}
+                        {!canWriteOps && (
+                            <span className="text-xs text-muted-foreground">Ретрай доступен только owner/admin/platform admin</span>
+                        )}
+                    </div>
+                    {knowledgeActivationLoading ? (
+                        <div className="text-sm text-muted-foreground">Загрузка...</div>
+                    ) : knowledgeActivationError ? (
+                        <div className="text-sm text-muted-foreground">Не удалось загрузить activation queue</div>
+                    ) : knowledgeActivationData?.items?.length ? (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="text-xs text-muted-foreground">
+                                    <tr className="border-b border-border/60 text-left">
+                                        <th className="py-2 pr-3">Статус</th>
+                                        <th className="py-2 pr-3">Этап</th>
+                                        <th className="py-2 pr-3">Попытки</th>
+                                        <th className="py-2 pr-3">Версия</th>
+                                        <th className="py-2 pr-3">Ошибка</th>
+                                        <th className="py-2 pr-3">Heartbeat</th>
+                                        <th className="py-2 pr-3 text-right">Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {knowledgeActivationData.items.map((item) => (
+                                        <tr key={item.id} className="border-b border-border/40">
+                                            <td className="py-2 pr-3">
+                                                <span
+                                                    className={`px-2 py-1 rounded text-xs font-medium ${
+                                                        item.state === "failed" || item.state === "stuck"
+                                                            ? "bg-red-100 text-red-800"
+                                                            : item.state === "queued"
+                                                                ? "bg-yellow-100 text-yellow-800"
+                                                                : item.state === "running"
+                                                                    ? "bg-blue-100 text-blue-800"
+                                                                    : "bg-green-100 text-green-800"
+                                                    }`}
+                                                >
+                                                    {item.state_label}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                <div className="text-xs text-foreground">{item.stage_label || "—"}</div>
+                                                <div className="text-xs text-muted-foreground">{item.source || "—"}</div>
+                                            </td>
+                                            <td className="py-2 pr-3">{item.attempt_count}</td>
+                                            <td className="py-2 pr-3">
+                                                <div className="font-mono text-xs text-foreground">{item.version_id.slice(0, 8)}</div>
+                                                <div className="font-mono text-xs text-muted-foreground">{item.branch_id.slice(0, 8)}</div>
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                <div className="text-xs text-destructive">{item.last_error || "—"}</div>
+                                                {item.error_code && (
+                                                    <div className="font-mono text-[11px] text-muted-foreground">{item.error_code}</div>
+                                                )}
+                                            </td>
+                                            <td className="py-2 pr-3 text-xs text-muted-foreground">
+                                                {item.heartbeat_at
+                                                    ? new Date(item.heartbeat_at).toLocaleString("ru-RU")
+                                                    : item.queued_at
+                                                        ? new Date(item.queued_at).toLocaleString("ru-RU")
+                                                        : "—"}
+                                            </td>
+                                            <td className="py-2 pr-3 text-right">
+                                                {(item.state === "failed" || item.state === "stuck") && (
+                                                    <button
+                                                        type="button"
+                                                        className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+                                                        onClick={() => knowledgeActivationRetry.mutate([item.id])}
+                                                        disabled={knowledgeActivationRetry.isPending || !canWriteOps}
+                                                    >
+                                                        Повторить
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-sm text-muted-foreground">Activation queue пуста</div>
                     )}
                 </div>
             )}

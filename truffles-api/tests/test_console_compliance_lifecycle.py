@@ -85,6 +85,34 @@ def _artifact_item(*, run_id, client_id, branch_id=None):
     )
 
 
+def test_resolve_policy_registry_scope_ignores_irrelevant_branch_for_client_scope():
+    context = _mock_context(role="platform_admin")
+
+    normalized_scope, resolved_branch_id = console_router._resolve_policy_registry_scope(
+        Mock(),
+        context=context,
+        scope="client",
+        branch_id=uuid4(),
+    )
+
+    assert normalized_scope == "client"
+    assert resolved_branch_id is None
+
+
+def test_resolve_sla_profile_scope_ignores_irrelevant_branch_for_domain_scope():
+    context = _mock_context(role="platform_admin")
+
+    resolved = console_router._resolve_sla_profile_scope(
+        Mock(),
+        context=context,
+        scope="domain",
+        domain_key="beauty",
+        branch_id=uuid4(),
+    )
+
+    assert resolved == ("domain", None, "beauty", None, None)
+
+
 @pytest.mark.asyncio
 async def test_run_compliance_lifecycle_requires_platform_admin(monkeypatch):
     context = _mock_context(role="owner")

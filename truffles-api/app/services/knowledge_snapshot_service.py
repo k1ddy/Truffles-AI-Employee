@@ -10,7 +10,10 @@ from uuid import UUID, uuid4
 
 from app.models import Branch, KnowledgeVersion
 from app.schemas.outbox_payload import TenantContext
-from app.services.knowledge_registry_service import build_pack_index_meta, get_current_published
+from app.services.knowledge_registry_service import (
+    build_pack_index_meta,
+    get_active_knowledge_version,
+)
 from app.services.pack_compiler_service import (
     build_compiled_pack_meta,
     extract_compiled_artifacts,
@@ -126,7 +129,7 @@ def build_knowledge_snapshot(
             .first()
         )
     else:
-        version = get_current_published(db, branch_id=branch_id)
+        version = get_active_knowledge_version(db, branch_id=branch_id)
 
     if not version:
         return None, "version_not_found"
