@@ -331,11 +331,17 @@ class TestPolicyCoreTimeoutRetry:
             result = route_llm_policy_core("Кто делает маникюр?")
 
         assert result["ok"] is True
+        assert "semantic_frame" not in result
+        assert result["payload"]["schema_version"] == "semantic_decision.v1"
         assert result["payload"]["grounding_requirements"]["referents"]["service"] == {
             "value": "маникюр",
             "entity_id": "svc:manicure",
             "entity_type": "service",
             "source_ref": "message",
+        }
+        assert result["binding"] == {
+            "tool_action": "catalog.service_query",
+            "tool_args": {"service_query": "маникюр"},
         }
         assert "tool_args" not in result["payload"]
 

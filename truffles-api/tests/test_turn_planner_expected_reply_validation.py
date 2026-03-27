@@ -1,4 +1,5 @@
 from app.core.turn_planner import TurnPlanner
+from tests import build_test_semantic_decision_payload
 
 
 def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypatch):
@@ -12,12 +13,18 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
         "app.services.intent_service.route_llm_policy_core",
         lambda *args, **kwargs: {
             "policy_input": {"message": "Алина", "task": "llm_policy_core"},
-            "payload": {
-                "action": "fact",
-                "intent": "other",
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "action": "fact",
+                    "intent": "other",
+                    "tool_action": "calendar.book_slot",
+                    "slots": {},
+                }
+            ),
+            "binding": {
                 "tool_action": "calendar.book_slot",
-                "slots": {},
-            }
+                "tool_args": {},
+            },
         },
     )
 
@@ -41,6 +48,85 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
     assert decision.meta["policy_core_trace"]["schema_verdict"] == "ok"
     assert decision.meta["policy_core_trace"]["projection_verdict"] == "ok"
     assert decision.meta["policy_core_trace"]["input"]["message"] == "Алина"
+
+
+def test_plan_degrades_when_policy_core_success_is_missing_binding(monkeypatch):
+    planner = TurnPlanner()
+
+    monkeypatch.setattr(
+        "app.services.consult_pack_service.load_consult_playbook",
+        lambda client_slug: ({}, None),
+    )
+    monkeypatch.setattr(
+        "app.services.intent_service.route_llm_policy_core",
+        lambda *args, **kwargs: {
+            "policy_input": {"message": "Алина", "task": "llm_policy_core"},
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "action": "fact",
+                    "intent": "other",
+                    "tool_action": "calendar.book_slot",
+                    "slots": {},
+                }
+            ),
+        },
+    )
+
+    decision = planner.plan(
+        message_text="Алина",
+        client_slug="demo_salon",
+        booking_state=None,
+    )
+
+    assert decision.action == "handoff"
+    assert decision.intent == "planner_degrade"
+    assert decision.meta["reason_code"] == "planner:invalid_projection"
+    assert decision.meta["earliest_failed_stage"] == "policy_projection"
+    assert decision.meta["root_reason_code"] == "policy_projection:binding_tool_action_missing"
+    assert decision.meta["policy_core_trace"]["projection_verdict"] == "binding_tool_action_missing"
+
+
+def test_plan_degrades_when_policy_core_success_uses_legacy_policy_payload(monkeypatch):
+    planner = TurnPlanner()
+
+    monkeypatch.setattr(
+        "app.services.consult_pack_service.load_consult_playbook",
+        lambda client_slug: ({}, None),
+    )
+    monkeypatch.setattr(
+        "app.services.intent_service.route_llm_policy_core",
+        lambda *args, **kwargs: {
+            "policy_input": {"message": "Алина", "task": "llm_policy_core"},
+            "payload": {
+                "action": "fact",
+                "intent": "other",
+                "tool_action": "calendar.book_slot",
+                "slots": {},
+            },
+            "binding": {
+                "tool_action": "calendar.book_slot",
+                "tool_args": {},
+            },
+        },
+    )
+
+    decision = planner.plan(
+        message_text="Алина",
+        client_slug="demo_salon",
+        booking_state={
+            "active": True,
+            "service": "маникюр",
+            "datetime": "2026-03-25T15:00:00Z",
+            "last_question": "name",
+        },
+    )
+
+    assert decision.action == "handoff"
+    assert decision.intent == "planner_degrade"
+    assert decision.meta["reason_code"] == "planner:invalid_projection"
+    assert decision.meta["earliest_failed_stage"] == "policy_projection"
+    assert decision.meta["root_reason_code"] == "policy_projection:semantic_decision_required"
+    assert decision.meta["policy_core_trace"]["projection_verdict"] == "semantic_decision_required"
 
 
 
@@ -136,11 +222,6 @@ def test_plan_records_policy_projection_failure_bundle(monkeypatch):
             "elapsed_ms": 91.2,
             "raw": '{"intent":"booking"}',
             "policy_input": {"message": "Можно завтра?", "task": "llm_policy_core"},
-            "semantic_frame": {
-                "intent": "booking",
-                "action": "collect",
-                "tool_action_hint": "calendar.list_slots",
-            },
             "projection_error": "collect_tool_action_hint_conflict",
             "projection_trace": {
                 "status": "error",
@@ -192,21 +273,26 @@ def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monk
     def _route_llm_policy_core(message_text: str, **kwargs):
         policy_calls.append(message_text)
         return {
-            "payload": {
-                "action": "collect",
-                "intent": "booking",
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "action": "collect",
+                    "intent": "booking",
+                    "tool_action": "collect",
+                    "slots": {"datetime": "завтра 15:00"},
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                    "goal": "booking",
+                    "reason": "llm_policy_core_slot_constraint",
+                    "question_contract": True,
+                    "pending_question_act": "slot_constraint",
+                    "pending_question_target": "time",
+                    "active_question_relation": "slot_constraint",
+                }
+            ),
+            "binding": {
                 "tool_action": "collect",
-                "tool_args": {"candidate_datetime": "завтра 15:00"},
-                "slots": {"datetime": "завтра 15:00"},
-                "next_question": "datetime",
-                "open_questions": ["datetime"],
-                "goal": "booking",
-                "reason": "llm_policy_core_slot_constraint",
-                "question_contract": True,
-                "pending_question_act": "slot_constraint",
-                "pending_question_target": "time",
-                "active_question_relation": "slot_constraint",
-            }
+                "tool_args": {},
+            },
         }
 
     monkeypatch.setattr(
@@ -238,16 +324,22 @@ def test_plan_delegates_context_assembly_to_policy_core_route(monkeypatch):
         captured_kwargs["message_text"] = message_text
         captured_kwargs.update(kwargs)
         return {
-            "payload": {
-                "action": "collect",
-                "intent": "booking",
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "action": "collect",
+                    "intent": "booking",
+                    "tool_action": "collect",
+                    "slots": {"service": "Маникюр"},
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                    "goal": "booking",
+                    "reason": "llm_policy_core_collect",
+                }
+            ),
+            "binding": {
                 "tool_action": "collect",
-                "slots": {"service": "Маникюр"},
-                "next_question": "datetime",
-                "open_questions": ["datetime"],
-                "goal": "booking",
-                "reason": "llm_policy_core_collect",
-            }
+                "tool_args": {},
+            },
         }
 
     monkeypatch.setattr(

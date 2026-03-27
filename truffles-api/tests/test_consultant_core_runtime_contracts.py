@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-from jsonschema import Draft202012Validator, FormatChecker, RefResolver
+import pytest
+from jsonschema import Draft202012Validator, FormatChecker, RefResolver, ValidationError
 
 from app.core import (
     BlockBoundaryRequest,
@@ -30,7 +31,7 @@ from app.services.policy_validation_boundary_service import (
     PolicyValidationBoundaryRuntimeInput,
     handle_policy_validation_boundary,
 )
-from tests import build_test_policy_override_decision
+from tests import build_test_policy_override_decision, build_test_semantic_decision_payload
 
 
 def _repo_root() -> Path:
@@ -612,21 +613,24 @@ def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() 
     planner = TurnPlanner()
 
     decision = planner._build_policy_core_decision(
-        {
-            "intent": "duration",
-            "action": "fact",
-            "tool_action": "catalog.service_query",
-            "reason": "collect:name",
-            "subject_kind": "service",
-            "capability": "duration",
-            "resolution_mode": "policy_fact",
-            "expected_reply_type": "name",
-            "next_question": "name",
-            "open_questions": ["name"],
-            "pending_question_act": "ask_about_requested_slot",
-            "pending_question_target": "time",
-            "active_question_relation": "generic_info_interrupt",
-        }
+        build_test_semantic_decision_payload(
+            {
+                "intent": "duration",
+                "action": "fact",
+                "tool_action": "catalog.service_query",
+                "reason": "collect:name",
+                "subject_kind": "service",
+                "capability": "duration",
+                "resolution_mode": "policy_fact",
+                "expected_reply_type": "name",
+                "next_question": "name",
+                "open_questions": ["name"],
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "generic_info_interrupt",
+            }
+        ),
+        binding_payload={"tool_action": "catalog.service_query", "tool_args": {}},
     )
 
     pending_question = planner.canonical_pending_question_contract(decision)
@@ -642,6 +646,21 @@ def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() 
     assert pending_question.active_question_relation == "generic_info_interrupt"
     assert pending_question.next_question == "name"
     assert pending_question.open_questions == ["name"]
+
+
+def test_turn_planner_rejects_legacy_policy_shape_payload_for_policy_core_decision() -> None:
+    planner = TurnPlanner()
+
+    with pytest.raises(ValueError, match="semantic_decision_required"):
+        planner._build_policy_core_decision(
+            {
+                "intent": "duration",
+                "action": "fact",
+                "tool_action": "catalog.service_query",
+                "expected_reply_type": "name",
+            },
+            binding_payload={"tool_action": "catalog.service_query", "tool_args": {}},
+        )
 
 
 def test_turn_planner_detects_owner_adjacent_shadow_carrier_mutation() -> None:
@@ -773,6 +792,47 @@ def test_turn_planner_builds_shadow_only_owner_adjacent_carriers_for_semantic_de
     assert canonical_frame.subject["kind"] == "service"
     assert canonical_frame.continuation["next_question"] == "name"
     assert canonical_contract["capability"] == "bookability"
+
+
+def test_policy_decision_schema_rejects_owner_backed_populated_shadow_carriers() -> None:
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "policy_collect",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    decision.pending_question_contract = PendingQuestionContract(
+        expected_reply_type="time",
+        next_question="datetime",
+        open_questions=["datetime"],
+    )
+    decision.meta["semantic_contract"] = {
+        "contract_version": "semantic_contract.v1",
+        "capability": "bookability",
+    }
+
+    with pytest.raises(ValidationError):
+        _load_schema("contracts/runtime/policy_decision.v1.jsonschema").validate(
+            decision.model_dump(mode="json")
+        )
 
 
 def test_boundary_validator_builds_typed_block_override() -> None:

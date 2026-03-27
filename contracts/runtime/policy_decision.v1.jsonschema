@@ -26,7 +26,11 @@
     },
     "outcome": {
       "type": "string",
-      "enum": ["FACT", "COLLECT", "HANDOFF"]
+      "enum": [
+        "FACT",
+        "COLLECT",
+        "HANDOFF"
+      ]
     },
     "action": {
       "type": "string",
@@ -111,13 +115,20 @@
   },
   "$defs": {
     "nullableToken": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "minLength": 1
     },
     "interaction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["owner", "target", "relation"],
+      "required": [
+        "owner",
+        "target",
+        "relation"
+      ],
       "properties": {
         "owner": {
           "type": "string",
@@ -229,6 +240,126 @@
           "$ref": "#/$defs/nullableToken"
         }
       }
+    },
+    "shadowSemanticFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "subject",
+        "referents",
+        "constraints",
+        "preferences",
+        "continuation",
+        "capability_selection",
+        "needs_human",
+        "user_goal",
+        "requested_effect",
+        "reason"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "semantic_frame.v2"
+        },
+        "user_goal": {
+          "type": "null"
+        },
+        "requested_effect": {
+          "type": "null"
+        },
+        "subject": {
+          "const": {}
+        },
+        "referents": {
+          "const": {}
+        },
+        "constraints": {
+          "const": {}
+        },
+        "preferences": {
+          "const": {}
+        },
+        "continuation": {
+          "const": {}
+        },
+        "capability_selection": {
+          "const": {}
+        },
+        "needs_human": {
+          "const": false
+        },
+        "reason": {
+          "type": "null"
+        }
+      }
+    },
+    "shadowPendingQuestionContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_reply_type",
+        "reason",
+        "pending_question_act",
+        "pending_question_target",
+        "active_question_relation",
+        "next_question",
+        "open_questions"
+      ],
+      "properties": {
+        "expected_reply_type": {
+          "type": "null"
+        },
+        "reason": {
+          "type": "null"
+        },
+        "pending_question_act": {
+          "type": "null"
+        },
+        "pending_question_target": {
+          "type": "null"
+        },
+        "active_question_relation": {
+          "type": "null"
+        },
+        "next_question": {
+          "type": "null"
+        },
+        "open_questions": {
+          "const": []
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "semantic_decision"
+        ],
+        "properties": {
+          "semantic_decision": {
+            "type": "object"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "semantic_frame": {
+            "$ref": "#/$defs/shadowSemanticFrame"
+          },
+          "pending_question_contract": {
+            "$ref": "#/$defs/shadowPendingQuestionContract"
+          },
+          "meta": {
+            "not": {
+              "required": [
+                "semantic_contract"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
 }

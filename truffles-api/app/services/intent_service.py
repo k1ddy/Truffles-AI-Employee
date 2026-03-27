@@ -3119,7 +3119,6 @@ def route_llm_policy_core(
     for container_field in ("pack_refs", "slots", "open_questions", "risk_signals", "entity_refs", "referents"):
         if not semantic_frame.get(container_field):
             semantic_frame.pop(container_field, None)
-    result["semantic_frame"] = deepcopy(semantic_frame)
     semantic_decision = SemanticDecisionV1.from_policy_core_payload(semantic_frame)
     semantic_decision_payload = semantic_decision.model_dump(mode="python", exclude_none=True)
 

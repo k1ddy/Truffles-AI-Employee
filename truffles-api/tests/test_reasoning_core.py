@@ -14,6 +14,7 @@ from app.routers.webhook import dedup as dedup_module
 from app.routers.webhook import trace as trace_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
 from app.services import reasoning_core
+from tests import build_test_semantic_decision_payload
 
 
 def test_reasoning_core_stage_snapshot_matches_trace() -> None:
@@ -37,28 +38,30 @@ def test_reasoning_core_pending_booking_reactivation_candidate_restores_dialog_s
         policy_core_calls.append(dict(kwargs))
         return {
             "ok": True,
-            "payload": {
-                "intent": "booking",
-                "action": "collect",
-                "tool_action": "collect",
-                "tool_args": {},
-                "goal": "booking",
-                "reason": "booking_prompt",
-                "next_question": "service",
-                "open_questions": ["service"],
-                "slots": {"service": "", "datetime": "20:00", "name": ""},
-                "entity_refs": [],
-                "capability": "bookability",
-                "subject_kind": "booking",
-                "temporal_scope": "general",
-                "resolution_mode": "clarify_missing_service",
-                "pending_question_act": None,
-                "pending_question_target": None,
-                "active_question_relation": None,
-                "needs_manager": False,
-                "pack_refs": [],
-                "risk_signals": [],
-            },
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "intent": "booking",
+                    "action": "collect",
+                    "tool_action": "collect",
+                    "goal": "booking",
+                    "reason": "booking_prompt",
+                    "next_question": "service",
+                    "open_questions": ["service"],
+                    "slots": {"service": "", "datetime": "20:00", "name": ""},
+                    "entity_refs": [],
+                    "capability": "bookability",
+                    "subject_kind": "booking",
+                    "temporal_scope": "general",
+                    "resolution_mode": "clarify_missing_service",
+                    "pending_question_act": None,
+                    "pending_question_target": None,
+                    "active_question_relation": None,
+                    "needs_manager": False,
+                    "pack_refs": [],
+                    "risk_signals": [],
+                }
+            ),
+            "binding": {"tool_action": "collect", "tool_args": {}},
         }
 
     candidate = resolve_pending_booking_reactivation_candidate(
@@ -208,28 +211,30 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
         policy_core_calls.append(dict(kwargs))
         return {
             "ok": True,
-            "payload": {
-                "intent": "booking",
-                "action": "collect",
-                "tool_action": "collect",
-                "tool_args": {},
-                "goal": "booking",
-                "reason": "booking_prompt",
-                "next_question": "service",
-                "open_questions": ["service"],
-                "slots": {"service": "", "datetime": "20:00", "name": ""},
-                "entity_refs": [],
-                "capability": "bookability",
-                "subject_kind": "booking",
-                "temporal_scope": "general",
-                "resolution_mode": "clarify_missing_service",
-                "pending_question_act": None,
-                "pending_question_target": None,
-                "active_question_relation": None,
-                "needs_manager": False,
-                "pack_refs": [],
-                "risk_signals": [],
-            },
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "intent": "booking",
+                    "action": "collect",
+                    "tool_action": "collect",
+                    "goal": "booking",
+                    "reason": "booking_prompt",
+                    "next_question": "service",
+                    "open_questions": ["service"],
+                    "slots": {"service": "", "datetime": "20:00", "name": ""},
+                    "entity_refs": [],
+                    "capability": "bookability",
+                    "subject_kind": "booking",
+                    "temporal_scope": "general",
+                    "resolution_mode": "clarify_missing_service",
+                    "pending_question_act": None,
+                    "pending_question_target": None,
+                    "active_question_relation": None,
+                    "needs_manager": False,
+                    "pack_refs": [],
+                    "risk_signals": [],
+                }
+            ),
+            "binding": {"tool_action": "collect", "tool_args": {}},
         }
 
     candidate = resolve_pending_booking_reactivation_candidate(

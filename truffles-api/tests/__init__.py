@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core import InteractionContract, PolicyDecision, TurnPlanner
+from app.core import InteractionContract, PolicyDecision, SemanticDecisionV1, TurnPlanner
 
 
 def build_test_policy_override_decision(
@@ -81,3 +81,8 @@ def build_test_policy_override_decision(
         pending_question_contract=pending_question,
         meta=meta,
     )
+
+
+def build_test_semantic_decision_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(payload)
+    return semantic_decision.model_dump(mode="python", exclude_none=True)

@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable
 
+from pydantic import ValidationError
+
 from app.core.dialog_state_service import DialogStateService
+from app.core.semantic_decision import SemanticDecisionV1
 from app.routers.webhook import decision as decision_router
 from app.schemas.webhook import WebhookRequest
 from app.services.owner_resolver import (
@@ -41,6 +44,26 @@ def _build_booking_prompt_slot_values(
         if cleaned:
             normalized[slot_key] = cleaned
     return normalized
+
+
+def _canonical_policy_core_success_payload(
+    policy_result: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    if not isinstance(policy_result, dict):
+        return None, {}
+    raw_payload = policy_result.get("payload")
+    if not isinstance(raw_payload, dict):
+        return None, {}
+    try:
+        semantic_decision = SemanticDecisionV1.model_validate(raw_payload)
+    except ValidationError:
+        return None, {}
+    binding_payload = (
+        dict(policy_result.get("binding"))
+        if isinstance(policy_result.get("binding"), dict)
+        else {}
+    )
+    return semantic_decision.as_policy_payload(), binding_payload
 
 
 def resolve_initial_booking_timeout_collect_candidate(
@@ -326,18 +349,34 @@ def resolve_llm_booking_prompt_candidate(
         **policy_core_kwargs,
     )
     policy_payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
+    canonical_policy_payload, canonical_binding = _canonical_policy_core_success_payload(
+        policy_result if isinstance(policy_result, dict) else None
+    )
     policy_error = _normalize_token(
         policy_result.get("error") if isinstance(policy_result, dict) else None
     )
-    def _build_policy_collect_candidate() -> dict[str, object] | None:
-        if not isinstance(policy_payload, dict):
+    def _build_policy_collect_candidate(
+        active_policy_payload: dict[str, Any] | None,
+        *,
+        binding_payload: dict[str, Any] | None = None,
+    ) -> dict[str, object] | None:
+        if not isinstance(active_policy_payload, dict):
             return None
 
-        policy_action = _normalize_token(policy_payload.get("action"))
-        policy_tool_action = _normalize_token(policy_payload.get("tool_action"))
-        policy_intent = _normalize_token(policy_payload.get("intent"))
-        policy_goal = _normalize_token(policy_payload.get("goal"))
-        policy_tool_args = policy_payload.get("tool_args")
+        binding_payload = dict(binding_payload) if isinstance(binding_payload, dict) else {}
+        policy_action = _normalize_token(active_policy_payload.get("action"))
+        policy_tool_action = (
+            _normalize_token(binding_payload.get("tool_action"))
+            or _normalize_token(active_policy_payload.get("tool_action"))
+            or _normalize_token(active_policy_payload.get("tool_action_hint"))
+        )
+        policy_intent = _normalize_token(active_policy_payload.get("intent"))
+        policy_goal = _normalize_token(active_policy_payload.get("goal"))
+        policy_tool_args = (
+            binding_payload.get("tool_args")
+            if "tool_args" in binding_payload
+            else active_policy_payload.get("tool_args")
+        )
         normalized_tool_args = dict(policy_tool_args) if isinstance(policy_tool_args, dict) else {}
         raw_appointment_id = normalized_tool_args.get("appointment_id")
         normalized_appointment_id = (
@@ -361,15 +400,17 @@ def resolve_llm_booking_prompt_candidate(
         if not (is_collect_candidate or is_verification_recovery_candidate):
             return None
 
-        if policy_payload.get("needs_manager") is True:
+        if active_policy_payload.get("needs_manager") is True:
             return None
-        if decision_router._normalize_plan_refs(policy_payload.get("pack_refs")):
+        if decision_router._normalize_plan_refs(active_policy_payload.get("pack_refs")):
             return None
-        risk_signals = policy_payload.get("risk_signals")
+        risk_signals = active_policy_payload.get("risk_signals")
         if decision_router._normalize_plan_refs(risk_signals):
             return None
 
-        normalized_slot_state = decision_router._normalize_plan_slot_state(policy_payload.get("slots"))
+        normalized_slot_state = decision_router._normalize_plan_slot_state(
+            active_policy_payload.get("slots")
+        )
         validated_slot_values: dict[str, str] = {}
         for slot_key, value in normalized_slot_state.items():
             validated_value = decision_router._validate_plan_slot_value(
@@ -380,10 +421,12 @@ def resolve_llm_booking_prompt_candidate(
             if validated_value:
                 validated_slot_values[slot_key] = validated_value
 
-        collect_slot = _normalize_token(policy_payload.get("next_question"))
+        collect_slot = _normalize_token(active_policy_payload.get("next_question"))
         open_questions = [
             item
-            for item in decision_router._normalize_plan_questions(policy_payload.get("open_questions"))
+            for item in decision_router._normalize_plan_questions(
+                active_policy_payload.get("open_questions")
+            )
             if item in decision_router.BOOKING_SLOT_ORDER
         ]
         if collect_slot not in decision_router.BOOKING_SLOT_ORDER:
@@ -398,7 +441,11 @@ def resolve_llm_booking_prompt_candidate(
         if set(open_questions) != {collect_slot}:
             return None
 
-        raw_tool_args = policy_payload.get("tool_args")
+        raw_tool_args = (
+            binding_payload.get("tool_args")
+            if "tool_args" in binding_payload
+            else active_policy_payload.get("tool_args")
+        )
         if raw_tool_args is not None and not isinstance(raw_tool_args, dict):
             return None
         policy_tool_args = dict(raw_tool_args) if isinstance(raw_tool_args, dict) else {}
@@ -408,19 +455,19 @@ def resolve_llm_booking_prompt_candidate(
         }
         if unsupported_tool_args:
             return None
-        raw_entity_refs = policy_payload.get("entity_refs")
+        raw_entity_refs = active_policy_payload.get("entity_refs")
         if raw_entity_refs is not None and not isinstance(raw_entity_refs, (list, tuple)):
             return None
         semantic_view = build_semantic_contract_view(
             tool_args=policy_tool_args,
             entity_refs=list(raw_entity_refs or ()),
-            subject_kind=policy_payload.get("subject_kind"),
-            capability=policy_payload.get("capability"),
-            temporal_scope=policy_payload.get("temporal_scope"),
-            resolution_mode=policy_payload.get("resolution_mode"),
-            pending_question_act=policy_payload.get("pending_question_act"),
-            pending_question_target=policy_payload.get("pending_question_target"),
-            active_question_relation=policy_payload.get("active_question_relation"),
+            subject_kind=active_policy_payload.get("subject_kind"),
+            capability=active_policy_payload.get("capability"),
+            temporal_scope=active_policy_payload.get("temporal_scope"),
+            resolution_mode=active_policy_payload.get("resolution_mode"),
+            pending_question_act=active_policy_payload.get("pending_question_act"),
+            pending_question_target=active_policy_payload.get("pending_question_target"),
+            active_question_relation=active_policy_payload.get("active_question_relation"),
         )
         specialist_name, specialist_id = extract_specialist_preference(
             tool_args=policy_tool_args,
@@ -503,7 +550,7 @@ def resolve_llm_booking_prompt_candidate(
         recovered_booking_state, _ = recovery
         return {
             "collect_slot": collect_slot,
-            "reason": _normalize_token(policy_payload.get("reason")) or "booking_prompt",
+            "reason": _normalize_token(active_policy_payload.get("reason")) or "booking_prompt",
             "slot_values": validated_slot_values,
             "merged_slot_values": _build_booking_prompt_slot_values(recovered_booking_state),
             "specialist_name": specialist_name,
@@ -530,7 +577,7 @@ def resolve_llm_booking_prompt_candidate(
                 )
                 return timeout_recovery_candidate
         if allow_timeout_recovery and policy_error == "invalid_schema":
-            invalid_schema_candidate = _build_policy_collect_candidate()
+            invalid_schema_candidate = _build_policy_collect_candidate(policy_payload)
             if invalid_schema_candidate is not None:
                 invalid_schema_candidate["policy_core_mode"] = "degraded_fallback"
                 invalid_schema_candidate["policy_core_degrade_reason"] = (
@@ -542,7 +589,12 @@ def resolve_llm_booking_prompt_candidate(
                 return invalid_schema_candidate
         return None
 
-    return _build_policy_collect_candidate()
+    if canonical_policy_payload is None or not canonical_binding:
+        return None
+    return _build_policy_collect_candidate(
+        canonical_policy_payload,
+        binding_payload=canonical_binding,
+    )
 
 
 def resolve_pending_booking_reactivation_candidate(

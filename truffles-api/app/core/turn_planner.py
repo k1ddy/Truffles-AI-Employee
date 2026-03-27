@@ -179,17 +179,30 @@ class TurnPlanner:
             binding_payload = (
                 dict(policy_result.get("binding"))
                 if isinstance(policy_result.get("binding"), dict)
-                else {}
+                else None
             )
-            if not binding_payload:
-                binding_payload = {
-                    "tool_action": raw_payload.get("tool_action"),
-                    "tool_args": raw_payload.get("tool_args"),
-                }
-            decision = self._build_policy_core_decision(
-                semantic_decision=self._coerce_semantic_decision(raw_payload),
-                binding_payload=binding_payload,
-            )
+            try:
+                decision = self._build_policy_core_decision(
+                    semantic_decision=self._coerce_semantic_decision(raw_payload),
+                    binding_payload=binding_payload,
+                )
+            except ValueError as exc:
+                projection_error = self._normalize_token(str(exc)) or "invalid_projection"
+                decision = self.build_controlled_degrade(
+                    reason_code="planner:invalid_projection",
+                    action="handoff",
+                    intent="planner_degrade",
+                    tool_action="handoff",
+                    interaction_owner="turn_planner_degrade",
+                )
+                decision.meta["earliest_failed_stage"] = "policy_projection"
+                decision.meta["root_reason_code"] = f"policy_projection:{projection_error}"
+                decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
+                    policy_result,
+                    schema_verdict="ok",
+                    projection_verdict=projection_error,
+                )
+                return decision
             decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
                 policy_result,
                 schema_verdict="ok",
@@ -738,18 +751,16 @@ class TurnPlanner:
         binding_payload: dict[str, Any] | None = None,
     ) -> PolicyDecision:
         if payload is not None:
-            legacy_binding = dict(binding_payload) if isinstance(binding_payload, dict) else {
-                "tool_action": payload.get("tool_action"),
-                "tool_args": payload.get("tool_args"),
-            }
             semantic_decision = self._coerce_semantic_decision(payload)
-            binding_payload = legacy_binding
         if not isinstance(semantic_decision, SemanticDecisionV1):
             raise ValueError("semantic_decision_required")
         normalized_binding = dict(binding_payload) if isinstance(binding_payload, dict) else {}
+        binding_tool_action = self._normalize_token(normalized_binding.get("tool_action"))
+        if not binding_tool_action:
+            raise ValueError("binding_tool_action_missing")
         return self.build_from_semantic_decision(
             semantic_decision,
-            binding_tool_action=self._normalize_tool_action(normalized_binding.get("tool_action")),
+            binding_tool_action=self._normalize_tool_action(binding_tool_action),
             binding_tool_args=self._normalize_dict(normalized_binding.get("tool_args")),
             interaction_owner="llm_policy_core",
             source="llm_policy_core",
@@ -759,9 +770,9 @@ class TurnPlanner:
         self,
         payload: dict[str, Any],
     ) -> SemanticDecisionV1:
-        if payload.get("schema_version") == "semantic_decision.v1":
-            return SemanticDecisionV1.model_validate(payload)
-        return SemanticDecisionV1.from_policy_core_payload(payload)
+        if payload.get("schema_version") != "semantic_decision.v1":
+            raise ValueError("semantic_decision_required")
+        return SemanticDecisionV1.model_validate(payload)
 
     def _normalized_semantic_payload(
         self,
