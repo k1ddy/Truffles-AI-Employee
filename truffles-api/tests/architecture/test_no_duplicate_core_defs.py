@@ -56,3 +56,25 @@ def test_reasoning_core_has_no_duplicate_top_level_defs() -> None:
     actual = _top_level_duplicate_defs(ROOT / Path("truffles-api/app/services/reasoning_core.py"))
 
     assert actual == {}
+
+
+def test_turn_planner_has_no_general_policy_override_builder() -> None:
+    module = ast.parse((ROOT / Path("truffles-api/app/core/turn_planner.py")).read_text())
+    top_level_names = {
+        node.name
+        for node in module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    turn_planner = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "TurnPlanner"
+    )
+    method_names = {
+        node.name
+        for node in turn_planner.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    assert "build_from_policy_override" not in top_level_names
+    assert "build_from_policy_override" not in method_names

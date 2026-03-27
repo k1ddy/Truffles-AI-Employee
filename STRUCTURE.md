@@ -33,6 +33,7 @@
 | `contracts/consult/consult_controller_output.v1.jsonschema` | Канон контракта consult LLM‑контроллера | Архитектор/Backend |
 | `contracts/runtime/` | Versioned runtime contracts for consultant controlled-demolition target core | Architect/Backend |
 | `contracts/runtime/policy_decision.v1.jsonschema` | Канон typed semantic owner decision (`PolicyDecision`) | Architect/Backend |
+| `contracts/runtime/semantic_decision.v1.jsonschema` | Канон typed hot-path semantic owner artifact (`SemanticDecisionV1`) | Architect/Backend |
 | `contracts/runtime/dialog_state.v1.jsonschema` | Канон writable continuity state (`DialogState`) | Architect/Backend |
 | `contracts/runtime/boundary_override.v1.jsonschema` | Канон explicit deterministic boundary override | Architect/Backend |
 | `contracts/runtime/turn_result.v1.jsonschema` | Канон assembled runtime turn result (`planner -> boundary -> executor -> reply`) | Architect/Backend |
@@ -116,6 +117,7 @@
 | `truffles-api/app/core/booking_prompt_owner.py` | Canonical non-frozen booking-prompt candidate owner for initial booking prompt resolution and timeout-recovery shaping | Backend/Architect |
 | `truffles-api/app/core/intent_routing.py` | Typed lexical intent-routing primitive detector for new-core ingress bridges | Backend/Architect |
 | `truffles-api/app/core/turn_planner.py` | Typed `PolicyDecision` seam for future planner cutover | Backend/Architect |
+| `truffles-api/app/core/semantic_decision.py` | Typed `SemanticDecisionV1` owner artifact and normalization contract for canaried hot-path meaning | Backend/Architect |
 | `truffles-api/app/core/boundary_validator.py` | Typed `BoundaryOverride` seam for deterministic boundary validation | Backend/Architect |
 | `truffles-api/app/core/dialog_state_service.py` | Typed `DialogState` seam for future single continuity writer; now also owns expected-reply/question-contract plus session-memory question-writer, session-memory normalization, canonical referent shaping, session-memory freshness, ancillary context-carrier writer bridges, and carryover manager-writer bridges | Backend/Architect |
 | `truffles-api/app/services/llm_quality_contracts.py` | Shared proof-path expectation/scenario-contract owner extracted from proof-only `ops/diagnose.py` and `scripts/booking_dialog_scenarios.py`, including booking-scenario merge, post-coverage repair, and llm-turn sanitize orchestration | Backend/QA/Architect |
@@ -211,11 +213,70 @@
 | `docs/CONSOLE_AUDIT/pages/insights.md` | Audit page: Insights/Analytics | Frontend/Architect |
 | `docs/CONSOLE_AUDIT/pages/marketing.md` | Audit page: Marketing lifecycle + audience/preflight | Frontend/Architect |
 | `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | UX backlog (bugs/UX debt) по реализованной Console | Frontend/Backend/Architect |
+| `docs/system_forensics/` | Repo-backed forensic memory for consultant-core architecture/state/control-path analysis | Architect/Brain/Hands |
+| `docs/system_forensics/INDEX.md` | Index of hotspot analyses, ledgers, and final synthesis | Architect/Brain/Hands |
+| `docs/system_forensics/WORK_METHOD.md` | Forensic method: FACT/INFERENCE/UNKNOWN discipline and update protocol | Architect/Brain/Hands |
+| `docs/system_forensics/TEMPLATE_FILE_ANALYSIS.md` | Template for per-file forensic hotspot analysis | Architect/Brain/Hands |
+| `docs/system_forensics/files/` | Deep per-file forensic analyses for consultant-core hotspots | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_core_consultant_runtime.md` | First deep hotspot analysis: active runtime orchestration owner | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_core_dialog_state_service.md` | Second deep hotspot analysis: continuity/state megaservice and truth-carrier reconciliation | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_services_intent_service.md` | Third deep hotspot analysis: active owner gateway, context assembly, and legacy semantic helper co-location | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_core_turn_executor.md` | Fourth deep hotspot analysis: downstream execution, boundary artifacts, and post-owner semantic reconstruction | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_core_turn_planner.md` | Fifth deep hotspot analysis: planner decision shaping, owner-input/output adaptation, and typed policy decision carriers | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_core_booking_prompt_owner.md` | Sixth deep hotspot analysis: booking-prompt owner classification and alternate booking recovery lane audit | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_services_reasoning_core.md` | Seventh deep hotspot analysis: reasoning-core compatibility shim, boundary helpers, and delegation residue | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_decision.md` | Eighth deep hotspot analysis: webhook decision megafile, compatibility symbol warehouse, and frozen router residue | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_legacy.md` | Ninth deep hotspot analysis: `_legacy.py` compatibility import bus, frozen namespace fanout, and cyclic adapter residue | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_context_manager.md` | Tenth deep hotspot analysis: context-manager state bridge, canonical-dialog-state reconciliation, and legacy continuity coupling | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_response.md` | Eleventh deep hotspot analysis: response-stage orchestration, fallback subsystem, and user-visible compatibility side effects | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_booking.md` | Twelfth deep hotspot analysis: booking-domain orchestration, prompt/confirmation loops, and booking-side commit/escalation behavior | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_info.md` | Thirteenth deep hotspot analysis: info-domain orchestration, truth-fallback behavior, and info-side carryover/escalation behavior | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_pending.md` | Fourteenth deep hotspot analysis: pending/manager-active continuity transport, handover routing, and Telegram-forwarding behavior | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_policy.md` | Fifteenth deep hotspot analysis: policy helper warehouse, law-gate/policy-pack routing, and policy-side escalation behavior | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_guards.md` | Sixteenth deep hotspot analysis: guard/mute/human-lock/clarify subsystem and guard-side routing residue | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_dedup.md` | Seventeenth deep hotspot analysis: dedup/debounce preflight subsystem and shadowed inbound-owner residue | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_webhook.md` | Eighteenth deep hotspot analysis: unmounted legacy webhook wrapper, stale shadow helper warehouse, and wrapper contract drift | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_main.md` | Nineteenth deep hotspot analysis: main FastAPI composition root and mounted-router evidence | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_init.md` | Twentieth deep hotspot analysis: narrowed webhook-package export contract and remaining public surface | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_message_endpoint.md` | Twenty-first deep hotspot analysis: mixed active-ingress and legacy-wrapper/_legacy contract warehouse | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_webhook_dedup.md` | Twenty-second deep hotspot analysis: dedup package-surface vs extracted-module contract split | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_webhook_response.md` | Twenty-third deep hotspot analysis: response package-surface vs extracted-module contract split | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_webhook_booking.md` | Twenty-fourth deep hotspot analysis: booking package-surface vs extracted-module contract split | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_booking_chaos_dialogs.md` | Twenty-fifth deep hotspot analysis: explicit narrowed-package split guard for legacy handler exports | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_outbox_service.md` | Twenty-sixth deep hotspot analysis: dedicated outbox-worker endpoint and live `_process_outbox_rows` package-export caller chain | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_webhook_outbox.md` | Twenty-seventh deep hotspot analysis: real outbox transport-helper implementation and wrapper/export seam | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_outbox_service_app.md` | Twenty-eighth deep hotspot analysis: dedicated outbox-service contract and package-export pin | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_provider_gateway_integration.md` | Twenty-ninth deep hotspot analysis: direct outbox-helper/provider integration contract coverage | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_outbox_service_app.md` | Thirtieth deep hotspot analysis: dedicated outbox-service FastAPI composition root and deployment surface | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_admin.md` | Thirty-first deep hotspot analysis: mounted admin router and duplicated outbox-entrypoint orchestration | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_admin_legacy_auth.md` | Thirty-second deep hotspot analysis: mounted admin auth coverage and omitted live outbox route | Architect/Brain/Hands |
+| `docs/system_forensics/files/tests_test_outbox_transport_degraded.md` | Thirty-third deep hotspot analysis: direct outbox transport-degradation helper contract | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_workers_outbox.md` | Thirty-fourth deep hotspot analysis: standalone outbox worker loop and live package-seam caller | Architect/Brain/Hands |
+| `docs/system_forensics/files/app_routers_console.md` | Thirty-fifth deep hotspot analysis: mounted console ops-job outbox execute caller | Architect/Brain/Hands |
+| `docs/system_forensics/ledgers/` | Cross-cut ledgers for control paths, semantic ownership, truth carriers, and cutover blockers | Architect/Brain/Hands |
+| `docs/system_forensics/final/` | Final synthesized system analysis built from file analyses and ledgers | Architect/Brain/Hands |
+| `docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md` | Accumulating whole-system synthesis and guide for future exact work | Architect/Brain/Hands |
+| `docs/system_forensics/final/RESEARCH_BRIEF.md` | External research contract for scalable target architecture and migration thinking | Architect/Brain/Hands |
+| `docs/system_forensics/final/RESEARCH_SOURCE_PACK.md` | Prioritized research reading pack across forensic corpus and external framing sources | Architect/Brain/Hands |
+| `docs/system_forensics/final/RESEARCH_OUTPUT_SCHEMA.md` | Required schema for external research deliverables and decision-ready recommendations | Architect/Brain/Hands |
+| `docs/system_forensics/final/EXTERNAL_RESEARCH_PROMPT.md` | Ready-to-send prompt for external architecture research based on the forensic corpus | Architect/Brain/Hands |
+| `docs/system_forensics/final/TARGET_DECISION.md` | Canonical accepted target-architecture decision for consultant-core execution | Architect/Brain/Hands |
+| `docs/system_forensics/final/IMPLEMENTATION_PROGRAM.md` | Ordered finite workstream program derived from forensic and external research | Architect/Brain/Hands |
+| `docs/system_forensics/final/SEMANTIC_DECISION_V1.md` | Contract for the single hot-path semantic owner artifact | Architect/Brain/Hands |
+| `docs/system_forensics/final/BINDING_PLAN_V1.md` | Contract for deterministic binding between semantic decision and execution | Architect/Brain/Hands |
+| `docs/system_forensics/final/TURN_JOURNAL_V1.md` | Contract for append-only canonical turn journal | Architect/Brain/Hands |
+| `docs/system_forensics/final/CONVERSATION_PROJECTION_V1.md` | Contract for the single primary canonical conversation projection | Architect/Brain/Hands |
+| `docs/system_forensics/final/NEXT_AGENT_FULL_PROMPT.md` | Full zero-context execution prompt for the next implementation agent | Architect/Brain/Hands |
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
 | `docs/runbooks/INBOX_CALENDAR_WAVE4_RELEASE.md` | Wave4 release runbook for Inbox/Calendar (`canary -> go/no-go -> rollback`) | Brain/Architect/OPS |
 | `docs/runbooks/INBOX_SEMANTIC_WAVE22_VALIDATION.md` | Wave22 semantic validation runbook for Inbox manager/admin/history/booking matrix | Brain/Architect/QA |
+| `docs/TASK_PACKAGES/TP-2026-03-27-consultant-core-workstream1-semantic-decision-hot-path-a922.md` | Workstream 1 / Family 1 bounded Task Package for `SemanticDecisionV1` hot-path cutover and post-owner mutation guard | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-27-consultant-core-workstream1-state-writer-owner-read-cut-a922.md` | Workstream 1 / Family 2 bounded Task Package for state-writer canonical owner-read cut and execution/existing semantic authority reduction on the canaried path | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-27-consultant-core-workstream1-executor-semantic-output-constriction-a922.md` | Workstream 1 / Family 3 bounded Task Package for narrowing executor canaried output to operational enrichment only | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-27-consultant-core-workstream1-planner-synthetic-authority-cut-a922.md` | Workstream 1 / Family 4 bounded Task Package for removing planner-core general synthetic semantic minting and guarding the canaried runtime path | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-27-consultant-core-workstream1-owner-adjacent-shadow-cut-a922.md` | Workstream 1 / Family 5 bounded Task Package for making canaried owner-adjacent semantic compatibility carriers shadow-only | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-inbox-calendar-ux-reconstruction-closeout-a1.md` | Closeout Task Package for Inbox/Calendar wave4 release discipline (`flag rollback + live lane evidence + runbook`) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-console-e2e-live-auth-hardening-a1.md` | Follow-up Task Package for live no-mocks auth/case inspection hardening after wave4 closeout | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-06-console-e2e-auth-helper-unification-a1.md` | Follow-up Task Package for shared auth helper unification in `login/smoke/inspect_case` Playwright specs | Brain/Architect |

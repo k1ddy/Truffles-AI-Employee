@@ -331,7 +331,7 @@ class TestPolicyCoreTimeoutRetry:
             result = route_llm_policy_core("Кто делает маникюр?")
 
         assert result["ok"] is True
-        assert result["payload"]["referents"]["service"] == {
+        assert result["payload"]["grounding_requirements"]["referents"]["service"] == {
             "value": "маникюр",
             "entity_id": "svc:manicure",
             "entity_type": "service",
@@ -512,7 +512,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
-        assert result["payload"]["tool_args"] == {"service_query": "Маникюр"}
+        assert result["binding"]["tool_args"] == {"service_query": "Маникюр"}
 
     def test_policy_core_route_rejects_collect_tool_action_hint_conflict(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -622,7 +622,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
-        assert result["payload"]["tool_args"] == {"service_query": "маникюр"}
+        assert result["binding"]["tool_args"] == {"service_query": "маникюр"}
 
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1032,10 +1032,10 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["resolution_mode"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "time"
-        assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
+        assert result["payload"]["grounding_requirements"]["resolution_mode"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "ask_about_requested_slot"
 
     def test_policy_core_normalizes_collect_resolution_mode_to_direct(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1058,7 +1058,7 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["resolution_mode"] == "direct"
+        assert result["payload"]["grounding_requirements"]["resolution_mode"] == "direct"
 
     def test_policy_core_drops_relation_token_from_pending_question_act(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1106,9 +1106,9 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert "pending_question_act" not in result["payload"]
-        assert result["payload"]["pending_question_target"] == "specialist"
-        assert result["payload"]["active_question_relation"] == "referent_followup"
-        assert result["payload"]["referents"]["specialist"] == {
+        assert result["payload"]["missing_information"]["pending_question_target"] == "specialist"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "referent_followup"
+        assert result["payload"]["grounding_requirements"]["referents"]["specialist"] == {
             "value": "Айгерим",
             "entity_id": "spec:aigerim",
             "entity_type": "specialist",
@@ -1161,11 +1161,11 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["tool_action"] == "calendar.get_booking"
-        assert result["payload"]["next_question"] == "name"
-        assert result["payload"].get("pending_question_act") is None
-        assert result["payload"].get("pending_question_target") is None
-        assert result["payload"].get("active_question_relation") is None
+        assert result["binding"]["tool_action"] == "calendar.get_booking"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"].get("pending_question_act") is None
+        assert result["payload"]["missing_information"].get("pending_question_target") is None
+        assert result["payload"]["missing_information"].get("active_question_relation") is None
 
     def test_policy_core_rejects_conflicting_service_shadow_against_canonical_referent(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1207,7 +1207,7 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result.get("tool_args_sanitized") is True
-        assert result["payload"]["tool_args"] == {"service_query": "маникюр"}
+        assert result["binding"]["tool_args"] == {"service_query": "маникюр"}
 
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1232,9 +1232,9 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["pending_question_act"] == "slot_compare"
-        assert result["payload"]["pending_question_target"] == "time"
-        assert result["payload"]["active_question_relation"] == "slot_compare"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "slot_compare"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "slot_compare"
 
     def test_policy_core_preserves_specialist_availability_followup_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1262,13 +1262,13 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["subject_kind"] == "specialist"
-        assert result["payload"]["capability"] == "live_availability"
-        assert result["payload"]["temporal_scope"] == "date_range"
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "specialist"
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "specialist"
+        assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["temporal_scope"] == "date_range"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "specialist"
         assert (
-            result["payload"]["active_question_relation"]
+            result["payload"]["missing_information"]["active_question_relation"]
             == "specialist_availability_followup"
         )
 
@@ -1300,15 +1300,15 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["subject_kind"] == "specialist"
-        assert result["payload"]["capability"] == "live_availability"
-        assert result["payload"]["temporal_scope"] == "specific_time"
-        assert result["payload"]["next_question"] == "name"
-        assert result["payload"]["open_questions"] == ["name"]
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "specialist"
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "specialist"
+        assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["temporal_scope"] == "specific_time"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"]["open_questions"] == ["name"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "specialist"
         assert (
-            result["payload"]["active_question_relation"]
+            result["payload"]["missing_information"]["active_question_relation"]
             == "specialist_availability_followup"
         )
 
@@ -1342,14 +1342,14 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["subject_kind"] == "booking"
-        assert result["payload"]["capability"] == "live_availability"
-        assert result["payload"]["temporal_scope"] == "specific_time"
-        assert result["payload"]["next_question"] == "name"
-        assert result["payload"]["open_questions"] == ["name"]
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "time"
-        assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "booking"
+        assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["temporal_scope"] == "specific_time"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"]["open_questions"] == ["name"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "ask_about_requested_slot"
 
     def test_policy_core_prompt_free_slots_question_keeps_pending_time_contract(self):
         prompt = _load_policy_core_prompt()

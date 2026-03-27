@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.core import DialogStateService, TurnPlanner
+from app.core import DialogStateService, SemanticDecisionV1, TurnPlanner
 from app.routers.webhook.session_memory import (
     _reset_session_memory,
     _sync_session_memory_interaction_state,
 )
+from tests import build_test_policy_override_decision
 
 
 def test_dialog_state_service_projects_session_memory_interaction_state() -> None:
@@ -362,7 +363,7 @@ def test_expected_reply_context_sync_result_carries_canonical_pending_question_c
 
 
 def test_dialog_state_service_builds_collect_owner_state() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "master_query",
             "action": "collect",
@@ -402,7 +403,7 @@ def test_dialog_state_service_builds_collect_owner_state() -> None:
 
 
 def test_dialog_state_service_builds_booking_prompt_owner_state() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2970,7 +2971,7 @@ def test_dialog_state_service_merges_fact_interrupt_slots_into_active_booking() 
             "current_goal": "booking",
         }
     }
-    decision = planner.build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "action": "fact",
             "intent": "duration",
@@ -3069,7 +3070,7 @@ def test_dialog_state_service_preserves_active_booking_contract_across_fact_inte
             "current_goal": "booking",
         }
     }
-    decision = planner.build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "action": "fact",
             "intent": "duration",
@@ -3113,9 +3114,276 @@ def test_dialog_state_service_preserves_active_booking_contract_across_fact_inte
     assert booking_payload["service"] == "Маникюр"
 
 
+def test_dialog_state_service_semantic_decision_state_write_ignores_conflicting_execution_semantics() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 27, 12, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "pending_question_contract": {
+                    "expected_reply_type": "name",
+                    "reason": "stale_reason",
+                    "pending_question_target": "customer",
+                    "active_question_relation": "stale_relation",
+                    "next_question": "name",
+                    "open_questions": ["name"],
+                },
+                "interaction_state": {
+                    "interaction_owner": "stale_owner",
+                },
+                "meta": {
+                    "writer": "dialog_state_service",
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "subject_kind": "service",
+                        "capability": "pricing",
+                        "temporal_scope": "today",
+                        "resolution_mode": "stale_resolution",
+                    },
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+        }
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "booking_manage",
+            "tool_action": "calendar.book_slot",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "resolution_mode": "ask_about_requested_slot",
+            "temporal_scope": "requested_slot",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                    "value": "Маникюр",
+                }
+            ],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.book_slot",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    _, dialog_state, _ = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={
+            "semantic_contract": {
+                "contract_version": "semantic_contract.v1",
+                "subject_kind": "service",
+                "capability": "pricing",
+                "temporal_scope": "today",
+                "resolution_mode": "stale_resolution",
+                "pending_question_act": "stale_act",
+                "pending_question_target": "specialist",
+                "active_question_relation": "stale_relation",
+                "entity_refs": [
+                    {
+                        "entity_id": "spc:aigerim",
+                        "entity_type": "specialist",
+                        "source_ref": "execution",
+                        "value": "Айгерим",
+                    }
+                ],
+                "referents": {
+                    "specialist": {
+                        "value": "Айгерим",
+                        "entity_id": "spc:aigerim",
+                        "entity_type": "specialist",
+                        "source_ref": "execution",
+                    }
+                },
+                "grounding_provenance": {
+                    "pack_id": "demo_salon",
+                    "resolver_id": "catalog",
+                    "resolver_version": "v2",
+                },
+            },
+            "slot_values": {
+                "service": "Маникюр",
+                "datetime": "2026-03-29T19:00:00+00:00",
+            },
+        },
+        now=now,
+    )
+
+    frame = dialog_state.semantic_state.materialized_frame.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    assert frame["subject"]["kind"] == "booking"
+    assert frame["capability_selection"]["capability"] == "booking_manage"
+    assert frame["capability_selection"]["resolution_mode"] == "ask_about_requested_slot"
+    assert frame["constraints"]["temporal_scope"] == "requested_slot"
+    assert frame["continuation"]["pending_question_target"] == "time"
+    assert frame["continuation"]["active_question_relation"] == "ask_about_requested_slot"
+    assert frame["constraints"]["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "resolver_id": "catalog",
+        "resolver_version": "v2",
+    }
+    assert frame["referents"]["specialist"] == {
+        "value": "Айгерим",
+        "entity_id": "spc:aigerim",
+        "entity_type": "specialist",
+        "source_ref": "execution",
+    }
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert dialog_state.meta["semantic_contract"]["capability"] == "booking_manage"
+    assert dialog_state.meta["semantic_contract"]["subject_kind"] == "booking"
+    assert dialog_state.meta["semantic_contract"]["pending_question_target"] == "time"
+    assert dialog_state.meta["semantic_contract"]["active_question_relation"] == "ask_about_requested_slot"
+    assert dialog_state.meta["semantic_contract"]["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "resolver_id": "catalog",
+        "resolver_version": "v2",
+    }
+
+
+def test_dialog_state_service_semantic_decision_state_write_reads_executor_enrichment_only() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 27, 12, 5, tzinfo=timezone.utc)
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "booking_manage",
+            "tool_action": "calendar.book_slot",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "resolution_mode": "ask_about_requested_slot",
+            "temporal_scope": "requested_slot",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.book_slot",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    _, dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta={
+            "semantic_enrichment": {
+                "referents": {
+                    "specialist": {
+                        "value": "Айгерим",
+                        "entity_id": "spc:aigerim",
+                        "entity_type": "specialist",
+                        "source_ref": "execution",
+                    }
+                },
+                "grounding_provenance": {
+                    "pack_id": "demo_salon",
+                    "resolver_id": "catalog",
+                    "resolver_version": "v2",
+                },
+            },
+            "slot_values": {
+                "service": "Маникюр",
+                "datetime": "2026-03-29T19:00:00+00:00",
+            },
+        },
+        now=now,
+    )
+
+    frame = dialog_state.semantic_state.materialized_frame.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    assert frame["subject"]["kind"] == "booking"
+    assert frame["capability_selection"]["capability"] == "booking_manage"
+    assert frame["constraints"]["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "resolver_id": "catalog",
+        "resolver_version": "v2",
+    }
+    assert frame["referents"]["specialist"] == {
+        "value": "Айгерим",
+        "entity_id": "spc:aigerim",
+        "entity_type": "specialist",
+        "source_ref": "execution",
+    }
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert dialog_state.meta["semantic_contract"]["capability"] == "booking_manage"
+    assert dialog_state.meta["semantic_contract"]["subject_kind"] == "booking"
+    assert dialog_state.meta["semantic_contract"]["grounding_provenance"] == {
+        "pack_id": "demo_salon",
+        "resolver_id": "catalog",
+        "resolver_version": "v2",
+    }
+
+
 def test_dialog_state_service_omits_empty_pending_question_contract_in_runtime_payload() -> None:
     service = DialogStateService()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "hours",
             "action": "fact",
@@ -3198,7 +3466,7 @@ def test_dialog_state_service_fact_owner_contract_overrides_stale_booking_follow
             "current_goal": "booking",
         },
     }
-    decision = planner.build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "action": "fact",
             "intent": "duration",
@@ -3335,7 +3603,7 @@ def test_dialog_state_service_check_booking_fact_keeps_owner_reference_followup_
             "current_goal": "booking",
         },
     }
-    decision = planner.build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "action": "fact",
             "intent": "check_booking",
@@ -3453,7 +3721,7 @@ def test_dialog_state_service_clears_expected_reply_contract_on_handoff() -> Non
             "current_goal": "booking",
         }
     }
-    decision = planner.build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "action": "handoff",
             "intent": "booking",
@@ -3508,7 +3776,7 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
             "current_goal": "booking",
         }
     }
-    decision = planner.build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -3599,7 +3867,7 @@ def test_dialog_state_service_persists_specialist_followup_referent_on_collect()
 
 def test_dialog_state_service_merges_execution_semantic_grounding_into_runtime_contract() -> None:
     service = DialogStateService()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "pricing",
             "action": "fact",

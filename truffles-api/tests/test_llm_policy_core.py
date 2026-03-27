@@ -28,7 +28,7 @@ def test_validate_llm_policy_core_output_valid():
     assert error is None
     assert contract is not None
     assert contract.action == "fact"
-    assert contract.tool_action == "info"
+    assert contract.tool_action_hint == "info"
     assert contract.resolver_id == "llm_policy_core"
     assert contract.resolver_version == "v1"
     assert contract.entity_refs and contract.entity_refs[0].get("entity_id") == "svc:manicure"
@@ -93,8 +93,7 @@ def test_validate_llm_policy_core_output_accepts_sparse_location_projection():
 
     assert error is None
     assert contract is not None
-    assert contract.tool_action == "catalog.location"
-    assert contract.tool_args == {}
+    assert contract.tool_action_hint == "catalog.location"
     assert contract.referents == {}
 
 
@@ -155,7 +154,7 @@ def test_validate_llm_policy_core_output_invalid():
     assert error is not None
 
 
-def test_validate_llm_policy_core_output_rejects_unknown_calendar_tool_arg():
+def test_validate_llm_policy_core_output_ignores_legacy_calendar_tool_args():
     payload = {
         "intent": "booking",
         "action": "fact",
@@ -171,12 +170,12 @@ def test_validate_llm_policy_core_output_rejects_unknown_calendar_tool_arg():
 
     contract, error = validate_llm_policy_core_output(payload)
 
-    assert contract is None
-    assert error is not None
-    assert "tool_args_unknown_field:foo" in error
+    assert error is None
+    assert contract is not None
+    assert contract.tool_action_hint == "calendar.book_slot"
 
 
-def test_validate_llm_policy_core_output_rejects_invalid_catalog_info_refs_type():
+def test_validate_llm_policy_core_output_ignores_legacy_catalog_tool_args_shape():
     payload = {
         "intent": "location",
         "action": "fact",
@@ -192,9 +191,9 @@ def test_validate_llm_policy_core_output_rejects_invalid_catalog_info_refs_type(
 
     contract, error = validate_llm_policy_core_output(payload)
 
-    assert contract is None
-    assert error is not None
-    assert "tool_args_type_invalid:info_refs" in error
+    assert error is None
+    assert contract is not None
+    assert contract.tool_action_hint == "catalog.location"
 
 
 def test_validate_llm_policy_core_output_accepts_master_query_fact_with_service():
@@ -216,8 +215,8 @@ def test_validate_llm_policy_core_output_accepts_master_query_fact_with_service(
     assert error is None
     assert contract is not None
     assert contract.intent == "master_query"
-    assert contract.tool_action == "catalog.service_query"
-    assert contract.tool_args.get("service_query") == "маникюр"
+    assert contract.tool_action_hint == "catalog.service_query"
+    assert contract.slots.get("service") == "маникюр"
 
 
 def test_validate_llm_policy_core_output_rejects_master_query_fact_without_service():

@@ -12,6 +12,7 @@ from typing import Any, Iterable, Tuple
 import httpx
 
 from app.core.policy_tool_projector import project_policy_tool_binding
+from app.core.semantic_decision import SemanticDecisionV1
 from app.logging_config import get_logger, record_llm_time
 from app.schemas.intent import (
     validate_llm_plan_output,
@@ -2640,6 +2641,7 @@ def route_llm_policy_core(
         "structured_output_fallback_used": False,
         "policy_input": None,
         "schema_error": None,
+        "binding": None,
         "projection_error": None,
         "projection_trace": None,
         "semantic_frame": None,
@@ -3118,9 +3120,11 @@ def route_llm_policy_core(
         if not semantic_frame.get(container_field):
             semantic_frame.pop(container_field, None)
     result["semantic_frame"] = deepcopy(semantic_frame)
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(semantic_frame)
+    semantic_decision_payload = semantic_decision.model_dump(mode="python", exclude_none=True)
 
     projection, projection_error = project_policy_tool_binding(
-        semantic_frame=semantic_frame,
+        semantic_decision=semantic_decision_payload,
         allowed_tool_actions=allowed_tool_actions,
     )
     if projection_error:
@@ -3134,13 +3138,13 @@ def route_llm_policy_core(
         }
         return result
 
-    projected_payload = dict(semantic_frame)
-    projected_payload["tool_action"] = projection.tool_action
-    if projection.tool_args:
-        projected_payload["tool_args"] = dict(projection.tool_args)
+    result["binding"] = {
+        "tool_action": projection.tool_action,
+        "tool_args": dict(projection.tool_args),
+    }
     result["projection_trace"] = dict(projection.trace)
     result["ok"] = True
-    result["payload"] = projected_payload
+    result["payload"] = semantic_decision_payload
     return result
 
 

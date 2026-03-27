@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
@@ -295,13 +296,14 @@ class TurnExecutor:
         booking_state: dict[str, Any] | None,
     ) -> RuntimeExecutionResult:
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
+        canonical_pending_question = TurnPlanner().canonical_pending_question_contract(decision)
         semantic_contract = self._build_execution_semantic_contract(
             decision,
             booking_state=merged_slots,
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
         next_slot = (
-            self._normalize_booking_slot(decision.pending_question_contract.next_question)
+            self._normalize_booking_slot(canonical_pending_question.next_question)
             or self._first_missing_booking_slot(merged_slots)
         )
         prompt_map = self._BOOKING_PROMPTS
@@ -337,6 +339,7 @@ class TurnExecutor:
                     tool_action=decision.tool_action,
                     tool_decision="slot_constraint",
                     meta=self._attach_semantic_contract_meta(
+                        decision,
                         {
                         "slot_values": merged_slots,
                         "next_slot": next_slot,
@@ -356,6 +359,7 @@ class TurnExecutor:
             pending_question_contract=pending_question_contract,
         )
         meta: dict[str, Any] = self._attach_semantic_contract_meta(
+            decision,
             {"slot_values": merged_slots},
             semantic_contract=semantic_contract,
             pending_question_contract=pending_question_contract,
@@ -439,6 +443,7 @@ class TurnExecutor:
                 tool_action=decision.tool_action,
                 tool_decision="not_found",
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     {"booking_verification_prompt": True},
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -493,6 +498,7 @@ class TurnExecutor:
                     tool_action=decision.tool_action,
                     tool_decision=master_reply.intent or "master",
                     meta=self._attach_semantic_contract_meta(
+                        decision,
                         master_meta,
                         semantic_contract=semantic_contract,
                         pending_question_contract=pending_question_contract,
@@ -533,6 +539,7 @@ class TurnExecutor:
                 if tool_execution_projection:
                     tool_meta["tool_execution_projection"] = tool_execution_projection
                 tool_meta = self._attach_semantic_contract_meta(
+                    decision,
                     tool_meta,
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -562,6 +569,7 @@ class TurnExecutor:
                     tool_action=resolved_tool_action,
                     tool_decision=direct_info_ref,
                     meta=self._attach_semantic_contract_meta(
+                        decision,
                         direct_meta,
                         semantic_contract=semantic_contract,
                         pending_question_contract=pending_question_contract,
@@ -606,6 +614,7 @@ class TurnExecutor:
                 tool_action=decision.tool_action,
                 tool_decision=pack_decision.intent or pack_decision.action,
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     pack_meta,
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -617,6 +626,7 @@ class TurnExecutor:
                 tool_action=resolved_tool_action,
                 tool_decision="info_ref_unresolved",
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     unresolved_info_meta,
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -628,6 +638,7 @@ class TurnExecutor:
             tool_action=decision.tool_action,
             tool_decision="passthrough",
             meta=self._attach_semantic_contract_meta(
+                decision,
                 {"fact_fallback": True},
                 semantic_contract=semantic_contract,
                 pending_question_contract=pending_question_contract,
@@ -905,13 +916,45 @@ class TurnExecutor:
         return contract
 
     @staticmethod
+    def _has_canonical_semantic_owner(decision: PolicyDecision) -> bool:
+        return getattr(decision, "semantic_decision", None) is not None
+
+    @classmethod
+    def _build_execution_semantic_enrichment(
+        cls,
+        semantic_contract: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(semantic_contract, dict) or not semantic_contract:
+            return None
+        enrichment: dict[str, Any] = {}
+        referents = cls._normalize_semantic_referents(semantic_contract.get("referents"))
+        if referents:
+            enrichment["referents"] = deepcopy(referents)
+        entity_refs = cls._normalize_semantic_entity_refs(semantic_contract.get("entity_refs"))
+        if entity_refs:
+            enrichment["entity_refs"] = deepcopy(entity_refs)
+        grounding_provenance = cls._normalize_grounding_provenance(
+            semantic_contract.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            enrichment["grounding_provenance"] = deepcopy(grounding_provenance)
+        return enrichment or None
+
+    @classmethod
     def _attach_semantic_contract_meta(
+        cls,
+        decision: PolicyDecision,
         meta: dict[str, Any] | None,
         *,
         semantic_contract: dict[str, Any] | None,
         pending_question_contract: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = dict(meta) if isinstance(meta, dict) else {}
+        if cls._has_canonical_semantic_owner(decision):
+            semantic_enrichment = cls._build_execution_semantic_enrichment(semantic_contract)
+            if isinstance(semantic_enrichment, dict) and semantic_enrichment:
+                payload["semantic_enrichment"] = semantic_enrichment
+            return payload
         if isinstance(semantic_contract, dict) and semantic_contract:
             payload["semantic_contract"] = semantic_contract
         if isinstance(pending_question_contract, dict) and pending_question_contract:
@@ -923,8 +966,9 @@ class TurnExecutor:
         decision: PolicyDecision,
     ) -> dict[str, Any] | None:
         dialog_state_service = DialogStateService()
+        canonical_pending_question = TurnPlanner().canonical_pending_question_contract(decision)
         frame_pending_question_contract = dialog_state_service._pending_question_from_frame(
-            decision.semantic_frame
+            TurnPlanner().canonical_semantic_frame(decision)
         )
         if isinstance(frame_pending_question_contract, dict):
             return dialog_state_service.project_pending_question_contract(
@@ -932,16 +976,16 @@ class TurnExecutor:
                 expected_reply_type=(
                     None
                     if frame_pending_question_contract.get("expected_reply_type")
-                    else decision.pending_question_contract.expected_reply_type
+                    else canonical_pending_question.expected_reply_type
                 ),
                 expected_reply_reason=(
                     None
                     if frame_pending_question_contract.get("reason")
-                    else decision.pending_question_contract.reason
+                    else canonical_pending_question.reason
                 ),
             )
         return dialog_state_service.project_pending_question_contract(
-            decision.pending_question_contract,
+            canonical_pending_question,
         )
 
     def _build_execution_semantic_contract(
@@ -951,13 +995,7 @@ class TurnExecutor:
         booking_state: dict[str, Any] | None,
         service_name: str | None = None,
     ) -> dict[str, Any] | None:
-        base_contract = DialogStateService()._semantic_contract_from_frame(
-            decision.semantic_frame
-        ) or (
-            dict(decision.meta.get("semantic_contract"))
-            if isinstance(decision.meta.get("semantic_contract"), dict)
-            else {}
-        )
+        base_contract = TurnPlanner().canonical_semantic_contract(decision) or {}
         if not base_contract:
             return None
         contract = dict(base_contract)
@@ -1070,7 +1108,7 @@ class TurnExecutor:
         for item in decision.capability_refs:
             _remember(item)
 
-        semantic_contract = decision.meta.get("semantic_contract") if isinstance(decision.meta, dict) else None
+        semantic_contract = TurnPlanner().canonical_semantic_contract(decision)
         if isinstance(semantic_contract, dict):
             _remember(semantic_contract.get("capability"))
         return refs
@@ -1148,6 +1186,7 @@ class TurnExecutor:
                 tool_action="collect",
                 tool_decision=missing_slot,
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     {"slot_values": merged_slots, "booking_incomplete": True},
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -1160,6 +1199,7 @@ class TurnExecutor:
                 tool_action="handoff",
                 tool_decision="branch_missing",
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     {"slot_values": merged_slots},
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -1174,6 +1214,7 @@ class TurnExecutor:
                 tool_action="collect",
                 tool_decision="datetime_invalid",
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     {"slot_values": merged_slots, "booking_incomplete": True},
                     semantic_contract=semantic_contract,
                     pending_question_contract=pending_question_contract,
@@ -1206,6 +1247,7 @@ class TurnExecutor:
                 tool_action="collect",
                 tool_decision="datetime_conflict",
                 meta=self._attach_semantic_contract_meta(
+                    decision,
                     {
                     "slot_values": merged_slots,
                     "next_slot": "datetime",
@@ -1224,6 +1266,7 @@ class TurnExecutor:
             tool_action="calendar.book_slot",
             tool_decision="ok",
             meta=self._attach_semantic_contract_meta(
+                decision,
                 {
                 "slot_values": merged_slots,
                 "appointment_id": str(appointment.id),

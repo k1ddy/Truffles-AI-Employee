@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.core.turn_planner import PendingQuestionContract, PolicyDecision, SemanticFrame
+from app.core.turn_planner import PendingQuestionContract, PolicyDecision, SemanticFrame, TurnPlanner
 from app.schemas.webhook import InteractionStateContract, MemoryContract
 
 
@@ -491,9 +491,13 @@ class DialogStateService:
         current_goal: str | None,
         booking_payload: dict[str, Any] | None,
     ) -> SemanticFrame:
+        owner_frame = self._canonical_decision_semantic_frame(decision)
+        owner_payload = self.project_semantic_frame(owner_frame) or {}
         existing_payload = self.project_semantic_frame(existing) or {}
-        decision_payload = self.project_semantic_frame(decision.semantic_frame) or {}
-        materialized = deepcopy(existing_payload)
+        decision_payload = owner_payload
+        if not decision_payload and not self._has_canonical_semantic_owner(decision):
+            decision_payload = self.project_semantic_frame(decision.semantic_frame) or {}
+        materialized = deepcopy(owner_payload) if owner_payload else deepcopy(existing_payload)
         for section_name in (
             "subject",
             "referents",
@@ -516,9 +520,11 @@ class DialogStateService:
             incoming = decision_payload.get(section_name)
             if isinstance(incoming, dict) and incoming:
                 materialized[section_name].update(incoming)
-        incoming_pending_contract = self.project_pending_question_contract(
-            decision.pending_question_contract
-        )
+        incoming_pending_contract = self._canonical_decision_pending_question_contract(decision)
+        if not incoming_pending_contract and not self._has_canonical_semantic_owner(decision):
+            incoming_pending_contract = (
+                self.project_pending_question_contract(decision.pending_question_contract) or {}
+            )
         if isinstance(incoming_pending_contract, dict) and incoming_pending_contract:
             for field_name in (
                 "expected_reply_type",
@@ -558,41 +564,37 @@ class DialogStateService:
                     materialized["referents"][referent_key] = dict(referent_payload)
 
         execution = dict(execution_payload) if isinstance(execution_payload, dict) else {}
-        execution_contract = (
-            dict(execution.get("semantic_contract"))
-            if isinstance(execution.get("semantic_contract"), dict)
-            else {}
+        execution_contract = self._execution_semantic_payload(
+            execution,
+            owner_only=self._has_canonical_semantic_owner(decision),
         )
         if execution_contract:
-            subject_kind = self._normalize_projection_token(
-                execution_contract.get("subject_kind")
-            )
-            if subject_kind and "kind" not in materialized["subject"]:
-                materialized["subject"]["kind"] = subject_kind
             execution_entity_refs = execution_contract.get("entity_refs")
             if isinstance(execution_entity_refs, list) and execution_entity_refs:
-                existing_entity_refs = materialized["subject"].get("entity_refs")
-                if isinstance(existing_entity_refs, list) and existing_entity_refs:
-                    materialized["subject"]["entity_refs"] = [
-                        *existing_entity_refs,
-                        *execution_entity_refs,
-                    ]
-                else:
-                    materialized["subject"]["entity_refs"] = list(execution_entity_refs)
-            for field_name in ("temporal_scope", "alternate_datetime", "grounding_provenance"):
-                value = execution_contract.get(field_name)
-                if value not in (None, {}, []):
-                    materialized["constraints"][field_name] = value
-            for field_name in ("capability", "resolution_mode"):
-                value = execution_contract.get(field_name)
-                if value not in (None, {}, []):
-                    materialized["capability_selection"][field_name] = value
+                existing_entity_refs = self._normalize_semantic_entity_refs(
+                    materialized["subject"].get("entity_refs")
+                )
+                existing_entity_refs.extend(
+                    self._normalize_semantic_entity_refs(execution_entity_refs)
+                )
+                normalized_entity_refs = self._normalize_semantic_entity_refs(existing_entity_refs)
+                if normalized_entity_refs:
+                    materialized["subject"]["entity_refs"] = normalized_entity_refs
+            grounding_provenance = self._normalize_grounding_provenance(
+                execution_contract.get("grounding_provenance")
+            )
+            if grounding_provenance:
+                materialized["constraints"]["grounding_provenance"] = grounding_provenance
             execution_referents = self._normalize_semantic_referents(
                 execution_contract.get("referents")
             )
             for referent_key, referent_payload in execution_referents.items():
                 current_referent = materialized["referents"].get(referent_key)
                 if isinstance(current_referent, dict):
+                    current_value = self._normalize_projection_token(current_referent.get("value"))
+                    incoming_value = self._normalize_projection_token(referent_payload.get("value"))
+                    if current_value and incoming_value and current_value.casefold() != incoming_value.casefold():
+                        continue
                     merged = dict(current_referent)
                     merged.update(referent_payload)
                     materialized["referents"][referent_key] = merged
@@ -608,7 +610,9 @@ class DialogStateService:
             }
             if cleaned_slots:
                 materialized["continuation"]["slot_values"] = cleaned_slots
-        if not materialized.get("user_goal"):
+        if owner_payload:
+            materialized["user_goal"] = decision_payload.get("user_goal")
+        elif not materialized.get("user_goal"):
             goal = self._normalize_projection_token(current_goal)
             if goal:
                 materialized["user_goal"] = goal
@@ -682,6 +686,100 @@ class DialogStateService:
             materialized_frame=materialized_frame,
             event_log=[*existing_semantic_state.event_log, event],
         )
+
+    @staticmethod
+    def _has_canonical_semantic_owner(decision: PolicyDecision) -> bool:
+        return isinstance(getattr(decision, "semantic_decision", None), BaseModel)
+
+    def _canonical_decision_semantic_frame(
+        self,
+        decision: PolicyDecision,
+    ) -> SemanticFrame | None:
+        if not self._has_canonical_semantic_owner(decision):
+            return None
+        frame = TurnPlanner().canonical_semantic_frame(decision)
+        if not isinstance(frame, SemanticFrame):
+            return None
+        return frame.model_copy(deep=True)
+
+    def _canonical_decision_semantic_contract(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any]:
+        if not self._has_canonical_semantic_owner(decision):
+            return {}
+        contract = TurnPlanner().canonical_semantic_contract(decision)
+        return dict(contract) if isinstance(contract, dict) else {}
+
+    def _canonical_decision_pending_question_contract(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any]:
+        if not self._has_canonical_semantic_owner(decision):
+            return {}
+        pending_question = TurnPlanner().canonical_pending_question_contract(decision)
+        return self.project_pending_question_contract(pending_question) or {}
+
+    def _decision_pending_question_contract(
+        self,
+        decision: PolicyDecision,
+    ) -> PendingQuestionContract:
+        if self._has_canonical_semantic_owner(decision):
+            return TurnPlanner().canonical_pending_question_contract(decision)
+        return decision.pending_question_contract
+
+    def _decision_semantic_contract(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any]:
+        canonical_contract = self._canonical_decision_semantic_contract(decision)
+        if canonical_contract:
+            return canonical_contract
+        return (
+            self._semantic_contract_from_frame(decision.semantic_frame)
+            or (
+                dict(decision.meta.get("semantic_contract"))
+                if isinstance(decision.meta.get("semantic_contract"), dict)
+                else {}
+            )
+        )
+
+    def _execution_semantic_enrichment_from_contract(
+        self,
+        semantic_contract: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(semantic_contract, dict):
+            return {}
+        enrichment: dict[str, Any] = {}
+        referents = self._normalize_semantic_referents(semantic_contract.get("referents"))
+        if referents:
+            enrichment["referents"] = deepcopy(referents)
+        entity_refs = self._normalize_semantic_entity_refs(semantic_contract.get("entity_refs"))
+        if entity_refs:
+            enrichment["entity_refs"] = deepcopy(entity_refs)
+        grounding_provenance = self._normalize_grounding_provenance(
+            semantic_contract.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            enrichment["grounding_provenance"] = deepcopy(grounding_provenance)
+        return enrichment
+
+    def _execution_semantic_payload(
+        self,
+        payload: dict[str, Any] | None,
+        *,
+        owner_only: bool,
+    ) -> dict[str, Any]:
+        execution_payload = dict(payload) if isinstance(payload, dict) else {}
+        enrichment = execution_payload.get("semantic_enrichment")
+        if isinstance(enrichment, dict) and enrichment:
+            return dict(enrichment)
+        semantic_contract = execution_payload.get("semantic_contract")
+        if not isinstance(semantic_contract, dict):
+            return {}
+        if owner_only:
+            return self._execution_semantic_enrichment_from_contract(semantic_contract)
+        return dict(semantic_contract)
 
     def _semantic_contract_from_frame(
         self,
@@ -987,7 +1085,7 @@ class DialogStateService:
             raise ValueError("expected_reply_type_invalid")
 
         reason_token = self._normalize_projection_token(expected_reply_reason)
-        pending_contract = decision.pending_question_contract
+        pending_contract = self._decision_pending_question_contract(decision)
         next_question = self._normalize_projection_token(pending_contract.next_question)
         open_questions = [
             token
@@ -1463,19 +1561,10 @@ class DialogStateService:
         _remember("booking_ref", existing_state.current_referents.booking)
         _remember("customer", existing_state.current_referents.customer)
 
-        decision_semantic_contract = (
-            self._semantic_contract_from_frame(decision.semantic_frame)
-            or (
-                dict(decision.meta.get("semantic_contract"))
-                if isinstance(decision.meta.get("semantic_contract"), dict)
-                else {}
-            )
-        )
-        execution_semantic_contract = (
-            dict(execution_payload.get("semantic_contract"))
-            if isinstance(execution_payload, dict)
-            and isinstance(execution_payload.get("semantic_contract"), dict)
-            else {}
+        decision_semantic_contract = self._decision_semantic_contract(decision)
+        execution_semantic_contract = self._execution_semantic_payload(
+            execution_payload if isinstance(execution_payload, dict) else {},
+            owner_only=self._has_canonical_semantic_owner(decision),
         )
         decision_referents = (
             decision_semantic_contract.get("referents")
@@ -1536,7 +1625,11 @@ class DialogStateService:
             "booking_ref": "booking_ref",
             "customer": "customer",
         }
-        raw_entity_refs = decision.meta.get("entity_refs") if isinstance(decision.meta, dict) else None
+        raw_entity_refs = (
+            decision_semantic_contract.get("entity_refs")
+            if isinstance(decision_semantic_contract, dict)
+            else None
+        )
         if isinstance(raw_entity_refs, list):
             for row in raw_entity_refs:
                 if not isinstance(row, dict):
@@ -1576,20 +1669,40 @@ class DialogStateService:
             if isinstance(existing_state.meta.get("semantic_contract"), dict)
             else {}
         )
-        decision_contract = (
-            self._semantic_contract_from_frame(decision.semantic_frame)
-            or (
-                dict(decision.meta.get("semantic_contract"))
-                if isinstance(decision.meta.get("semantic_contract"), dict)
-                else {}
+        decision_contract = self._decision_semantic_contract(decision)
+        execution_contract = self._execution_semantic_payload(
+            execution_payload if isinstance(execution_payload, dict) else {},
+            owner_only=self._has_canonical_semantic_owner(decision),
+        )
+        if self._has_canonical_semantic_owner(decision) and decision_contract:
+            contract = dict(decision_contract)
+            contract["contract_version"] = "semantic_contract.v1"
+            entity_refs = self._normalize_semantic_entity_refs(contract.get("entity_refs"))
+            entity_refs.extend(
+                self._normalize_semantic_entity_refs(execution_contract.get("entity_refs"))
             )
-        )
-        execution_contract = (
-            dict(execution_payload.get("semantic_contract"))
-            if isinstance(execution_payload, dict)
-            and isinstance(execution_payload.get("semantic_contract"), dict)
-            else {}
-        )
+            entity_refs = self._normalize_semantic_entity_refs(entity_refs)
+            if entity_refs:
+                contract["entity_refs"] = entity_refs
+            else:
+                contract.pop("entity_refs", None)
+            grounding_provenance = self._normalize_grounding_provenance(
+                execution_contract.get("grounding_provenance")
+            )
+            if grounding_provenance:
+                contract["grounding_provenance"] = grounding_provenance
+            referents = self._build_semantic_referents(
+                existing_contract={},
+                entity_refs=entity_refs,
+                grounded_referents=grounded_referents,
+                booking_payload=booking_payload,
+                decision=decision,
+                execution_payload=execution_payload,
+                execution_contract=execution_contract,
+            )
+            if referents:
+                contract["referents"] = referents
+            return contract if len(contract) > 1 else None
         contract: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
         for source in (existing_contract, decision_contract, execution_contract):
             for key in (
@@ -1705,11 +1818,7 @@ class DialogStateService:
             for referent_key, value in grounded_referents.items():
                 _remember(referent_key, value=value, source_ref="runtime_grounding")
 
-        decision_contract = (
-            dict(decision.meta.get("semantic_contract"))
-            if isinstance(decision.meta.get("semantic_contract"), dict)
-            else {}
-        )
+        decision_contract = self._decision_semantic_contract(decision)
         decision_referents = decision_contract.get("referents")
         if isinstance(decision_referents, dict):
             for referent_key, payload in decision_referents.items():
@@ -2402,10 +2511,12 @@ class DialogStateService:
         clear_booking = bool(execution_payload.get("clear_booking"))
         merged_booking = self.normalize_booking_payload(existing_booking)
         loaded_current_goal = self._normalize_projection_token(loaded.get("current_goal"))
+        decision_pending_contract = self._decision_pending_question_contract(decision)
+        decision_semantic_contract = self._decision_semantic_contract(decision)
         owner_pending_question_contract = None
         if decision.outcome != "COLLECT":
             owner_pending_question_contract = self.project_pending_question_contract(
-                decision.pending_question_contract,
+                decision_pending_contract,
             )
         if decision.outcome == "COLLECT":
             merged_booking = self.build_collect_owner_booking_payload(
@@ -2413,7 +2524,7 @@ class DialogStateService:
                 now=now,
                 last_question=self._normalize_projection_token(
                     execution_payload.get("next_slot")
-                    or decision.pending_question_contract.next_question
+                    or decision_pending_contract.next_question
                     or "service"
                 ) or "service",
                 slot_values=slot_values,
@@ -2434,14 +2545,9 @@ class DialogStateService:
                 slot_values=slot_values,
             )
         if isinstance(merged_booking, dict):
-            semantic_contract = (
-                dict(decision.meta.get("semantic_contract"))
-                if isinstance(decision.meta.get("semantic_contract"), dict)
-                else {}
-            )
             semantic_referents = (
-                semantic_contract.get("referents")
-                if isinstance(semantic_contract.get("referents"), dict)
+                decision_semantic_contract.get("referents")
+                if isinstance(decision_semantic_contract.get("referents"), dict)
                 else {}
             )
             specialist_referent = (
@@ -2488,7 +2594,7 @@ class DialogStateService:
         elif decision.outcome == "COLLECT":
             next_slot = self._normalize_projection_token(
                 execution_payload.get("next_slot")
-                or decision.pending_question_contract.next_question
+                or decision_pending_contract.next_question
             )
             if next_slot:
                 expected_reply_type = {
@@ -2530,7 +2636,19 @@ class DialogStateService:
             grounded_referents=grounded_referents,
         )
         semantic_execution_payload = dict(execution_payload)
-        if semantic_contract and "semantic_contract" not in semantic_execution_payload:
+        if self._has_canonical_semantic_owner(decision):
+            semantic_enrichment = self._execution_semantic_payload(
+                semantic_execution_payload,
+                owner_only=True,
+            )
+            if not semantic_enrichment:
+                semantic_enrichment = self._execution_semantic_enrichment_from_contract(
+                    semantic_contract
+                )
+            if semantic_enrichment and "semantic_enrichment" not in semantic_execution_payload:
+                semantic_execution_payload["semantic_enrichment"] = semantic_enrichment
+            semantic_execution_payload.pop("semantic_contract", None)
+        elif semantic_contract and "semantic_contract" not in semantic_execution_payload:
             semantic_execution_payload["semantic_contract"] = semantic_contract
         semantic_state = self._build_semantic_state(
             existing_state=loaded["dialog_state"],

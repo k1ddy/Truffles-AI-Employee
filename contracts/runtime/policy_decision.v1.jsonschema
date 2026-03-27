@@ -93,6 +93,17 @@
     "pending_question_contract": {
       "$ref": "#/$defs/pendingQuestionContract"
     },
+    "semantic_decision": {
+      "anyOf": [
+        {
+          "$ref": "https://truffles.ai/contracts/runtime/semantic_decision.v1.jsonschema"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "meta": {
       "type": "object",
       "additionalProperties": true

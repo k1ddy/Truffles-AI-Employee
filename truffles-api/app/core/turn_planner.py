@@ -4,6 +4,8 @@ from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.semantic_decision import SemanticDecisionV1
+
 DecisionOutcome = Literal["FACT", "COLLECT", "HANDOFF"]
 _PLANNER_SLOT_ALIASES = {
     "service_query": "service",
@@ -69,6 +71,7 @@ class PolicyDecision(BaseModel):
     interaction: InteractionContract
     semantic_frame: SemanticFrame = Field(default_factory=SemanticFrame)
     pending_question_contract: PendingQuestionContract = Field(default_factory=PendingQuestionContract)
+    semantic_decision: SemanticDecisionV1 | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -172,7 +175,21 @@ class TurnPlanner:
         )
         payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
         if isinstance(payload, dict):
-            decision = self._build_policy_core_decision(payload)
+            raw_payload = dict(payload)
+            binding_payload = (
+                dict(policy_result.get("binding"))
+                if isinstance(policy_result.get("binding"), dict)
+                else {}
+            )
+            if not binding_payload:
+                binding_payload = {
+                    "tool_action": raw_payload.get("tool_action"),
+                    "tool_args": raw_payload.get("tool_args"),
+                }
+            decision = self._build_policy_core_decision(
+                semantic_decision=self._coerce_semantic_decision(raw_payload),
+                binding_payload=binding_payload,
+            )
             decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
                 policy_result,
                 schema_verdict="ok",
@@ -221,82 +238,209 @@ class TurnPlanner:
         )
         return decision
 
-    def build_from_policy_override(
+    def build_from_semantic_decision(
         self,
-        payload: dict[str, Any],
+        semantic_decision: SemanticDecisionV1,
         *,
+        binding_tool_action: str,
+        binding_tool_args: dict[str, Any] | None = None,
         interaction_owner: str,
-        interaction_relation: str | None = None,
         source: str = "policy_core",
     ) -> PolicyDecision:
-        action = self._normalize_token(payload.get("action")) or "handoff"
-        intent = self._normalize_token(payload.get("intent")) or "other"
-        tool_action = self._normalize_tool_action(payload.get("tool_action"))
+        semantic_payload = self._normalized_semantic_payload(semantic_decision)
+        action = semantic_decision.requested_outcome
         outcome = self._ACTION_TO_OUTCOME.get(action)
         if outcome is None:
             raise ValueError(f"unsupported_policy_action:{action}")
-        relation = interaction_relation or self._normalize_token(
-            payload.get("active_question_relation")
-        )
-        capability = self._normalize_token(payload.get("capability"))
-        entity_refs = self._normalize_entity_refs(payload.get("entity_refs"))
-        pending_question = self._build_pending_question_contract(payload)
-        semantic_frame = self._build_semantic_frame_payload(
-            payload,
-            entity_refs=entity_refs,
-            pending_question=pending_question,
-        )
-        meta = {
+        meta: dict[str, Any] = {
             "planner_source": "turn_planner",
-            "synthetic_policy_decision": True,
+            "semantic_decision_id": semantic_decision.decision_id,
+            "semantic_decision_schema_version": semantic_decision.schema_version,
         }
         for key in (
             "reason",
             "goal",
-            "normalized_text",
             "needs_manager",
-            "confidence",
             "resolver_id",
             "resolver_version",
-            "subject_kind",
-            "temporal_scope",
-            "resolution_mode",
-            "pending_question_act",
-            "alternate_datetime",
-            "question_contract",
         ):
-            value = payload.get(key)
+            value = semantic_payload.get(key)
             if value is not None:
                 meta[key] = value
-        if entity_refs:
-            meta["entity_refs"] = entity_refs
-        semantic_contract = self._build_semantic_contract_payload(
-            payload,
-            entity_refs=entity_refs,
-            semantic_frame=semantic_frame,
-        )
-        if semantic_contract:
-            meta["semantic_contract"] = semantic_contract
         return PolicyDecision(
             outcome=outcome,
             action=action,
-            intent=intent,
+            intent=semantic_decision.intent,
             source=source,
-            tool_action=tool_action,
-            tool_args=self._normalize_dict(payload.get("tool_args")),
-            slots=self._normalize_string_dict(payload.get("slots")),
-            pack_refs=self._normalize_list(payload.get("pack_refs")),
-            capability_refs=[capability] if capability else [],
-            risk_signals=self._normalize_list(payload.get("risk_signals")),
+            tool_action=self._normalize_tool_action(binding_tool_action),
+            tool_args=self._normalize_dict(binding_tool_args),
+            slots=dict(semantic_decision.semantic_slots),
+            pack_refs=list(semantic_decision.grounding_requirements.pack_refs),
+            capability_refs=[semantic_decision.capability_id]
+            if semantic_decision.capability_id
+            else [],
+            risk_signals=list(semantic_decision.risk_signals),
             interaction=InteractionContract(
                 owner=interaction_owner,
-                target=self._normalize_token(payload.get("pending_question_target")),
-                relation=relation,
+                target=semantic_decision.missing_information.pending_question_target,
+                relation=semantic_decision.missing_information.active_question_relation,
             ),
-            semantic_frame=semantic_frame,
-            pending_question_contract=pending_question,
+            semantic_decision=semantic_decision,
             meta=meta,
         )
+
+    def canonical_pending_question_contract(
+        self,
+        decision: PolicyDecision,
+    ) -> PendingQuestionContract:
+        if isinstance(decision.semantic_decision, SemanticDecisionV1):
+            semantic_payload = self._normalized_semantic_payload(decision.semantic_decision)
+            return self._build_pending_question_contract(semantic_payload)
+        return decision.pending_question_contract
+
+    def canonical_semantic_frame(
+        self,
+        decision: PolicyDecision,
+    ) -> SemanticFrame:
+        if isinstance(decision.semantic_decision, SemanticDecisionV1):
+            semantic_payload = self._normalized_semantic_payload(decision.semantic_decision)
+            entity_refs = self._normalize_entity_refs(semantic_payload.get("entity_refs"))
+            pending_question = self._build_pending_question_contract(semantic_payload)
+            return self._build_semantic_frame_payload(
+                semantic_payload,
+                entity_refs=entity_refs,
+                pending_question=pending_question,
+            )
+        return decision.semantic_frame
+
+    def canonical_semantic_contract(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any] | None:
+        if isinstance(decision.semantic_decision, SemanticDecisionV1):
+            semantic_payload = self._normalized_semantic_payload(decision.semantic_decision)
+            entity_refs = self._normalize_entity_refs(semantic_payload.get("entity_refs"))
+            semantic_frame = self._build_semantic_frame_payload(
+                semantic_payload,
+                entity_refs=entity_refs,
+                pending_question=self._build_pending_question_contract(semantic_payload),
+            )
+            return self._build_semantic_contract_payload(
+                semantic_payload,
+                entity_refs=entity_refs,
+                semantic_frame=semantic_frame,
+            )
+        semantic_contract = decision.meta.get("semantic_contract") if isinstance(decision.meta, dict) else None
+        if isinstance(semantic_contract, dict):
+            return dict(semantic_contract)
+        fallback = self._build_semantic_contract_payload(
+            {},
+            entity_refs=[],
+            semantic_frame=decision.semantic_frame,
+        )
+        return dict(fallback) if isinstance(fallback, dict) else None
+
+    def detect_semantic_mutation(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any] | None:
+        semantic_decision = decision.semantic_decision
+        if not isinstance(semantic_decision, SemanticDecisionV1):
+            return None
+        diffs: dict[str, Any] = {}
+        if decision.action != semantic_decision.requested_outcome:
+            diffs["action"] = {
+                "expected": semantic_decision.requested_outcome,
+                "actual": decision.action,
+            }
+        if decision.intent != semantic_decision.intent:
+            diffs["intent"] = {
+                "expected": semantic_decision.intent,
+                "actual": decision.intent,
+            }
+        if dict(decision.slots) != dict(semantic_decision.semantic_slots):
+            diffs["slots"] = {
+                "expected": dict(semantic_decision.semantic_slots),
+                "actual": dict(decision.slots),
+            }
+        if list(decision.pack_refs) != list(semantic_decision.grounding_requirements.pack_refs):
+            diffs["pack_refs"] = {
+                "expected": list(semantic_decision.grounding_requirements.pack_refs),
+                "actual": list(decision.pack_refs),
+            }
+        expected_capability_refs = [semantic_decision.capability_id] if semantic_decision.capability_id else []
+        if list(decision.capability_refs) != expected_capability_refs:
+            diffs["capability_refs"] = {
+                "expected": expected_capability_refs,
+                "actual": list(decision.capability_refs),
+            }
+        if list(decision.risk_signals) != list(semantic_decision.risk_signals):
+            diffs["risk_signals"] = {
+                "expected": list(semantic_decision.risk_signals),
+                "actual": list(decision.risk_signals),
+            }
+        expected_target = semantic_decision.missing_information.pending_question_target
+        if decision.interaction.target != expected_target:
+            diffs["interaction.target"] = {
+                "expected": expected_target,
+                "actual": decision.interaction.target,
+            }
+        expected_relation = semantic_decision.missing_information.active_question_relation
+        if decision.interaction.relation != expected_relation:
+            diffs["interaction.relation"] = {
+                "expected": expected_relation,
+                "actual": decision.interaction.relation,
+            }
+        shadow_pending = PendingQuestionContract().model_dump(mode="python", exclude_none=True)
+        actual_pending = decision.pending_question_contract.model_dump(mode="python", exclude_none=True)
+        if actual_pending != shadow_pending:
+            diffs["pending_question_contract"] = {
+                "expected": shadow_pending,
+                "actual": actual_pending,
+            }
+        shadow_frame = SemanticFrame().model_dump(mode="python", exclude_none=True)
+        actual_frame = decision.semantic_frame.model_dump(mode="python", exclude_none=True)
+        if actual_frame != shadow_frame:
+            diffs["semantic_frame"] = {
+                "expected": shadow_frame,
+                "actual": actual_frame,
+            }
+        shadow_contract: dict[str, Any] = {}
+        actual_contract = (
+            dict(decision.meta.get("semantic_contract"))
+            if isinstance(decision.meta, dict) and isinstance(decision.meta.get("semantic_contract"), dict)
+            else {}
+        )
+        if actual_contract != shadow_contract:
+            diffs["meta.semantic_contract"] = {
+                "expected": shadow_contract,
+                "actual": actual_contract,
+            }
+        if not diffs:
+            return None
+        return {
+            "reason_code": "semantic_decision_post_owner_mutation",
+            "semantic_decision_id": semantic_decision.decision_id,
+            "diffs": diffs,
+        }
+
+    def detect_missing_semantic_owner(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any] | None:
+        if isinstance(decision.semantic_decision, SemanticDecisionV1):
+            return None
+        meta = dict(decision.meta) if isinstance(decision.meta, dict) else {}
+        if meta.get("degrade_path") or meta.get("preflight_path"):
+            return None
+        return {
+            "reason_code": "missing_semantic_owner",
+            "source": decision.source,
+            "outcome": decision.outcome,
+            "action": decision.action,
+            "tool_action": decision.tool_action,
+            "synthetic_policy_decision": bool(meta.get("synthetic_policy_decision")),
+        }
 
     def _build_semantic_contract_payload(
         self,
@@ -588,12 +732,42 @@ class TurnPlanner:
 
     def _build_policy_core_decision(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | None = None,
+        *,
+        semantic_decision: SemanticDecisionV1 | None = None,
+        binding_payload: dict[str, Any] | None = None,
     ) -> PolicyDecision:
-        normalized_payload = dict(payload)
-        normalized_payload["tool_action"] = self._normalize_tool_action(
-            normalized_payload.get("tool_action")
+        if payload is not None:
+            legacy_binding = dict(binding_payload) if isinstance(binding_payload, dict) else {
+                "tool_action": payload.get("tool_action"),
+                "tool_args": payload.get("tool_args"),
+            }
+            semantic_decision = self._coerce_semantic_decision(payload)
+            binding_payload = legacy_binding
+        if not isinstance(semantic_decision, SemanticDecisionV1):
+            raise ValueError("semantic_decision_required")
+        normalized_binding = dict(binding_payload) if isinstance(binding_payload, dict) else {}
+        return self.build_from_semantic_decision(
+            semantic_decision,
+            binding_tool_action=self._normalize_tool_action(normalized_binding.get("tool_action")),
+            binding_tool_args=self._normalize_dict(normalized_binding.get("tool_args")),
+            interaction_owner="llm_policy_core",
+            source="llm_policy_core",
         )
+
+    def _coerce_semantic_decision(
+        self,
+        payload: dict[str, Any],
+    ) -> SemanticDecisionV1:
+        if payload.get("schema_version") == "semantic_decision.v1":
+            return SemanticDecisionV1.model_validate(payload)
+        return SemanticDecisionV1.from_policy_core_payload(payload)
+
+    def _normalized_semantic_payload(
+        self,
+        semantic_decision: SemanticDecisionV1,
+    ) -> dict[str, Any]:
+        normalized_payload = semantic_decision.as_policy_payload()
         normalized_payload["slots"] = self._normalize_planner_slots(
             normalized_payload.get("slots")
         )
@@ -603,27 +777,18 @@ class TurnPlanner:
         normalized_payload["open_questions"] = [
             item
             for item in (
-                self._normalize_booking_slot_name(
-                    raw_item,
-                )
+                self._normalize_booking_slot_name(raw_item)
                 for raw_item in self._normalize_list(normalized_payload.get("open_questions"))
             )
             if item
         ]
         if normalized_payload.get("next_question") and not normalized_payload["open_questions"]:
             normalized_payload["open_questions"] = [normalized_payload["next_question"]]
-        if normalized_payload.get("action") == "handoff":
+        if semantic_decision.requested_outcome == "handoff":
             normalized_payload = self._strip_pending_question_payload_if_handoff(
                 normalized_payload
             )
-        return self.build_from_policy_override(
-            normalized_payload,
-            interaction_owner="llm_policy_core",
-            interaction_relation=self._normalize_token(
-                normalized_payload.get("active_question_relation")
-            ),
-            source="llm_policy_core",
-        )
+        return normalized_payload
 
     @classmethod
     def _strip_pending_question_payload_if_handoff(
@@ -852,6 +1017,7 @@ __all__ = [
     "InteractionContract",
     "PendingQuestionContract",
     "PolicyDecision",
+    "SemanticDecisionV1",
     "SemanticFrame",
     "TurnPlanner",
 ]

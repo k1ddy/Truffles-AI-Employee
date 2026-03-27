@@ -116,12 +116,12 @@ def _sanitize_projected_tool_args(
 
 def project_policy_tool_binding(
     *,
-    semantic_frame: Mapping[str, Any],
+    semantic_decision: Mapping[str, Any],
     allowed_tool_actions: Iterable[str],
 ) -> tuple[PolicyToolProjection | None, str | None]:
-    action = _normalize_token(semantic_frame.get("action"))
+    action = _normalize_token(semantic_decision.get("requested_outcome") or semantic_decision.get("action"))
     tool_action_hint = _normalize_token(
-        semantic_frame.get("tool_action_hint") or semantic_frame.get("tool_action")
+        semantic_decision.get("tool_action_hint") or semantic_decision.get("tool_action")
     )
     if action not in {"fact", "collect", "handoff"}:
         return None, "action_invalid"
@@ -149,8 +149,17 @@ def project_policy_tool_binding(
     if resolved_tool_action not in allowed:
         return None, f"tool_action_not_allowed:{resolved_tool_action}"
 
-    slots = _normalize_slots(semantic_frame.get("slots"))
-    referents = _normalize_referents(semantic_frame.get("referents"))
+    slots = _normalize_slots(
+        semantic_decision.get("semantic_slots") or semantic_decision.get("slots")
+    )
+    grounding_requirements = (
+        semantic_decision.get("grounding_requirements")
+        if isinstance(semantic_decision.get("grounding_requirements"), Mapping)
+        else {}
+    )
+    referents = _normalize_referents(
+        grounding_requirements.get("referents") or semantic_decision.get("referents")
+    )
     projected_args: dict[str, Any] = {}
 
     service_payload = referents.get("service") or {}

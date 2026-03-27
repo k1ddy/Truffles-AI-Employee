@@ -14,6 +14,11 @@ from app.core.dialog_state_service import (
     SemanticStateEvent,
 )
 from app.core.response_realizer import ReplyEnvelope, ReplyKind, ResponseRealizer
+from app.core.semantic_decision import (
+    GroundingRequirementsV1,
+    MissingInformationV1,
+    SemanticDecisionV1,
+)
 from app.core.turn_executor import (
     BlockBoundaryRequest,
     DegradeBoundaryRequest,
@@ -52,12 +57,15 @@ __all__ = [
     "InteractionContract",
     "InteractionState",
     "InboundTurnInput",
+    "GroundingRequirementsV1",
+    "MissingInformationV1",
     "OwnerCutoverAction",
     "PendingQuestionContract",
     "PolicyDecision",
     "ReplyEnvelope",
     "ReplyKind",
     "ResponseRealizer",
+    "SemanticDecisionV1",
     "SemanticFrame",
     "SemanticStateEvent",
     "ToolOutcome",

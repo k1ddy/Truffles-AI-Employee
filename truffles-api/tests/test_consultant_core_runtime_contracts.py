@@ -16,8 +16,11 @@ from app.core import (
     DegradeBoundaryRequest,
     DialogState,
     DialogStateService,
+    PendingQuestionContract,
     PolicyDecision,
     ResponseRealizer,
+    SemanticDecisionV1,
+    SemanticFrame,
     TurnExecutor,
     TurnPlanner,
 )
@@ -27,6 +30,7 @@ from app.services.policy_validation_boundary_service import (
     PolicyValidationBoundaryRuntimeInput,
     handle_policy_validation_boundary,
 )
+from tests import build_test_policy_override_decision
 
 
 def _repo_root() -> Path:
@@ -195,7 +199,7 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
 
     def _fake_plan(**kwargs):
         captured.update(kwargs)
-        return TurnPlanner().build_from_policy_override(
+        semantic_decision = SemanticDecisionV1.from_policy_core_payload(
             {
                 "intent": "booking",
                 "action": "collect",
@@ -203,9 +207,12 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
                 "goal": "booking",
                 "next_question": "datetime",
                 "open_questions": ["datetime"],
-            },
+            }
+        )
+        return TurnPlanner().build_from_semantic_decision(
+            semantic_decision,
+            binding_tool_action="collect",
             interaction_owner="llm_policy_core_booking",
-            interaction_relation="fill_requested_slot",
             source="llm_policy_core",
         )
 
@@ -346,7 +353,7 @@ def test_consultant_runtime_plan_turn_does_not_prefill_service_from_raw_message(
 
     def _fake_plan(**kwargs):
         captured.update(kwargs)
-        return TurnPlanner().build_from_policy_override(
+        semantic_decision = SemanticDecisionV1.from_policy_core_payload(
             {
                 "intent": "booking",
                 "action": "collect",
@@ -355,9 +362,12 @@ def test_consultant_runtime_plan_turn_does_not_prefill_service_from_raw_message(
                 "slots": {"service": "маникюр"},
                 "next_question": "datetime",
                 "open_questions": ["datetime"],
-            },
+            }
+        )
+        return TurnPlanner().build_from_semantic_decision(
+            semantic_decision,
+            binding_tool_action="collect",
             interaction_owner="llm_policy_core_booking",
-            interaction_relation="fill_requested_slot",
             source="llm_policy_core",
         )
 
@@ -399,8 +409,62 @@ def test_consultant_runtime_plan_turn_does_not_prefill_service_from_raw_message(
             }
         },
     }
-    assert decision.pending_question_contract.next_question == "datetime"
+    assert TurnPlanner().canonical_pending_question_contract(decision).next_question == "datetime"
     assert override is None
+
+
+def test_consultant_runtime_plan_turn_degrades_synthetic_decision_without_semantic_owner() -> None:
+    runtime = ConsultantRuntime()
+
+    runtime.planner.plan = lambda **_kwargs: build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="fill_requested_slot",
+        source="llm_policy_core",
+    )
+    runtime._build_memory_summary = lambda *_args, **_kwargs: "user: test"
+
+    decision, override = runtime._plan_turn(
+        db=None,
+        payload=SimpleNamespace(
+            client_slug="demo_salon",
+            body=SimpleNamespace(message="Хочу записаться."),
+        ),
+        prepared=SimpleNamespace(
+            conversation=SimpleNamespace(state="bot_active"),
+            branch_id=uuid4(),
+        ),
+        runtime_state=SimpleNamespace(
+            dialog_state=DialogState.model_validate(_dialog_state_payload()),
+            booking_state={},
+            expected_reply_type=None,
+            expected_reply_reason=None,
+            current_goal=None,
+        ),
+    )
+
+    assert decision.meta["degrade_path"] is True
+    assert decision.meta["reason_code"] == "planner:missing_semantic_owner"
+    assert decision.intent == "planner_missing_semantic_owner"
+    assert decision.interaction.owner == "semantic_owner_guard"
+    assert decision.meta["missing_semantic_owner_guard"] == {
+        "reason_code": "missing_semantic_owner",
+        "source": "llm_policy_core",
+        "outcome": "COLLECT",
+        "action": "collect",
+        "tool_action": "collect",
+        "synthetic_policy_decision": True,
+    }
+    assert override is not None
+    assert override.reason_code == "planner:missing_semantic_owner"
+    assert override.meta["missing_semantic_owner_guard"]["source"] == "llm_policy_core"
 
 
 def _build_boundary_turn_result(
@@ -517,10 +581,8 @@ def test_runtime_core_scaffolding_round_trips_contract_payloads() -> None:
     assert result.reply.reply_kind == "collect"
 
 
-def test_turn_planner_builds_policy_decision_from_policy_override_payload() -> None:
-    planner = TurnPlanner()
-
-    decision = planner.build_from_policy_override(
+def test_test_support_builds_policy_decision_from_policy_override_payload() -> None:
+    decision = build_test_policy_override_decision(
         {
             "intent": "contact",
             "action": "fact",
@@ -567,14 +629,150 @@ def test_turn_planner_preserves_policy_core_followup_contract_for_fact_action() 
         }
     )
 
+    pending_question = planner.canonical_pending_question_contract(decision)
+
     assert decision.outcome == "FACT"
-    assert decision.pending_question_contract.expected_reply_type == "name"
-    assert decision.pending_question_contract.reason == "collect:name"
-    assert decision.pending_question_contract.pending_question_act == "ask_about_requested_slot"
-    assert decision.pending_question_contract.pending_question_target == "time"
-    assert decision.pending_question_contract.active_question_relation == "generic_info_interrupt"
-    assert decision.pending_question_contract.next_question == "name"
-    assert decision.pending_question_contract.open_questions == ["name"]
+    assert decision.pending_question_contract.model_dump(mode="python", exclude_none=True) == {
+        "open_questions": []
+    }
+    assert pending_question.expected_reply_type == "name"
+    assert pending_question.reason == "collect:name"
+    assert pending_question.pending_question_act == "ask_about_requested_slot"
+    assert pending_question.pending_question_target == "time"
+    assert pending_question.active_question_relation == "generic_info_interrupt"
+    assert pending_question.next_question == "name"
+    assert pending_question.open_questions == ["name"]
+
+
+def test_turn_planner_detects_owner_adjacent_shadow_carrier_mutation() -> None:
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.book_slot",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "policy_collect",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "name",
+            "pending_question_act": "fill_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "fill_requested_slot",
+            "next_question": "name",
+            "open_questions": ["name"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.book_slot",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    decision.pending_question_contract = PendingQuestionContract(
+        expected_reply_type="name",
+        next_question="name",
+        open_questions=["name"],
+    )
+    decision.semantic_frame = SemanticFrame(
+        user_goal="booking",
+        requested_effect="commit_booking",
+        continuation={"next_question": "name"},
+    )
+    decision.meta["semantic_contract"] = {
+        "contract_version": "semantic_contract.v1",
+        "capability": "bookability",
+    }
+
+    mutation = planner.detect_semantic_mutation(decision)
+
+    assert mutation is not None
+    assert mutation["reason_code"] == "semantic_decision_post_owner_mutation"
+    assert mutation["diffs"]["pending_question_contract"]["expected"] == {"open_questions": []}
+    assert mutation["diffs"]["semantic_frame"]["expected"] == {
+        "schema_version": "semantic_frame.v2",
+        "subject": {},
+        "referents": {},
+        "constraints": {},
+        "preferences": {},
+        "continuation": {},
+        "capability_selection": {},
+        "needs_human": False,
+    }
+    assert mutation["diffs"]["meta.semantic_contract"]["expected"] == {}
+
+
+def test_turn_planner_builds_shadow_only_owner_adjacent_carriers_for_semantic_decision() -> None:
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "fact",
+            "tool_action": "calendar.book_slot",
+            "tool_action_hint": "calendar.book_slot",
+            "goal": "booking",
+            "reason": "final_name_collected",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "direct",
+            "temporal_scope": "specific_time",
+            "slots": {
+                "service": "Маникюр",
+                "datetime": "2026-03-27T15:00:00+05:00",
+                "name": "Алина",
+            },
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "value": "Маникюр",
+                    "source_ref": "memory",
+                }
+            ],
+            "expected_reply_type": "name",
+            "pending_question_act": "fill_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "fill_requested_slot",
+            "next_question": "name",
+            "open_questions": ["name"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.book_slot",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    canonical_frame = planner.canonical_semantic_frame(decision)
+    canonical_contract = planner.canonical_semantic_contract(decision)
+
+    assert decision.semantic_frame.model_dump(mode="python", exclude_none=True) == {
+        "schema_version": "semantic_frame.v2",
+        "subject": {},
+        "referents": {},
+        "constraints": {},
+        "preferences": {},
+        "continuation": {},
+        "capability_selection": {},
+        "needs_human": False,
+    }
+    assert decision.pending_question_contract.model_dump(mode="python", exclude_none=True) == {
+        "open_questions": []
+    }
+    assert "semantic_contract" not in decision.meta
+    assert canonical_frame.subject["kind"] == "service"
+    assert canonical_frame.continuation["next_question"] == "name"
+    assert canonical_contract["capability"] == "bookability"
 
 
 def test_boundary_validator_builds_typed_block_override() -> None:
@@ -871,7 +1069,7 @@ def test_turn_executor_builds_typed_owner_cutover_artifact() -> None:
 
 
 def test_turn_executor_builds_typed_tool_reply_owner_cutover_artifact() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "service_duration",
             "action": "fact",
@@ -1106,7 +1304,7 @@ def test_policy_validation_boundary_fact_guard_escalates_at_limit() -> None:
 
 
 def test_turn_executor_builds_typed_booking_prompt_owner_cutover_artifact() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -1150,7 +1348,7 @@ def test_turn_executor_builds_typed_booking_prompt_owner_cutover_artifact() -> N
 
 
 def test_turn_executor_builds_typed_check_booking_prompt_owner_cutover_artifact() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "check_booking",
             "action": "collect",
@@ -1194,7 +1392,7 @@ def test_turn_executor_builds_typed_check_booking_prompt_owner_cutover_artifact(
 
 
 def test_turn_executor_returns_reference_prompt_for_check_booking_fact() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "check_booking",
             "action": "fact",
@@ -1237,8 +1435,85 @@ def test_turn_executor_returns_reference_prompt_for_check_booking_fact() -> None
     assert result.meta["semantic_contract"]["capability"] == "booking_manage"
 
 
+def test_turn_executor_semantic_decision_emits_enrichment_only_meta() -> None:
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "booking_manage",
+            "tool_action": "calendar.book_slot",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "resolution_mode": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                    "value": "Маникюр",
+                }
+            ],
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.book_slot",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Хочу записаться на маникюр.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime(2026, 3, 27, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert "semantic_contract" not in result.meta
+    assert "pending_question_contract" not in result.meta
+    assert result.meta["semantic_enrichment"] == {
+        "referents": {
+            "service": {
+                "value": "Маникюр",
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "source_ref": "memory",
+            }
+        },
+        "entity_refs": [
+            {
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "source_ref": "memory",
+                "value": "Маникюр",
+            }
+        ],
+    }
+
+
 def test_turn_executor_routes_master_query_through_master_catalog() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "master_query",
             "action": "fact",
@@ -1273,7 +1548,7 @@ def test_turn_executor_routes_master_query_through_master_catalog() -> None:
 
 
 def test_turn_executor_keeps_slot_constraint_collect_contract() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -1314,7 +1589,7 @@ def test_turn_executor_keeps_slot_constraint_collect_contract() -> None:
 
 
 def test_turn_executor_realizes_specialist_followup_collect_prompt_from_canonical_contract() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -1369,7 +1644,7 @@ def test_turn_executor_realizes_specialist_followup_collect_prompt_from_canonica
 
 
 def test_turn_executor_adds_pricing_info_sections_for_price_reply() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "pricing",
             "action": "fact",
@@ -1422,7 +1697,7 @@ def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_regis
         _execute_tool_action,
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "info",
             "action": "fact",
@@ -1515,7 +1790,7 @@ def test_turn_executor_projects_policy_info_refs_into_catalog_execution(monkeypa
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "other",
             "action": "fact",
@@ -1557,7 +1832,7 @@ def test_turn_executor_uses_policy_owned_info_truth_fallback_without_echo(monkey
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "other",
             "action": "fact",
@@ -1619,7 +1894,7 @@ def test_turn_executor_projects_specialist_referent_into_tool_args(monkeypatch) 
         _execute_tool_action,
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "fact",
@@ -1717,7 +1992,7 @@ def test_turn_executor_prunes_legacy_info_args_when_resolving_catalog_service_qu
         _execute_tool_action,
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "duration",
             "action": "fact",
@@ -1792,7 +2067,7 @@ def test_turn_executor_does_not_project_service_shadow_into_catalog_location(mon
         _execute_tool_action,
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "location",
             "action": "fact",
@@ -1851,7 +2126,7 @@ def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(m
 
     monkeypatch.setattr("app.services.pack_runtime_service.get_pack_decision", _get_pack_decision)
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "pricing",
             "action": "fact",
@@ -1923,7 +2198,7 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
 
     monkeypatch.setattr("app.services.pack_runtime_service.get_pack_decision", _get_pack_decision)
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "pricing",
             "action": "fact",
@@ -2038,7 +2313,7 @@ def test_turn_executor_does_not_use_truth_semantic_fallback_when_pack_misses(mon
         _format_reply_from_truth,
     )
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "promotions",
             "action": "fact",
@@ -2070,7 +2345,7 @@ def test_turn_executor_does_not_use_truth_semantic_fallback_when_pack_misses(mon
 
 
 def test_consultant_runtime_records_question_contract_trace_entries() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2150,7 +2425,7 @@ def test_consultant_runtime_records_question_contract_trace_entries() -> None:
 
 def test_consultant_runtime_trace_prefers_canonical_question_contract_over_stale_projection() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2213,7 +2488,7 @@ def test_consultant_runtime_trace_prefers_canonical_question_contract_over_stale
 
 def test_consultant_runtime_trace_emits_question_contract_for_collect_pending_contract_without_flag() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2378,7 +2653,7 @@ def test_consultant_runtime_trace_records_policy_core_causal_bundle() -> None:
 
 def test_consultant_runtime_write_runtime_state_persists_semantic_runtime_path() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2413,7 +2688,7 @@ def test_consultant_runtime_write_runtime_state_persists_semantic_runtime_path()
 
 def test_consultant_runtime_trace_prefers_policy_core_semantic_contract_over_runtime_projection() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2497,7 +2772,7 @@ def test_consultant_runtime_trace_prefers_policy_core_semantic_contract_over_run
 
 def test_consultant_runtime_trace_prefers_materialized_frame_over_stale_legacy_carriers() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2595,7 +2870,7 @@ def test_consultant_runtime_trace_prefers_materialized_frame_over_stale_legacy_c
 
 
 def test_turn_executor_omits_empty_pending_question_contract_from_execution_meta() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "hours",
             "action": "fact",
@@ -2610,7 +2885,7 @@ def test_turn_executor_omits_empty_pending_question_contract_from_execution_meta
 
 
 def test_consultant_runtime_records_referent_followup_axes_in_trace_and_meta() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2696,7 +2971,7 @@ def test_consultant_runtime_records_referent_followup_axes_in_trace_and_meta() -
 
 
 def test_consultant_runtime_records_tool_execution_projection_in_trace_and_meta() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "pricing",
             "action": "fact",
@@ -2859,9 +3134,181 @@ def test_consultant_runtime_memory_profile_uses_canonical_pending_question_contr
     assert "active_slots" not in profile
 
 
+def test_consultant_runtime_memory_profile_uses_state_written_semantic_decision_contract_from_executor_enrichment() -> None:
+    runtime = ConsultantRuntime()
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 27, 12, 30, tzinfo=timezone.utc)
+    expected_pending_question_contract = {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    expected_specialist_referent = {
+        "value": "Айгерим",
+        "entity_id": "spc:aigerim",
+        "entity_type": "specialist",
+        "source_ref": "execution",
+    }
+    expected_grounding_provenance = {
+        "pack_id": "demo_salon",
+        "resolver_id": "catalog",
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "booking_manage",
+            "tool_action": "calendar.book_slot",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "resolution_mode": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.book_slot",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    updated, _, _ = service.write_runtime_payload(
+        {
+            "consultant_runtime": {
+                "schema_version": "consultant_runtime.v1",
+                "dialog_state": {
+                    "schema_version": "dialog_state.v1",
+                    "pending_question_contract": {
+                        "expected_reply_type": "name",
+                        "reason": "stale_reason",
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                    },
+                    "interaction_state": {
+                        "interaction_owner": "stale_owner",
+                    },
+                    "meta": {
+                        "writer": "dialog_state_service",
+                        "current_goal": "booking",
+                        "semantic_contract": {
+                            "contract_version": "semantic_contract.v1",
+                            "capability": "pricing",
+                            "subject_kind": "service",
+                        },
+                    },
+                },
+                "booking": {
+                    "active": True,
+                    "service": "Маникюр",
+                    "last_question": "datetime",
+                },
+            }
+        },
+        decision=decision,
+        execution_meta={
+            "semantic_enrichment": {
+                "referents": {
+                    "specialist": dict(expected_specialist_referent)
+                },
+                "grounding_provenance": dict(expected_grounding_provenance),
+            },
+            "slot_values": {"service": "Маникюр"},
+        },
+        now=now,
+    )
+    loaded = service.load_runtime_payload(updated)
+    runtime_state = SimpleNamespace(
+        current_goal=loaded["current_goal"],
+        booking_state=loaded["booking_payload"],
+        dialog_state=loaded["dialog_state"],
+        expected_reply_type=loaded["expected_reply_type"],
+        expected_reply_reason=loaded["expected_reply_reason"],
+    )
+
+    profile = runtime._build_policy_core_memory_profile(runtime_state)
+
+    assert profile["pending_question_contract"] == expected_pending_question_contract
+    assert profile["semantic_contract"]["capability"] == "booking_manage"
+    assert profile["semantic_contract"]["subject_kind"] == "booking"
+    assert profile["semantic_contract"]["pending_question_target"] == "time"
+    assert profile["semantic_contract"]["active_question_relation"] == "ask_about_requested_slot"
+    assert profile["semantic_contract"]["grounding_provenance"] == expected_grounding_provenance
+    assert profile["semantic_contract"]["referents"]["specialist"] == expected_specialist_referent
+
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(
+        tool_action="calendar.book_slot",
+        tool_decision="datetime",
+        meta={
+            "semantic_enrichment": {
+                "referents": {"specialist": dict(expected_specialist_referent)},
+                "grounding_provenance": dict(expected_grounding_provenance),
+            },
+            "tool_execution_projection": {
+                "projection_source": "semantic_contract",
+                "service_query": "Маникюр",
+            },
+        },
+    )
+    turn_result = SimpleNamespace(
+        dialog_state=runtime_state.dialog_state,
+        reply=SimpleNamespace(reply_kind="collect"),
+    )
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "consultant_runtime"
+        and entry.get("semantic_contract", {}).get("referents", {}).get("specialist")
+        == expected_specialist_referent
+        and entry.get("semantic_contract", {}).get("grounding_provenance")
+        == expected_grounding_provenance
+        and entry.get("pending_question_contract") == expected_pending_question_contract
+        and entry.get("tool_execution_projection") == {
+            "projection_source": "semantic_contract",
+            "service_query": "Маникюр",
+        }
+        for entry in trace
+    )
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta["semantic_contract"]["referents"]["specialist"] == expected_specialist_referent
+    assert decision_meta["semantic_contract"]["grounding_provenance"] == expected_grounding_provenance
+    assert decision_meta["pending_question_contract"] == expected_pending_question_contract
+
+
 def test_consultant_runtime_memory_profile_prefers_materialized_frame_over_stale_legacy_carriers() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2944,7 +3391,7 @@ def test_consultant_runtime_memory_profile_prefers_materialized_frame_over_stale
 
 def test_consultant_runtime_contract_action_prefers_materialized_frame_over_stale_legacy_carriers() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -2987,7 +3434,7 @@ def test_consultant_runtime_contract_action_prefers_materialized_frame_over_stal
 
 
 def test_turn_planner_builds_canonical_semantic_frame_v2() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "fact",
@@ -3031,6 +3478,9 @@ def test_turn_planner_builds_canonical_semantic_frame_v2() -> None:
         source="llm_policy_core",
     )
 
+    canonical_frame = TurnPlanner().canonical_semantic_frame(decision)
+    canonical_contract = TurnPlanner().canonical_semantic_contract(decision)
+
     assert decision.semantic_frame.schema_version == "semantic_frame.v2"
     assert decision.semantic_frame.user_goal == "booking"
     assert decision.semantic_frame.requested_effect == "commit_booking"
@@ -3041,11 +3491,21 @@ def test_turn_planner_builds_canonical_semantic_frame_v2() -> None:
     assert decision.semantic_frame.capability_selection["capability"] == "bookability"
     assert decision.semantic_frame.capability_selection["tool_action_hint"] == "calendar.book_slot"
     assert decision.meta["semantic_contract"]["capability"] == "bookability"
+    assert canonical_frame.schema_version == "semantic_frame.v2"
+    assert canonical_frame.user_goal == "booking"
+    assert canonical_frame.requested_effect == "commit_booking"
+    assert canonical_frame.subject["kind"] == "service"
+    assert canonical_frame.subject["value"] == "Маникюр"
+    assert canonical_frame.continuation["next_question"] == "name"
+    assert canonical_frame.continuation["slot_values"]["service"] == "Маникюр"
+    assert canonical_frame.capability_selection["capability"] == "bookability"
+    assert canonical_frame.capability_selection["tool_action_hint"] == "calendar.book_slot"
+    assert canonical_contract["capability"] == "bookability"
 
 
 def test_dialog_state_service_writes_append_only_semantic_state_log() -> None:
     service = DialogStateService()
-    first_decision = TurnPlanner().build_from_policy_override(
+    first_decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -3177,7 +3637,7 @@ def test_consultant_runtime_memory_profile_prefers_canonical_semantic_state() ->
 
 
 def test_turn_executor_builds_execution_contract_from_canonical_semantic_frame() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -3256,7 +3716,7 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
         "specialist_name": "Айгерим",
     }
 
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "collect",
@@ -3394,7 +3854,7 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
 def test_turn_executor_commits_booking_only_on_explicit_calendar_book_slot(
     monkeypatch,
 ) -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "booking",
             "action": "fact",
@@ -3443,7 +3903,7 @@ def test_turn_executor_commits_booking_only_on_explicit_calendar_book_slot(
 
 
 def test_turn_executor_builds_typed_explicit_handoff_owner_cutover_artifact() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "human_request",
             "action": "handoff",
@@ -3652,7 +4112,7 @@ def test_turn_executor_builds_typed_owner_cutover_turn_outcome() -> None:
 
 
 def test_response_realizer_honors_degrade_reply_kind_override() -> None:
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "duration",
             "action": "fact",
@@ -3677,7 +4137,7 @@ def test_response_realizer_honors_degrade_reply_kind_override() -> None:
 
 def test_consultant_runtime_preserves_owner_decision_when_executor_requests_handoff() -> None:
     runtime = ConsultantRuntime()
-    decision = TurnPlanner().build_from_policy_override(
+    decision = build_test_policy_override_decision(
         {
             "intent": "duration",
             "action": "fact",
