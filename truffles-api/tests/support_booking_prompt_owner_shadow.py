@@ -1,3 +1,10 @@
+"""Shadow-only test helper for former booking prompt owner residue.
+
+This file preserves deterministic test coverage for the old booking
+reactivation candidate lane after Workstream 1 removed it from `app/core`.
+It must not gain runtime callers.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -20,7 +27,6 @@ from app.services.owner_resolver import (
 from app.services.policy_validation_boundary_service import (
     build_policy_validation_booking_recovery,
 )
-
 
 _PENDING_BOOKING_REACTIVATION_REPLY_BY_SLOT = {
     "service": decision_router.EXPECTED_REPLY_SERVICE,

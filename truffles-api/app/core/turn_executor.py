@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, NamedTuple
-from uuid import UUID
-
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.binding_plan import BindingPlanV1
 from app.core.boundary_validator import BoundaryOverride, BoundaryValidator
 from app.core.dialog_state_service import DialogState, DialogStateService
 from app.core.response_realizer import ReplyEnvelope, ResponseRealizer
+from app.core.runtime_trace_contract import RuntimeTraceContractV1
 from app.core.turn_planner import DecisionOutcome, PolicyDecision, TurnPlanner
-from app.schemas.intent import validate_tool_args_shape
 from app.schemas.turn_outcome import TurnOutcome, TurnOutcomeObservability
 
 ToolStatus = Literal["ok", "degraded", "blocked", "skipped"]
@@ -42,6 +41,7 @@ class TurnTrace(BaseModel):
 
     reason_code: str | None = None
     stages: list[str] = Field(default_factory=list)
+    runtime_trace_contract: RuntimeTraceContractV1 | None = None
 
 
 class TurnResult(BaseModel):
@@ -78,7 +78,6 @@ class BoundaryExecutionArtifact(NamedTuple):
 @dataclass(frozen=True)
 class BlockBoundaryRequest:
     reason_code: str
-    action: str
     intent: str
     interaction_owner: str
     tool_action: str
@@ -95,7 +94,6 @@ class BlockBoundaryRequest:
 @dataclass(frozen=True)
 class DegradeBoundaryRequest:
     reason_code: str
-    action: str
     intent: str
     interaction_owner: str
     public_message: str
@@ -119,15 +117,6 @@ class OwnerExecutionArtifact(NamedTuple):
 class TurnExecutor:
     """Assembles the typed turn result while runtime cutover is still pending."""
 
-    _POLICY_INFO_TOOL_ACTION_MAP = {
-        "pricing": "catalog.service_query",
-        "duration": "catalog.service_query",
-        "promotions": "catalog.service_query",
-        "services_overview": "catalog.service_query",
-        "location": "catalog.location",
-        "hours": "catalog.location",
-        "parking": "catalog.location",
-    }
     _DIRECT_INFO_TRUTH_REFS = {
         "location",
         "hours",
@@ -259,15 +248,37 @@ class TurnExecutor:
         now: datetime,
     ) -> RuntimeExecutionResult:
         merged_booking = self._merge_booking_slots(booking_state, decision.slots)
-        if decision.outcome == "HANDOFF":
-            return RuntimeExecutionResult(
-                text="Передаю диалог менеджеру. Он скоро подключится.",
-                tool_action="handoff",
-                tool_decision="pending",
-                meta={"handoff_requested": True},
-                request_handoff=True,
+        binding_plan = self._binding_plan(decision)
+        if not isinstance(binding_plan, BindingPlanV1):
+            return self._execute_binding_gap("executor:missing_binding_plan")
+
+        binding_outcome_type = binding_plan.binding_outcome_type
+        bound_ref = self._normalize_fact_hint(binding_plan.selected_tool_or_workflow_ref)
+
+        if binding_outcome_type == "handoff":
+            return self._execute_binding_handoff(
+                "handoff",
+                handoff_reason_code=binding_plan.handoff_reason_code,
             )
-        if decision.tool_action == "calendar.book_slot":
+        if binding_outcome_type == "degrade":
+            return self._execute_binding_handoff(
+                "degrade",
+                handoff_reason_code=binding_plan.degrade_reason_code,
+            )
+        if binding_outcome_type == "deny":
+            return RuntimeExecutionResult(
+                text="",
+                tool_action="noop",
+                tool_decision="blocked",
+                meta={"reason_code": binding_plan.deny_reason_code or "binding_deny"},
+            )
+        if binding_outcome_type in {"workflow_start", "workflow_advance"}:
+            return self._execute_collect(decision, booking_state=merged_booking)
+        if binding_outcome_type != "tool_call":
+            return self._execute_binding_gap(
+                f"executor:unsupported_binding_outcome:{binding_outcome_type}"
+            )
+        if bound_ref == "calendar.book_slot":
             return self._execute_booking_confirmation(
                 decision,
                 db=db,
@@ -277,17 +288,36 @@ class TurnExecutor:
                 user_phone=user_phone,
                 now=now,
             )
-        if decision.outcome == "FACT":
-            return self._execute_fact(
-                decision,
-                db=db,
-                message_text=message_text,
-                client_slug=client_slug,
-                branch_id=branch_id,
-                booking_state=merged_booking,
-                now=now,
-            )
-        return self._execute_collect(decision, booking_state=merged_booking)
+        return self._execute_fact(
+            decision,
+            db=db,
+            message_text=message_text,
+            client_slug=client_slug,
+            branch_id=branch_id,
+            booking_state=merged_booking,
+            now=now,
+        )
+
+    @staticmethod
+    def _execute_binding_handoff(
+        tool_decision: str,
+        *,
+        handoff_reason_code: str | None,
+    ) -> RuntimeExecutionResult:
+        meta: dict[str, Any] = {"handoff_requested": True}
+        if isinstance(handoff_reason_code, str) and handoff_reason_code.strip():
+            meta["reason_code"] = handoff_reason_code.strip()
+        return RuntimeExecutionResult(
+            text="Передаю диалог менеджеру. Он скоро подключится.",
+            tool_action="handoff",
+            tool_decision=tool_decision,
+            meta=meta,
+            request_handoff=True,
+        )
+
+    @classmethod
+    def _execute_binding_gap(cls, reason_code: str) -> RuntimeExecutionResult:
+        return cls._execute_binding_handoff("binding_gap", handoff_reason_code=reason_code)
 
     def _execute_collect(
         self,
@@ -425,13 +455,16 @@ class TurnExecutor:
         query_text = (message_text or "").strip()
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
         service_name = merged_slots.get("service")
+        resolved_tool_action, projected_tool_args, tool_execution_projection = (
+            self._binding_tool_call_payload(decision)
+        )
         semantic_contract = self._build_execution_semantic_contract(
             decision,
             booking_state=merged_slots,
             service_name=service_name,
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
-        if decision.tool_action == "calendar.get_booking" and decision.intent in {
+        if resolved_tool_action == "calendar.get_booking" and decision.intent in {
             "check_booking",
             "verify_booking",
         }:
@@ -440,7 +473,7 @@ class TurnExecutor:
                     "Чтобы проверить запись, подскажите примерную дату и время "
                     "или имя, на которое оформляли запись."
                 ),
-                tool_action=decision.tool_action,
+                tool_action=resolved_tool_action,
                 tool_decision="not_found",
                 meta=self._attach_semantic_contract_meta(
                     decision,
@@ -495,7 +528,7 @@ class TurnExecutor:
                 )
                 return RuntimeExecutionResult(
                     text=master_reply.response.strip(),
-                    tool_action=decision.tool_action,
+                    tool_action=resolved_tool_action,
                     tool_decision=master_reply.intent or "master",
                     meta=self._attach_semantic_contract_meta(
                         decision,
@@ -504,16 +537,6 @@ class TurnExecutor:
                         pending_question_contract=pending_question_contract,
                     ),
                 )
-        resolved_tool_action = self._resolve_fact_tool_action(
-            decision=decision,
-            policy_info_refs=policy_info_refs,
-        )
-        projected_tool_args, tool_execution_projection = self._build_tool_execution_projection(
-            decision=decision,
-            semantic_contract=semantic_contract,
-            service_name=service_name,
-            tool_action=resolved_tool_action,
-        )
         if db is not None and branch_id is not None and is_tool_action(resolved_tool_action):
             service_query = self._resolve_fact_service_query(
                 decision=decision,
@@ -550,31 +573,58 @@ class TurnExecutor:
                     tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
                     meta=tool_meta,
                 )
-        if decision.tool_action == "info":
+        should_attempt_direct_info_fallback = decision.tool_action == "info" or (
+            self._has_canonical_semantic_owner(decision) and bool(policy_info_refs)
+        )
+        direct_info_ref = None
+        direct_info_reply = None
+        if should_attempt_direct_info_fallback:
             direct_info_ref, direct_info_reply = self._build_direct_policy_info_reply(
                 policy_info_refs=policy_info_refs,
                 client_slug=client_slug,
                 format_reply_from_truth=format_reply_from_truth,
             )
-            if direct_info_ref and direct_info_reply:
-                direct_meta: dict[str, Any] = {
-                    "info_sections": [direct_info_ref],
-                    "info_ref_execution": True,
-                    "info_ref_source": "policy_core",
-                }
-                if tool_execution_projection:
-                    direct_meta["tool_execution_projection"] = tool_execution_projection
-                return RuntimeExecutionResult(
-                    text=direct_info_reply,
-                    tool_action=resolved_tool_action,
-                    tool_decision=direct_info_ref,
-                    meta=self._attach_semantic_contract_meta(
-                        decision,
-                        direct_meta,
-                        semantic_contract=semantic_contract,
-                        pending_question_contract=pending_question_contract,
-                    ),
-                )
+        if direct_info_ref and direct_info_reply:
+            direct_meta: dict[str, Any] = {
+                "info_sections": [direct_info_ref],
+                "info_ref_execution": True,
+                "info_ref_source": "policy_core",
+            }
+            if tool_execution_projection:
+                direct_meta["tool_execution_projection"] = tool_execution_projection
+            return RuntimeExecutionResult(
+                text=direct_info_reply,
+                tool_action=resolved_tool_action,
+                tool_decision=direct_info_ref,
+                meta=self._attach_semantic_contract_meta(
+                    decision,
+                    direct_meta,
+                    semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
+                ),
+            )
+        if (
+            should_attempt_direct_info_fallback
+            and resolved_tool_action == "info"
+            and db is not None
+            and branch_id is not None
+        ):
+            logical_info_result = self._execute_logical_info_tool_candidates(
+                decision=decision,
+                db=db,
+                query_text=query_text,
+                client_slug=client_slug,
+                branch_id=branch_id,
+                now=now,
+                semantic_contract=semantic_contract,
+                pending_question_contract=pending_question_contract,
+                service_name=service_name,
+                fact_refs=fact_refs,
+                tool_execution_projection=tool_execution_projection,
+            )
+            if logical_info_result is not None:
+                return logical_info_result
+        if should_attempt_direct_info_fallback:
             unresolved_info_meta = {
                 "fact_fallback": True,
                 "fact_fallback_reason": "policy_info_unresolved",
@@ -632,14 +682,16 @@ class TurnExecutor:
                     pending_question_contract=pending_question_contract,
                 ),
             )
-        fallback_text = (message_text or "").strip() or "Я уточню это для вас."
         return RuntimeExecutionResult(
-            text=fallback_text,
-            tool_action=decision.tool_action,
-            tool_decision="passthrough",
+            text="Я уточню это для вас.",
+            tool_action=resolved_tool_action,
+            tool_decision="fact_unresolved",
             meta=self._attach_semantic_contract_meta(
                 decision,
-                {"fact_fallback": True},
+                {
+                    "fact_fallback": True,
+                    "fact_fallback_reason": "fact_execution_unresolved",
+                },
                 semantic_contract=semantic_contract,
                 pending_question_contract=pending_question_contract,
             ),
@@ -660,124 +712,9 @@ class TurnExecutor:
         return cleaned or None
 
     @classmethod
-    def _looks_like_uuid(cls, value: Any) -> bool:
-        token = cls._normalize_execution_text(value)
-        if token is None:
-            return False
-        try:
-            UUID(token)
-        except (ValueError, TypeError):
-            return False
-        return True
-
-    @classmethod
     def _semantic_referents(cls, semantic_contract: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         referents = semantic_contract.get("referents") if isinstance(semantic_contract, dict) else None
         return referents if isinstance(referents, dict) else {}
-
-    def _build_tool_execution_projection(
-        self,
-        *,
-        decision: PolicyDecision,
-        semantic_contract: dict[str, Any] | None,
-        service_name: str | None = None,
-        tool_action: str | None = None,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        projected_args: dict[str, Any] = {}
-        referents = self._semantic_referents(semantic_contract)
-        resolved_tool_action = self._normalize_fact_hint(tool_action) or self._normalize_fact_hint(
-            decision.tool_action
-        )
-
-        service_payload = referents.get("service") if isinstance(referents.get("service"), dict) else {}
-        projected_service = self._normalize_execution_text(
-            service_payload.get("value")
-            or service_name
-        )
-        if projected_service and resolved_tool_action in {
-            "calendar.list_slots",
-            "calendar.book_slot",
-            "catalog.service_query",
-            "catalog.portfolio",
-        }:
-            projected_args["service_query"] = projected_service
-
-        specialist_payload = (
-            referents.get("specialist")
-            if isinstance(referents.get("specialist"), dict)
-            else {}
-        )
-        projected_specialist_name = self._normalize_execution_text(
-            specialist_payload.get("value")
-        )
-        if projected_specialist_name and resolved_tool_action in {
-            "calendar.list_slots",
-            "calendar.book_slot",
-        }:
-            projected_args["specialist_name"] = projected_specialist_name
-
-        projected_specialist_id = self._normalize_execution_text(
-            specialist_payload.get("entity_id")
-        )
-        if (
-            projected_specialist_id
-            and resolved_tool_action in {"calendar.list_slots", "calendar.book_slot"}
-            and self._looks_like_uuid(projected_specialist_id)
-        ):
-            projected_args["specialist_id"] = projected_specialist_id
-        else:
-            projected_args.pop("specialist_id", None)
-
-        booking_ref_payload = (
-            referents.get("booking_ref")
-            if isinstance(referents.get("booking_ref"), dict)
-            else {}
-        )
-        projected_booking_id = self._normalize_execution_text(
-            booking_ref_payload.get("entity_id") or booking_ref_payload.get("value")
-        )
-        if (
-            projected_booking_id
-            and resolved_tool_action in {"calendar.get_booking", "calendar.reschedule", "calendar.cancel"}
-            and self._looks_like_uuid(projected_booking_id)
-        ):
-            projected_args["appointment_id"] = projected_booking_id
-
-        projected_args = self._sanitize_projected_tool_args(
-            tool_action=resolved_tool_action,
-            projected_args=projected_args,
-        )
-        projection: dict[str, Any] = {"projection_source": "semantic_contract"}
-        for key in ("service_query", "specialist_name", "specialist_id", "appointment_id"):
-            value = projected_args.get(key)
-            if isinstance(value, str) and value.strip():
-                projection[key] = value.strip()
-        if len(projection) == 1:
-            return projected_args, {}
-        return projected_args, projection
-
-    @staticmethod
-    def _sanitize_projected_tool_args(
-        *,
-        tool_action: str | None,
-        projected_args: dict[str, Any],
-    ) -> dict[str, Any]:
-        if not projected_args:
-            return {}
-        cleaned_args = dict(projected_args)
-        while True:
-            normalized_args, error = validate_tool_args_shape(
-                tool_action=tool_action,
-                tool_args=cleaned_args,
-            )
-            if error is None:
-                return normalized_args or {}
-            if not error.startswith("tool_args_unknown_field:"):
-                return cleaned_args
-            unknown_key = error.split(":", 1)[1].strip()
-            if not unknown_key or unknown_key not in cleaned_args:
-                return cleaned_args
-            cleaned_args.pop(unknown_key, None)
 
     @classmethod
     def _normalize_semantic_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
@@ -918,6 +855,36 @@ class TurnExecutor:
     @staticmethod
     def _has_canonical_semantic_owner(decision: PolicyDecision) -> bool:
         return getattr(decision, "semantic_decision", None) is not None
+
+    @staticmethod
+    def _binding_plan(decision: PolicyDecision) -> BindingPlanV1 | None:
+        binding_plan = getattr(decision, "binding_plan", None)
+        if isinstance(binding_plan, BindingPlanV1):
+            return binding_plan
+        return None
+
+    @classmethod
+    def _binding_tool_call_payload(
+        cls,
+        decision: PolicyDecision,
+    ) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        binding_plan = cls._binding_plan(decision)
+        if (
+            not isinstance(binding_plan, BindingPlanV1)
+            or binding_plan.binding_outcome_type != "tool_call"
+        ):
+            raise ValueError("binding_tool_call_required")
+        resolved_tool_action = (
+            cls._normalize_fact_hint(binding_plan.selected_tool_or_workflow_ref) or "noop"
+        )
+        projected_tool_args = dict(binding_plan.resolved_args)
+        tool_execution_projection = {
+            "projection_source": "binding_plan.v1",
+            "binding_id": binding_plan.binding_id,
+            "tool_action": resolved_tool_action,
+            **projected_tool_args,
+        }
+        return resolved_tool_action, projected_tool_args, tool_execution_projection
 
     @classmethod
     def _build_execution_semantic_enrichment(
@@ -1113,20 +1080,6 @@ class TurnExecutor:
             _remember(semantic_contract.get("capability"))
         return refs
 
-    def _resolve_fact_tool_action(
-        self,
-        *,
-        decision: PolicyDecision,
-        policy_info_refs: list[str],
-    ) -> str:
-        if decision.tool_action != "info":
-            return decision.tool_action
-        for info_ref in policy_info_refs:
-            projected = self._POLICY_INFO_TOOL_ACTION_MAP.get(info_ref)
-            if projected:
-                return projected
-        return decision.tool_action
-
     def _build_direct_policy_info_reply(
         self,
         *,
@@ -1141,6 +1094,76 @@ class TurnExecutor:
             if isinstance(reply, str) and reply.strip():
                 return info_ref, reply.strip()
         return None, None
+
+    def _execute_logical_info_tool_candidates(
+        self,
+        *,
+        decision: PolicyDecision,
+        db: Any,
+        query_text: str,
+        client_slug: str | None,
+        branch_id: Any,
+        now: datetime,
+        semantic_contract: dict[str, Any] | None,
+        pending_question_contract: dict[str, Any] | None,
+        service_name: str | None,
+        fact_refs: set[str],
+        tool_execution_projection: dict[str, Any] | None,
+    ) -> RuntimeExecutionResult | None:
+        from app.services.tool_registry_service import execute_tool_action
+        from app.services.tool_registry_snapshot_service import list_policy_info_tool_actions
+
+        info_sections_hint = self._resolve_fact_info_sections(fact_refs)
+        service_query = self._resolve_fact_service_query(
+            decision=decision,
+            service_name=service_name,
+            semantic_contract=semantic_contract,
+        )
+        for candidate_tool_action in list_policy_info_tool_actions():
+            tool_result = execute_tool_action(
+                db,
+                tool_action=candidate_tool_action,
+                tool_args={},
+                conversation_id=None,
+                branch_id=branch_id,
+                client_slug=client_slug,
+                service_query=service_query,
+                info_sections_hint=info_sections_hint,
+                message_text=query_text,
+                expected_reply_type=None,
+                now=now,
+                semantic_contract=semantic_contract,
+            )
+            if not tool_result.handled or not isinstance(tool_result.response_text, str):
+                continue
+            response_text = tool_result.response_text.strip()
+            if not response_text:
+                continue
+            tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
+            info_sections = [
+                item
+                for item in (tool_meta.get("info_sections") or [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if not tool_result.ok and not info_sections:
+                continue
+            tool_meta["logical_info_resolution"] = True
+            tool_meta["logical_info_resolution_source"] = "tool_registry_policy_candidates"
+            if tool_execution_projection:
+                tool_meta["tool_execution_projection"] = tool_execution_projection
+            tool_meta = self._attach_semantic_contract_meta(
+                decision,
+                tool_meta,
+                semantic_contract=semantic_contract,
+                pending_question_contract=pending_question_contract,
+            )
+            return RuntimeExecutionResult(
+                text=response_text,
+                tool_action=candidate_tool_action,
+                tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
+                meta=tool_meta,
+            )
+        return None
 
     def _resolve_fact_service_query(
         self,
@@ -1484,7 +1507,6 @@ class TurnExecutor:
     ) -> BoundaryExecutionArtifact:
         decision = TurnPlanner().build_preflight_reject(
             reason_code=request.reason_code,
-            action=request.action,
             intent=request.intent,
             interaction_owner=request.interaction_owner,
             interaction_target=request.interaction_target,
@@ -1520,7 +1542,6 @@ class TurnExecutor:
     ) -> BoundaryExecutionArtifact:
         decision = TurnPlanner().build_controlled_degrade(
             reason_code=request.reason_code,
-            action=request.action,
             intent=request.intent,
             interaction_owner=request.interaction_owner,
             interaction_target=request.interaction_target,

@@ -108,6 +108,17 @@
       ],
       "default": null
     },
+    "binding_plan": {
+      "anyOf": [
+        {
+          "$ref": "https://truffles.ai/contracts/runtime/binding_plan.v1.jsonschema"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "meta": {
       "type": "object",
       "additionalProperties": true
@@ -345,6 +356,9 @@
       },
       "then": {
         "properties": {
+          "binding_plan": {
+            "$ref": "https://truffles.ai/contracts/runtime/binding_plan.v1.jsonschema"
+          },
           "semantic_frame": {
             "$ref": "#/$defs/shadowSemanticFrame"
           },
@@ -357,6 +371,30 @@
                 "semantic_contract"
               ]
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "meta": {
+            "type": "object",
+            "required": [
+              "synthetic_policy_decision"
+            ],
+            "properties": {
+              "synthetic_policy_decision": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "binding_plan": {
+            "$ref": "https://truffles.ai/contracts/runtime/binding_plan.v1.jsonschema"
           }
         }
       }

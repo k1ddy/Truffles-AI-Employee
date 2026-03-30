@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.core import DialogStateService, SemanticDecisionV1, TurnPlanner
-from app.routers.webhook.session_memory import (
-    _reset_session_memory,
-    _sync_session_memory_interaction_state,
+from app.core import ConversationProjectionV1, DialogStateService, SemanticDecisionV1, TurnPlanner, TurnJournalV1
+from tests import (
+    build_test_policy_override_decision,
+    build_test_reset_session_memory,
+    build_test_sync_session_memory_interaction_state,
 )
-from tests import build_test_policy_override_decision
 
 
 def test_dialog_state_service_projects_session_memory_interaction_state() -> None:
@@ -2511,6 +2511,123 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
     assert context["re_entry_required"]["required"] is True
 
 
+def test_dialog_state_service_rebuilds_session_memory_from_runtime_projection() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 27, 12, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "conversation_projection": ConversationProjectionV1(
+                current_goal="booking",
+                pending_question_contract={
+                    "expected_reply_type": "time",
+                    "reason": "booking_prompt",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                booking_state={"active": True, "service": "Маникюр"},
+            ).model_dump(mode="python", exclude_none=True)
+        }
+    }
+
+    updated_context, rebuilt_memory = service.rebuild_context_session_memory(
+        context,
+        base_memory={
+            "active_goal": "info",
+            "goal_stack": ["info"],
+            "pending_question_contract": {
+                "expected_reply_type": "service",
+                "reason": "old_reason",
+                "next_question": "service",
+                "open_questions": ["service"],
+            },
+            "last_updated_at": "2026-03-27T08:00:00+00:00",
+            "ttl_hours": 24,
+        },
+        now=now,
+        default_ttl_hours=24,
+    )
+
+    assert rebuilt_memory["active_goal"] == "booking"
+    assert rebuilt_memory["goal_stack"][-1] == "booking"
+    assert rebuilt_memory["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "booking_prompt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert updated_context["session_memory"] == rebuilt_memory
+    assert rebuilt_memory["last_updated_at"] == now.isoformat()
+
+
+def test_dialog_state_service_clear_expected_reply_rebuilds_projection_first_memory() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 27, 12, 30, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "conversation_projection": ConversationProjectionV1(
+                current_goal="booking",
+                pending_question_contract={},
+            ).model_dump(mode="python", exclude_none=True)
+        },
+        "session_memory": {
+            "active_goal": "info",
+            "pending_question_contract": {
+                "expected_reply_type": "service",
+                "reason": "stale_reason",
+                "next_question": "service",
+                "open_questions": ["service"],
+            },
+            "last_updated_at": "2026-03-27T08:00:00+00:00",
+            "ttl_hours": 24,
+        },
+    }
+
+    updated_context, rebuilt_memory, changed = service.clear_context_session_memory_expected_reply(
+        context,
+        expected_reply_type="service",
+        now=now,
+        default_ttl_hours=24,
+    )
+
+    assert changed is True
+    assert rebuilt_memory["active_goal"] == "booking"
+    assert "pending_question_contract" not in rebuilt_memory
+    assert updated_context["session_memory"] == rebuilt_memory
+    assert rebuilt_memory["last_updated_at"] == now.isoformat()
+
+
+def test_dialog_state_service_prepares_conversation_context_write_with_simulation_and_trace_merge() -> None:
+    service = DialogStateService()
+    prepared = service.prepare_conversation_context_write(
+        {
+            "simulation": {"mode": True, "id": "sim-1"},
+            "simulation_mode": True,
+            "decision_trace": [
+                {"stage": "seed", "decision": "start", "recorded_at": "t1"},
+                {"stage": "carry", "decision": "keep", "recorded_at": "t2"},
+            ],
+        },
+        {
+            "context_manager": {"current_goal": "booking"},
+            "decision_trace": [
+                {"stage": "seed", "decision": "start", "recorded_at": "t1"},
+                {"stage": "new", "decision": "append", "recorded_at": "t3"},
+            ],
+        },
+        decision_trace_key="decision_trace",
+        preserve_keys=("simulation", "simulation_mode"),
+        retain_trace=lambda trace: trace,
+    )
+
+    assert prepared["simulation"] == {"mode": True, "id": "sim-1"}
+    assert prepared["simulation_mode"] is True
+    assert prepared["decision_trace"] == [
+        {"stage": "seed", "decision": "start", "recorded_at": "t1"},
+        {"stage": "carry", "decision": "keep", "recorded_at": "t2"},
+        {"stage": "new", "decision": "append", "recorded_at": "t3"},
+    ]
+
+
 def test_dialog_state_service_load_runtime_payload_reprojects_stale_expected_reply_fields() -> None:
     service = DialogStateService()
 
@@ -2657,7 +2774,7 @@ def test_dialog_state_service_gets_and_sets_clarify_attempt_state() -> None:
 
 def test_sync_session_memory_interaction_state_uses_dialog_state_projection() -> None:
     now = datetime(2026, 3, 15, 18, 30, tzinfo=timezone.utc)
-    context, memory = _sync_session_memory_interaction_state(
+    context, memory = build_test_sync_session_memory_interaction_state(
         {},
         interaction_state={
             "resume_slot": " Name ",
@@ -2682,7 +2799,7 @@ def test_sync_session_memory_interaction_state_uses_dialog_state_projection() ->
 
 def test_reset_session_memory_clears_carryover_family_from_canonical_state() -> None:
     now = datetime(2026, 3, 16, 12, 30, tzinfo=timezone.utc)
-    context, manager, snapshot = _reset_session_memory(
+    context, manager, snapshot = build_test_reset_session_memory(
         context={
             "context_manager": {
                 "class_carryover": {
@@ -3726,6 +3843,7 @@ def test_dialog_state_service_clears_expected_reply_contract_on_handoff() -> Non
             "action": "handoff",
             "intent": "booking",
             "tool_action": "handoff",
+            "reason": "handoff_booking",
             "subject_kind": "booking",
             "capability": "booking_manage",
             "pending_question_act": "ask_about_requested_slot",
@@ -3949,3 +4067,179 @@ def test_dialog_state_service_merges_execution_semantic_grounding_into_runtime_c
     }
     assert dialog_state.current_referents.service == "Маникюр"
     assert dialog_state.interaction_state.grounded_referents["service"] == "Маникюр"
+
+
+def test_dialog_state_service_load_runtime_payload_prefers_conversation_projection_over_stale_dialog_state() -> None:
+    service = DialogStateService()
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "conversation_projection": {
+                "schema_version": "conversation_projection.v1",
+                "projection_version": "v1",
+                "conversation_id": "conv-1",
+                "last_turn_id": "turn-1",
+                "current_semantic_decision_ref": "decision-1",
+                "active_capability": "bookability",
+                "semantic_slots": {"service": "Маникюр"},
+                "missing_information": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "active_workflow_ref": "calendar.list_slots",
+                "pending_handoff_state": {},
+                "last_reply_ref": None,
+                "compatibility_view_refs": {
+                    "dialog_state": "consultant_runtime.dialog_state.v1",
+                },
+                "semantic_frame": {
+                    "schema_version": "semantic_frame.v2",
+                    "user_goal": "booking",
+                    "requested_effect": "collect_missing_input",
+                    "subject": {"kind": "service", "value": "Маникюр"},
+                    "referents": {
+                        "service": {
+                            "value": "Маникюр",
+                            "entity_id": "svc:manicure",
+                            "entity_type": "service",
+                            "source_ref": "carryover",
+                        }
+                    },
+                    "constraints": {},
+                    "preferences": {},
+                    "continuation": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "slot_values": {"service": "Маникюр"},
+                    },
+                    "capability_selection": {"capability": "bookability"},
+                    "needs_human": False,
+                    "reason": "collect_datetime",
+                },
+                "semantic_contract": {
+                    "contract_version": "semantic_contract.v1",
+                    "capability": "bookability",
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "current_goal": "booking",
+                "booking_state": {"active": True, "service": "Маникюр", "last_question": "datetime"},
+            },
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "semantic_state": {
+                    "schema_version": "canonical_semantic_state.v1",
+                    "materialized_frame": {
+                        "schema_version": "semantic_frame.v2",
+                        "user_goal": "consult",
+                        "requested_effect": "answer_question",
+                        "subject": {},
+                        "referents": {},
+                        "constraints": {},
+                        "preferences": {},
+                        "continuation": {},
+                        "capability_selection": {},
+                        "needs_human": False,
+                        "reason": "consult",
+                    },
+                    "event_log": [],
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "service_choice",
+                    "reason": "stale",
+                    "next_question": "service",
+                    "open_questions": ["service"],
+                },
+                "current_referents": {},
+                "interaction_state": {"interaction_owner": "legacy"},
+                "projections": {"expected_reply_type": "service_choice", "expected_reply_reason": "stale"},
+                "meta": {"current_goal": "consult"},
+            },
+            "booking": {"active": True, "service": "Старый"},
+        },
+        "current_goal": "consult",
+        "expected_reply_type": "service_choice",
+    }
+
+    payload = service.load_runtime_payload(context)
+
+    assert isinstance(payload["conversation_projection"], ConversationProjectionV1)
+    assert payload["current_goal"] == "booking"
+    assert payload["booking_payload"]["service"] == "Маникюр"
+    assert payload["dialog_state"].pending_question_contract.expected_reply_type == "time"
+    assert payload["dialog_state"].meta["current_goal"] == "booking"
+
+
+
+def test_dialog_state_service_write_runtime_payload_emits_turn_journal_and_conversation_projection() -> None:
+    service = DialogStateService()
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "goal": "booking",
+            "reason": "collect_datetime",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                }
+            },
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta={"slot_values": {"service": "Маникюр"}, "next_slot": "datetime"},
+        now=datetime(2026, 3, 27, 12, 0, tzinfo=timezone.utc),
+        conversation_id="conv-1",
+        trace_id="trace-1",
+    )
+
+    runtime_payload = updated["consultant_runtime"]
+    turn_journal = TurnJournalV1.model_validate(runtime_payload["turn_journal"])
+    projection = ConversationProjectionV1.model_validate(runtime_payload["conversation_projection"])
+
+    assert [event.event_type for event in turn_journal.events] == [
+        "BindingPlanIssued",
+        "ExecutionCompleted",
+    ]
+    assert turn_journal.conversation_id == "conv-1"
+    assert projection.conversation_id == "conv-1"
+    assert projection.current_semantic_decision_ref is None
+    assert projection.active_capability == "bookability"
+    assert projection.current_goal == "booking"
+    assert projection.pending_question_contract["expected_reply_type"] == "time"
+    assert projection.booking_state["service"] == "Маникюр"
+    assert runtime_payload["dialog_state"]["semantic_state"]["materialized_frame"]["user_goal"] == "booking"
+    assert dialog_state.meta["current_goal"] == "booking"

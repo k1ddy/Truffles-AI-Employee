@@ -195,6 +195,7 @@ def test_plan_records_policy_core_schema_failure_bundle(monkeypatch):
         "status": "error",
         "schema_verdict": "invalid_schema",
         "projection_verdict": "skipped",
+        "reason_code": "policy_core:invalid_schema",
         "input": {"message": "Когда запись?", "task": "llm_policy_core"},
         "raw_output": '{"broken":true}',
         "error": "invalid_schema",
@@ -226,7 +227,7 @@ def test_plan_records_policy_projection_failure_bundle(monkeypatch):
             "projection_trace": {
                 "status": "error",
                 "projection_source": "policy_tool_projector",
-                "tool_action_hint": "calendar.list_slots",
+                "tool_action_hint": "handoff",
                 "error": "collect_tool_action_hint_conflict",
             },
             "model_name": "gpt-5.4-nano-2026-03-17",
@@ -256,7 +257,7 @@ def test_plan_records_policy_projection_failure_bundle(monkeypatch):
     assert decision.meta["policy_core_trace"]["projection"] == {
         "status": "error",
         "projection_source": "policy_tool_projector",
-        "tool_action_hint": "calendar.list_slots",
+        "tool_action_hint": "handoff",
         "error": "collect_tool_action_hint_conflict",
     }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -9,9 +10,11 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.binding_plan import BindingPlanV1
 from app.core.boundary_validator import BoundaryOverride, BoundaryValidator
 from app.core.dialog_state_service import DialogState, DialogStateService
 from app.core.response_realizer import ReplyEnvelope, ResponseRealizer
+from app.core.runtime_trace_contract import build_runtime_trace_contract
 from app.core.turn_executor import RuntimeExecutionResult, TurnExecutor
 from app.core.turn_planner import PolicyDecision, TurnPlanner
 from app.logging_config import get_logger, get_trace_id
@@ -525,7 +528,6 @@ class ConsultantRuntime:
         if prepared.conversation.state == ConversationState.MANAGER_ACTIVE.value:
             decision = self.planner.build_controlled_degrade(
                 reason_code="manager_active",
-                action="handoff",
                 intent="manager_active",
                 interaction_owner="pending_gate",
             )
@@ -550,7 +552,6 @@ class ConsultantRuntime:
         if missing_owner_guard:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:missing_semantic_owner",
-                action="handoff",
                 intent="planner_missing_semantic_owner",
                 interaction_owner="semantic_owner_guard",
             )
@@ -567,10 +568,29 @@ class ConsultantRuntime:
                 },
             )
             return decision, override
+        missing_binding_plan_guard = self.planner.detect_missing_binding_plan(decision)
+        if missing_binding_plan_guard:
+            decision = self.planner.build_controlled_degrade(
+                reason_code="planner:missing_binding_plan",
+                intent="planner_missing_binding_plan",
+                interaction_owner="binding_plan_guard",
+            )
+            decision.meta["missing_binding_plan_guard"] = missing_binding_plan_guard
+            override = self.boundary.build_degrade_override(
+                reason_code="planner:missing_binding_plan",
+                public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
+                trace_message="missing_binding_plan_guard_failed",
+                meta={
+                    "activate_handoff": True,
+                    "reply_kind": "handoff",
+                    "degrade_stage": "planner",
+                    "missing_binding_plan_guard": missing_binding_plan_guard,
+                },
+            )
+            return decision, override
         if decision.outcome not in _RUNTIME_ALLOWED_OUTCOMES:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:invalid_outcome",
-                action="handoff",
                 intent="planner_invalid_outcome",
                 interaction_owner="turn_planner",
             )
@@ -578,7 +598,6 @@ class ConsultantRuntime:
         if mutation_guard:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:semantic_decision_post_owner_mutation",
-                action="handoff",
                 intent="planner_semantic_decision_guard",
                 interaction_owner="semantic_decision_guard",
             )
@@ -609,14 +628,10 @@ class ConsultantRuntime:
     ) -> dict[str, Any]:
         profile: dict[str, Any] = {}
         dialog_state = runtime_state.dialog_state
-        semantic_frame = self.dialog_state.project_runtime_semantic_frame(
-            dialog_state,
-            booking_payload=runtime_state.booking_state,
+        semantic_frame = self.dialog_state.project_semantic_frame(
+            dialog_state.semantic_state.materialized_frame
         ) or {}
-        active_goal = self.dialog_state.project_runtime_current_goal(
-            dialog_state,
-            booking_payload=runtime_state.booking_state,
-        )
+        active_goal = self.dialog_state.project_current_goal_from_frame(semantic_frame)
         if not active_goal and runtime_state.booking_state:
             active_goal = "booking"
         if isinstance(active_goal, str) and active_goal.strip():
@@ -639,11 +654,12 @@ class ConsultantRuntime:
                     "source_ref": "carryover",
                 }
 
-        semantic_contract = self.dialog_state.project_runtime_semantic_contract(
-            dialog_state,
-            booking_payload=runtime_state.booking_state,
+        semantic_contract = self.dialog_state._semantic_contract_from_frame(
+            semantic_frame
         )
-        semantic_contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
+        semantic_contract = (
+            deepcopy(semantic_contract) if isinstance(semantic_contract, dict) else {}
+        )
         if semantic_contract:
             semantic_referents = (
                 dict(semantic_contract.get("referents"))
@@ -668,10 +684,9 @@ class ConsultantRuntime:
                 "referents": canonical_referents,
             }
 
-        pending_contract = self.dialog_state.project_runtime_pending_question_contract(
-            dialog_state,
-            booking_payload=runtime_state.booking_state,
-        ) or {}
+        pending_contract = deepcopy(
+            self.dialog_state._pending_question_from_frame(semantic_frame) or {}
+        )
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
 
@@ -738,6 +753,97 @@ class ConsultantRuntime:
             enrichment_payload["grounding_provenance"] = grounding_provenance
         return enrichment_payload
 
+    @staticmethod
+    def _has_canonical_semantic_owner(
+        decision: PolicyDecision | None,
+    ) -> bool:
+        return isinstance(decision, PolicyDecision) and getattr(decision, "semantic_decision", None) is not None
+
+    def _semantic_contract_enrichment(
+        self,
+        semantic_contract: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(semantic_contract, dict):
+            return {}
+        enrichment: dict[str, Any] = {}
+        entity_refs = self.dialog_state._normalize_semantic_entity_refs(
+            semantic_contract.get("entity_refs")
+        )
+        if entity_refs:
+            enrichment["entity_refs"] = entity_refs
+        referents = self.dialog_state._normalize_semantic_referents(
+            semantic_contract.get("referents")
+        )
+        if referents:
+            enrichment["referents"] = referents
+        grounding_provenance = self.dialog_state._normalize_grounding_provenance(
+            semantic_contract.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            enrichment["grounding_provenance"] = grounding_provenance
+        return enrichment
+
+    def _merge_semantic_enrichment(
+        self,
+        contract: dict[str, Any] | None,
+        enrichment: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        base = dict(contract) if isinstance(contract, dict) else {}
+        if not isinstance(enrichment, dict) or not enrichment:
+            return base
+        if not base:
+            base = {"contract_version": "semantic_contract.v1"}
+
+        grounding_provenance = self.dialog_state._normalize_grounding_provenance(
+            enrichment.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            base["grounding_provenance"] = dict(grounding_provenance)
+
+        merged_entity_refs = self.dialog_state._normalize_semantic_entity_refs(
+            base.get("entity_refs")
+        )
+        merged_entity_refs.extend(
+            self.dialog_state._normalize_semantic_entity_refs(enrichment.get("entity_refs"))
+        )
+        merged_entity_refs = self.dialog_state._normalize_semantic_entity_refs(merged_entity_refs)
+        if merged_entity_refs:
+            base["entity_refs"] = merged_entity_refs
+        else:
+            base.pop("entity_refs", None)
+
+        merged_referents = self.dialog_state._normalize_semantic_referents(
+            base.get("referents")
+        )
+        incoming_referents = self.dialog_state._normalize_semantic_referents(
+            enrichment.get("referents")
+        )
+        for referent_key, referent_payload in incoming_referents.items():
+            current_referent = merged_referents.get(referent_key)
+            if isinstance(current_referent, dict):
+                current_value = self.dialog_state._normalize_projection_token(
+                    current_referent.get("value")
+                )
+                incoming_value = self.dialog_state._normalize_projection_token(
+                    referent_payload.get("value")
+                )
+                if (
+                    current_value
+                    and incoming_value
+                    and current_value.casefold() != incoming_value.casefold()
+                ):
+                    continue
+                merged = dict(current_referent)
+                merged.update(referent_payload)
+                merged_referents[referent_key] = merged
+                continue
+            merged_referents[referent_key] = dict(referent_payload)
+        if merged_referents:
+            base["referents"] = merged_referents
+        else:
+            base.pop("referents", None)
+        return base
+
     def _project_runtime_semantic_contract(
         self,
         dialog_state: DialogState,
@@ -755,6 +861,21 @@ class ConsultantRuntime:
             if isinstance(decision, PolicyDecision)
             else None
         )
+        if self._has_canonical_semantic_owner(decision):
+            contract = (
+                dict(owner_semantic_contract)
+                if isinstance(owner_semantic_contract, dict) and owner_semantic_contract
+                else {}
+            )
+            contract = self._merge_semantic_enrichment(
+                contract,
+                self._semantic_contract_enrichment(semantic_contract),
+            )
+            contract = self._merge_semantic_enrichment(
+                contract,
+                self._execution_semantic_enrichment(execution),
+            )
+            return contract
         contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
         if isinstance(owner_semantic_contract, dict) and owner_semantic_contract:
             if not contract:
@@ -779,15 +900,7 @@ class ConsultantRuntime:
                     contract["referents"] = dict(owner_semantic_contract["referents"])
         execution_semantic_enrichment = self._execution_semantic_enrichment(execution)
         if execution_semantic_enrichment:
-            if not contract:
-                contract = {"contract_version": "semantic_contract.v1"}
-            grounding_provenance = execution_semantic_enrichment.get("grounding_provenance")
-            if isinstance(grounding_provenance, dict) and grounding_provenance:
-                contract["grounding_provenance"] = dict(grounding_provenance)
-            if "entity_refs" not in contract and isinstance(execution_semantic_enrichment.get("entity_refs"), list):
-                contract["entity_refs"] = list(execution_semantic_enrichment["entity_refs"])
-            if "referents" not in contract and isinstance(execution_semantic_enrichment.get("referents"), dict):
-                contract["referents"] = dict(execution_semantic_enrichment["referents"])
+            contract = self._merge_semantic_enrichment(contract, execution_semantic_enrichment)
             return contract
         execution_meta = getattr(execution, "meta", None)
         execution_semantic_contract = (
@@ -825,17 +938,6 @@ class ConsultantRuntime:
         booking_state: dict[str, Any] | None = None,
         decision: PolicyDecision | None = None,
     ) -> dict[str, Any]:
-        pending_question_contract = self.dialog_state.project_runtime_pending_question_contract(
-            dialog_state,
-            booking_payload=booking_state,
-        ) or self.dialog_state.project_pending_question_contract(
-            (
-                self.planner.canonical_pending_question_contract(decision)
-                if isinstance(decision, PolicyDecision)
-                else None
-            ),
-        )
-        contract = dict(pending_question_contract) if isinstance(pending_question_contract, dict) else {}
         owner_contract = self.dialog_state.project_pending_question_contract(
             (
                 self.planner.canonical_pending_question_contract(decision)
@@ -843,6 +945,13 @@ class ConsultantRuntime:
                 else None
             ),
         )
+        if self._has_canonical_semantic_owner(decision):
+            return dict(owner_contract) if isinstance(owner_contract, dict) and owner_contract else {}
+        pending_question_contract = self.dialog_state.project_runtime_pending_question_contract(
+            dialog_state,
+            booking_payload=booking_state,
+        ) or owner_contract
+        contract = dict(pending_question_contract) if isinstance(pending_question_contract, dict) else {}
         if isinstance(owner_contract, dict) and owner_contract:
             for key in (
                 "expected_reply_type",
@@ -891,7 +1000,7 @@ class ConsultantRuntime:
         execution: RuntimeExecutionResult,
         boundary_override: BoundaryOverride | None,
     ) -> tuple[PolicyDecision, BoundaryOverride | None]:
-        if not execution.request_handoff or decision.outcome == "HANDOFF":
+        if not execution.request_handoff or self._decision_requests_handoff(decision):
             return decision, boundary_override
         return decision, self.boundary.build_degrade_override(
             reason_code="executor:handoff_requested",
@@ -910,7 +1019,7 @@ class ConsultantRuntime:
         decision: PolicyDecision,
         boundary_override: BoundaryOverride | None,
     ) -> bool:
-        if decision.outcome == "HANDOFF":
+        if ConsultantRuntime._decision_requests_handoff(decision):
             return True
         if not isinstance(boundary_override, BoundaryOverride):
             return False
@@ -932,13 +1041,19 @@ class ConsultantRuntime:
         execution_meta = dict(execution.meta)
         if execution.clear_booking:
             execution_meta["clear_booking"] = True
-        if decision.outcome == "COLLECT" and execution.tool_decision:
+        if self._decision_collects(decision) and execution.tool_decision:
             execution_meta.setdefault("next_slot", execution.tool_decision)
+        conversation = getattr(prepared, "conversation", None)
+        conversation_id = None
+        if conversation is not None and getattr(conversation, "id", None) is not None:
+            conversation_id = str(conversation.id)
         updated_context, dialog_state, _booking_payload = self.dialog_state.write_runtime_payload(
             runtime_state.context,
             decision=decision,
             execution_meta=execution_meta,
             now=now,
+            conversation_id=conversation_id,
+            trace_id=get_trace_id(),
         )
         runtime_payload = (
             updated_context.get("consultant_runtime")
@@ -1083,6 +1198,15 @@ class ConsultantRuntime:
         delivered: bool,
     ) -> None:
         dialog_state = turn_result.dialog_state
+        runtime_payload = self.dialog_state.load_runtime_payload(conversation.context or {})
+        runtime_projection = runtime_payload.get("conversation_projection")
+        runtime_turn_journal = runtime_payload.get("turn_journal")
+        trace_id = get_trace_id()
+        if not trace_id and runtime_turn_journal is not None:
+            for journal_event in reversed(runtime_turn_journal.events):
+                if isinstance(journal_event.trace_id, str) and journal_event.trace_id.strip():
+                    trace_id = journal_event.trace_id.strip()
+                    break
         semantic_frame_before = None
         if isinstance(runtime_state_before, LoadedRuntimeState):
             semantic_frame_before = self._project_runtime_semantic_frame(
@@ -1117,7 +1241,7 @@ class ConsultantRuntime:
             "reply_kind": turn_result.reply.reply_kind,
             "interaction_owner": decision.interaction.owner,
             "source": contract_source,
-            "trace_id": get_trace_id(),
+            "trace_id": trace_id,
             "delivered": delivered,
         }
         earliest_failed_stage = None
@@ -1169,7 +1293,7 @@ class ConsultantRuntime:
             question_contract_active = question_contract_active or bool(
                 decision.meta.get("question_contract")
             )
-        if not question_contract_active and decision.outcome == "COLLECT" and pending_question_contract:
+        if not question_contract_active and self._decision_collects(decision) and pending_question_contract:
             question_contract_active = True
         if not pending_question_act:
             pending_question_act = pending_question_contract.get("pending_question_act")
@@ -1200,6 +1324,32 @@ class ConsultantRuntime:
             trace_event["tool_execution_projection"] = dict(
                 execution.meta["tool_execution_projection"]
             )
+        runtime_trace_contract = build_runtime_trace_contract(
+            trace_id=trace_event["trace_id"],
+            runtime_entrypoint=_RUNTIME_ENTRYPOINT_NAME,
+            semantic_runtime_path=self.semantic_runtime_path,
+            decision=decision,
+            contract_source=contract_source,
+            contract_action=contract_action,
+            reply_kind=turn_result.reply.reply_kind,
+            delivered=delivered,
+            execution_tool_action=execution.tool_action,
+            execution_tool_decision=execution.tool_decision,
+            reason_code=reason_code,
+            earliest_failed_stage=earliest_failed_stage,
+            root_reason_code=root_reason_code,
+            projection=runtime_projection,
+            turn_journal=runtime_turn_journal,
+            pending_question_contract=pending_question_contract,
+            semantic_contract=semantic_contract,
+            semantic_state_before=semantic_frame_before,
+            semantic_state_after=semantic_frame_after,
+        )
+        runtime_trace_contract_payload = runtime_trace_contract.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+        trace_event["runtime_trace_contract"] = runtime_trace_contract_payload
         context = dict(conversation.context or {})
         trace = context.get(_RUNTIME_TRACE_KEY)
         if not isinstance(trace, list):
@@ -1295,6 +1445,9 @@ class ConsultantRuntime:
             decision_meta["policy_core_trace"] = policy_core_trace
         if isinstance(execution.meta, dict):
             decision_meta.update(execution.meta)
+        decision_meta["runtime_trace_contract"] = runtime_trace_contract_payload
+        if getattr(turn_result, "trace", None) is not None and hasattr(turn_result.trace, "runtime_trace_contract"):
+            turn_result.trace.runtime_trace_contract = runtime_trace_contract
         if user_message is not None:
             user_meta = dict(user_message.message_metadata or {})
             existing = (
@@ -1322,10 +1475,15 @@ class ConsultantRuntime:
         turn_result: Any,
     ) -> str:
         dialog_state = turn_result.dialog_state
-        current_goal = self.dialog_state.project_runtime_current_goal(dialog_state) or (
+        owner_current_goal = (
             self.dialog_state.project_current_goal_from_frame(
                 self.planner.canonical_semantic_frame(decision)
             )
+            if self._has_canonical_semantic_owner(decision)
+            else None
+        )
+        current_goal = owner_current_goal or self.dialog_state.project_runtime_current_goal(
+            dialog_state
         )
         pending_question_contract = self._project_runtime_pending_question_contract(
             dialog_state,
@@ -1339,9 +1497,24 @@ class ConsultantRuntime:
             and execution.meta.get("appointment_id")
         ):
             return "booking_confirm"
-        if decision.outcome == "COLLECT" and current_goal == "booking" and expected_reply_type:
+        if self._decision_collects(decision) and current_goal == "booking" and expected_reply_type:
             return "booking_prompt"
         return decision.action
+
+    @staticmethod
+    def _binding_outcome_type(decision: PolicyDecision) -> str | None:
+        binding_plan = getattr(decision, "binding_plan", None)
+        if isinstance(binding_plan, BindingPlanV1):
+            return binding_plan.binding_outcome_type
+        return None
+
+    @classmethod
+    def _decision_requests_handoff(cls, decision: PolicyDecision) -> bool:
+        return cls._binding_outcome_type(decision) in {"handoff", "degrade"}
+
+    @classmethod
+    def _decision_collects(cls, decision: PolicyDecision) -> bool:
+        return cls._binding_outcome_type(decision) in {"workflow_start", "workflow_advance"}
 
     @staticmethod
     def _derive_contract_source(decision: PolicyDecision) -> str:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.binding_plan import BindingPlanV1
 from app.core.semantic_decision import SemanticDecisionV1
 
 DecisionOutcome = Literal["FACT", "COLLECT", "HANDOFF"]
@@ -72,7 +74,19 @@ class PolicyDecision(BaseModel):
     semantic_frame: SemanticFrame = Field(default_factory=SemanticFrame)
     pending_question_contract: PendingQuestionContract = Field(default_factory=PendingQuestionContract)
     semantic_decision: SemanticDecisionV1 | None = None
+    binding_plan: BindingPlanV1 | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_binding_contract(self) -> PolicyDecision:
+        is_synthetic = bool(
+            isinstance(self.meta, dict) and self.meta.get("synthetic_policy_decision")
+        )
+        if self.semantic_decision is not None and self.binding_plan is None:
+            raise ValueError("binding_plan_required_for_semantic_decision")
+        if is_synthetic and self.binding_plan is None:
+            raise ValueError("binding_plan_required_for_synthetic_decision")
+        return self
 
 
 class InboundTurnInput(BaseModel):
@@ -156,7 +170,6 @@ class TurnPlanner:
         if not normalized_message:
             return self.build_preflight_reject(
                 reason_code="empty_message",
-                action="reject",
                 intent="empty_message",
                 interaction_owner="turn_planner_preflight",
             )
@@ -176,6 +189,11 @@ class TurnPlanner:
         payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
         if isinstance(payload, dict):
             raw_payload = dict(payload)
+            binding_plan_payload = (
+                dict(policy_result.get("binding_plan"))
+                if isinstance(policy_result.get("binding_plan"), dict)
+                else None
+            )
             binding_payload = (
                 dict(policy_result.get("binding"))
                 if isinstance(policy_result.get("binding"), dict)
@@ -184,15 +202,14 @@ class TurnPlanner:
             try:
                 decision = self._build_policy_core_decision(
                     semantic_decision=self._coerce_semantic_decision(raw_payload),
+                    binding_plan_payload=binding_plan_payload,
                     binding_payload=binding_payload,
                 )
             except ValueError as exc:
                 projection_error = self._normalize_token(str(exc)) or "invalid_projection"
                 decision = self.build_controlled_degrade(
                     reason_code="planner:invalid_projection",
-                    action="handoff",
                     intent="planner_degrade",
-                    tool_action="handoff",
                     interaction_owner="turn_planner_degrade",
                 )
                 decision.meta["earliest_failed_stage"] = "policy_projection"
@@ -237,9 +254,7 @@ class TurnPlanner:
             )
         decision = self.build_controlled_degrade(
             reason_code=f"planner:{degrade_reason}",
-            action="handoff",
             intent="planner_degrade",
-            tool_action="handoff",
             interaction_owner="turn_planner_degrade",
         )
         decision.meta["earliest_failed_stage"] = earliest_failed_stage
@@ -257,6 +272,7 @@ class TurnPlanner:
         *,
         binding_tool_action: str,
         binding_tool_args: dict[str, Any] | None = None,
+        binding_plan: BindingPlanV1 | None = None,
         interaction_owner: str,
         source: str = "policy_core",
     ) -> PolicyDecision:
@@ -265,10 +281,22 @@ class TurnPlanner:
         outcome = self._ACTION_TO_OUTCOME.get(action)
         if outcome is None:
             raise ValueError(f"unsupported_policy_action:{action}")
+        normalized_binding_plan = binding_plan
+        if not isinstance(normalized_binding_plan, BindingPlanV1):
+            normalized_binding_plan = BindingPlanV1.build_compat(
+                decision_id=semantic_decision.decision_id,
+                requested_outcome=semantic_decision.requested_outcome,
+                capability_id=semantic_decision.capability_id,
+                selected_tool_or_workflow_ref=self._normalize_tool_action(binding_tool_action),
+                resolved_args=self._normalize_dict(binding_tool_args),
+                handoff_reason_code=semantic_decision.handoff_reason_code,
+            )
         meta: dict[str, Any] = {
             "planner_source": "turn_planner",
             "semantic_decision_id": semantic_decision.decision_id,
             "semantic_decision_schema_version": semantic_decision.schema_version,
+            "binding_plan_id": normalized_binding_plan.binding_id,
+            "binding_plan_schema_version": normalized_binding_plan.schema_version,
         }
         for key in (
             "reason",
@@ -285,8 +313,10 @@ class TurnPlanner:
             action=action,
             intent=semantic_decision.intent,
             source=source,
-            tool_action=self._normalize_tool_action(binding_tool_action),
-            tool_args=self._normalize_dict(binding_tool_args),
+            tool_action=self._normalize_tool_action(
+                normalized_binding_plan.selected_tool_or_workflow_ref
+            ),
+            tool_args=self._normalize_dict(normalized_binding_plan.resolved_args),
             slots=dict(semantic_decision.semantic_slots),
             pack_refs=list(semantic_decision.grounding_requirements.pack_refs),
             capability_refs=[semantic_decision.capability_id]
@@ -299,6 +329,7 @@ class TurnPlanner:
                 relation=semantic_decision.missing_information.active_question_relation,
             ),
             semantic_decision=semantic_decision,
+            binding_plan=normalized_binding_plan,
             meta=meta,
         )
 
@@ -453,6 +484,24 @@ class TurnPlanner:
             "action": decision.action,
             "tool_action": decision.tool_action,
             "synthetic_policy_decision": bool(meta.get("synthetic_policy_decision")),
+        }
+
+    def detect_missing_binding_plan(
+        self,
+        decision: PolicyDecision,
+    ) -> dict[str, Any] | None:
+        if not isinstance(decision.semantic_decision, SemanticDecisionV1):
+            return None
+        if isinstance(decision.binding_plan, BindingPlanV1):
+            return None
+        meta = dict(decision.meta) if isinstance(decision.meta, dict) else {}
+        if meta.get("degrade_path") or meta.get("preflight_path"):
+            return None
+        return {
+            "reason_code": "missing_binding_plan",
+            "semantic_decision_id": decision.semantic_decision.decision_id,
+            "tool_action": decision.tool_action,
+            "source": decision.source,
         }
 
     def _build_semantic_contract_payload(
@@ -642,19 +691,21 @@ class TurnPlanner:
         self,
         *,
         reason_code: str,
-        action: str,
         intent: str,
-        outcome: DecisionOutcome = "HANDOFF",
-        tool_action: str = "handoff",
         interaction_owner: str,
         interaction_target: str | None = None,
         interaction_relation: str | None = None,
     ) -> PolicyDecision:
+        synthetic_decision_id = uuid4().hex
+        binding_plan = BindingPlanV1.build_degrade(
+            decision_id=synthetic_decision_id,
+            degrade_reason_code=reason_code,
+        )
         return PolicyDecision(
-            outcome=outcome,
-            action=action,
+            outcome="HANDOFF",
+            action="handoff",
             intent=intent,
-            tool_action=tool_action,
+            tool_action="handoff",
             interaction=InteractionContract(
                 owner=interaction_owner,
                 target=interaction_target,
@@ -664,22 +715,29 @@ class TurnPlanner:
                 "reason_code": reason_code,
                 "degrade_path": True,
                 "synthetic_policy_decision": True,
+                "binding_plan_id": binding_plan.binding_id,
+                "binding_plan_schema_version": binding_plan.schema_version,
             },
+            binding_plan=binding_plan,
         )
 
     def build_preflight_reject(
         self,
         *,
         reason_code: str,
-        action: str,
         intent: str,
         interaction_owner: str,
         interaction_target: str | None = None,
         interaction_relation: str | None = None,
     ) -> PolicyDecision:
+        synthetic_decision_id = uuid4().hex
+        binding_plan = BindingPlanV1.build_deny(
+            decision_id=synthetic_decision_id,
+            deny_reason_code=reason_code,
+        )
         return PolicyDecision(
             outcome="FACT",
-            action=action,
+            action="preflight_reject",
             intent=intent,
             tool_action="noop",
             interaction=InteractionContract(
@@ -691,7 +749,10 @@ class TurnPlanner:
                 "reason_code": reason_code,
                 "preflight_path": True,
                 "synthetic_policy_decision": True,
+                "binding_plan_id": binding_plan.binding_id,
+                "binding_plan_schema_version": binding_plan.schema_version,
             },
+            binding_plan=binding_plan,
         )
 
     @staticmethod
@@ -722,12 +783,20 @@ class TurnPlanner:
             "schema_verdict": schema_verdict,
             "projection_verdict": projection_verdict,
         }
+        error_token = self._normalize_token(payload.get("error"))
+        projection_error_token = self._normalize_token(payload.get("projection_error"))
+        if error_token:
+            trace_payload["reason_code"] = f"policy_core:{error_token}"
+        elif projection_error_token:
+            trace_payload["reason_code"] = f"policy_projection:{projection_error_token}"
         for field_name, result_key in (
             ("input", "policy_input"),
             ("semantic_frame", "semantic_frame"),
             ("raw_output", "raw"),
             ("error", "error"),
             ("schema_error", "schema_error"),
+            ("response_format_error", "response_format_error"),
+            ("structured_output_fallback_reason", "structured_output_fallback_reason"),
             ("projection_error", "projection_error"),
             ("projection", "projection_trace"),
             ("elapsed_ms", "elapsed_ms"),
@@ -737,6 +806,9 @@ class TurnPlanner:
             ("compact_retry_used", "compact_retry_used"),
             ("structured_output_enabled", "structured_output_enabled"),
             ("structured_output_fallback_used", "structured_output_fallback_used"),
+            ("contract_repair_retry_used", "contract_repair_retry_used"),
+            ("contract_repair_reason", "contract_repair_reason"),
+            ("contract_repair_input", "contract_repair_input"),
         ):
             value = payload.get(result_key)
             if value is not None:
@@ -748,20 +820,25 @@ class TurnPlanner:
         payload: dict[str, Any] | None = None,
         *,
         semantic_decision: SemanticDecisionV1 | None = None,
+        binding_plan_payload: dict[str, Any] | None = None,
         binding_payload: dict[str, Any] | None = None,
     ) -> PolicyDecision:
         if payload is not None:
             semantic_decision = self._coerce_semantic_decision(payload)
         if not isinstance(semantic_decision, SemanticDecisionV1):
             raise ValueError("semantic_decision_required")
-        normalized_binding = dict(binding_payload) if isinstance(binding_payload, dict) else {}
-        binding_tool_action = self._normalize_token(normalized_binding.get("tool_action"))
-        if not binding_tool_action:
-            raise ValueError("binding_tool_action_missing")
+        binding_plan = self._coerce_binding_plan(
+            semantic_decision,
+            binding_plan_payload=binding_plan_payload,
+            binding_payload=binding_payload,
+        )
         return self.build_from_semantic_decision(
             semantic_decision,
-            binding_tool_action=self._normalize_tool_action(binding_tool_action),
-            binding_tool_args=self._normalize_dict(normalized_binding.get("tool_args")),
+            binding_tool_action=self._normalize_tool_action(
+                binding_plan.selected_tool_or_workflow_ref
+            ),
+            binding_tool_args=self._normalize_dict(binding_plan.resolved_args),
+            binding_plan=binding_plan,
             interaction_owner="llm_policy_core",
             source="llm_policy_core",
         )
@@ -773,6 +850,38 @@ class TurnPlanner:
         if payload.get("schema_version") != "semantic_decision.v1":
             raise ValueError("semantic_decision_required")
         return SemanticDecisionV1.model_validate(payload)
+
+    def _coerce_binding_plan(
+        self,
+        semantic_decision: SemanticDecisionV1,
+        *,
+        binding_plan_payload: dict[str, Any] | None = None,
+        binding_payload: dict[str, Any] | None = None,
+    ) -> BindingPlanV1:
+        if isinstance(binding_plan_payload, dict):
+            binding_plan = BindingPlanV1.model_validate(binding_plan_payload)
+            if binding_plan.decision_id != semantic_decision.decision_id:
+                raise ValueError("binding_decision_id_mismatch")
+            expected_outcome_type = {
+                "fact": "tool_call",
+                "collect": "workflow_advance",
+                "handoff": "handoff",
+            }.get(semantic_decision.requested_outcome)
+            if expected_outcome_type and binding_plan.binding_outcome_type != expected_outcome_type:
+                raise ValueError("binding_outcome_conflict")
+            return binding_plan
+        normalized_binding = dict(binding_payload) if isinstance(binding_payload, dict) else {}
+        binding_tool_action = self._normalize_token(normalized_binding.get("tool_action"))
+        if not binding_tool_action:
+            raise ValueError("binding_tool_action_missing")
+        return BindingPlanV1.build_compat(
+            decision_id=semantic_decision.decision_id,
+            requested_outcome=semantic_decision.requested_outcome,
+            capability_id=semantic_decision.capability_id,
+            selected_tool_or_workflow_ref=self._normalize_tool_action(binding_tool_action),
+            resolved_args=self._normalize_dict(normalized_binding.get("tool_args")),
+            handoff_reason_code=semantic_decision.handoff_reason_code,
+        )
 
     def _normalized_semantic_payload(
         self,

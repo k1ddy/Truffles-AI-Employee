@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles/contracts/runtime/release_gate_evidence.v1.jsonschema",
+  "title": "ReleaseGateEvidenceV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "chain_id",
+    "generated_at",
+    "mode",
+    "run_id",
+    "step_status",
+    "decision",
+    "chain_status",
+    "quality_snapshot",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "release_gate_evidence.v1"
+    },
+    "chain_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["lock", "replay", "canary", "full"]
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step_status": {
+      "type": "string",
+      "enum": ["canonical", "incomplete", "invalid", "failed"]
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["promote", "hold", "no_go", "rollback_executed", "accept"]
+    },
+    "chain_status": {
+      "type": "string",
+      "enum": ["active", "blocked", "canonical_closed", "aborted"]
+    },
+    "blocked_reason": {
+      "type": ["string", "null"]
+    },
+    "stop_reason": {
+      "type": ["string", "null"]
+    },
+    "next_command": {
+      "type": ["string", "null"]
+    },
+    "baseline": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["step", "run_id", "output_dir"],
+      "properties": {
+        "step": {"type": ["string", "null"]},
+        "run_id": {"type": ["string", "null"]},
+        "output_dir": {"type": ["string", "null"]}
+      }
+    },
+    "quality_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "infra_valid",
+        "semantic_valid",
+        "run_integrity_valid",
+        "manual_audit_status",
+        "evidence_handoff_valid",
+        "evidence_handoff_reason",
+        "quality_lane_effective",
+        "target_blockers_total",
+        "judged_turns"
+      ],
+      "properties": {
+        "infra_valid": {"type": ["boolean", "null"]},
+        "semantic_valid": {"type": ["boolean", "null"]},
+        "run_integrity_valid": {"type": ["boolean", "null"]},
+        "manual_audit_status": {"type": ["string", "null"]},
+        "evidence_handoff_valid": {"type": ["boolean", "null"]},
+        "evidence_handoff_reason": {"type": ["string", "null"]},
+        "quality_lane_effective": {"type": ["string", "null"]},
+        "target_blockers_total": {"type": "integer", "minimum": 0},
+        "judged_turns": {"type": "integer", "minimum": 0}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_dir",
+        "summary_path",
+        "run_manifest_path",
+        "manual_audit_json_path",
+        "manual_audit_markdown_path",
+        "brief_for_next_agent_path",
+        "responses_path",
+        "trace_bundle_path",
+        "scenarios_path",
+        "rollback_path",
+        "chain_state_path"
+      ],
+      "properties": {
+        "output_dir": {"type": ["string", "null"]},
+        "summary_path": {"type": ["string", "null"]},
+        "run_manifest_path": {"type": ["string", "null"]},
+        "manual_audit_json_path": {"type": ["string", "null"]},
+        "manual_audit_markdown_path": {"type": ["string", "null"]},
+        "brief_for_next_agent_path": {"type": ["string", "null"]},
+        "responses_path": {"type": ["string", "null"]},
+        "trace_bundle_path": {"type": ["string", "null"]},
+        "scenarios_path": {"type": ["string", "null"]},
+        "rollback_path": {"type": ["string", "null"]},
+        "chain_state_path": {"type": ["string", "null"]}
+      }
+    },
+    "rollback": {
+      "type": ["object", "null"]
+    }
+  }
+}

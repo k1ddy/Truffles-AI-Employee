@@ -370,11 +370,7 @@ proof_only_files:
 
 continuity_guard:
   allowed_writer_paths:
-    - truffles-api/app/core/dialog_state_service.py
-    - truffles-api/app/routers/webhook/context_manager.py
-    - truffles-api/app/routers/webhook/session_memory.py
-    - truffles-api/app/services/state_service.py
-    - truffles-api/app/routers/webhook/pending.py
+  - truffles-api/app/core/dialog_state_service.py
   guarded_tokens:
     - expected_reply_type
     - expected_reply_reason

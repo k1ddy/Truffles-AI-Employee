@@ -1115,6 +1115,137 @@ def write_brief(state: dict, *, chain_id: str, output_dir: str, mode: str, run_i
             continue
 
 
+def _existing_path_or_none(path_value: str | None):
+    token = str(path_value or "").strip()
+    if not token:
+        return None
+    path = os.path.abspath(os.path.expanduser(token))
+    return path if os.path.exists(path) else None
+
+
+def _quality_snapshot(summary: dict | None, output_dir: str):
+    summary = summary if isinstance(summary, dict) else {}
+    quality = summary.get("quality_status") if isinstance(summary.get("quality_status"), dict) else {}
+    infra_valid = parse_status_bool(summary.get("infra_valid"))
+    if infra_valid is None:
+        infra_valid = parse_status_bool(quality.get("infra_valid"))
+    semantic_valid = parse_status_bool(summary.get("semantic_valid"))
+    if semantic_valid is None:
+        semantic_valid = parse_status_bool(quality.get("semantic_valid"))
+    run_integrity_valid = parse_status_bool(quality.get("run_integrity_valid"))
+    if run_integrity_valid is None:
+        run_integrity_valid = parse_status_bool(summary.get("run_integrity_valid"))
+    evidence_handoff_valid = None
+    evidence_handoff_reason = None
+    if summary:
+        evidence_handoff_valid, evidence_handoff_reason = _summary_evidence_handoff_status(
+            summary,
+            output_dir,
+        )
+    target_total, judged = derive_target_blocker_total(summary)
+    return {
+        "infra_valid": infra_valid,
+        "semantic_valid": semantic_valid,
+        "run_integrity_valid": run_integrity_valid,
+        "manual_audit_status": _summary_manual_audit_status_with_artifacts(summary, output_dir) or None,
+        "evidence_handoff_valid": evidence_handoff_valid,
+        "evidence_handoff_reason": evidence_handoff_reason,
+        "quality_lane_effective": _summary_lane_token(summary) or None,
+        "target_blockers_total": int(target_total),
+        "judged_turns": int(judged),
+    }
+
+
+def _release_gate_decision(state: dict, *, mode: str, run_id: str, step_status: str):
+    rollback = state.get("rollback") if isinstance(state.get("rollback"), dict) else {}
+    rollback_status = str(rollback.get("status") or "").strip().lower()
+    rollback_failed_mode = str(rollback.get("failed_mode") or "").strip().lower()
+    rollback_failed_run_id = str(rollback.get("failed_run_id") or "").strip()
+    if rollback_status == "executed" and rollback_failed_mode == mode and rollback_failed_run_id == run_id:
+        return "rollback_executed"
+    if mode == "full" and step_status == "canonical" and str(state.get("status") or "").strip().lower() == "canonical_closed":
+        return "accept"
+    if step_status == "canonical":
+        return "promote"
+    if step_status == "incomplete":
+        return "hold"
+    return "no_go"
+
+
+def _release_gate_payload(
+    state: dict,
+    *,
+    chain_id: str,
+    mode: str,
+    run_id: str,
+    output_dir: str,
+    summary_path: str,
+    summary: dict | None,
+    step_status: str,
+    stop_reason: str | None,
+):
+    baseline_step, baseline_run_id, baseline_output_dir = _last_canonical_step(state)
+    rollback = state.get("rollback") if isinstance(state.get("rollback"), dict) else None
+    return {
+        "schema_version": "release_gate_evidence.v1",
+        "chain_id": chain_id,
+        "generated_at": now_iso(),
+        "mode": mode,
+        "run_id": run_id,
+        "step_status": step_status,
+        "decision": _release_gate_decision(
+            state,
+            mode=mode,
+            run_id=run_id,
+            step_status=step_status,
+        ),
+        "chain_status": str(state.get("status") or "").strip() or "active",
+        "blocked_reason": state.get("blocked_reason"),
+        "stop_reason": stop_reason or None,
+        "next_command": state.get("next_command"),
+        "baseline": {
+            "step": baseline_step,
+            "run_id": baseline_run_id,
+            "output_dir": baseline_output_dir,
+        },
+        "quality_snapshot": _quality_snapshot(summary, output_dir),
+        "evidence": {
+            "output_dir": output_dir or None,
+            "summary_path": _existing_path_or_none(summary_path),
+            "run_manifest_path": _existing_path_or_none(os.path.join(output_dir, "run_manifest.json")),
+            "manual_audit_json_path": _existing_path_or_none(os.path.join(output_dir, "manual_audit.json")),
+            "manual_audit_markdown_path": _existing_path_or_none(os.path.join(output_dir, "manual_audit.md")),
+            "brief_for_next_agent_path": _existing_path_or_none(os.path.join(output_dir, "brief_for_next_agent.md")),
+            "responses_path": _existing_path_or_none(os.path.join(output_dir, "responses.jsonl")),
+            "trace_bundle_path": _existing_path_or_none(os.path.join(output_dir, "trace_bundle.jsonl")),
+            "scenarios_path": _existing_path_or_none(os.path.join(output_dir, "scenarios.json")),
+            "rollback_path": _existing_path_or_none(
+                str(rollback.get("artifact_path") or "") if isinstance(rollback, dict) else ""
+            ),
+            "chain_state_path": os.path.abspath(os.path.expanduser(state_path(chain_id))),
+        },
+        "rollback": rollback,
+    }
+
+
+def _write_release_gate_artifacts(chain_id: str, output_dir: str, payload: dict):
+    artifact_paths = []
+    if output_dir:
+        artifact_paths.append(os.path.join(output_dir, "release_gate.json"))
+    artifact_paths.append(os.path.join(CHAIN_ROOT, f"{chain_id}-release_gate.json"))
+    written_path = None
+    for path in artifact_paths:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            if written_path is None:
+                written_path = path
+        except Exception:
+            continue
+    return written_path
+
+
 def _last_canonical_step(state: dict):
     steps = state.get("steps") if isinstance(state.get("steps"), dict) else {}
     for step in reversed(STEPS):
@@ -1538,6 +1669,21 @@ def cmd_finalize():
             step_status=step_status,
             next_command=next_command,
         )
+        _write_release_gate_artifacts(
+            chain_id,
+            OUTPUT_DIR,
+            _release_gate_payload(
+                state,
+                chain_id=chain_id,
+                mode=MODE,
+                run_id=RUN_ID,
+                output_dir=OUTPUT_DIR,
+                summary_path=SUMMARY_PATH,
+                summary=summary,
+                step_status=step_status,
+                stop_reason=stop_reason,
+            ),
+        )
         write_json_atomic(path, state)
     finally:
         if fcntl is not None:
@@ -1728,6 +1874,21 @@ def cmd_bootstrap():
             step_status=step_status,
             next_command=next_command,
         )
+        _write_release_gate_artifacts(
+            chain_id,
+            OUTPUT_DIR,
+            _release_gate_payload(
+                state,
+                chain_id=chain_id,
+                mode=MODE,
+                run_id=RUN_ID,
+                output_dir=OUTPUT_DIR,
+                summary_path=SUMMARY_PATH,
+                summary=summary,
+                step_status=step_status,
+                stop_reason=stop_reason,
+            ),
+        )
         write_json_atomic(path, state)
     finally:
         if fcntl is not None:
@@ -1794,7 +1955,7 @@ def cmd_rollback(chain_id: str, reason: str):
         active = state.get("active") if isinstance(state.get("active"), dict) else {}
         active_run_id = str(active.get("run_id") or "").strip() or None
         active_output_dir = str(active.get("output_dir") or "").strip() or None
-        apply_rollback(
+        rollback_payload = apply_rollback(
             state,
             chain_id=chain_id,
             reason=reason or "manual_rollback",
@@ -1802,6 +1963,57 @@ def cmd_rollback(chain_id: str, reason: str):
             failed_mode=current_step,
             failed_run_id=active_run_id,
             failed_output_dir=active_output_dir,
+        )
+        _write_release_gate_artifacts(
+            chain_id,
+            active_output_dir or "",
+            {
+                "schema_version": "release_gate_evidence.v1",
+                "chain_id": chain_id,
+                "generated_at": now_iso(),
+                "mode": current_step or "lock",
+                "run_id": active_run_id or rollback_payload.get("baseline_run_id") or chain_id,
+                "step_status": "failed",
+                "decision": "rollback_executed",
+                "chain_status": str(state.get("status") or "").strip() or "blocked",
+                "blocked_reason": state.get("blocked_reason"),
+                "stop_reason": reason or "manual_rollback",
+                "next_command": None,
+                "baseline": {
+                    "step": rollback_payload.get("baseline_step"),
+                    "run_id": rollback_payload.get("baseline_run_id"),
+                    "output_dir": rollback_payload.get("baseline_output_dir"),
+                },
+                "quality_snapshot": {
+                    "infra_valid": None,
+                    "semantic_valid": None,
+                    "run_integrity_valid": None,
+                    "manual_audit_status": None,
+                    "evidence_handoff_valid": None,
+                    "evidence_handoff_reason": None,
+                    "quality_lane_effective": None,
+                    "target_blockers_total": 0,
+                    "judged_turns": 0,
+                },
+                "evidence": {
+                    "output_dir": active_output_dir or None,
+                    "summary_path": None,
+                    "run_manifest_path": None,
+                    "manual_audit_json_path": None,
+                    "manual_audit_markdown_path": None,
+                    "brief_for_next_agent_path": _existing_path_or_none(
+                        os.path.join(active_output_dir, "brief_for_next_agent.md")
+                    )
+                    if active_output_dir
+                    else None,
+                    "responses_path": None,
+                    "trace_bundle_path": None,
+                    "scenarios_path": None,
+                    "rollback_path": _existing_path_or_none(str(rollback_payload.get("artifact_path") or "")),
+                    "chain_state_path": os.path.abspath(os.path.expanduser(state_path(chain_id))),
+                },
+                "rollback": rollback_payload,
+            },
         )
         write_json_atomic(path, state)
     finally:

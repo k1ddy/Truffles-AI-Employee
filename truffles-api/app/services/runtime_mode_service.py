@@ -38,11 +38,11 @@ def get_outbound_allowlist(env: dict[str, str] | None = None) -> set[str]:
 
 def get_eval_mode(env: dict[str, str] | None = None) -> str:
     source_env = _source_env(env)
+    if is_legacy_test_mode_enabled(source_env):
+        return "local"
     explicit = _normalize_mode(source_env.get("EVAL_MODE"), valid=_VALID_EVAL_MODES)
     if explicit:
         return explicit
-    if is_legacy_test_mode_enabled(source_env):
-        return "local"
     return "prod"
 
 
@@ -90,6 +90,10 @@ def should_block_outbound(
 
 def get_outbox_worker_mode(env: dict[str, str] | None = None) -> str:
     source_env = _source_env(env)
+    eval_mode = get_eval_mode(source_env)
+    enabled_token = source_env.get("OUTBOX_WORKER_ENABLED")
+    if is_legacy_test_mode_enabled(source_env) and enabled_token is not None:
+        return "local_debug" if _is_env_enabled(enabled_token, default=False) else "off"
     explicit = _normalize_mode(
         source_env.get("OUTBOX_WORKER_MODE"),
         valid=_VALID_OUTBOX_WORKER_MODES,
@@ -97,12 +101,12 @@ def get_outbox_worker_mode(env: dict[str, str] | None = None) -> str:
     if explicit:
         return explicit
 
-    if not _is_env_enabled(source_env.get("OUTBOX_WORKER_ENABLED"), default=True):
+    enabled_by_default = eval_mode == "prod"
+    if not _is_env_enabled(source_env.get("OUTBOX_WORKER_ENABLED"), default=enabled_by_default):
         return "off"
 
-    eval_mode = get_eval_mode(source_env)
     if eval_mode != "prod":
-        return "off"
+        return "local_debug"
     return "prod"
 
 

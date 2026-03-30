@@ -161,3 +161,38 @@ Next-block contract (mandatory):
   - consumer updates still depend on raw policy-shape payloads
 - Owner role for closure:
   - Brain / Top Architect
+
+## Implementation result
+- Status: completed for this bounded family.
+- Authority removed:
+  - `route_llm_policy_core(...)` no longer emits success-path `semantic_frame`; hot-path owner output now exposes canonical `SemanticDecisionV1` plus separate binding only.
+  - `TurnPlanner` no longer translates legacy policy-shape payloads back into semantic owner meaning on the hot path; success-path intake requires `semantic_decision.v1` plus binding.
+  - `booking_prompt_owner.py` no longer reads raw success-path policy fields directly from owner payload; it validates canonical `SemanticDecisionV1` and reads tool binding from `binding`.
+  - `policy_decision.v1` contract now encodes the owner-backed shadow-only rule for `semantic_frame`, `pending_question_contract`, and `meta.semantic_contract`.
+- Files touched:
+  - `truffles-api/app/services/intent_service.py`
+  - `truffles-api/app/core/turn_planner.py`
+  - `truffles-api/app/core/booking_prompt_owner.py`
+  - `contracts/runtime/policy_decision.v1.jsonschema`
+  - `truffles-api/tests/__init__.py`
+  - `truffles-api/tests/test_intent.py`
+  - `truffles-api/tests/test_consultant_core_runtime_contracts.py`
+  - `truffles-api/tests/test_reasoning_core.py`
+  - `truffles-api/tests/test_turn_planner_expected_reply_validation.py`
+  - `STATE.md`
+  - `STRUCTURE.md`
+- Deterministic checks:
+  - `python3 -m py_compile truffles-api/app/services/intent_service.py truffles-api/app/core/turn_planner.py truffles-api/app/core/booking_prompt_owner.py truffles-api/tests/__init__.py truffles-api/tests/test_intent.py truffles-api/tests/test_consultant_core_runtime_contracts.py truffles-api/tests/test_reasoning_core.py truffles-api/tests/test_turn_planner_expected_reply_validation.py` -> `pass`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_turn_planner_expected_reply_validation.py` -> `8 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_consultant_core_runtime_contracts.py -k "semantic_decision or policy_core_decision or schema"` -> `6 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_reasoning_core.py -k "pending_booking_reactivation"` -> `2 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_intent.py -k "route_llm_policy_core or semantic_decision"` -> `2 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_consultant_core_runtime_contracts.py` -> `69 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_reasoning_core.py` -> `26 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_intent.py` -> `78 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture` -> `24 passed`
+  - `git diff --check` -> `pass`
+- Residual debt left for next block:
+  - runtime/state readers still keep owner-precedence merge logic spread across `consultant_runtime.py` / `dialog_state_service.py`
+  - pre-owner memory profile still injects projected semantic state from runtime storage
+  - legacy webhook mesh still has semantic compatibility readers outside this producer/consumer cut

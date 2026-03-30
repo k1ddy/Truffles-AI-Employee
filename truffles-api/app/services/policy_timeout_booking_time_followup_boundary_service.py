@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from app.core import DialogStateService
 from app.schemas.webhook import WebhookResponse
+
+_DIALOG_STATE_SERVICE = DialogStateService()
 
 
 @dataclass(frozen=True)
@@ -101,16 +104,13 @@ def handle_policy_timeout_booking_time_followup_boundary(
         interaction_owner=runtime_input.interaction_owner,
     )
     context = hooks.set_context_manager(context, timeout_followup_manager)
-    interaction_state_payload = hooks.get_canonical_dialog_state(timeout_followup_manager).get(
-        "interaction_state"
+    interaction_state_payload = _DIALOG_STATE_SERVICE.project_context_session_memory_interaction_state(
+        context,
+        context_manager_key="context_manager",
     )
     context, timeout_followup_memory = hooks.sync_session_memory_interaction_state(
         context,
-        interaction_state=(
-            interaction_state_payload
-            if isinstance(interaction_state_payload, dict)
-            else None
-        ),
+        interaction_state=interaction_state_payload if isinstance(interaction_state_payload, dict) else None,
         now=runtime_input.now,
     )
     hooks.set_conversation_context(runtime_input.conversation, context)

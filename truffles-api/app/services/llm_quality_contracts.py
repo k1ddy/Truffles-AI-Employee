@@ -445,6 +445,13 @@ _BOOKING_SCENARIO_RESCHEDULE_FOLLOWUP_EXPECT_OVERRIDE = {
 _BOOKING_SCENARIO_CHECK_BOOKING_FOLLOWUP_EXPECT_OVERRIDE = {
     "expected_reply": True,
 }
+_BOOKING_SCENARIO_CHECK_BOOKING_CONFIRM_EXPECT_OVERRIDE = {
+    "expected_reply": True,
+    "reply_type": None,
+    "meta_any": {
+        "expected_reply_type": ["name", "time"],
+    },
+}
 _BOOKING_SCENARIO_TIME_COLLECT_EXPECT_OVERRIDE = {
     "reply_type": "time",
     "expected_reply": True,
@@ -2673,8 +2680,20 @@ def booking_scenario_check_booking_followup_expect_override() -> dict[str, Any]:
     return deepcopy(_BOOKING_SCENARIO_CHECK_BOOKING_FOLLOWUP_EXPECT_OVERRIDE)
 
 
+def booking_scenario_check_booking_confirm_expect_override() -> dict[str, Any]:
+    return deepcopy(_BOOKING_SCENARIO_CHECK_BOOKING_CONFIRM_EXPECT_OVERRIDE)
+
+
 def booking_scenario_time_collect_expect_override() -> dict[str, Any]:
     return deepcopy(_BOOKING_SCENARIO_TIME_COLLECT_EXPECT_OVERRIDE)
+
+
+def has_booking_scenario_active_check_booking_confirm(
+    tags: list[str],
+    *,
+    active_management_tag: str | None,
+) -> bool:
+    return active_management_tag == "check_booking" and "confirm" in _booking_scenario_lowered_tags(tags)
 
 
 def apply_booking_scenario_active_time_specialist_followup_expectations(
@@ -3959,6 +3978,13 @@ def _booking_scenario_select_post_coverage_repair_decision(
         return BookingScenarioPostCoverageRepairDecision(
             tags=rewritten_active_time_master_tags
         )
+    if has_booking_scenario_active_check_booking_confirm(
+        effective_tags,
+        active_management_tag=state.active_management_tag,
+    ):
+        return BookingScenarioPostCoverageRepairDecision(
+            expect_override=booking_scenario_check_booking_confirm_expect_override(),
+        )
     if booking_scenario_looks_like_check_booking_followup(text, effective_tags):
         return BookingScenarioPostCoverageRepairDecision(
             tags=rewrite_booking_scenario_check_booking_followup_tags(effective_tags),
@@ -4404,6 +4430,11 @@ def sanitize_booking_scenario_llm_turns(
         if check_booking_followup_normalized:
             tags = rewrite_booking_scenario_check_booking_followup_tags(tags)
             normalized_turn["expect"] = booking_scenario_check_booking_followup_expect_override()
+        elif has_booking_scenario_active_check_booking_confirm(
+            tags,
+            active_management_tag=state.active_management_tag,
+        ):
+            normalized_turn["expect"] = booking_scenario_check_booking_confirm_expect_override()
         elif reschedule_followup_normalized:
             tags = rewrite_booking_scenario_reschedule_followup_tags(tags)
             normalized_turn["expect"] = booking_scenario_reschedule_followup_expect_override()
@@ -4612,6 +4643,7 @@ __all__ = [
     "booking_scenario_looks_like_question_like_slot_constraint",
     "booking_scenario_looks_like_requested_slot_question_without_temporal_scope",
     "booking_scenario_check_booking_followup_expect_override",
+    "booking_scenario_check_booking_confirm_expect_override",
     "booking_scenario_normalize_active_time_booking_fill_tags",
     "booking_scenario_normalize_booking_requested_slot_question_tags",
     "booking_scenario_normalize_grounded_partial_date_mixed_fill_tags",
@@ -4678,6 +4710,7 @@ __all__ = [
     "parse_coverage_tokens",
     "repair_booking_scenario_post_coverage_dialogs",
     "sanitize_booking_scenario_llm_turns",
+    "has_booking_scenario_active_check_booking_confirm",
     "has_booking_scenario_orphan_pending_question_tags",
     "rewrite_booking_scenario_check_booking_followup_tags",
     "rewrite_booking_scenario_orphan_pending_question_tags",

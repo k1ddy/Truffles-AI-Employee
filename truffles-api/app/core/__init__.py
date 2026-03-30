@@ -4,6 +4,8 @@ from app.core.boundary_validator import (
     BoundaryValidationResult,
     BoundaryValidator,
 )
+from app.core.binding_plan import BindingOutcomeType, BindingPlanV1
+from app.core.conversation_projection import ConversationProjectionV1
 from app.core.dialog_state_service import (
     CanonicalSemanticState,
     CurrentReferents,
@@ -14,11 +16,19 @@ from app.core.dialog_state_service import (
     SemanticStateEvent,
 )
 from app.core.response_realizer import ReplyEnvelope, ReplyKind, ResponseRealizer
+from app.core.runtime_trace_contract import (
+    RuntimeTraceActionTransitionV1,
+    RuntimeTraceBindingTransitionV1,
+    RuntimeTraceContractV1,
+    RuntimeTraceOwnerTransitionV1,
+    RuntimeTraceStateTransitionV1,
+)
 from app.core.semantic_decision import (
     GroundingRequirementsV1,
     MissingInformationV1,
     SemanticDecisionV1,
 )
+from app.core.turn_journal import TurnJournalEventV1, TurnJournalV1
 from app.core.turn_executor import (
     BlockBoundaryRequest,
     DegradeBoundaryRequest,
@@ -46,8 +56,11 @@ __all__ = [
     "BoundaryOverride",
     "BoundaryValidationResult",
     "BoundaryValidator",
+    "BindingOutcomeType",
+    "BindingPlanV1",
     "BlockBoundaryRequest",
     "CanonicalSemanticState",
+    "ConversationProjectionV1",
     "CurrentReferents",
     "DegradeBoundaryRequest",
     "DecisionOutcome",
@@ -65,6 +78,11 @@ __all__ = [
     "ReplyEnvelope",
     "ReplyKind",
     "ResponseRealizer",
+    "RuntimeTraceActionTransitionV1",
+    "RuntimeTraceBindingTransitionV1",
+    "RuntimeTraceContractV1",
+    "RuntimeTraceOwnerTransitionV1",
+    "RuntimeTraceStateTransitionV1",
     "SemanticDecisionV1",
     "SemanticFrame",
     "SemanticStateEvent",
@@ -72,6 +90,8 @@ __all__ = [
     "ToolStatus",
     "TurnContractStatus",
     "TurnExecutor",
+    "TurnJournalEventV1",
+    "TurnJournalV1",
     "TurnObservability",
     "TurnPlanner",
     "TurnResult",

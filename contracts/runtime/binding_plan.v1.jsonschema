@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/binding_plan.v1.jsonschema",
+  "title": "BindingPlan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "binding_id",
+    "decision_id",
+    "binding_outcome_type",
+    "capability_id",
+    "selected_tool_or_workflow_ref",
+    "authz_scope",
+    "resolved_args",
+    "timeout_policy",
+    "retry_policy",
+    "idempotency_key",
+    "deny_reason_code",
+    "degrade_reason_code",
+    "handoff_reason_code"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "binding_plan.v1"
+    },
+    "binding_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "binding_outcome_type": {
+      "type": "string",
+      "enum": [
+        "tool_call",
+        "workflow_start",
+        "workflow_advance",
+        "deny",
+        "degrade",
+        "handoff"
+      ]
+    },
+    "capability_id": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "selected_tool_or_workflow_ref": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "authz_scope": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "resolved_args": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "timeout_policy": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "retry_policy": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "idempotency_key": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "deny_reason_code": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "degrade_reason_code": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "handoff_reason_code": {
+      "type": ["string", "null"],
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "binding_outcome_type": {
+            "enum": ["tool_call", "workflow_start", "workflow_advance"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "selected_tool_or_workflow_ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "binding_outcome_type": {
+            "const": "deny"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "deny_reason_code": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "binding_outcome_type": {
+            "const": "degrade"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "degrade_reason_code": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "binding_outcome_type": {
+            "const": "handoff"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "handoff_reason_code": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
+}

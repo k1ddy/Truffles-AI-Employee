@@ -24,8 +24,8 @@ from app.services.handover_context_service import (
 from app.services.result import Result
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
-    _reset_context_preserving_trace,
     DECISION_TRACE_KEY,
+    _reset_context_preserving_trace,
     capture_pending_resume_on_conversation,
     force_state,
     is_simulation_context,
@@ -923,7 +923,8 @@ class HandoverMaterializationResult:
     error_code: str | None = None
 
 
-_NOOP_TRACE_HOOK: Callable[..., None] = lambda *_args, **_kwargs: None
+def _NOOP_TRACE_HOOK(*_args, **_kwargs) -> None:
+    return None
 
 
 def _apply_handover_contract_to_message(

@@ -4,11 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from app.core import DialogStateService
 from app.services.owner_resolver import (
     TimeoutOwnerBoundaryInput,
     TimeoutOwnerBoundaryResolution,
     resolve_timeout_owner_boundary,
 )
+
+_DIALOG_STATE_SERVICE = DialogStateService()
 
 
 @dataclass(frozen=True)
@@ -170,14 +173,13 @@ def apply_timeout_owner_boundary_resolution(
         interaction_owner=resolution.execution_owner,
     )
     context = hooks.set_context_manager(context, context_manager)
-    interaction_state_payload = hooks.get_canonical_dialog_state(context_manager).get(
-        "interaction_state"
+    interaction_state_payload = _DIALOG_STATE_SERVICE.project_context_session_memory_interaction_state(
+        context,
+        context_manager_key="context_manager",
     )
     context, _session_memory = hooks.sync_session_memory_interaction_state(
         context,
-        interaction_state=(
-            interaction_state_payload if isinstance(interaction_state_payload, dict) else None
-        ),
+        interaction_state=interaction_state_payload if isinstance(interaction_state_payload, dict) else None,
         now=now,
     )
     hooks.set_conversation_context(conversation, context)

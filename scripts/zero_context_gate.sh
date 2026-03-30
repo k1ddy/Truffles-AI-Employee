@@ -63,7 +63,7 @@ fi
 require_section() {
   local file="$1"
   local section="$2"
-  if ! rg -Fq "## ${section}" "$file"; then
+  if ! search_fixed_q "## ${section}" "$file"; then
     echo "ERROR: Missing section '## ${section}' in ${file}" >&2
     return 1
   fi
@@ -72,16 +72,46 @@ require_section() {
 require_token() {
   local file="$1"
   local token="$2"
-  if ! rg -Fq "$token" "$file"; then
+  if ! search_fixed_q "$token" "$file"; then
     echo "ERROR: Missing token '${token}' in ${file}" >&2
     return 1
   fi
 }
 
+search_fixed_q() {
+  local needle="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -Fq "$needle" "$file"
+    return
+  fi
+  grep -Fq -- "$needle" "$file"
+}
+
+search_regex_q() {
+  local pattern="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q "$pattern" "$file"
+    return
+  fi
+  grep -Eq -- "$pattern" "$file"
+}
+
+search_regex_count() {
+  local pattern="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$file" | wc -l | tr -d '[:space:]'
+    return
+  fi
+  grep -En -- "$pattern" "$file" | wc -l | tr -d '[:space:]'
+}
+
 require_single_web_query_in_tp() {
   local file="$1"
   local query_count
-  query_count=$(rg -n '^- \*\*Query \(exact\):\*\*' "$file" | wc -l | tr -d '[:space:]')
+  query_count=$(search_regex_count '^- \*\*Query \(exact\):\*\*' "$file")
   if [[ "$query_count" != "1" ]]; then
     echo "ERROR: TP must contain exactly one 'Query (exact)' entry (found ${query_count}) in ${file}" >&2
     exit 1
@@ -96,7 +126,14 @@ require_web_sources_block_has_url() {
     in_section && /^## / {exit}
     in_section {print}
   ' "$file")
-  if ! printf '%s\n' "$sources_block" | rg -q 'https?://'; then
+  if command -v rg >/dev/null 2>&1; then
+    if ! printf '%s\n' "$sources_block" | rg -q 'https?://'; then
+      echo "ERROR: TP one-web-search section must include at least one URL source in ${file}" >&2
+      exit 1
+    fi
+    return
+  fi
+  if ! printf '%s\n' "$sources_block" | grep -Eq 'https?://'; then
     echo "ERROR: TP one-web-search section must include at least one URL source in ${file}" >&2
     exit 1
   fi
@@ -160,9 +197,13 @@ for token in '`BLOCK_ID`' '`DEPENDS_ON`' '`UNLOCKS`'; do
 done
 
 for file in "$TP_PATH" "$REPORT_PATH"; do
-  if rg -n "<[^>]+>" "$file" >/dev/null; then
+  if search_regex_q "<[^>]+>" "$file"; then
     echo "ERROR: Unresolved placeholders found in ${file}" >&2
-    rg -n "<[^>]+>" "$file" >&2 || true
+    if command -v rg >/dev/null 2>&1; then
+      rg -n "<[^>]+>" "$file" >&2 || true
+    else
+      grep -En -- "<[^>]+>" "$file" >&2 || true
+    fi
     exit 1
   fi
 done
@@ -192,7 +233,7 @@ require_single_web_query_in_tp "$TP_PATH"
 require_web_sources_block_has_url "$TP_PATH"
 
 if [[ -n "$GRAPH_PATH" ]]; then
-  if ! rg -Fq "blocks:" "$GRAPH_PATH"; then
+  if ! search_fixed_q "blocks:" "$GRAPH_PATH"; then
     echo "ERROR: Invalid block graph (missing 'blocks:'): $GRAPH_PATH" >&2
     exit 1
   fi

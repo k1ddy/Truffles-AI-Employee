@@ -1,0 +1,222 @@
+{
+  "$defs": {
+    "SemanticFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "default": "semantic_frame.v2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "user_goal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Goal"
+        },
+        "requested_effect": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Effect"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "object"
+        },
+        "referents": {
+          "additionalProperties": {
+            "type": "object"
+          },
+          "title": "Referents",
+          "type": "object"
+        },
+        "constraints": {
+          "title": "Constraints",
+          "type": "object"
+        },
+        "preferences": {
+          "title": "Preferences",
+          "type": "object"
+        },
+        "continuation": {
+          "title": "Continuation",
+          "type": "object"
+        },
+        "capability_selection": {
+          "title": "Capability Selection",
+          "type": "object"
+        },
+        "needs_human": {
+          "default": false,
+          "title": "Needs Human",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "title": "SemanticFrame",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "conversation_projection.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "projection_version": {
+      "default": "v1",
+      "title": "Projection Version",
+      "type": "string"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "last_turn_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Turn Id"
+    },
+    "current_semantic_decision_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Current Semantic Decision Ref"
+    },
+    "active_capability": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Capability"
+    },
+    "semantic_slots": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Semantic Slots",
+      "type": "object"
+    },
+    "missing_information": {
+      "title": "Missing Information",
+      "type": "object"
+    },
+    "active_workflow_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Workflow Ref"
+    },
+    "pending_handoff_state": {
+      "title": "Pending Handoff State",
+      "type": "object"
+    },
+    "last_reply_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Reply Ref"
+    },
+    "compatibility_view_refs": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Compatibility View Refs",
+      "type": "object"
+    },
+    "semantic_frame": {
+      "$ref": "#/$defs/SemanticFrame"
+    },
+    "semantic_contract": {
+      "title": "Semantic Contract",
+      "type": "object"
+    },
+    "pending_question_contract": {
+      "title": "Pending Question Contract",
+      "type": "object"
+    },
+    "current_goal": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Current Goal"
+    },
+    "booking_state": {
+      "title": "Booking State",
+      "type": "object"
+    }
+  },
+  "title": "ConversationProjectionV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/schemas/runtime/conversation_projection.v1.jsonschema"
+}

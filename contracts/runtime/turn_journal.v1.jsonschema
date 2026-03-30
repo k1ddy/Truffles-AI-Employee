@@ -1,0 +1,125 @@
+{
+  "$defs": {
+    "TurnJournalEventV1": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "turn_journal.event.v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "source_component": {
+          "title": "Source Component",
+          "type": "string"
+        },
+        "causal_parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causal Parent Id"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
+        },
+        "payload": {
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "turn_id",
+        "event_type",
+        "timestamp",
+        "source_component"
+      ],
+      "title": "TurnJournalEventV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "turn_journal.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "last_turn_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Turn Id"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/TurnJournalEventV1"
+      },
+      "title": "Events",
+      "type": "array"
+    }
+  },
+  "title": "TurnJournalV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/schemas/runtime/turn_journal.v1.jsonschema"
+}
