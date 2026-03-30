@@ -677,6 +677,7 @@
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
 | `docs/REPORTS/2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md` | Report: three-checkout freeze manifests + inventory + consolidation base selection | Brain/Architect |
 | `docs/REPORTS/2026-03-30-consultant-core-consolidation-doc-conflict-resolution-a922.md` | Report: low-risk doc conflict source picks for consolidation worktree | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-consolidation-code-conflict-shortlist-a922.md` | Report: P0/P1/P2 shortlist for remaining consultant-core code/test conflicts | Brain/Architect |
 | `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
 | `docs/REPORTS/2026-02-20-tenants-a11y-evidence-a201.md` | Отчёт: live e2e+axe evidence для Tenants (platform_admin) | Brain/Architect |
 | `docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md` | Отчёт: Tenants V3 redesign baseline + Wave3 backfill verification + Wave4/5 progress | Brain/Architect |
