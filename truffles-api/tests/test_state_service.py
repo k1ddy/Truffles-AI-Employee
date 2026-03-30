@@ -7,13 +7,14 @@ import pytest
 
 from app.models import Handover, Message, User
 from app.routers.webhook import _legacy as legacy
-from app.routers.webhook.dedup import should_process_debounced_message
 from app.routers.webhook.decision import (
-    LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
     is_handover_status_question,
+)
+from app.routers.webhook.runtime_primitives import (
+    LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
     should_offer_low_confidence_retry,
 )
-from app.services.state_machine import ConversationState
+from app.routers.webhook.dedup import should_process_debounced_message
 from app.services.handover_owner_service import (
     ActiveHandoverReuseRuntimeHooks,
     PendingEscalationNotificationRuntimeHooks,
@@ -27,12 +28,13 @@ from app.services.handover_owner_service import (
     manager_return,
     manager_take,
 )
+from app.services.state_machine import ConversationState
 from app.services.state_service import (
     HandoverConfirmationRuntimeHooks,
-    PendingResumeBoundaryRuntimeHooks,
     PendingContinuityRuntimeHooks,
-    _build_session_memory_observability_snapshot,
+    PendingResumeBoundaryRuntimeHooks,
     _build_pending_resume_snapshot_payload,
+    _build_session_memory_observability_snapshot,
     _capture_pending_resume_context,
     _handle_handover_confirmation_runtime,
     _prepare_pending_handoff_resume_boundary_restore,
@@ -40,12 +42,12 @@ from app.services.state_service import (
     _resolve_pending_ack,
     _resolve_pending_close,
     _resolve_pending_no_handover_reset,
-    _restore_pending_resume_context,
-    _restore_pending_resume_payload,
     _resolve_pending_resume_boundary_activation,
-    _resolve_resolved_handoff_resume_boundary_restore,
     _resolve_pending_resume_session_memory_policy,
     _resolve_pending_timeout_resume_boundary_payload,
+    _resolve_resolved_handoff_resume_boundary_restore,
+    _restore_pending_resume_context,
+    _restore_pending_resume_payload,
     check_invariants,
 )
 
@@ -1310,7 +1312,12 @@ def test_build_pending_resume_snapshot_payload_captures_pending_resume_contract(
     assert payload["booking"] == {"active": True, "service": "Маникюр"}
     assert payload["session_memory"] == {
         "active_goal": "booking",
+        "goal_stack": ["booking"],
         "interaction_state": {"resume_slot": "datetime"},
+        "pending_question_contract": {
+            "expected_reply_type": "time",
+            "reason": "booking_prompt",
+        },
     }
     assert payload["last_service_hint"] == "Маникюр"
     assert payload["last_service_hint_at"] == "2026-03-15T10:00:00+00:00"
@@ -1347,6 +1354,80 @@ def test_build_pending_resume_snapshot_payload_prefers_canonical_question_contra
     assert payload["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
         "expected_reply_type": "time",
         "reason": "booking_interrupt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+
+def test_build_pending_resume_snapshot_payload_prefers_runtime_projection_over_stale_compatibility_views() -> None:
+    payload = _build_pending_resume_snapshot_payload(
+        context={
+            "consultant_runtime": {
+                "conversation_projection": {
+                    "schema_version": "conversation_projection.v1",
+                    "projection_version": "v1",
+                    "current_goal": "booking",
+                    "semantic_slots": {"service": "Маникюр"},
+                    "missing_information": {
+                        "expected_reply_type": "time",
+                        "reason": "runtime_projection",
+                    },
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "reason": "runtime_projection",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    },
+                    "booking_state": {"active": True, "service": "Маникюр"},
+                }
+            }
+        },
+        context_manager={
+            "current_goal": "info",
+            "canonical_dialog_state": {
+                "pending_question_contract": {
+                    "expected_reply_type": "name",
+                    "reason": "stale_canonical",
+                    "next_question": "name",
+                    "open_questions": ["name"],
+                }
+            },
+        },
+        expected_reply_type=" service_choice ",
+        expected_reply_reason=" stale_projection ",
+        intent_queue=["booking"],
+        booking_context={"active": True, "service": "Педикюр"},
+        session_memory={
+            "active_goal": "info",
+            "pending_question_contract": {
+                "expected_reply_type": "name",
+                "reason": "stale_session_memory",
+                "next_question": "name",
+                "open_questions": ["name"],
+            },
+        },
+    )
+
+    assert payload["expected_reply_type"] == "time"
+    assert payload["expected_reply_reason"] == "runtime_projection"
+    assert payload["booking"] == {"active": True, "service": "Маникюр"}
+    assert payload["context_manager"]["current_goal"] == "booking"
+    assert payload["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "runtime_projection",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert payload["session_memory"]["active_goal"] == "booking"
+    assert payload["session_memory"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "runtime_projection",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
         "next_question": "datetime",
         "open_questions": ["datetime"],
     }
@@ -1448,6 +1529,81 @@ def test_restore_pending_resume_payload_restores_owner_contract() -> None:
     assert restored["re_entry_required"]["reason"] == "pending_resume"
     assert "pending_sla" not in restored
     assert "handover_confirmation" not in restored
+
+
+def test_restore_pending_resume_payload_roundtrip_preserves_projection_derived_snapshot() -> None:
+    now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
+    payload = _build_pending_resume_snapshot_payload(
+        context={
+            "consultant_runtime": {
+                "conversation_projection": {
+                    "schema_version": "conversation_projection.v1",
+                    "projection_version": "v1",
+                    "current_goal": "booking",
+                    "semantic_slots": {"service": "Маникюр"},
+                    "missing_information": {
+                        "expected_reply_type": "time",
+                        "reason": "runtime_projection",
+                    },
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "reason": "runtime_projection",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    },
+                    "booking_state": {"active": True, "service": "Маникюр"},
+                }
+            }
+        },
+        context_manager={
+            "current_goal": "info",
+            "canonical_dialog_state": {
+                "pending_question_contract": {
+                    "expected_reply_type": "name",
+                    "reason": "stale_canonical",
+                }
+            },
+        },
+        expected_reply_type="name",
+        expected_reply_reason="stale_projection",
+        intent_queue=["booking"],
+        booking_context={"active": True, "service": "Педикюр"},
+        session_memory={"active_goal": "info"},
+    )
+
+    restored = _restore_pending_resume_payload(
+        context={
+            "pending_sla": {"ping_sent_at": now.isoformat()},
+            "handover_confirmation": {"required": True},
+        },
+        pending_resume=payload,
+        now=now,
+    )
+
+    assert restored["expected_reply_type"] == "time"
+    assert restored["expected_reply_reason"] == "runtime_projection"
+    assert restored["booking"] == {"active": True, "service": "Маникюр"}
+    assert restored["context_manager"]["current_goal"] == "booking"
+    assert restored["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "runtime_projection",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert restored["session_memory"]["active_goal"] == "booking"
+    assert restored["session_memory"]["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "runtime_projection",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert restored["session_memory"]["last_updated_at"] == now.isoformat()
 
 
 def test_prepare_pending_handoff_resume_boundary_restore_uses_owner_surface() -> None:

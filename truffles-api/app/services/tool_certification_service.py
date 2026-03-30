@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.tool_registry_entry import ToolRegistryEntry
+from app.services.tool_registry_snapshot_service import list_declared_tool_actions
 
 TOOL_REGISTRY_SCHEMA_VERSION = "v1"
 TOOL_REGISTRY_STATUS_ACTIVE = "active"
@@ -43,16 +44,7 @@ class _RegistryEntryView:
     source: str
 
 
-_DEFAULT_TOOL_ACTIONS: tuple[str, ...] = (
-    "calendar.list_slots",
-    "calendar.book_slot",
-    "calendar.get_booking",
-    "calendar.reschedule",
-    "calendar.cancel",
-    "catalog.service_query",
-    "catalog.location",
-    "catalog.portfolio",
-)
+_DEFAULT_TOOL_ACTIONS: tuple[str, ...] = list_declared_tool_actions()
 
 
 def _normalize_tool_action(value: str) -> str:

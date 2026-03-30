@@ -6,6 +6,7 @@ from uuid import uuid4
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import policy
 from app.schemas.capabilities import CapabilitiesPayload, CapabilityPolicyOverrides
+from app.services import policy_snapshot_service
 
 
 def _noop_truth_gate(*_args, **_kwargs):
@@ -20,7 +21,7 @@ def test_get_policy_handler_uses_default_for_unknown_policy_type(monkeypatch):
     default_truth_gate = _noop_truth_gate
 
     monkeypatch.setattr(
-        legacy,
+        policy,
         "_POLICY_HANDLERS",
         {
             "default": {"truth_gate": default_truth_gate},
@@ -42,7 +43,7 @@ def test_get_policy_handler_prefers_exact_mapping_over_default(monkeypatch):
     exact_truth_gate = _exact_truth_gate
 
     monkeypatch.setattr(
-        legacy,
+        policy,
         "_POLICY_HANDLERS",
         {
             "default": {"truth_gate": default_truth_gate},
@@ -116,13 +117,22 @@ def test_resolve_hard_law_sections_fallback_excludes_payment_info():
     assert "legal" in sections
 
 
+def test_build_routing_policy_snapshot_is_versioned():
+    snapshot = policy_snapshot_service.build_routing_policy_snapshot("manager_active")
+
+    assert snapshot.schema_version == "routing_policy_snapshot.v1"
+    assert snapshot.conversation_state == "manager_active"
+    assert snapshot.allow_bot_reply is False
+
+
 def test_get_policy_pack_applies_runtime_operational_overrides(monkeypatch):
     runtime = SimpleNamespace(
         payload=CapabilitiesPayload.model_validate(
             {"policy_overrides": {"payment_info": {"response": "Оплата по счету"}}}
-        )
+        ),
+        source="client_capabilities",
     )
-    monkeypatch.setattr(policy, "get_runtime_capabilities", lambda: runtime)
+    monkeypatch.setattr(policy_snapshot_service, "get_runtime_capabilities", lambda: runtime)
     client = SimpleNamespace(
         config={
             "policy_pack": {
@@ -146,9 +156,10 @@ def test_get_policy_pack_ignores_runtime_override_for_hard_law_section(monkeypat
     runtime = SimpleNamespace(
         payload=CapabilitiesPayload.model_validate(
             {"policy_overrides": {"payment_info": {"response": "Новый ответ"}}}
-        )
+        ),
+        source="client_capabilities",
     )
-    monkeypatch.setattr(policy, "get_runtime_capabilities", lambda: runtime)
+    monkeypatch.setattr(policy_snapshot_service, "get_runtime_capabilities", lambda: runtime)
     client = SimpleNamespace(
         config={
             "policy_pack": {
@@ -173,13 +184,18 @@ def test_get_policy_pack_applies_registry_operational_overrides(monkeypatch):
         client_id=uuid4(),
         branch_id=uuid4(),
         payload=CapabilitiesPayload(),
+        source="client_capabilities",
     )
-    monkeypatch.setattr(policy, "get_runtime_capabilities", lambda: runtime)
+    monkeypatch.setattr(policy_snapshot_service, "get_runtime_capabilities", lambda: runtime)
+    version_id = uuid4()
     monkeypatch.setattr(
-        policy,
-        "resolve_effective_policy_overrides",
-        lambda *_args, **_kwargs: CapabilityPolicyOverrides.model_validate(
-            {"payment_info": {"response": "Оплата через кассу"}}
+        policy_snapshot_service,
+        "resolve_effective_policy_version",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id=version_id,
+            payload_json=CapabilityPolicyOverrides.model_validate(
+                {"payment_info": {"response": "Оплата через кассу"}}
+            ).model_dump(exclude_none=True),
         ),
     )
     client = SimpleNamespace(
@@ -210,13 +226,17 @@ def test_get_policy_pack_ignores_registry_override_for_hard_law_section(monkeypa
         client_id=uuid4(),
         branch_id=uuid4(),
         payload=CapabilitiesPayload(),
+        source="client_capabilities",
     )
-    monkeypatch.setattr(policy, "get_runtime_capabilities", lambda: runtime)
+    monkeypatch.setattr(policy_snapshot_service, "get_runtime_capabilities", lambda: runtime)
     monkeypatch.setattr(
-        policy,
-        "resolve_effective_policy_overrides",
-        lambda *_args, **_kwargs: CapabilityPolicyOverrides.model_validate(
-            {"payment_info": {"response": "Новый ответ"}}
+        policy_snapshot_service,
+        "resolve_effective_policy_version",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id=uuid4(),
+            payload_json=CapabilityPolicyOverrides.model_validate(
+                {"payment_info": {"response": "Новый ответ"}}
+            ).model_dump(exclude_none=True),
         ),
     )
     client = SimpleNamespace(

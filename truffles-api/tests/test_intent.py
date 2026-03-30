@@ -9,13 +9,13 @@ import httpx
 from app.schemas.capabilities import CapabilitiesPayload
 from app.schemas.consult import ConsultPlaybook
 from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
+from app.services.policy_vocabulary_snapshot_service import build_policy_core_response_format
 from app.services.intent_service import (
-    DomainIntent,
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
+    DomainIntent,
     Intent,
     _build_customer_name_hint_response_format,
-    _build_policy_core_response_format,
     _build_service_query_hint_response_format,
     _build_specialist_hint_response_format,
     _load_policy_core_prompt,
@@ -23,8 +23,8 @@ from app.services.intent_service import (
     _resolve_model_temperature,
     _resolve_policy_core_reasoning_effort,
     _sanitize_policy_core_payload,
-    classify_intent,
     classify_domain_with_scores,
+    classify_intent,
     extract_customer_name_hint_llm,
     extract_service_query_hint_llm,
     interpret_expected_reply,
@@ -340,9 +340,14 @@ class TestPolicyCoreTimeoutRetry:
             "source_ref": "message",
         }
         assert result["binding"] == {
-            "tool_action": "catalog.service_query",
-            "tool_args": {"service_query": "маникюр"},
+            "tool_action": "info",
+            "tool_args": {},
         }
+        assert result["binding_plan"]["schema_version"] == "binding_plan.v1"
+        assert result["binding_plan"]["decision_id"] == result["payload"]["decision_id"]
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "info"
+        assert result["binding_plan"]["resolved_args"] == {}
         assert "tool_args" not in result["payload"]
 
     def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
@@ -446,7 +451,7 @@ class TestPolicyCoreTimeoutRetry:
         assert fallback_kwargs["reasoning_effort"] == "low"
         assert fallback_kwargs["max_tokens"] >= 400
         assert fallback_kwargs["temperature"] is None
-        assert fallback_kwargs["timeout_seconds"] == 8.0
+        assert fallback_kwargs["timeout_seconds"] == 6.0
 
     def test_policy_core_gpt5_compatibility_helpers_use_chat_safe_defaults(self, monkeypatch):
         monkeypatch.setattr(
@@ -519,13 +524,16 @@ class TestPolicyCoreTimeoutRetry:
         assert result["ok"] is True
         assert result["tool_args_sanitized"] is True
         assert result["binding"]["tool_args"] == {"service_query": "Маникюр"}
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.list_slots"
+        assert result["binding_plan"]["resolved_args"] == {"service_query": "Маникюр"}
 
     def test_policy_core_route_rejects_collect_tool_action_hint_conflict(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = {
             "intent": "booking",
             "action": "collect",
-            "tool_action_hint": "calendar.list_slots",
+            "tool_action_hint": "handoff",
             "pack_refs": [],
             "slots": {"service": "Маникюр"},
             "next_question": "datetime",
@@ -544,6 +552,111 @@ class TestPolicyCoreTimeoutRetry:
         assert result["ok"] is False
         assert result["error"] == "invalid_projection"
         assert result["projection_error"] == "collect_tool_action_hint_conflict"
+
+    def test_policy_core_repairs_booking_manage_reference_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "check_booking",
+            "action": "collect",
+            "tool_action_hint": "collect",
+            "pack_refs": [],
+            "slots": {},
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
+            "needs_manager": False,
+            "reason": "calendar_get_booking_collect_reference",
+            "subject_kind": "booking",
+            "capability": "booking_manage",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": None,
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "action": "fact",
+            "tool_action_hint": "calendar.get_booking",
+            "reason": "calendar_get_booking_collect_reference",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core("Проверьте мою запись")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert result["contract_repair_reason"] == "llm_policy_core_error:booking_manage_reference_action_invalid"
+        assert result["binding"]["tool_action"] == "calendar.get_booking"
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.get_booking"
+        assert result["payload"]["requested_outcome"] == "fact"
+        assert result["payload"]["tool_action_hint"] == "calendar.get_booking"
+
+    def test_policy_core_repairs_generic_info_interrupt_followup_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action_hint": "catalog.service_query",
+            "pack_refs": ["pricing"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": None,
+            "next_question": None,
+            "open_questions": [],
+            "needs_manager": False,
+            "reason": "user_asks_price_for_known_service",
+            "subject_kind": "service",
+            "capability": "pricing",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "active_question_relation": "generic_info_interrupt",
+            "pending_question_act": None,
+            "pending_question_target": None,
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Какая цена?",
+                expected_reply_type="time",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert result["contract_repair_reason"] == "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["open_questions"] == ["datetime"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
 
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1168,10 +1281,63 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is True
         assert result["binding"]["tool_action"] == "calendar.get_booking"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.get_booking"
         assert result["payload"]["missing_information"]["next_question"] == "name"
         assert result["payload"]["missing_information"].get("pending_question_act") is None
         assert result["payload"]["missing_information"].get("pending_question_target") is None
         assert result["payload"]["missing_information"].get("active_question_relation") is None
+
+    def test_policy_core_binding_plan_resolves_info_capability_to_executable_tool(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["promotions"],
+            "needs_manager": False,
+            "reason": "promo_question",
+            "subject_kind": "service",
+            "capability": "promotions",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("У вас есть акции?")
+
+        assert result["ok"] is True
+        assert result["binding"]["tool_action"] == "catalog.service_query"
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "catalog.service_query"
+
+    def test_policy_core_binding_plan_types_handoff_explicitly(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "intent": "manager",
+                "action": "handoff",
+                "tool_action_hint": "handoff",
+                "reason": "manager_requested",
+                "goal": "handoff",
+                "needs_manager": True,
+                "subject_kind": "general",
+                "capability": "other",
+                "temporal_scope": "none",
+                "resolution_mode": "direct",
+                "next_question": None,
+                "open_questions": [],
+                "expected_reply_type": None,
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Позовите менеджера")
+
+        assert result["ok"] is True
+        assert result["binding"]["tool_action"] == "handoff"
+        assert result["binding_plan"]["binding_outcome_type"] == "handoff"
+        assert result["binding_plan"]["handoff_reason_code"] == "manager_requested"
 
     def test_policy_core_rejects_conflicting_service_shadow_against_canonical_referent(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -1524,6 +1690,8 @@ class TestPolicyCoreTimeoutRetry:
         assert result["ok"] is True
         assert result["structured_output_enabled"] is True
         assert result["structured_output_fallback_used"] is True
+        assert result["structured_output_fallback_reason"] == "response_format_invalid_request"
+        assert "response_format json_schema is not supported" in result["response_format_error"]
         assert mock_llm.return_value.generate.call_count == 2
         first_kwargs = mock_llm.return_value.generate.call_args_list[0].kwargs
         second_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
@@ -1531,46 +1699,54 @@ class TestPolicyCoreTimeoutRetry:
         assert "response_format" not in second_kwargs or second_kwargs.get("response_format") is None
 
     def test_policy_core_response_format_is_strict_and_canonical(self):
-        response_format = _build_policy_core_response_format(["calendar.book_slot"])
+        response_format = build_policy_core_response_format(["calendar.book_slot"])
         assert response_format["json_schema"]["strict"] is True
         schema = response_format["json_schema"]["schema"]
         assert schema["type"] == "object"
-        assert schema["required"] == [
-            "intent",
-            "action",
-            "tool_action_hint",
-            "needs_manager",
-            "subject_kind",
-            "capability",
-            "resolution_mode",
-        ]
+        assert schema["required"] == list(schema["properties"].keys())
+        assert "check_booking" in schema["properties"]["intent"]["enum"]
+        assert "verify_booking" in schema["properties"]["intent"]["enum"]
         assert "referents" in schema["properties"]
+        assert "entity_refs" in schema["properties"]
         assert "subject_kind" in schema["properties"]
         assert "capability" in schema["properties"]
         assert "temporal_scope" in schema["properties"]
         assert "resolution_mode" in schema["properties"]
         assert "expected_reply_type" in schema["properties"]
+        assert "risk_signals" in schema["properties"]
+        assert "language" in schema["properties"]
+        assert "confidence" in schema["properties"]
+        assert "goal" in schema["properties"]
         assert "pending_question_act" in schema["properties"]
         assert "pending_question_target" in schema["properties"]
         assert "active_question_relation" in schema["properties"]
-        assert "entity_refs" not in schema["properties"]
-        assert "resolver_id" not in schema["properties"]
-        assert "resolver_version" not in schema["properties"]
+        assert "resolver_id" in schema["properties"]
+        assert "resolver_version" in schema["properties"]
         assert "tool_args" not in schema["properties"]
         assert schema["properties"]["tool_action_hint"]["enum"] == ["calendar.book_slot"]
         slots_schema = schema["properties"]["slots"]
         referents_schema = schema["properties"]["referents"]
         assert "anyOf" in slots_schema
         assert "anyOf" in referents_schema
-        assert any(
-            variant["required"] == ["service"]
-            and list(variant["properties"].keys()) == ["service"]
+        slot_variants = next(
+            variant["anyOf"]
             for variant in slots_schema["anyOf"]
+            if isinstance(variant, dict) and "anyOf" in variant
+        )
+        referent_variants = next(
+            variant["anyOf"]
+            for variant in referents_schema["anyOf"]
+            if isinstance(variant, dict) and "anyOf" in variant
         )
         assert any(
             variant["required"] == ["service"]
             and list(variant["properties"].keys()) == ["service"]
-            for variant in referents_schema["anyOf"]
+            for variant in slot_variants
+        )
+        assert any(
+            variant["required"] == ["service"]
+            and list(variant["properties"].keys()) == ["service"]
+            for variant in referent_variants
         )
 
 

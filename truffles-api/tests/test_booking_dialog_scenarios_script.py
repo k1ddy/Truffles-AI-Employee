@@ -13,12 +13,12 @@ from app.services.llm_quality_contracts import (
     advance_booking_scenario_partial_date_anchor_context,
     advance_booking_scenario_pending_question_context,
     apply_booking_scenario_active_name_master_info_interrupt_expectations,
+    apply_booking_scenario_active_name_time_availability_followup_expectations,
     apply_booking_scenario_active_pending_question_cancel_interrupt_expectations,
     apply_booking_scenario_active_pending_question_info_interrupt_expectations,
-    apply_booking_scenario_ambiguous_time_fill_expectations,
     apply_booking_scenario_active_time_master_info_interrupt_expectations,
     apply_booking_scenario_active_time_specialist_followup_expectations,
-    apply_booking_scenario_active_name_time_availability_followup_expectations,
+    apply_booking_scenario_ambiguous_time_fill_expectations,
     apply_booking_scenario_exact_time_fill_collect_expectations,
     apply_booking_scenario_grounded_partial_date_daypart_fill_expectations,
     apply_booking_scenario_grounded_time_specialist_availability_transition_expectations,
@@ -28,7 +28,6 @@ from app.services.llm_quality_contracts import (
     apply_booking_scenario_pending_specialist_availability_followup_expectations,
     apply_booking_scenario_service_grounded_booking_expectations,
     apply_booking_scenario_service_grounded_booking_progress_interrupt_expectations,
-    booking_scenario_orphan_pending_question_expect_override,
     booking_scenario_expectation_has_contract_reason,
     booking_scenario_looks_like_check_booking_followup,
     booking_scenario_looks_like_generic_booking_request,
@@ -37,11 +36,12 @@ from app.services.llm_quality_contracts import (
     booking_scenario_normalize_active_time_master_info_tags,
     booking_scenario_normalize_active_time_specialist_master_tags,
     booking_scenario_normalize_malformed_check_booking_tags,
-    booking_scenario_normalize_pending_question_tags,
-    booking_scenario_normalize_stateful_booking_tags,
     booking_scenario_normalize_partial_date_slot_constraint_tags,
-    booking_scenario_normalize_slot_compare_partial_date_constraint_tags,
+    booking_scenario_normalize_pending_question_tags,
     booking_scenario_normalize_slot_compare_exact_time_fill_tags,
+    booking_scenario_normalize_slot_compare_partial_date_constraint_tags,
+    booking_scenario_normalize_stateful_booking_tags,
+    booking_scenario_orphan_pending_question_expect_override,
     booking_scenario_time_collect_expect_override,
     clear_booking_scenario_multi_service_info_interrupt_followup_expectations,
     has_booking_scenario_orphan_pending_question_tags,
@@ -1720,13 +1720,13 @@ def test_sanitize_llm_turns_normalizes_partial_date_fill_to_name_collect():
 
     expect = sanitized[1].get("expect") or {}
     assert sanitized[1]["tags"] == ["time"]
-    assert expect.get("reply_type") == "name"
-    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
+    assert expect.get("reply_type") == "time"
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
     assert (expect.get("meta_any") or {}).get("pending_question_act") is None
     assert (expect.get("meta_any") or {}).get("pending_question_target") is None
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("expected_reply_type") == "time"
         for entry in (expect.get("trace_contains") or [])
     )
     assert not any(
@@ -2419,12 +2419,12 @@ def test_sanitize_llm_turns_normalizes_partial_date_slot_constraint_under_active
 
     expect = sanitized[2].get("expect") or {}
     assert sanitized[2]["tags"] == ["time"]
-    assert expect.get("reply_type") == "name"
+    assert expect.get("reply_type") == "time"
     assert (expect.get("meta_any") or {}).get("pending_question_act") is None
-    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("expected_reply_type") == "time"
         for entry in (expect.get("trace_contains") or [])
     )
 
@@ -2683,15 +2683,16 @@ def test_sanitize_llm_turns_keeps_named_specialist_followup_after_time_fill():
 
     expect = sanitized[3].get("expect") or {}
     assert sanitized[3]["tags"] == ["booking"]
-    assert expect.get("reply_type") == "name"
+    assert expect.get("reply_type") == "time"
     assert expect.get("info_sections") == []
     assert (expect.get("meta_any") or {}).get("pending_question_target") == ["specialist"]
-    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
     assert any(
         entry.get("stage") == "pending_question_interaction"
         and entry.get("decision") == "booking_specialist_followup"
         and entry.get("pending_question_target") == "specialist"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("active_question_relation") == "referent_followup"
+        and entry.get("expected_reply_type") == "time"
         for entry in (expect.get("trace_contains") or [])
     )
 
@@ -4058,7 +4059,7 @@ def test_sanitize_llm_turns_keeps_generic_booking_service_choice_when_service_mi
         {
             "stage": "question_contract",
             "expected_reply_type": "service_choice",
-            "reason": "booking_prompt",
+            "reason": "collect:service",
         }
     ]
 
@@ -4097,18 +4098,18 @@ def test_sanitize_llm_turns_hardens_weekend_booking_service_followup_after_hours
         "source": "llm_policy_core",
         "tool_action": "collect",
         "expected_reply_type": "service_choice",
-        "expected_reply_reason": "booking_prompt",
+        "expected_reply_reason": "collect:service",
     }
     assert (expect.get("meta_any") or {}).get("action") == ["booking_prompt"]
     assert (expect.get("meta_any") or {}).get("source") == ["llm_policy_core"]
     assert (expect.get("meta_any") or {}).get("tool_action") == ["collect"]
     assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["service_choice"]
-    assert (expect.get("meta_any") or {}).get("expected_reply_reason") == ["booking_prompt"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_reason") == ["collect:service"]
     assert (expect.get("trace_contains") or []) == [
         {
             "stage": "question_contract",
             "expected_reply_type": "service_choice",
-            "reason": "booking_prompt",
+            "reason": "collect:service",
         }
     ]
 
@@ -4368,7 +4369,7 @@ def test_repair_post_coverage_orphan_pending_question_turns_rewrites_orphan_turn
         {
             "stage": "question_contract",
             "expected_reply_type": "service_choice",
-            "reason": "booking_prompt",
+            "reason": "collect:service",
         }
     ]
 
@@ -4459,6 +4460,71 @@ def test_repair_post_coverage_orphan_pending_question_turns_rewrites_check_booki
         and entry.get("expected_reply_type") == "service_choice"
         for entry in (repaired_turn["expect"].get("trace_contains") or [])
     )
+
+
+def test_sanitize_llm_turns_relaxes_confirm_after_active_check_booking():
+    ctx = _module._build_context(random.Random(531))
+    turns = [
+        {
+            "kind": "text",
+            "text": "Проверьте мою запись на четверг.",
+            "tags": ["check_booking"],
+            "expect": {"expected_reply": False},
+        },
+        {
+            "kind": "text",
+            "text": "Подтвердите, пожалуйста, мою запись на четверг.",
+            "tags": ["confirm"],
+            "expect": {
+                "action": "booking_prompt",
+                "reply_type": "time",
+                "expected_reply": True,
+                "meta_any": {"expected_reply_type": ["time"]},
+            },
+        },
+    ]
+
+    sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(531))
+
+    expect = sanitized[1]["expect"]
+    assert sanitized[1]["tags"] == ["confirm"]
+    assert expect.get("expected_reply") is True
+    assert expect.get("reply_type") is None
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name", "time"]
+
+
+def test_repair_post_coverage_orphan_pending_question_turns_relaxes_confirm_after_active_check_booking():
+    dialogs = [
+        {
+            "dialog_id": 1,
+            "turns": [
+                {
+                    "kind": "text",
+                    "text": "Проверьте мою запись на четверг.",
+                    "tags": ["check_booking"],
+                    "expect": {"expected_reply": False},
+                },
+                {
+                    "kind": "text",
+                    "text": "Подтвердите, пожалуйста, мою запись на четверг.",
+                    "tags": ["confirm"],
+                    "expect": {
+                        "action": "booking_prompt",
+                        "reply_type": "time",
+                        "expected_reply": True,
+                        "meta_any": {"expected_reply_type": ["time"]},
+                    },
+                },
+            ],
+        }
+    ]
+
+    repaired = _module._repair_post_coverage_orphan_pending_question_turns(dialogs)
+
+    expect = repaired[0]["turns"][1]["expect"]
+    assert expect.get("expected_reply") is True
+    assert expect.get("reply_type") is None
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name", "time"]
 
 
 def test_repair_post_coverage_orphan_pending_question_turns_restores_slot_question_after_malformed_check_booking():
@@ -4866,13 +4932,13 @@ def test_repair_post_coverage_orphan_pending_question_turns_normalizes_grounded_
     repaired_turn = repaired[0]["turns"][2]
     repaired_expect = repaired_turn["expect"]
     assert repaired_turn["tags"] == ["time"]
-    assert repaired_expect["reply_type"] == "name"
-    assert repaired_expect["meta_any"]["expected_reply_type"] == ["name"]
+    assert repaired_expect["reply_type"] == "time"
+    assert repaired_expect["meta_any"]["expected_reply_type"] == ["time"]
     assert repaired_expect["meta_any"].get("pending_question_act") is None
     assert repaired_expect["meta_any"].get("pending_question_target") is None
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("expected_reply_type") == "time"
         for entry in (repaired_expect.get("trace_contains") or [])
     )
     assert not any(
@@ -4926,13 +4992,13 @@ def test_repair_post_coverage_orphan_pending_question_turns_normalizes_partial_d
     repaired_turn = repaired[0]["turns"][1]
     repaired_expect = repaired_turn["expect"]
     assert repaired_turn["tags"] == ["time"]
-    assert repaired_expect["reply_type"] == "name"
-    assert repaired_expect["meta_any"]["expected_reply_type"] == ["name"]
+    assert repaired_expect["reply_type"] == "time"
+    assert repaired_expect["meta_any"]["expected_reply_type"] == ["time"]
     assert repaired_expect["meta_any"].get("pending_question_act") is None
     assert repaired_expect["meta_any"].get("pending_question_target") is None
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("expected_reply_type") == "time"
         for entry in (repaired_expect.get("trace_contains") or [])
     )
     assert not any(
@@ -5796,13 +5862,13 @@ def test_generate_template_dialog_weekend_service_followup_keeps_strong_service_
         "source": "llm_policy_core",
         "tool_action": "collect",
         "expected_reply_type": "service_choice",
-        "expected_reply_reason": "booking_prompt",
+        "expected_reply_reason": "collect:service",
     }
     assert (expect.get("trace_contains") or []) == [
         {
             "stage": "question_contract",
             "expected_reply_type": "service_choice",
-            "reason": "booking_prompt",
+            "reason": "collect:service",
         }
     ]
 

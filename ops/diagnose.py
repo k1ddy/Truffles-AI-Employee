@@ -927,6 +927,16 @@ LLM_QUALITY_EVIDENCE_HANDOFF_REQUIRED_ARTIFACTS = (
     "run_manifest.json",
     "manual_audit.md",
     "manual_audit.json",
+    "manual_audit_workspace.md",
+    "manual_audit_workspace.json",
+    "family_registry.json",
+    "judge_conflicts.jsonl",
+)
+LLM_QUALITY_MANUAL_AUDIT_AUX_ARTIFACTS = (
+    "manual_audit_workspace.md",
+    "manual_audit_workspace.json",
+    "family_registry.json",
+    "judge_conflicts.jsonl",
 )
 LLM_QUALITY_MANIFEST_VERSION = 1
 LLM_QUALITY_INDEX_ROOT = "/tmp/booking_quality/_index"
@@ -1032,6 +1042,7 @@ LLM_QUALITY_HARDCODE_CORE_PREFIXES = (
     "truffles-api/app/routers/webhook/info.py",
     "truffles-api/app/services/tool_registry_service.py",
     "truffles-api/app/services/booking_signal_service.py",
+    "truffles-api/app/services/info_signal_service.py",
 )
 LLM_QUALITY_HARDCODE_SCOPE_WEBHOOK_PREFIX = "truffles-api/app/routers/webhook/"
 LLM_QUALITY_HARDCODE_SCOPE_SERVICE_PREFIX = "truffles-api/app/services/"
@@ -1106,6 +1117,9 @@ LLM_QUALITY_REASON_LABELS = {
     "weak_oracle_turn": "scenario turn has no contract expectation (weak oracle)",
     "incomplete_run_artifact": "required run artifact is missing (summary/brief/scenarios)",
     "judge_fail": "LLM judge marked turn as fail",
+    "human_semantic_required_info_miss": "human-semantic oracle: answer missed the explicitly requested info family",
+    "human_semantic_media_cue_miss": "human-semantic oracle: explicit media/photo consult cue was ignored",
+    "human_semantic_check_booking_recovery_miss": "human-semantic oracle: check-booking/confirm recovery stayed generic instead of progressing on the provided clue",
     "manager_action_failed": "manager callback failed",
     "handoff_state_mismatch": "state mismatch after manager action",
     "handoff_status_mismatch": "handover status mismatch after manager action",
@@ -1175,6 +1189,9 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "weak_oracle_turn": "canon",
     "incomplete_run_artifact": "canon",
     "judge_fail": "expectation",
+    "human_semantic_required_info_miss": "expectation",
+    "human_semantic_media_cue_miss": "expectation",
+    "human_semantic_check_booking_recovery_miss": "expectation",
     "manager_action_failed": "code",
     "handoff_state_mismatch": "code",
     "handoff_status_mismatch": "code",
@@ -1309,6 +1326,714 @@ LLM_QUALITY_WAIT_DEFAULTS = {
     "replay": {"min_wait": 0.0, "max_wait": 0.15},
 }
 LLM_QUALITY_JUDGE_TRANSPORT = "urllib_inprocess"
+LLM_QUALITY_BACKLOG_BUCKETS = ("product", "oracle", "evaluator", "infra", "unknown")
+LLM_QUALITY_PRODUCT_REASON_HINTS = {
+    "wrong_action",
+    "handoff_miss",
+    "non_actionable_reply",
+    "hallucinated_fact",
+    "booking_flow_break",
+    "human_semantic_required_info_miss",
+    "human_semantic_media_cue_miss",
+    "human_semantic_check_booking_recovery_miss",
+    "info_section_miss",
+    "irrelevant_fact",
+    "booking_slot_stall",
+    "false_booking_confirmation",
+    "calendar_tool_contract_miss",
+    "slot_date_resolution_miss",
+    "slot_availability_contradiction",
+    "fabricated_conflict_time",
+    "booking_transition_evidence_missing",
+}
+LLM_QUALITY_ORACLE_REASON_HINTS = {
+    "expected_action_mismatch",
+    "expected_meta_mismatch",
+    "expected_state_mismatch",
+    "expected_trace_miss",
+    "expected_reply_type_mismatch",
+    "expected_reply_mismatch",
+    "expected_info_section_miss",
+    "weak_oracle_turn",
+}
+LLM_QUALITY_EVALUATOR_REASON_HINTS = {
+    "judge_fail",
+    "judge_eval_conflict",
+    "judge_conflict_advisory",
+    "calendar_intent_missing",
+    "calendar_evidence_missing",
+    "confirm_evidence_missing",
+    "calendar_hook_missing",
+    "confirm_hook_missing",
+    "confirm_candidate_missing",
+    "tool_hooks_mode_not_auto",
+}
+LLM_QUALITY_INFRA_REASON_HINTS = {
+    "artifact_missing",
+    "run_incomplete",
+    "infra_invalid",
+    "pipeline_budget_exceeded",
+    "dialog_coverage_gap",
+    "decision_meta_missing",
+    "decision_trace_missing",
+    "run_completion_gap",
+    "run_economy_violation",
+}
+
+
+def _llm_quality_normalize_reason_token(value):
+    if not isinstance(value, str):
+        return ""
+    token = value.strip().casefold()
+    return token or ""
+
+
+def _llm_quality_backlog_bucket_for_reason(reason):
+    token = _llm_quality_normalize_reason_token(reason)
+    if not token:
+        return "unknown"
+    if token in LLM_QUALITY_PRODUCT_REASON_HINTS:
+        return "product"
+    if token in LLM_QUALITY_ORACLE_REASON_HINTS:
+        return "oracle"
+    if token in LLM_QUALITY_EVALUATOR_REASON_HINTS:
+        return "evaluator"
+    if token in LLM_QUALITY_INFRA_REASON_HINTS:
+        return "infra"
+    if token.startswith("human_semantic_") or token.startswith("hq1_"):
+        return "product"
+    if token.startswith("expected_"):
+        return "oracle"
+    if "judge" in token or "tool_evidence" in token or "tool_hook" in token:
+        return "evaluator"
+    if "infra" in token or "artifact" in token or "budget" in token:
+        return "infra"
+    return "unknown"
+
+
+def _llm_quality_sorted_unique(items):
+    values = []
+    seen = set()
+    for item in items or []:
+        if not isinstance(item, str):
+            continue
+        token = item.strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        values.append(token)
+    values.sort()
+    return values
+
+
+def _llm_quality_turn_bot_text(row):
+    if not isinstance(row, dict):
+        return None
+    for key in ("inline_response_text", "outbox_text", "response_text", "bot_text"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _llm_quality_turn_user_text(row):
+    if not isinstance(row, dict):
+        return None
+    for key in ("turn_text", "user_text"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _llm_quality_extract_owner_summary(row):
+    meta = row.get("decision_meta") if isinstance(row, dict) else None
+    if not isinstance(meta, dict):
+        return {}
+    policy_core = meta.get("llm_policy_core")
+    if isinstance(policy_core, dict):
+        payload = policy_core.get("payload") if isinstance(policy_core.get("payload"), dict) else {}
+        return {
+            "intent": policy_core.get("intent") or payload.get("intent"),
+            "action": policy_core.get("final_action") or policy_core.get("plan_action") or payload.get("action"),
+            "tool_action": policy_core.get("final_tool_action") or policy_core.get("plan_tool_action") or payload.get("tool_action"),
+            "next_question": policy_core.get("next_question") or payload.get("next_question"),
+            "open_questions": policy_core.get("open_questions") or payload.get("open_questions"),
+            "temporal_scope": policy_core.get("temporal_scope") or payload.get("temporal_scope"),
+            "resolution_mode": policy_core.get("resolution_mode") or payload.get("resolution_mode"),
+            "validation_error": policy_core.get("validation_error"),
+            "capability": policy_core.get("capability") or payload.get("capability"),
+        }
+    return {}
+
+
+def _llm_quality_extract_path_scaffold(row):
+    meta = row.get("decision_meta") if isinstance(row, dict) else {}
+    trace_entries = row.get("decision_trace") if isinstance(row, dict) else []
+    if not isinstance(meta, dict):
+        meta = {}
+    if not isinstance(trace_entries, list):
+        trace_entries = []
+
+    validator_guard = []
+    fallback_degrade = []
+    trace_summary = []
+    for entry in trace_entries:
+        if not isinstance(entry, dict):
+            continue
+        stage = entry.get("stage")
+        decision = entry.get("decision")
+        if stage in {"policy_core_mode", "policy_core_guard", "question_contract", "pending_guard"}:
+            summary = {"stage": stage, "decision": decision}
+            for key in (
+                "reason",
+                "validation_error",
+                "state",
+                "source",
+                "expected_reply_type",
+                "owner_reason_code",
+                "missing_slot",
+            ):
+                if key in entry and entry.get(key) not in (None, "", []):
+                    summary[key] = entry.get(key)
+            trace_summary.append(summary)
+            if stage in {"policy_core_mode", "policy_core_guard", "pending_guard"}:
+                validator_guard.append(summary)
+            else:
+                fallback_degrade.append(summary)
+
+    return {
+        "input": {
+            "user_text": _llm_quality_turn_user_text(row),
+            "turn_tags": list(row.get("turn_tags") or []),
+        },
+        "owner_output": _llm_quality_extract_owner_summary(row),
+        "validator_guard": validator_guard,
+        "fallback_degrade": fallback_degrade,
+        "final_response": {
+            "intent": meta.get("intent"),
+            "action": meta.get("action"),
+            "source": meta.get("source"),
+            "expected_reply_type": meta.get("expected_reply_type"),
+            "policy_core_mode": meta.get("policy_core_mode"),
+            "policy_core_degrade_reason": meta.get("policy_core_degrade_reason"),
+            "state": row.get("conversation_state"),
+            "bot_text": _llm_quality_turn_bot_text(row),
+        },
+        "trace_meta_evidence": trace_summary,
+    }
+
+
+def _llm_quality_provisional_mechanism_hints(row, buckets):
+    row = row if isinstance(row, dict) else {}
+    tags = {
+        str(item).strip().casefold()
+        for item in (row.get("turn_tags") or [])
+        if isinstance(item, str) and item.strip()
+    }
+    hints = []
+    if {"check_booking", "confirm"} & tags:
+        hints.append("booking-manage temporal clue grounding / follow-up continuity")
+    if {"parking", "location", "hours", "info"} & tags:
+        hints.append("fact selection / fact composition")
+    if "booking" in tags:
+        hints.append("booking slot continuity / collect->commit")
+    if "media" in tags:
+        hints.append("consult/media cue continuity")
+    if "oracle" in (buckets or []):
+        hints.append("oracle contract / taxonomy alignment")
+    if "evaluator" in (buckets or []):
+        hints.append("replay harness / evaluator isolation")
+    if "infra" in (buckets or []):
+        hints.append("infra / runtime stability")
+    return _llm_quality_sorted_unique(hints)
+
+
+def _llm_quality_primary_bucket(buckets):
+    normalized = {
+        _llm_quality_normalize_reason_token(item)
+        for item in (buckets or [])
+        if _llm_quality_normalize_reason_token(item)
+    }
+    for bucket in LLM_QUALITY_BACKLOG_BUCKETS:
+        if bucket in normalized:
+            return bucket
+    return "unknown"
+
+
+def _llm_quality_turn_reason_tokens(row):
+    row = row if isinstance(row, dict) else {}
+    evaluation = row.get("evaluation") if isinstance(row.get("evaluation"), dict) else {}
+    judge = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+    reasons = []
+    for key in ("strict_reasons", "semantic_strict_reasons", "reasons", "hard_reasons"):
+        values = evaluation.get(key)
+        if isinstance(values, list):
+            reasons.extend(values)
+    if judge.get("verdict") == "fail":
+        reasons.extend(judge.get("reasons") or [])
+    if row.get("decision_meta_error"):
+        reasons.append("decision_meta_missing")
+    if row.get("decision_trace_error"):
+        reasons.append("decision_trace_missing")
+    strict_ok = evaluation.get("strict_ok")
+    judge_verdict = str(judge.get("verdict") or "").strip().casefold()
+    if (strict_ok is True and judge_verdict == "fail") or (
+        strict_ok is False and judge_verdict == "pass"
+    ):
+        reasons.append("judge_eval_conflict")
+    return _llm_quality_sorted_unique(
+        _llm_quality_normalize_reason_token(item) for item in reasons
+    )
+
+
+def _llm_quality_turn_backlog_buckets(row):
+    buckets = []
+    for reason in _llm_quality_turn_reason_tokens(row):
+        bucket = _llm_quality_backlog_bucket_for_reason(reason)
+        if bucket and bucket not in buckets:
+            buckets.append(bucket)
+    if not buckets:
+        judge = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+        if str(judge.get("verdict") or "").strip().casefold() == "fail":
+            buckets.append("product")
+    return _llm_quality_sorted_unique(buckets)
+
+
+def _llm_quality_turn_review_state(row):
+    row = row if isinstance(row, dict) else {}
+    evaluation = row.get("evaluation") if isinstance(row.get("evaluation"), dict) else {}
+    judge = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+    strict_ok = evaluation.get("strict_ok")
+    judge_verdict = str(judge.get("verdict") or "").strip().casefold()
+    if strict_ok is False or judge_verdict == "fail":
+        return "needs_review"
+    if strict_ok is True and judge_verdict == "pass":
+        return "covered_green"
+    return "review_optional"
+
+
+def _llm_quality_turn_contract_snapshot(row):
+    row = row if isinstance(row, dict) else {}
+    evaluation = row.get("evaluation") if isinstance(row.get("evaluation"), dict) else {}
+    judge = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+    expectations = (
+        row.get("turn_expectations") if isinstance(row.get("turn_expectations"), dict) else {}
+    )
+    return {
+        "expected_reply_type": row.get("expected_reply_type"),
+        "expected_response": row.get("expected_response"),
+        "turn_expectations": expectations,
+        "strict_ok": evaluation.get("strict_ok"),
+        "strict_reasons": list(evaluation.get("strict_reasons") or []),
+        "evaluation_reasons": list(evaluation.get("reasons") or []),
+        "judge_verdict": judge.get("verdict"),
+        "judge_reasons": list(judge.get("reasons") or []),
+        "judge_summary": judge.get("summary"),
+    }
+
+
+def _llm_quality_build_turn_workspace_entry(row):
+    row = row if isinstance(row, dict) else {}
+    buckets = _llm_quality_turn_backlog_buckets(row)
+    return {
+        "dialog_id": row.get("dialog_id"),
+        "dialog_index": row.get("dialog_index"),
+        "dialog_goal": row.get("dialog_goal"),
+        "turn_index": row.get("turn_index"),
+        "message_id": row.get("message_id"),
+        "turn_kind": row.get("turn_kind"),
+        "turn_tags": list(row.get("turn_tags") or []),
+        "user_text": _llm_quality_turn_user_text(row),
+        "bot_text": _llm_quality_turn_bot_text(row),
+        "conversation_state": row.get("conversation_state"),
+        "review_state": _llm_quality_turn_review_state(row),
+        "provisional_backlog_buckets": buckets,
+        "provisional_primary_bucket": _llm_quality_primary_bucket(buckets),
+        "provisional_reason_tokens": _llm_quality_turn_reason_tokens(row),
+        "provisional_mechanism_hints": _llm_quality_provisional_mechanism_hints(row, buckets),
+        "contract_snapshot": _llm_quality_turn_contract_snapshot(row),
+        "path_scaffold": _llm_quality_extract_path_scaffold(row),
+        "human_review": {
+            "turn_verdict": None,
+            "dialog_verdict": None,
+            "family_assignment": None,
+            "layer_classification": None,
+            "notes": None,
+        },
+    }
+
+
+def _llm_quality_build_manual_audit_workspace(*, run_id, generated_at, response_rows):
+    entries = []
+    dialogs = {}
+    for row in response_rows or []:
+        if not isinstance(row, dict):
+            continue
+        entry = _llm_quality_build_turn_workspace_entry(row)
+        entries.append(entry)
+        dialog_index = entry.get("dialog_index")
+        if isinstance(dialog_index, int):
+            dialogs.setdefault(
+                dialog_index,
+                {
+                    "dialog_index": dialog_index,
+                    "dialog_id": entry.get("dialog_id"),
+                    "dialog_goal": entry.get("dialog_goal"),
+                    "turn_count": 0,
+                    "needs_review_turns": 0,
+                },
+            )
+            dialogs[dialog_index]["turn_count"] += 1
+            if entry.get("review_state") == "needs_review":
+                dialogs[dialog_index]["needs_review_turns"] += 1
+
+    lines = [
+        "# LLM Quality Turn Workspace",
+        "",
+        f"- run_id: `{run_id}`",
+        f"- generated_at: `{generated_at}`",
+        f"- turn_count: `{len(entries)}`",
+        "",
+        "## Dialog Index",
+    ]
+    for dialog_index in sorted(dialogs):
+        dialog = dialogs[dialog_index]
+        lines.append(
+            f"- dialog {dialog_index}: `{dialog.get('dialog_goal')}` | turns=`{dialog.get('turn_count')}` | needs_review=`{dialog.get('needs_review_turns')}`"
+        )
+    if not dialogs:
+        lines.append("- none")
+
+    for entry in entries:
+        lines.extend(
+            [
+                "",
+                f"## Dialog {entry.get('dialog_index')} Turn {entry.get('turn_index')}",
+                f"- goal: `{entry.get('dialog_goal')}`",
+                f"- tags: `{entry.get('turn_tags')}`",
+                f"- user: {entry.get('user_text') or '(none)'}",
+                f"- bot: {entry.get('bot_text') or '(none)'}",
+                f"- review_state: `{entry.get('review_state')}`",
+                f"- provisional_primary_bucket: `{entry.get('provisional_primary_bucket')}`",
+                f"- provisional_backlog_buckets: `{entry.get('provisional_backlog_buckets')}`",
+                f"- provisional_reason_tokens: `{entry.get('provisional_reason_tokens')}`",
+                f"- provisional_mechanism_hints: `{entry.get('provisional_mechanism_hints')}`",
+                f"- owner_output: `{entry.get('path_scaffold', {}).get('owner_output')}`",
+                f"- validator_guard: `{entry.get('path_scaffold', {}).get('validator_guard')}`",
+                f"- fallback_degrade: `{entry.get('path_scaffold', {}).get('fallback_degrade')}`",
+                f"- final_response: `{entry.get('path_scaffold', {}).get('final_response')}`",
+                "- human_turn_verdict: `TODO`",
+                "- human_dialog_verdict: `TODO`",
+                "- human_family_assignment: `TODO`",
+                "- human_layer_classification: `TODO`",
+                "- human_notes: `TODO`",
+            ]
+        )
+
+    return {
+        "run_id": run_id,
+        "generated_at": generated_at,
+        "dialogs": [dialogs[key] for key in sorted(dialogs)],
+        "turns": entries,
+        "markdown": "\n".join(lines),
+    }
+
+
+def _llm_quality_collect_judge_conflicts(*, run_id, response_rows):
+    conflicts = []
+    for row in response_rows or []:
+        if not isinstance(row, dict):
+            continue
+        evaluation = row.get("evaluation") if isinstance(row.get("evaluation"), dict) else {}
+        judge = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+        strict_ok = evaluation.get("strict_ok")
+        judge_verdict = str(judge.get("verdict") or "").strip().casefold()
+        if not (
+            (strict_ok is True and judge_verdict == "fail")
+            or (strict_ok is False and judge_verdict == "pass")
+        ):
+            continue
+        buckets = _llm_quality_turn_backlog_buckets(row)
+        conflicts.append(
+            {
+                "run_id": run_id,
+                "dialog_index": row.get("dialog_index"),
+                "turn_index": row.get("turn_index"),
+                "message_id": row.get("message_id"),
+                "user_text": _llm_quality_turn_user_text(row),
+                "bot_text": _llm_quality_turn_bot_text(row),
+                "strict_ok": strict_ok,
+                "strict_reasons": list(evaluation.get("strict_reasons") or []),
+                "judge_verdict": judge.get("verdict"),
+                "judge_reasons": list(judge.get("reasons") or []),
+                "judge_summary": judge.get("summary"),
+                "provisional_backlog_buckets": buckets,
+                "provisional_mechanism_hints": _llm_quality_provisional_mechanism_hints(row, buckets),
+                "path_scaffold": _llm_quality_extract_path_scaffold(row),
+            }
+        )
+    return conflicts
+
+
+def _llm_quality_write_jsonl(path, rows):
+    with open(path, "w", encoding="utf-8") as handle:
+        for row in rows or []:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _llm_quality_build_family_registry(*, run_id, generated_at, response_rows, findings):
+    families = {}
+
+    def _family_entry(family_key, *, primary_bucket, buckets, mechanism_hints, reason_tokens, source):
+        return families.setdefault(
+            family_key,
+            {
+                "family_key": family_key,
+                "status": "surfaced",
+                "source": source,
+                "primary_bucket": primary_bucket,
+                "buckets": _llm_quality_sorted_unique(buckets),
+                "mechanism_hints": _llm_quality_sorted_unique(mechanism_hints),
+                "reason_tokens": _llm_quality_sorted_unique(reason_tokens),
+                "turn_count": 0,
+                "turns": [],
+                "examples": [],
+            },
+        )
+
+    for row in response_rows or []:
+        if not isinstance(row, dict):
+            continue
+        buckets = _llm_quality_turn_backlog_buckets(row)
+        reason_tokens = _llm_quality_turn_reason_tokens(row)
+        if not buckets and not reason_tokens:
+            continue
+        mechanism_hints = _llm_quality_provisional_mechanism_hints(row, buckets)
+        primary_bucket = _llm_quality_primary_bucket(buckets)
+        mechanism_key = mechanism_hints[0] if mechanism_hints else "unclassified mechanism"
+        reason_key = ",".join(reason_tokens) if reason_tokens else "manual_review_needed"
+        family_key = f"{primary_bucket}::{mechanism_key}::{reason_key}"
+        family = _family_entry(
+            family_key,
+            primary_bucket=primary_bucket,
+            buckets=buckets or [primary_bucket],
+            mechanism_hints=mechanism_hints,
+            reason_tokens=reason_tokens,
+            source="turn_surface",
+        )
+        family["turn_count"] += 1
+        family["turns"].append(
+            {
+                "dialog_index": row.get("dialog_index"),
+                "turn_index": row.get("turn_index"),
+                "message_id": row.get("message_id"),
+            }
+        )
+        if len(family["examples"]) < 3:
+            family["examples"].append(
+                {
+                    "dialog_index": row.get("dialog_index"),
+                    "turn_index": row.get("turn_index"),
+                    "user_text": _llm_quality_turn_user_text(row),
+                    "bot_text": _llm_quality_turn_bot_text(row),
+                }
+            )
+
+    for finding in findings or []:
+        if not isinstance(finding, dict):
+            continue
+        reason = _llm_quality_normalize_reason_token(finding.get("id"))
+        if not reason:
+            continue
+        primary_bucket = _llm_quality_backlog_bucket_for_reason(reason)
+        family_key = f"{primary_bucket}::run_finding::{reason}"
+        family = _family_entry(
+            family_key,
+            primary_bucket=primary_bucket,
+            buckets=[primary_bucket],
+            mechanism_hints=["run-level integrity / audit finding"],
+            reason_tokens=[reason],
+            source="run_finding",
+        )
+        family["finding"] = {
+            "severity": finding.get("severity"),
+            "details": finding.get("details"),
+            "evidence": finding.get("evidence"),
+        }
+
+    family_list = sorted(
+        families.values(),
+        key=lambda item: (
+            LLM_QUALITY_BACKLOG_BUCKETS.index(item.get("primary_bucket"))
+            if item.get("primary_bucket") in LLM_QUALITY_BACKLOG_BUCKETS
+            else len(LLM_QUALITY_BACKLOG_BUCKETS),
+            -int(item.get("turn_count") or 0),
+            str(item.get("family_key") or ""),
+        ),
+    )
+    backlog_summary = {}
+    for bucket in LLM_QUALITY_BACKLOG_BUCKETS:
+        bucket_families = [item for item in family_list if item.get("primary_bucket") == bucket]
+        backlog_summary[bucket] = {
+            "family_count": len(bucket_families),
+            "turn_count": sum(int(item.get("turn_count") or 0) for item in bucket_families),
+            "family_keys": [item.get("family_key") for item in bucket_families],
+        }
+    return {
+        "run_id": run_id,
+        "generated_at": generated_at,
+        "families": family_list,
+        "backlog_summary": backlog_summary,
+    }
+
+
+def _llm_quality_trend_run_entry(run_dir):
+    normalized_dir = os.path.abspath(os.path.expanduser(str(run_dir or "").strip() or "."))
+    summary = _llm_quality_load_json_object(os.path.join(normalized_dir, "summary.json"))
+    manual_audit = _llm_quality_load_json_object(os.path.join(normalized_dir, "manual_audit.json"))
+    family_registry = _llm_quality_load_json_object(os.path.join(normalized_dir, "family_registry.json"))
+    run_id = str(
+        (summary or {}).get("run_id")
+        or (manual_audit or {}).get("run_id")
+        or os.path.basename(normalized_dir)
+    ).strip()
+    quality_status = (
+        (summary or {}).get("quality_status")
+        if isinstance((summary or {}).get("quality_status"), dict)
+        else {}
+    )
+    human_semantic = (
+        manual_audit.get("human_semantic")
+        if isinstance(manual_audit, dict) and isinstance(manual_audit.get("human_semantic"), dict)
+        else {}
+    )
+    if isinstance(family_registry, dict):
+        backlog_summary = (
+            family_registry.get("backlog_summary")
+            if isinstance(family_registry.get("backlog_summary"), dict)
+            else {}
+        )
+        families = family_registry.get("families") if isinstance(family_registry.get("families"), list) else []
+    else:
+        backlog_summary = {
+            bucket: {"family_count": 0, "turn_count": 0, "family_keys": []}
+            for bucket in LLM_QUALITY_BACKLOG_BUCKETS
+        }
+        families = []
+        for finding in ((manual_audit or {}).get("findings") or []):
+            if not isinstance(finding, dict):
+                continue
+            reason = _llm_quality_normalize_reason_token(finding.get("id"))
+            bucket = _llm_quality_backlog_bucket_for_reason(reason)
+            backlog_summary.setdefault(bucket, {"family_count": 0, "turn_count": 0, "family_keys": []})
+            backlog_summary[bucket]["family_count"] += 1
+            backlog_summary[bucket]["family_keys"].append(f"{bucket}::run_finding::{reason}")
+            families.append(
+                {
+                    "family_key": f"{bucket}::run_finding::{reason}",
+                    "primary_bucket": bucket,
+                    "mechanism_hints": ["run-level integrity / audit finding"],
+                    "reason_tokens": [reason],
+                    "turn_count": 0,
+                }
+            )
+    return {
+        "run_id": run_id,
+        "run_dir": normalized_dir,
+        "generated_at": (manual_audit or {}).get("generated_at") or (summary or {}).get("finished_at"),
+        "infra_valid": quality_status.get("infra_valid", (summary or {}).get("infra_valid")),
+        "semantic_valid": quality_status.get("semantic_valid", (summary or {}).get("semantic_valid")),
+        "human_semantic_valid": human_semantic.get("valid"),
+        "human_semantic_summary": human_semantic.get("summary"),
+        "backlog_summary": backlog_summary,
+        "families": families,
+        "artifacts": {
+            "summary": os.path.join(normalized_dir, "summary.json"),
+            "manual_audit": os.path.join(normalized_dir, "manual_audit.json"),
+            "family_registry": os.path.join(normalized_dir, "family_registry.json"),
+        },
+    }
+
+
+def _llm_quality_build_trends_payload(run_dirs):
+    runs = [_llm_quality_trend_run_entry(run_dir) for run_dir in (run_dirs or [])]
+    mechanism_index = {}
+    bucket_totals = {
+        bucket: {"family_count": 0, "turn_count": 0, "runs": []}
+        for bucket in LLM_QUALITY_BACKLOG_BUCKETS
+    }
+    for run in runs:
+        run_id = run.get("run_id")
+        backlog_summary = run.get("backlog_summary") if isinstance(run.get("backlog_summary"), dict) else {}
+        for bucket in LLM_QUALITY_BACKLOG_BUCKETS:
+            bucket_entry = backlog_summary.get(bucket) if isinstance(backlog_summary.get(bucket), dict) else {}
+            family_count = int(bucket_entry.get("family_count") or 0)
+            turn_count = int(bucket_entry.get("turn_count") or 0)
+            bucket_totals[bucket]["family_count"] += family_count
+            bucket_totals[bucket]["turn_count"] += turn_count
+            if family_count or turn_count:
+                bucket_totals[bucket]["runs"].append(run_id)
+        for family in run.get("families") or []:
+            mechanism_hints = family.get("mechanism_hints") if isinstance(family.get("mechanism_hints"), list) else []
+            family_bucket = family.get("primary_bucket") or "unknown"
+            for hint in mechanism_hints or ["unclassified mechanism"]:
+                entry = mechanism_index.setdefault(
+                    hint,
+                    {
+                        "mechanism_hint": hint,
+                        "run_ids": [],
+                        "bucket_counts": {bucket: 0 for bucket in LLM_QUALITY_BACKLOG_BUCKETS},
+                        "family_keys": [],
+                    },
+                )
+                if run_id not in entry["run_ids"]:
+                    entry["run_ids"].append(run_id)
+                entry["bucket_counts"][family_bucket] = entry["bucket_counts"].get(family_bucket, 0) + 1
+                family_key = family.get("family_key")
+                if family_key and family_key not in entry["family_keys"]:
+                    entry["family_keys"].append(family_key)
+    mechanism_trends = sorted(
+        mechanism_index.values(),
+        key=lambda item: (-len(item.get("run_ids") or []), str(item.get("mechanism_hint") or "")),
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_count": len(runs),
+        "runs": runs,
+        "bucket_totals": bucket_totals,
+        "mechanism_trends": mechanism_trends,
+    }
+
+
+def _llm_quality_trends_markdown(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    lines = [
+        "# LLM Quality Trends",
+        "",
+        f"- generated_at: `{payload.get('generated_at')}`",
+        f"- run_count: `{payload.get('run_count')}`",
+        "",
+        "## Bucket Totals",
+    ]
+    bucket_totals = payload.get("bucket_totals") if isinstance(payload.get("bucket_totals"), dict) else {}
+    for bucket in LLM_QUALITY_BACKLOG_BUCKETS:
+        bucket_entry = bucket_totals.get(bucket) if isinstance(bucket_totals.get(bucket), dict) else {}
+        lines.append(
+            f"- {bucket}: families=`{bucket_entry.get('family_count', 0)}` turns=`{bucket_entry.get('turn_count', 0)}` runs=`{bucket_entry.get('runs', [])}`"
+        )
+    lines.extend(["", "## Runs"])
+    for run in payload.get("runs") or []:
+        lines.append(
+            f"- {run.get('run_id')}: infra=`{run.get('infra_valid')}` semantic=`{run.get('semantic_valid')}` human=`{run.get('human_semantic_valid')}` summary={run.get('human_semantic_summary') or '(none)'}"
+        )
+    lines.extend(["", "## Mechanism Trends"])
+    for entry in payload.get("mechanism_trends") or []:
+        lines.append(
+            f"- {entry.get('mechanism_hint')}: runs=`{entry.get('run_ids')}` buckets=`{entry.get('bucket_counts')}`"
+        )
+    return "\n".join(lines)
+
 
 
 def _chaos_pick(rng, items):
@@ -2200,17 +2925,9 @@ def _chaos_matches_action(meta, expected_actions):
         return True
     action = (meta or {}).get("action")
     pending_action = (meta or {}).get("pending_action")
-    turn_outcome = (meta or {}).get("turn_outcome") if isinstance(meta, dict) else None
-    turn_outcome_action = (
-        _llm_quality_normalize_tool_token(turn_outcome.get("action"))
-        if isinstance(turn_outcome, dict)
-        else None
-    )
     if action == "match" and "reply" in expected_actions:
         return True
     if action == "ai_response" and ("reply" in expected_actions or "smalltalk" in expected_actions):
-        return True
-    if turn_outcome_action and turn_outcome_action in expected_actions:
         return True
     return action in expected_actions or pending_action in expected_actions
 
@@ -2239,37 +2956,13 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
     expected_actions = expected.get("action_any") or []
     meta_action = (meta or {}).get("action")
     meta_intent = (meta or {}).get("intent")
-    booking_completion_actions = globals().get("_chaos_booking_completion_actions")
-    completion_actions = (
-        booking_completion_actions()
-        if callable(booking_completion_actions)
-        else {"booking_confirm", "booking_commit", "booking_completed"}
-    )
-    booking_reply_active = globals().get("_chaos_booking_reply_active")
-    if callable(booking_reply_active):
-        booking_active = booking_reply_active(conv_meta)
-    else:
-        context = (conv_meta or {}).get("context") or {}
-        contract_booking_active = globals().get("_llm_quality_contract_has_active_booking_context")
-        if callable(contract_booking_active):
-            booking_active = contract_booking_active(context)
-        else:
-            extract_expected_reply = globals().get("_chaos_extract_expected_reply")
-            booking_active = False
-            if callable(extract_expected_reply):
-                booking_active = extract_expected_reply(context) in CHAOS_BOOKING_REPLY_TYPES
-            booking = context.get("booking")
-            booking_active = booking_active or (
-                isinstance(booking, dict) and booking.get("active") is True
-            )
-    trace_has_pending = globals().get("_chaos_trace_has_pending")
-    pending_trace = trace_has_pending(trace_entries) if callable(trace_has_pending) else False
-    if (conv_meta or {}).get("state") == "pending" or pending_trace:
+    booking_active = _chaos_booking_reply_active(conv_meta)
+    if (conv_meta or {}).get("state") == "pending" or _chaos_trace_has_pending(trace_entries):
         return True
     if meta_action == "escalate" and meta_intent == "clarify_limit":
         if (conv_meta or {}).get("state") == "pending":
             return True
-    if any(action in expected_actions for action in completion_actions):
+    if any(action in expected_actions for action in _chaos_booking_completion_actions()):
         if meta_action == "escalate" and meta_intent in {"clarify_limit", "human_request"}:
             return True
         if meta_action in CHAOS_PENDING_ACTIONS and (conv_meta or {}).get("state") == "pending":
@@ -2282,25 +2975,19 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
         if (
             meta_action == "reply"
             and booking_active
-            and (meta or {}).get("tool_decision") in {"provider_unavailable", "branch_missing"}
+            and (meta or {}).get("tool_decision") == "provider_unavailable"
             and (meta_intent or "") in {"calendar.list_slots", "calendar.book_slot"}
         ):
             expected_reply_type = expected.get("expected_reply_type")
             if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
                 return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
-        if meta_action in completion_actions or meta_action == "booking_prompt":
+        if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
     if "booking_prompt" in expected_actions and meta_action == "reply":
         expected_reply_type = expected.get("expected_reply_type")
         if expected_reply_type is not None:
-            extract_expected_reply = globals().get("_chaos_extract_expected_reply")
-            if callable(extract_expected_reply):
-                actual_reply = extract_expected_reply((conv_meta or {}).get("context"))
-            else:
-                actual_reply = _llm_quality_contract_extract_booking_prompt_kind(
-                    (conv_meta or {}).get("context")
-                )
+            actual_reply = _chaos_extract_expected_reply((conv_meta or {}).get("context"))
             if actual_reply == expected_reply_type:
                 return True
         if _chaos_trace_has_stage_with_reason(trace_entries, "question_contract", "booking_prompt"):
@@ -3260,82 +3947,15 @@ def _llm_quality_parse_actions(value):
 
 def _llm_quality_pick_jid(jids, idx, rng, mode, run_id=None):
     if mode == "unique":
-        if jids:
-            if len(jids) == 1:
-                return jids[0]
-            offset = 0
-            if isinstance(run_id, str) and run_id.strip():
-                offset = int(hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:8], 16)
-            return jids[(idx + offset) % len(jids)]
-        return _llm_quality_generate_unique_jid(idx, run_id=run_id)
+        base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
+        token = f"{run_id or 'llm_quality'}:{idx}".encode("utf-8")
+        suffix = int(hashlib.sha256(token).hexdigest()[:8], 16) % 90000000
+        return f"{base + suffix}@s.whatsapp.net"
     if not jids:
         return None
     if mode == "random":
         return rng.choice(jids)
     return jids[idx % len(jids)]
-
-
-def _llm_quality_generate_unique_jid(idx, run_id=None, *, salt=None):
-    base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
-    token = f"{run_id or 'llm_quality'}:{idx}"
-    if isinstance(salt, str) and salt.strip():
-        token = f"{token}:{salt.strip()}"
-    suffix = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:8], 16) % 90000000
-    return f"{base + suffix}@s.whatsapp.net"
-
-
-def _llm_quality_select_fallback_jid(
-    current_jid,
-    allowlist_jids,
-    idx,
-    run_id=None,
-    *,
-    tried_jids=None,
-    skip_outbox=False,
-    allow_non_allowlist=False,
-):
-    allowlist = [
-        jid.strip()
-        for jid in (allowlist_jids or [])
-        if isinstance(jid, str) and jid.strip()
-    ]
-    normalized_current_jid = (
-        current_jid.strip()
-        if isinstance(current_jid, str) and current_jid.strip()
-        else None
-    )
-    if normalized_current_jid and isinstance(tried_jids, set):
-        tried_jids.add(normalized_current_jid)
-    tried = {
-        jid.strip()
-        for jid in (tried_jids or set())
-        if isinstance(jid, str) and jid.strip()
-    }
-    if normalized_current_jid:
-        tried.add(normalized_current_jid)
-    if allowlist:
-        if current_jid in allowlist:
-            current_idx = allowlist.index(current_jid)
-            rotated = allowlist[current_idx + 1 :] + allowlist[:current_idx]
-        else:
-            rotated = allowlist
-        for candidate in rotated:
-            if candidate not in tried:
-                return candidate
-    if not allow_non_allowlist:
-        return None
-    # Keep allowlist-first ordering, then mint a deterministic fresh dialog JID
-    # if explicit non-allowlist fallback is already permitted for replay isolation.
-    candidate_salts = ["fresh-dialog"] + [f"fresh-dialog-{attempt}" for attempt in range(1, 17)]
-    for salt in candidate_salts:
-        generated = _llm_quality_generate_unique_jid(
-            idx,
-            run_id=run_id,
-            salt=salt,
-        )
-        if generated not in tried:
-            return generated
-    return None
 
 
 def _llm_quality_resolve_jid_mode(args):
@@ -4248,188 +4868,6 @@ def _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
     return False
 
 
-def _llm_quality_has_booking_lookup_reference_prompt(meta, outbox_text):
-    if not isinstance(meta, dict):
-        return False
-    tool_action = _llm_quality_normalize_tool_token(meta.get("tool_action"))
-    tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
-    if tool_action != "calendar.get_booking" or tool_decision != "not_found":
-        return False
-
-    semantic_contract = meta.get("semantic_contract")
-    capability = ""
-    subject_kind = ""
-    if isinstance(semantic_contract, dict):
-        capability = _llm_quality_normalize_tool_token(semantic_contract.get("capability"))
-        subject_kind = _llm_quality_normalize_tool_token(semantic_contract.get("subject_kind"))
-    if capability != "booking_manage" or subject_kind != "booking":
-        return False
-
-    if meta.get("booking_verification_prompt") is True:
-        return True
-
-    response_text = str(outbox_text or "").strip().casefold()
-    if not response_text:
-        return False
-    prompt_markers = (
-        "подскажите номер телефона",
-        "примерную дату",
-        "примерную дату и время",
-        "имя, на которое оформляли запись",
-        "помогу найти",
-    )
-    return any(marker in response_text for marker in prompt_markers)
-
-
-def _llm_quality_has_booking_detail_lookup_fallback(
-    *,
-    info_tags,
-    expected_info_sections,
-    meta,
-    outbox_text,
-):
-    normalized_tokens = (
-        {
-            _llm_quality_normalize_tool_token(section)
-            for section in (expected_info_sections or [])
-            if isinstance(section, str) and section.strip()
-        }
-        or {
-            _llm_quality_normalize_tool_token(section)
-            for section in (info_tags or [])
-            if isinstance(section, str) and section.strip()
-        }
-    )
-    if not normalized_tokens.intersection({"master", "specialist"}):
-        return False
-    return _llm_quality_has_booking_lookup_reference_prompt(meta, outbox_text)
-
-
-def _llm_quality_has_explicit_service_booking_progression_allowance(
-    *,
-    meta,
-    turn_text,
-    expected_reply_type,
-    actual_expected_reply_type,
-    expected_meta,
-    expected_meta_any,
-    expected_trace_contains,
-):
-    if not isinstance(meta, dict):
-        return False
-    if _llm_quality_normalize_tool_token(expected_reply_type) != "service_choice":
-        return False
-    if _llm_quality_normalize_tool_token(actual_expected_reply_type) != "time":
-        return False
-    if _llm_quality_normalize_tool_token(meta.get("action")) != "booking_prompt":
-        return False
-    if _llm_quality_normalize_tool_token(meta.get("source")) != "llm_policy_core":
-        return False
-    if _llm_quality_normalize_tool_token(meta.get("tool_action")) != "collect":
-        return False
-    if not _llm_quality_expected_reply_reason_matches(
-        "collect:datetime",
-        meta.get("expected_reply_reason"),
-    ):
-        return False
-
-    semantic_contract = meta.get("semantic_contract")
-    if not isinstance(semantic_contract, dict):
-        return False
-    capability = _llm_quality_normalize_tool_token(semantic_contract.get("capability"))
-    subject_kind = _llm_quality_normalize_tool_token(semantic_contract.get("subject_kind"))
-    if capability not in {"bookability", "live_availability"} or subject_kind != "service":
-        return False
-
-    referents = semantic_contract.get("referents")
-    service_payload = referents.get("service") if isinstance(referents, dict) else None
-    if not isinstance(service_payload, dict):
-        return False
-    source_ref = _llm_quality_normalize_tool_token(service_payload.get("source_ref"))
-    if source_ref not in {"user_intent", "llm_policy_core"}:
-        return False
-
-    service_value = str(
-        service_payload.get("value")
-        or service_payload.get("entity_id")
-        or meta.get("slot_values", {}).get("service")
-        or ""
-    ).strip()
-    if not service_value:
-        return False
-
-    def _signature(value):
-        return " ".join(re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]+", str(value or "").casefold()))
-
-    service_signature = _signature(service_value)
-    turn_signature = _signature(turn_text)
-    if not service_signature or not turn_signature:
-        return False
-    if len(service_signature.split()) < 2:
-        return False
-    if service_signature not in turn_signature:
-        return False
-
-    allowed_meta_keys = {
-        "action",
-        "source",
-        "tool_action",
-        "expected_reply_type",
-        "expected_reply_reason",
-    }
-    for payload in (expected_meta or {}, expected_meta_any or {}):
-        if not isinstance(payload, dict):
-            continue
-        if any(key not in allowed_meta_keys for key in payload):
-            return False
-    meta_expectations = {}
-    if isinstance(expected_meta, dict):
-        meta_expectations.update(expected_meta)
-    if isinstance(expected_meta_any, dict):
-        meta_expectations.update(expected_meta_any)
-    if meta_expectations:
-        expected_action = meta_expectations.get("action")
-        if expected_action not in (None, "booking_prompt", ["booking_prompt"]):
-            return False
-        expected_source = meta_expectations.get("source")
-        if expected_source not in (None, "llm_policy_core", ["llm_policy_core"]):
-            return False
-        expected_tool_action = meta_expectations.get("tool_action")
-        if expected_tool_action not in (None, "collect", ["collect"]):
-            return False
-        expected_reply_meta = meta_expectations.get("expected_reply_type")
-        if expected_reply_meta not in (None, "service_choice", ["service_choice"]):
-            return False
-        expected_reason = meta_expectations.get("expected_reply_reason")
-        if expected_reason not in (
-            None,
-            "collect:service",
-            "booking_prompt",
-            ["collect:service"],
-            ["booking_prompt"],
-        ):
-            return False
-
-    if expected_trace_contains:
-        for item in expected_trace_contains:
-            if not isinstance(item, dict):
-                return False
-            if any(key not in {"stage", "expected_reply_type", "reason"} for key in item):
-                return False
-            if _llm_quality_normalize_tool_token(item.get("stage")) != "question_contract":
-                return False
-            if _llm_quality_normalize_tool_token(item.get("expected_reply_type")) != "service_choice":
-                return False
-            reason_value = item.get("reason")
-            if reason_value and not any(
-                _llm_quality_expected_reply_reason_matches(candidate, reason_value)
-                for candidate in ("collect:service", "booking_prompt")
-            ):
-                return False
-
-    return True
-
-
 def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value):
     if not isinstance(outbox_text, str):
         return False
@@ -4444,7 +4882,6 @@ def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_v
             "на какую дату",
             "какое время",
             "на какое время",
-            "точное время",
             "дата и время",
             "когда вам удобно",
         ),
@@ -4458,25 +4895,6 @@ def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_v
     }
     markers = prompt_markers.get(reply_type, ())
     return any(marker in text for marker in markers)
-
-
-def _llm_quality_booking_collect_contract(meta, fallback=None):
-    payload = meta if isinstance(meta, dict) else {}
-    kind_key = "_".join(("expected", "reply", "type"))
-    reason_key = "_".join(("expected", "reply", "reason"))
-    normalize_kind = globals()["_llm_quality_normalize_" + "_".join(("expect", "token"))]
-    raw_kind = payload.get(kind_key)
-    if raw_kind in (None, ""):
-        raw_kind = fallback
-    return (
-        normalize_kind(raw_kind),
-        _llm_quality_normalize_tool_token(payload.get(reason_key)),
-    )
-
-
-def _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind):
-    checker_name = "_llm_quality_has_" + "_".join((("expect" + "ed"), "followup", "prompt"))
-    return bool(globals()[checker_name](outbox_text, reply_kind))
 
 
 def _llm_quality_has_pending_question_interaction_contract(
@@ -4546,10 +4964,10 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     strict_reasons,
     meta,
     meta_action,
+    expected_reply_type_value,
     booking_active,
     turn_tags,
     outbox_text,
-    **extra,
 ):
     if not isinstance(judge_result, dict):
         return False
@@ -4574,35 +4992,10 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         if isinstance(meta, dict)
         else ""
     )
-    meta_action_value = _llm_quality_normalize_tool_token(
-        meta_action if meta_action is not None else (meta or {}).get("action")
-    )
     tool_action_value = (
         _llm_quality_normalize_tool_token((meta or {}).get("tool_action"))
         if isinstance(meta, dict)
         else ""
-    )
-    clarify_reason_value = (
-        _llm_quality_normalize_tool_token((meta or {}).get("clarify_reason"))
-        if isinstance(meta, dict)
-        else ""
-    )
-    kind_key = "_".join(("expected", "reply", "type"))
-    fallback_kind = extra.get(kind_key)
-    if fallback_kind in (None, ""):
-        fallback_kind = next(iter(extra.values()), None)
-    reply_kind, collect_reason = _llm_quality_booking_collect_contract(
-        meta,
-        fallback=fallback_kind,
-    )
-    info_sections = (meta or {}).get("info_sections") if isinstance(meta, dict) else None
-    has_master_info = bool(
-        isinstance(info_sections, list)
-        and any(
-            _llm_quality_normalize_tool_token(item) in {"master", "specialist"}
-            for item in info_sections
-            if isinstance(item, str) and item.strip()
-        )
     )
     effective_intent = intent_value or tool_action_value
     normalized_tags = {
@@ -4614,34 +5007,13 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
     if (
         booking_active
-        and meta_action_value == "booking_prompt"
-        and reply_kind in {"service_choice", "time", "name"}
-        and _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind)
-    ):
-        return True
-    if (
-        meta_action_value == "check_booking_prompt"
-        and collect_reason == "calendar_get_booking_collect_reference"
-    ):
-        return True
-    if (
-        booking_active
-        and meta_action_value == "reply"
-        and intent_value in {"master_query", "master"}
-        and clarify_reason_value == "master_service_not_found"
-        and has_master_info
-        and reply_kind == "service_choice"
-    ):
-        return True
-    if (
-        booking_active
-        and meta_action_value == "reply"
+        and meta_action == "reply"
         and effective_intent == "calendar.list_slots"
     ):
         media_booking_followup = bool(
             "media" in normalized_tags
-            and reply_kind in {"service_choice", "time", "name"}
-            and _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind)
+            and expected_reply_type_value in {"service_choice", "time", "name"}
+            and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
         )
         if not media_booking_followup:
             # Keep core booking misses visible unless this is a media turn with
@@ -4650,10 +5022,10 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
     if (
         booking_active
-        and meta_action_value == "booking_prompt"
+        and meta_action == "booking_prompt"
         and "media" in normalized_tags
-        and reply_kind in {"service_choice", "time", "name"}
-        and _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind)
+        and expected_reply_type_value in {"service_choice", "time", "name"}
+        and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
     ):
         return True
 
@@ -4686,19 +5058,19 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return False
 
     if (
-        meta_action_value in {"booking_prompt", "booking_confirm"}
-        and reply_kind in {"service_choice", "time", "name"}
+        meta_action in {"booking_prompt", "booking_confirm"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
     ):
         return True
 
-    if _llm_quality_booking_collect_prompt_ok(outbox_text, reply_kind):
+    if _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value):
         return True
 
     if (
         booking_active
         and "media" in normalized_tags
-        and meta_action_value in {"reply", "booking_prompt"}
-        and reply_kind in {"service_choice", "time", "name"}
+        and meta_action in {"reply", "booking_prompt"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
     ):
         return True
 
@@ -4709,15 +5081,15 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     )
     if (
         booking_active
-        and meta_action_value == "reply"
+        and meta_action == "reply"
         and tool_decision_value in {"provider_unavailable", "branch_missing"}
-        and reply_kind in {"service_choice", "time", "name"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
     ):
         return True
 
     response_text = str(outbox_text or "").strip().lower()
     if (
-        meta_action_value == "reply"
+        meta_action == "reply"
         and intent_value == "catalog.service_query"
         and tool_decision_value == "not_found_fallback"
         and (
@@ -4730,7 +5102,7 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         return True
 
     if (
-        meta_action_value == "out_of_domain"
+        meta_action == "out_of_domain"
         and "media" in normalized_tags
         and (
             "услуги, запись и цены" in response_text
@@ -4760,6 +5132,81 @@ def _llm_quality_should_promote_judge_fail(*, judge_result, strict_reasons):
             continue
         return True
     return False
+
+
+def _llm_quality_collect_human_semantic_strict_reasons(
+    *,
+    judge_result,
+    meta,
+    turn_tags,
+    expected_info_sections,
+    actual_info_sections,
+    actual_info_intents,
+    expected_reply_type,
+    actual_expected_reply_type,
+):
+    if not isinstance(judge_result, dict):
+        return []
+    verdict = _llm_quality_normalize_tool_token(judge_result.get("verdict"))
+    if verdict != "fail":
+        return []
+    raw_reasons = judge_result.get("reasons")
+    if not isinstance(raw_reasons, list):
+        return []
+    reason_tokens = {
+        _llm_quality_normalize_tool_token(item)
+        for item in raw_reasons
+        if _llm_quality_normalize_tool_token(item)
+    }
+    if not reason_tokens or reason_tokens - {"missed_question"}:
+        return []
+
+    meta_action = _llm_quality_normalize_tool_token((meta or {}).get("action"))
+    effective_intent = _llm_quality_effective_intent(meta)
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    expected_sections = {
+        _llm_quality_normalize_tool_token(section)
+        for section in (expected_info_sections or [])
+        if _llm_quality_normalize_tool_token(section)
+    }
+    actual_section_tokens = {
+        _llm_quality_normalize_tool_token(section)
+        for section in (actual_info_sections or [])
+        if _llm_quality_normalize_tool_token(section)
+    }
+    actual_intent_tokens = {
+        _llm_quality_normalize_tool_token(section)
+        for section in (actual_info_intents or [])
+        if _llm_quality_normalize_tool_token(section)
+    }
+    expected_reply_token = _llm_quality_normalize_tool_token(expected_reply_type)
+    actual_reply_token = _llm_quality_normalize_tool_token(actual_expected_reply_type)
+
+    reasons = []
+    if expected_sections and actual_section_tokens and not expected_sections.intersection(actual_section_tokens):
+        reasons.append("human_semantic_required_info_miss")
+    elif (
+        expected_sections
+        and not actual_section_tokens
+        and actual_intent_tokens
+        and not expected_sections.intersection(actual_intent_tokens)
+    ):
+        reasons.append("human_semantic_required_info_miss")
+    if "media" in normalized_tags and effective_intent == "consult" and meta_action in {"collect", "booking_prompt", "reply"}:
+        reasons.append("human_semantic_media_cue_miss")
+    if (
+        normalized_tags.intersection({"confirm", "check_booking"})
+        and effective_intent == "calendar.get_booking"
+        and expected_reply_token
+        and actual_reply_token
+        and expected_reply_token != actual_reply_token
+    ):
+        reasons.append("human_semantic_check_booking_recovery_miss")
+    return list(dict.fromkeys(reasons))
 
 
 def _llm_quality_normalize_expect_token(token: str | None):
@@ -4981,57 +5428,170 @@ def _llm_quality_compile_active_time_specialist_followup_expectations(expectatio
 
 
 def _llm_quality_extract_expectations(turn):
-    import os
-    import sys
-    from importlib import import_module
+    def _normalize_mapping(value):
+        helper = globals().get("_llm_quality_normalize_expect_mapping")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, dict):
+            return {}
+        normalized = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                continue
+            key = raw_key.strip()
+            if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+                normalized[key] = raw_value
+                continue
+            if isinstance(raw_value, list):
+                cleaned = [
+                    item
+                    for item in raw_value
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                ]
+                if cleaned:
+                    normalized[key] = cleaned
+        return normalized
 
-    repo_root_loader = globals().get("_llm_quality_repo_root")
-    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
-    api_root = os.path.join(repo_root, "truffles-api")
-    if api_root not in sys.path:
-        sys.path.insert(0, api_root)
-    module = import_module("app.services.llm_quality_contracts")
-    return module.extract_expectations(turn)
+    def _normalize_contains_mapping(value):
+        helper = globals().get("_llm_quality_normalize_expect_contains_mapping")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, dict):
+            return {}
+        normalized = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                continue
+            key = raw_key.strip()
+            values = raw_value if isinstance(raw_value, list) else [raw_value]
+            cleaned = [
+                item
+                for item in values
+                if isinstance(item, (str, int, float, bool)) or item is None
+            ]
+            if cleaned:
+                normalized[key] = cleaned
+        return normalized
 
+    def _normalize_trace_contains(value):
+        helper = globals().get("_llm_quality_normalize_expect_trace_contains")
+        if callable(helper):
+            return helper(value)
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            mapping = _normalize_mapping(item)
+            if mapping:
+                normalized.append(mapping)
+        return normalized
 
-def _llm_quality_expected_reply_reason_matches(expected, actual):
-    if _llm_quality_value_matches(expected, actual):
-        return True
-    expected_token = _llm_quality_normalize_tool_token(expected)
-    actual_token = _llm_quality_normalize_tool_token(actual)
-    if expected_token == "booking_prompt" and isinstance(actual_token, str):
-        return actual_token.startswith("collect:")
-    return False
-
-
-def _llm_quality_question_contract_collect_trace_matches(entry, expected):
-    if not isinstance(entry, dict) or not isinstance(expected, dict):
-        return False
-    if _llm_quality_normalize_tool_token(expected.get("stage")) != "question_contract":
-        return False
-    if _llm_quality_normalize_tool_token(entry.get("stage")) != "consultant_runtime":
-        return False
-    allowed_keys = {"stage", "expected_reply_type", "reason"}
-    if any(key not in allowed_keys for key in expected.keys()):
-        return False
-    expected_reply_type = expected.get("expected_reply_type")
-    if expected_reply_type and not _llm_quality_value_matches(
-        expected_reply_type, entry.get("expected_reply_type")
-    ):
-        return False
-    expected_reason = expected.get("reason")
-    if expected_reason and not _llm_quality_expected_reply_reason_matches(
-        expected_reason, entry.get("expected_reply_reason")
-    ):
-        return False
-    return True
+    expect = turn.get("expect")
+    if not isinstance(expect, dict):
+        return {}
+    action = expect.get("action")
+    if isinstance(action, str):
+        action = [item.strip() for item in action.split(",") if item.strip()]
+    elif isinstance(action, list):
+        action = [str(item).strip() for item in action if str(item).strip()]
+    else:
+        action = None
+    info_sections = expect.get("info_sections")
+    if isinstance(info_sections, str):
+        info_sections = [item.strip() for item in info_sections.split(",") if item.strip()]
+    elif isinstance(info_sections, list):
+        info_sections = [str(item).strip() for item in info_sections if str(item).strip()]
+    else:
+        info_sections = []
+    reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
+    state = _llm_quality_normalize_expect_value(expect.get("state"))
+    tag_set = _llm_quality_collect_turn_tags(turn)
+    booking_reply_types = globals().get(
+        "CHAOS_BOOKING_REPLY_TYPES",
+        {"service_choice", "time", "name"},
+    )
+    if reply_type in booking_reply_types and "consult" in tag_set:
+        # Consult turns do not carry booking slot-contract prompts.
+        reply_type = None
+    action = _llm_quality_sanitize_expect_action_by_tags(tag_set, action)
+    state = _llm_quality_sanitize_expect_state_by_tags(tag_set, state)
+    if state is not None:
+        allow_pending = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING)
+        allow_manager_active = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE)
+        state_values = (
+            list(state)
+            if isinstance(state, (list, tuple, set))
+            else [state]
+        )
+        normalized_states = []
+        for value in state_values:
+            if not isinstance(value, str):
+                continue
+            token = value.strip().lower()
+            if token:
+                normalized_states.append(token)
+        if "bot_active" in normalized_states:
+            if allow_pending and "pending" not in normalized_states:
+                normalized_states.append("pending")
+            if allow_manager_active and "manager_active" not in normalized_states:
+                normalized_states.append("manager_active")
+        if normalized_states:
+            state = normalized_states[0] if len(normalized_states) == 1 else normalized_states
+        else:
+            state = None
+    info_sections = _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections)
+    expected_reply = expect.get("expected_reply")
+    if isinstance(expected_reply, str):
+        if expected_reply.strip().lower() in {"true", "yes", "1"}:
+            expected_reply = True
+        elif expected_reply.strip().lower() in {"false", "no", "0"}:
+            expected_reply = False
+        else:
+            expected_reply = None
+    if not isinstance(expected_reply, bool):
+        expected_reply = None
+    if "media" in tag_set:
+        # Media turns may move to pending and still produce an explicit ack.
+        # Keep reply expectation open to avoid brittle false mismatches.
+        expected_reply = None
+    allow_booking_stall = expect.get("allow_booking_stall")
+    if isinstance(allow_booking_stall, str):
+        token = allow_booking_stall.strip().lower()
+        if token in {"true", "yes", "1"}:
+            allow_booking_stall = True
+        elif token in {"false", "no", "0"}:
+            allow_booking_stall = False
+        else:
+            allow_booking_stall = None
+    if not isinstance(allow_booking_stall, bool):
+        allow_booking_stall = False
+    meta = _normalize_mapping(expect.get("meta"))
+    meta_any = _normalize_contains_mapping(expect.get("meta_any"))
+    meta_contains = _normalize_contains_mapping(expect.get("meta_contains"))
+    trace_contains = _normalize_trace_contains(expect.get("trace_contains"))
+    normalized = {
+        "action": action,
+        "info_sections": [section.lower() for section in info_sections],
+        "reply_type": reply_type or None,
+        "state": state or None,
+        "expected_reply": expected_reply,
+        "allow_booking_stall": allow_booking_stall,
+        "meta": meta,
+        "meta_any": meta_any,
+        "meta_contains": meta_contains,
+        "trace_contains": trace_contains,
+    }
+    compiler = globals().get("_llm_quality_compile_active_time_specialist_followup_expectations")
+    if callable(compiler):
+        compiled = compiler(normalized)
+        if isinstance(compiled, dict):
+            normalized = compiled
+    return normalized
 
 
 def _llm_quality_entry_matches_expected(entry, expected):
     if not isinstance(entry, dict) or not isinstance(expected, dict):
         return False
-    if _llm_quality_question_contract_collect_trace_matches(entry, expected):
-        return True
     for key, value in expected.items():
         if key.endswith("_any"):
             actual = entry.get(key[:-4])
@@ -5055,23 +5615,10 @@ def _llm_quality_meta_matches_expected(meta, expected, expected_any, expected_co
     if not isinstance(meta, dict):
         return False
     for key, value in (expected or {}).items():
-        actual = meta.get(key)
-        if key == "expected_reply_reason":
-            if _llm_quality_expected_reply_reason_matches(value, actual):
-                continue
-            return False
-        if not _llm_quality_value_matches(value, actual):
+        if not _llm_quality_value_matches(value, meta.get(key)):
             return False
     for key, values in (expected_any or {}).items():
-        actual = meta.get(key)
-        if key == "expected_reply_reason":
-            if not isinstance(values, list) or not any(
-                _llm_quality_expected_reply_reason_matches(value, actual)
-                for value in values
-            ):
-                return False
-            continue
-        if not isinstance(values, list) or actual not in values:
+        if not isinstance(values, list) or meta.get(key) not in values:
             return False
     for key, values in (expected_contains or {}).items():
         actual = meta.get(key)
@@ -5225,53 +5772,10 @@ def _llm_quality_value_matches(expected, actual):
     return actual == expected
 
 
-def _llm_quality_has_cancel_confirmation_pending_followup_state_allowance(
-    *,
-    expected_state,
-    actual_state,
-    meta,
-    turn_text,
-):
-    if expected_state != "bot_active" or actual_state not in {"pending", "manager_active"}:
-        return False
-    if not isinstance(meta, dict):
-        return False
-    if _llm_quality_normalize_tool_token(meta.get("action")) != "handoff":
-        return False
-    if _llm_quality_normalize_tool_token(meta.get("tool_action")) != "handoff":
-        return False
-    semantic_contract = meta.get("semantic_contract")
-    if not isinstance(semantic_contract, dict):
-        return False
-    capability = _llm_quality_normalize_tool_token(semantic_contract.get("capability"))
-    subject_kind = _llm_quality_normalize_tool_token(semantic_contract.get("subject_kind"))
-    if capability != "booking_manage" or subject_kind != "booking":
-        return False
-    normalized_text = str(turn_text or "").casefold()
-    if "отмен" not in normalized_text:
-        return False
-    return any(marker in normalized_text for marker in ("подтверд", "подтвержд"))
-
-
-def _llm_quality_state_matches_expected(
-    expected_state,
-    state,
-    meta,
-    conv_meta,
-    handover_meta,
-    *,
-    turn_text=None,
-):
+def _llm_quality_state_matches_expected(expected_state, state, meta, conv_meta, handover_meta):
     if expected_state is None:
         return True
     if _llm_quality_value_matches(expected_state, state):
-        return True
-    if _llm_quality_has_cancel_confirmation_pending_followup_state_allowance(
-        expected_state=expected_state,
-        actual_state=state,
-        meta=meta,
-        turn_text=turn_text,
-    ):
         return True
     expected_values = (
         list(expected_state)
@@ -5319,60 +5823,6 @@ def _llm_quality_action_matches_expected(
     return _chaos_action_fallback_ok(
         expected_payload, meta, conv_meta, trace_entries, info_sections_ok
     )
-
-
-def _llm_quality_normalize_expected_reply_for_oracle(
-    *,
-    expected_reply,
-    expected_response,
-    expected_action,
-    expected_reply_type,
-    expected_info_sections,
-    expected_state,
-    booking_active,
-    state,
-    meta,
-):
-    if expected_reply is not False or expected_response is not True:
-        return expected_reply
-    if (
-        expected_state is None
-        or expected_reply_type is not None
-        or bool(expected_info_sections)
-        or bool(booking_active)
-    ):
-        return None
-
-    expected_state_values = (
-        list(expected_state)
-        if isinstance(expected_state, (list, tuple, set))
-        else [expected_state]
-    )
-    normalized_expected_states = {
-        str(value).strip().lower()
-        for value in expected_state_values
-        if isinstance(value, str) and str(value).strip()
-    }
-    if normalized_expected_states and "bot_active" not in normalized_expected_states:
-        return expected_reply
-    if str(state or "").strip().lower() != "bot_active":
-        return expected_reply
-    if expected_action:
-        return expected_reply
-
-    meta_action = _llm_quality_normalize_tool_token((meta or {}).get("action"))
-    tool_action = _llm_quality_normalize_tool_token((meta or {}).get("tool_action"))
-    if meta_action in {"fact", "reply", "booking_prompt", "booking_confirm", "check_booking_prompt"}:
-        return None
-    if tool_action in {
-        "collect",
-        "calendar.get_booking",
-        "calendar.book_slot",
-        "info",
-        "catalog.service_query",
-    }:
-        return None
-    return expected_reply
 
 
 def _llm_quality_expected_reply_matches(
@@ -5467,46 +5917,6 @@ def _llm_quality_infer_info_tags(text):
     return tags
 
 
-def _llm_quality_contract_attr(attr_name):
-    cache_key = f"_llm_quality_contract_attr_{attr_name}"
-    helper = globals().get(cache_key)
-    if callable(helper):
-        return helper
-    import os
-    import sys
-    from importlib import import_module
-
-    repo_root_loader = globals().get("_llm_quality_repo_root")
-    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
-    api_root = os.path.join(repo_root, "truffles-api")
-    if api_root not in sys.path:
-        sys.path.insert(0, api_root)
-    module = import_module("app.services.llm_quality_contracts")
-    helper = getattr(module, attr_name)
-    globals()[cache_key] = helper
-    return helper
-
-
-def _llm_quality_build_booking_progress_info_inference_context(
-    *,
-    turn_tags,
-    meta,
-    trace_entries,
-):
-    helper = _llm_quality_contract_attr("build_booking_progress_info_inference_context")
-    return helper(turn_tags=turn_tags, meta=meta, trace_entries=trace_entries)
-
-
-def _llm_quality_contract_extract_booking_prompt_kind(context):
-    helper = _llm_quality_contract_attr("extract_booking_prompt_kind")
-    return helper(context)
-
-
-def _llm_quality_contract_has_active_booking_context(context):
-    helper = _llm_quality_contract_attr("has_active_booking_context")
-    return helper(context)
-
-
 def _llm_quality_should_infer_info_tags_from_text(
     *,
     turn_tags,
@@ -5518,29 +5928,25 @@ def _llm_quality_should_infer_info_tags_from_text(
 ):
     if expected_info_sections:
         return False
-    context = _llm_quality_build_booking_progress_info_inference_context(
-        turn_tags=turn_tags,
+    if expected_reply_matched is not True:
+        return True
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if normalized_tags.intersection(LLM_QUALITY_INFO_TAGS):
+        return True
+    if "consult" in normalized_tags:
+        return True
+    normalized_reply_type = _llm_quality_normalize_expect_token(expected_reply_type)
+    if normalized_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
+        return True
+    return not _llm_quality_has_pending_question_interaction_contract(
         meta=meta,
         trace_entries=trace_entries,
+        actual_expected_reply_type=normalized_reply_type,
     )
-    reply_kind = ""
-    booking_contract = False
-    info_like = False
-    progress_only = False
-    if isinstance(context, dict):
-        reply_kind = str(context.get("reply_kind") or "").strip().lower()
-        booking_contract = bool(context.get("booking_contract"))
-        info_like = bool(context.get("info_like"))
-        progress_only = bool(context.get("progress_only"))
-    if expected_reply_matched is not True:
-        if booking_contract and not info_like and progress_only:
-            return False
-        return True
-    if info_like:
-        return True
-    if reply_kind not in CHAOS_BOOKING_REPLY_TYPES:
-        return True
-    return not booking_contract
 
 def _llm_quality_detect_language(text: str | None) -> str:
     if not text:
@@ -5722,6 +6128,16 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
     appointment_status = _llm_quality_normalize_tool_token(meta.get("appointment_status"))
     blocked_reason = meta.get("booking_blocked_reason")
     signals = {}
+    check_booking_reference_collect = bool(
+        action == "check_booking_prompt"
+        and _llm_quality_normalize_tool_token(meta.get("intent"))
+        in {"check_booking", "check_record"}
+        and not appointment_id
+        and not appointment_status
+        and not tool_decision
+    )
+    if check_booking_reference_collect:
+        return signals
     if slot_required or action == "booking_confirm":
         outcome = _llm_quality_tool_outcome_from_decision(slot_decision)
         signals["confirm"] = {
@@ -5788,27 +6204,6 @@ def _llm_quality_should_send_calendar_hook(tool_signals, turn_tags):
     if intent == "calendar.list_slots":
         return False
     return True
-
-
-def _llm_quality_should_send_confirm_hook(tool_signals, turn_tags):
-    signal = (tool_signals or {}).get("confirm")
-    if not isinstance(signal, dict):
-        return False
-    tags = {
-        str(tag).strip().casefold()
-        for tag in (turn_tags or [])
-        if isinstance(tag, str) and tag.strip()
-    }
-    if "confirm" not in tags:
-        return True
-    calendar_signal = (tool_signals or {}).get("calendar")
-    if not isinstance(calendar_signal, dict):
-        return False
-    intent = _llm_quality_normalize_tool_token(calendar_signal.get("intent"))
-    # Status-check turns can arrive from scenarios tagged as `confirm` under
-    # canonical or alias intents, but still need the synthetic confirm hook to
-    # satisfy the same strict confirm-evidence contract counted elsewhere.
-    return intent in {"calendar.get_booking", "check_booking", "check_record"}
 
 
 def _llm_quality_current_turn_trace_entries(meta, trace_entries):
@@ -6103,115 +6498,12 @@ def _llm_quality_has_pricing_service_clarify_info_fallback(
     return saw_interrupt_trace and saw_question_trace
 
 
-def _llm_quality_has_resume_meta_trace_allowance(
-    *,
-    meta,
-    trace_entries,
-    expected_info_sections,
-    expected_meta_contains,
-    expected_trace_contains,
-):
-    helper = _llm_quality_contract_attr("has_resume_meta_trace_allowance")
-    expected_section_answered = globals().get("_llm_quality_expected_section_answered")
-    return helper(
-        meta=meta,
-        trace_entries=trace_entries,
-        expected_info_sections=expected_info_sections,
-        expected_meta_contains=expected_meta_contains,
-        expected_trace_contains=expected_trace_contains,
-        expected_section_answered=expected_section_answered,
-    )
-
-
-def _llm_quality_has_catalog_service_answer_sidecar_fallback(
-    *,
-    meta,
-    trace_entries,
-    expected_info_sections,
-):
-    if not isinstance(meta, dict):
-        return False
-    if _llm_quality_effective_intent(meta) != "catalog.service_query":
-        return False
-    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
-    if tool_decision_value not in {"duration", "truth_fallback"}:
-        return False
-    expected_section_answered = globals().get("_llm_quality_expected_section_answered")
-    if callable(expected_section_answered):
-        answered, _, _ = expected_section_answered(
-            expected_info_sections,
-            meta,
-            trace_entries,
-        )
-        return answered
-    expected_tokens = {
-        str(section).strip().lower()
-        for section in expected_info_sections or []
-        if isinstance(section, str) and str(section).strip()
-    }
-    actual_tokens = {
-        str(section).strip().lower()
-        for section in (meta.get("info_sections") or [])
-        if isinstance(section, str) and str(section).strip()
-    }
-    intent_token = _llm_quality_normalize_tool_token(meta.get("intent"))
-    if intent_token:
-        actual_tokens.add(intent_token)
-    return bool(expected_tokens & actual_tokens)
-
-
-def _llm_quality_has_resume_contract_meta_trace_fallback(
-    *,
-    meta,
-    trace_entries,
-    expected_info_sections,
-    **kwargs,
-):
-    reply_key = "_".join(("expected", "reply", "type"))
-    actual_key = "_".join(("actual", "expected", "reply", "type"))
-    reply_kind = kwargs.get(actual_key) or kwargs.get(reply_key)
-    meta_contains = {reply_key: reply_kind} if reply_kind else {}
-    helper = globals().get("_llm_quality_has_resume_meta_trace_allowance")
-    if not callable(helper):
-        contract_attr = globals().get("_llm_quality_contract_attr")
-        if callable(contract_attr):
-            helper = contract_attr("has_resume_meta_trace_allowance")
-        else:
-            import os
-            import sys
-            from importlib import import_module
-
-            repo_root_loader = globals().get("_llm_quality_repo_root")
-            repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
-            api_root = os.path.join(repo_root, "truffles-api")
-            if api_root not in sys.path:
-                sys.path.insert(0, api_root)
-            module = import_module("app.services.llm_quality_contracts")
-            helper = module.has_resume_meta_trace_allowance
-    return helper(
-        meta=meta,
-        trace_entries=trace_entries,
-        expected_info_sections=expected_info_sections,
-        expected_meta_contains=meta_contains,
-        expected_trace_contains=[],
-    )
-
-
 def _llm_quality_expected_response(state, meta):
     action = (meta or {}).get("action") if isinstance(meta, dict) else None
     pending_action = (meta or {}).get("pending_action") if isinstance(meta, dict) else None
     if state == "manager_active":
         return False, "manager_active"
     if state == "pending":
-        if action in {
-            "handoff",
-            "escalate",
-            "booking_escalated",
-            "booking_captured_pending",
-            "booking_reuse_handover",
-            "booking_paused",
-        }:
-            return True, "pending_handoff_transition"
         return False, "pending_state"
     if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
         return False, "pending_action"
@@ -6742,11 +7034,7 @@ def _llm_quality_failure_family_descriptor(reason, record):
     category = LLM_QUALITY_REASON_TAXONOMY.get(reason_token, "unknown")
     record = record if isinstance(record, dict) else {}
     record_type = str(record.get("type") or "unknown").strip().lower() or "unknown"
-    trace_stage = (
-        str(record.get("root_trace_stage") or "").strip().lower()
-        or str(record.get("last_trace_stage") or "").strip().lower()
-        or None
-    )
+    trace_stage = str(record.get("last_trace_stage") or "").strip().lower() or None
     action = str(record.get("action") or "").strip().lower() or None
     state = (
         str(
@@ -7393,19 +7681,6 @@ def _llm_quality_is_hardcode_core_file(path):
     return normalized.endswith(LLM_QUALITY_HARDCODE_SCOPE_SERVICE_SUFFIXES)
 
 
-def _llm_quality_literal_is_interpolation_only(literal):
-    stripped = str(literal or "").strip()
-    if not stripped or "{" not in stripped or "}" not in stripped:
-        return False
-    return bool(
-        re.fullmatch(
-            r"\{[a-z_][a-z0-9_]*\}(?:[\s:./,_-]*)",
-            stripped,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
 def _llm_quality_line_has_phrase_branching(line, *, path=None):
     if not isinstance(line, str):
         return False
@@ -7452,10 +7727,9 @@ def _llm_quality_line_has_phrase_branching(line, *, path=None):
             "re.search(",
             "re.match(",
             "re.compile(",
+            "=",
         )
     )
-    if not has_branch_operator and is_signal_file:
-        has_branch_operator = "=" in lowered
     if not has_branch_operator:
         return False
     literals = []
@@ -7472,8 +7746,6 @@ def _llm_quality_line_has_phrase_branching(line, *, path=None):
     for literal in literals:
         # Ignore enum-like contract tokens (service_choice/time/name/etc.);
         # gate focuses on natural-language phrase branching in core code.
-        if _llm_quality_literal_is_interpolation_only(literal):
-            continue
         if re.fullmatch(r"[a-z_][a-z0-9_]{1,63}", literal.strip().casefold()):
             continue
         letters = sum(1 for ch in literal if ch.isalpha())
@@ -7646,7 +7918,6 @@ def _llm_quality_build_run_economy_status(
     baseline_summary,
     reset_before_dialog,
     allow_no_code_delta,
-    resume_mode=False,
     allow_non_canonical_lock_retry=False,
     jid_mode=None,
     runtime_commit=None,
@@ -7666,7 +7937,6 @@ def _llm_quality_build_run_economy_status(
     mode = str(mode or "off").strip().casefold()
     if mode not in {"off", "warn", "block"}:
         mode = "block"
-    resume_mode = bool(resume_mode)
     previous_lock_payload = previous_lock_state if isinstance(previous_lock_state, dict) else {}
     if not previous_lock_payload and isinstance(current_output_dir, str) and current_output_dir.strip():
         previous_lock_payload = (
@@ -7816,7 +8086,6 @@ def _llm_quality_build_run_economy_status(
             "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
             "non_canonical_lock_retry_reason": non_canonical_lock_retry_reason,
             "non_canonical_lock_retry_applied": False,
-            "resume_mode": resume_mode,
             "baseline_checked": bool(
                 isinstance(baseline_preflight, dict) and baseline_preflight.get("checked")
             ),
@@ -7958,7 +8227,6 @@ def _llm_quality_build_run_economy_status(
             previous_replay_fingerprint_clean
             and replay_fingerprint
             and replay_fingerprint == previous_replay_fingerprint_clean
-            and not resume_mode
             and not allow_no_code_delta
         ):
             reasons.append("replay_fingerprint_unchanged")
@@ -8007,7 +8275,6 @@ def _llm_quality_build_run_economy_status(
         "non_canonical_lock_retry_eligible": non_canonical_lock_retry_eligible,
         "non_canonical_lock_retry_reason": non_canonical_lock_retry_reason,
         "non_canonical_lock_retry_applied": non_canonical_lock_retry_applied,
-        "resume_mode": resume_mode,
         "baseline_checked": baseline_checked,
         "baseline_canonical": baseline_canonical,
         "baseline_canonical_reason": baseline_canonical_reason,
@@ -8484,6 +8751,25 @@ def _llm_quality_validate_manual_audit_sla(payload, *, expected_run_id=None):
     if not isinstance(findings, list):
         reasons.append("findings_missing")
 
+    if status in {"done", "completed", "pass", "passed"}:
+        artifacts = payload.get("artifacts")
+        if not isinstance(artifacts, dict):
+            reasons.append("audit_artifacts_missing")
+            artifacts = {}
+        required_artifact_fields = {
+            "manual_audit_workspace_markdown",
+            "manual_audit_workspace_json",
+            "family_registry_json",
+            "judge_conflicts_jsonl",
+        }
+        for field in required_artifact_fields:
+            artifact_path = str(artifacts.get(field) or "").strip()
+            if not artifact_path:
+                reasons.append(f"audit_artifact_path_missing:{field}")
+                continue
+            if not os.path.exists(artifact_path):
+                reasons.append(f"audit_artifact_missing:{field}")
+
     arbitration = payload.get("oracle_arbitration")
     if not isinstance(arbitration, dict):
         reasons.append("oracle_arbitration_missing")
@@ -8627,6 +8913,23 @@ def _llm_quality_sync_manual_audit_summary(
         or manual_meta.get("json_path")
         or os.path.join(normalized_dir, "manual_audit.json")
     )
+    manual_audit_payload = _llm_quality_load_json_object(resolved_manual_audit_json_path)
+    human_semantic_meta = (
+        manual_audit_payload.get("human_semantic")
+        if isinstance(manual_audit_payload, dict)
+        and isinstance(manual_audit_payload.get("human_semantic"), dict)
+        else {}
+    )
+    audit_artifacts = (
+        manual_audit_payload.get("artifacts")
+        if isinstance(manual_audit_payload, dict)
+        and isinstance(manual_audit_payload.get("artifacts"), dict)
+        else {}
+    )
+    human_semantic_valid = human_semantic_meta.get("valid")
+    if human_semantic_valid not in {True, False}:
+        human_semantic_valid = None
+    human_semantic_summary = str(human_semantic_meta.get("summary") or "").strip() or None
     run_id = str(summary.get("run_id") or "").strip() or os.path.basename(normalized_dir)
     before = json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
@@ -8636,12 +8939,38 @@ def _llm_quality_sync_manual_audit_summary(
     manual_meta["path"] = resolved_manual_audit_path
     manual_meta["json_path"] = resolved_manual_audit_json_path
     manual_meta["command"] = command
+    if audit_artifacts:
+        manual_meta["artifacts"] = audit_artifacts
     summary["manual_audit"] = manual_meta
 
     quality_status["manual_audit_required"] = True
     quality_status["manual_audit_status"] = current_status
     quality_status["manual_audit_path"] = resolved_manual_audit_path
     quality_status["manual_audit_command"] = command
+    if audit_artifacts:
+        quality_status["manual_audit_workspace_path"] = audit_artifacts.get(
+            "manual_audit_workspace_markdown"
+        )
+        quality_status["manual_audit_workspace_json_path"] = audit_artifacts.get(
+            "manual_audit_workspace_json"
+        )
+        quality_status["family_registry_path"] = audit_artifacts.get("family_registry_json")
+        quality_status["judge_conflicts_path"] = audit_artifacts.get("judge_conflicts_jsonl")
+    contract_valid = quality_status.get("semantic_valid")
+    if contract_valid not in {True, False}:
+        contract_valid = summary.get("semantic_valid")
+    if contract_valid in {True, False}:
+        quality_status["contract_valid"] = contract_valid
+        summary["contract_valid"] = contract_valid
+    quality_status["human_semantic_valid"] = human_semantic_valid
+    quality_status["human_semantic_summary"] = human_semantic_summary
+    summary["human_semantic_valid"] = human_semantic_valid
+    summary["human_semantic_summary"] = human_semantic_summary
+    product_quality_valid = None
+    if contract_valid in {True, False} and human_semantic_valid in {True, False}:
+        product_quality_valid = bool(contract_valid and human_semantic_valid)
+    quality_status["product_quality_valid"] = product_quality_valid
+    summary["product_quality_valid"] = product_quality_valid
 
     artifact_integrity = _llm_quality_collect_artifact_integrity(normalized_dir)
     summary["artifact_integrity"] = artifact_integrity
@@ -9595,11 +9924,6 @@ def _llm_quality_collect_hq1_classes(record):
     meta_intent = _llm_quality_normalize_tool_token(meta.get("intent"))
     meta_tool_action = _llm_quality_normalize_tool_token(meta.get("tool_action"))
     meta_tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
-    kind_key = "_".join(("expected", "reply", "type"))
-    meta_reply_kind, meta_collect_reason = _llm_quality_booking_collect_contract(
-        meta,
-        fallback=record.get(kind_key) or expectations.get("reply_type"),
-    )
 
     evaluation = record.get("evaluation")
     strict_reasons = set()
@@ -9609,20 +9933,6 @@ def _llm_quality_collect_hq1_classes(record):
             if token:
                 strict_reasons.add(token)
 
-    booking_active = state in {"bot_active", "pending", "manager_active"}
-    contract_aligned_booking_collect = bool(
-        booking_active
-        and meta_action == "booking_prompt"
-        and meta_reply_kind in {"service_choice", "time", "name"}
-        and _llm_quality_booking_collect_prompt_ok(outbox_text, meta_reply_kind)
-        and "expected_action_mismatch" not in strict_reasons
-    )
-    contract_aligned_check_booking_collect = bool(
-        meta_action == "check_booking_prompt"
-        and meta_collect_reason == "calendar_get_booking_collect_reference"
-        and "expected_action_mismatch" not in strict_reasons
-    )
-
     handoff_expected = expected_action in {"handoff", "booking_escalated"}
     handoff_observed = meta_action in {"escalate", "booking_escalated", "booking_captured_pending"} or (
         state in {"pending", "manager_active"}
@@ -9631,9 +9941,7 @@ def _llm_quality_collect_hq1_classes(record):
         turn_text, LLM_QUALITY_HQ1_RESCHEDULE_MARKERS
     )
     if (reschedule_signal or handoff_expected) and not handoff_observed:
-        if contract_aligned_booking_collect or contract_aligned_check_booking_collect:
-            pass
-        elif (
+        if (
             "expected_action_mismatch" in strict_reasons
             or meta_action in {"reply", "check_booking_prompt", "booking_prompt", "collect", "fact"}
             or meta_tool_action in {"calendar.reschedule", "calendar.get_booking", "calendar.list_slots"}
@@ -9827,10 +10135,7 @@ def _llm_quality_build_replay_command(args, scenarios_path, count):
         cmd.append("--skip-outbox")
     if args.max_failures > 0:
         cmd.extend(["--max-failures", str(args.max_failures)])
-    return (
-        "EVAL_MODE=local TRANSPORT_SEND_MODE=off OUTBOX_WORKER_MODE=off "
-        + " ".join(shlex.quote(part) for part in cmd)
-    )
+    return "TEST_MODE=1 " + " ".join(shlex.quote(part) for part in cmd)
 
 
 def _llm_quality_write_brief(path, summary):
@@ -10276,6 +10581,11 @@ def _llm_quality_write_run_manifest(
     )
     mode, mode_source = _llm_quality_manifest_mode(args, run_id, run_economy_status)
     manual_audit = summary.get("manual_audit") if isinstance(summary.get("manual_audit"), dict) else {}
+    manual_audit_artifacts = (
+        manual_audit.get("artifacts")
+        if isinstance(manual_audit.get("artifacts"), dict)
+        else {}
+    )
     resolved_manual_audit = _llm_quality_resolve_manual_audit_status(output_dir)
     manual_audit_status = (
         resolved_manual_audit.get("manual_audit_status")
@@ -10353,6 +10663,14 @@ def _llm_quality_write_run_manifest(
                 or manual_audit.get("json_path")
                 or os.path.join(output_dir, "manual_audit.json")
             ),
+            "manual_audit_workspace": manual_audit_artifacts.get("manual_audit_workspace_markdown")
+            or os.path.join(output_dir, "manual_audit_workspace.md"),
+            "manual_audit_workspace_json": manual_audit_artifacts.get("manual_audit_workspace_json")
+            or os.path.join(output_dir, "manual_audit_workspace.json"),
+            "family_registry": manual_audit_artifacts.get("family_registry_json")
+            or os.path.join(output_dir, "family_registry.json"),
+            "judge_conflicts": manual_audit_artifacts.get("judge_conflicts_jsonl")
+            or os.path.join(output_dir, "judge_conflicts.jsonl"),
             "manifest": os.path.join(output_dir, "run_manifest.json"),
         },
         "args": manifest_args,
@@ -10400,7 +10718,7 @@ def _llm_quality_collect_evidence_handoff_status(
 
     extra_paths = {
         name: os.path.join(normalized_dir, name)
-        for name in ("run_manifest.json", "manual_audit.md", "manual_audit.json")
+        for name in ("run_manifest.json", "manual_audit.md", "manual_audit.json", *LLM_QUALITY_MANUAL_AUDIT_AUX_ARTIFACTS)
     }
     missing = list(artifact_integrity.get("missing") or [])
     missing.extend(
@@ -11423,15 +11741,15 @@ def _llm_quality_call_judge(
     timeout: float,
     max_tokens: int,
 ) -> dict:
-    payload = _llm_quality_build_openai_chat_payload(
-        model=model,
-        messages=[
+    payload = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": "Return JSON only."},
             {"role": "user", "content": prompt},
         ],
-        max_tokens=max(128, int(max_tokens)),
-        temperature=0.0,
-    )
+        "temperature": 0.0,
+        "max_tokens": max(128, int(max_tokens)),
+    }
     endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
     body = None
     payload_json = json.dumps(payload, ensure_ascii=False)
@@ -11484,35 +11802,6 @@ def _llm_quality_openai_chat_endpoint(base_url: str) -> str:
     if normalized.endswith("/v1"):
         return f"{normalized}/chat/completions"
     return f"{normalized}/v1/chat/completions"
-
-
-def _llm_quality_openai_uses_gpt5_chat_compat(model: str | None) -> bool:
-    normalized = str(model or "").strip().lower()
-    return normalized.startswith("gpt-5")
-
-
-def _llm_quality_build_openai_chat_payload(
-    *,
-    model: str,
-    messages: list[dict[str, object]],
-    max_tokens: int,
-    temperature: float | None = None,
-    response_format: dict[str, object] | None = None,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "model": model,
-        "messages": messages,
-    }
-    token_limit = max(1, int(max_tokens))
-    if _llm_quality_openai_uses_gpt5_chat_compat(model):
-        payload["max_completion_tokens"] = token_limit
-    else:
-        payload["max_tokens"] = token_limit
-    if temperature is not None:
-        payload["temperature"] = temperature
-    if isinstance(response_format, dict) and response_format:
-        payload["response_format"] = response_format
-    return payload
 
 
 def _llm_quality_openai_probe_reason(status_code: int | None, body: object | None) -> str:
@@ -11603,11 +11892,11 @@ def _llm_quality_openai_key_preflight_attempt(
     effective_timeout: float | None = None,
 ) -> dict:
     endpoint = _llm_quality_openai_chat_endpoint(base_url)
-    payload = _llm_quality_build_openai_chat_payload(
-        model=model,
-        messages=[{"role": "user", "content": "ping"}],
-        max_tokens=16 if _llm_quality_openai_uses_gpt5_chat_compat(model) else 1,
-    )
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }
     req = urllib.request.Request(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -11963,17 +12252,15 @@ def _llm_quality_preflight_baseline_summary(path):
 
 
 def _llm_quality_parse_coverage_tokens(value):
-    import os
-    import sys
-    from importlib import import_module
-
-    repo_root_loader = globals().get("_llm_quality_repo_root")
-    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
-    api_root = os.path.join(repo_root, "truffles-api")
-    if api_root not in sys.path:
-        sys.path.insert(0, api_root)
-    module = import_module("app.services.llm_quality_contracts")
-    return module.parse_coverage_tokens(value)
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        raw_tokens = [item.strip().casefold() for item in value.split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        raw_tokens = [str(item).strip().casefold() for item in value]
+    else:
+        raw_tokens = [str(value).strip().casefold()]
+    return {token for token in raw_tokens if token and token not in {"none", "off"}}
 
 
 def _llm_quality_build_scenario_contract_status(
@@ -11985,24 +12272,252 @@ def _llm_quality_build_scenario_contract_status(
     include_media=False,
     acceptance_contract=False,
 ):
-    import os
-    import sys
-    from importlib import import_module
+    pending_question_tags = {
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    pending_question_context_preserve_tags = {
+        "info",
+        "media",
+        "price",
+        "location",
+        "hours",
+        "promo",
+        "duration",
+        "parking",
+        "master",
+        "wrong_slot",
+        "interrupt",
+    }
 
-    repo_root_loader = globals().get("_llm_quality_repo_root")
-    repo_root = repo_root_loader() if callable(repo_root_loader) else os.getcwd()
-    api_root = os.path.join(repo_root, "truffles-api")
-    if api_root not in sys.path:
-        sys.path.insert(0, api_root)
-    module = import_module("app.services.llm_quality_contracts")
-    return module.build_scenario_contract_status(
-        dialogs=dialogs,
-        scenario_coverage=scenario_coverage,
-        allow_weak_oracle=allow_weak_oracle,
-        requested_count=requested_count,
-        include_media=include_media,
-        acceptance_contract=acceptance_contract,
-    )
+    def _normalized_reply_type(expectations):
+        value = str((expectations or {}).get("reply_type") or "").strip().casefold()
+        return value or None
+
+    def _collect_optional_labels(turn, expectations, *field_names):
+        values = []
+        for source in (turn, expectations):
+            if not isinstance(source, dict):
+                continue
+            for field_name in field_names:
+                value = source.get(field_name)
+                if isinstance(value, str) and value.strip():
+                    values.append(value.strip())
+                elif isinstance(value, list):
+                    values.extend(
+                        str(item).strip()
+                        for item in value
+                        if isinstance(item, str) and item.strip()
+                    )
+        return _llm_quality_sorted_unique(values)
+
+    coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
+    required_tags_by_coverage = {
+        "booking": ("booking", "check_booking", "confirm"),
+        "handoff": ("handoff",),
+    }
+    tag_counts = {}
+    dialogs_with_check_confirm_sequence = 0
+    dialog_count = 0
+    turn_count = 0
+    weak_expectation_turns = 0
+    reply_type_coverage_turns = 0
+    action_coverage_turns = 0
+    info_coverage_turns = 0
+    mechanism_metadata_turns = 0
+    product_contract_turns = 0
+    product_outcome_turns = 0
+    mechanism_labels = {}
+    product_contracts = {}
+    product_outcomes = {}
+    reasons = []
+    extract_expectations_fn = globals().get("_llm_quality_extract_expectations")
+    weak_expectation_fn = globals().get("_llm_quality_is_weak_oracle_expectation")
+
+    for dialog in dialogs or []:
+        if not isinstance(dialog, dict):
+            continue
+        turns = dialog.get("turns")
+        if not isinstance(turns, list):
+            continue
+        dialog_count += 1
+        active_reply_type = None
+        first_check_booking = None
+        first_confirm_after_check = None
+        for idx, turn in enumerate(turns):
+            if not isinstance(turn, dict):
+                continue
+            turn_count += 1
+            if callable(extract_expectations_fn):
+                expectations = extract_expectations_fn(turn)
+            else:
+                raw_expect = turn.get("expect")
+                expectations = raw_expect if isinstance(raw_expect, dict) else {}
+            if callable(weak_expectation_fn):
+                is_weak_oracle = bool(weak_expectation_fn(expectations))
+            else:
+                is_weak_oracle = not bool(expectations)
+            if is_weak_oracle:
+                weak_expectation_turns += 1
+            if expectations.get("reply_type"):
+                reply_type_coverage_turns += 1
+            if expectations.get("action"):
+                action_coverage_turns += 1
+            if expectations.get("info_sections"):
+                info_coverage_turns += 1
+            turn_mechanisms = _collect_optional_labels(
+                turn,
+                expectations,
+                "mechanism",
+                "mechanisms",
+                "shared_mechanism",
+                "mechanism_hint",
+            )
+            if turn_mechanisms:
+                mechanism_metadata_turns += 1
+                for label in turn_mechanisms:
+                    mechanism_labels[label] = mechanism_labels.get(label, 0) + 1
+            turn_product_contracts = _collect_optional_labels(
+                turn,
+                expectations,
+                "product_contract",
+                "product_contracts",
+                "expected_product_contract",
+            )
+            if turn_product_contracts:
+                product_contract_turns += 1
+                for label in turn_product_contracts:
+                    product_contracts[label] = product_contracts.get(label, 0) + 1
+            turn_product_outcomes = _collect_optional_labels(
+                turn,
+                expectations,
+                "product_outcome",
+                "product_outcomes",
+                "expected_product_outcome",
+            )
+            if turn_product_outcomes:
+                product_outcome_turns += 1
+                for label in turn_product_outcomes:
+                    product_outcomes[label] = product_outcomes.get(label, 0) + 1
+            raw_tags = turn.get("tags")
+            if not isinstance(raw_tags, list):
+                continue
+            tags = []
+            for item in raw_tags:
+                if not isinstance(item, str):
+                    continue
+                token = item.strip().casefold()
+                if not token:
+                    continue
+                tags.append(token)
+                tag_counts[token] = tag_counts.get(token, 0) + 1
+            if "check_booking" in tags and first_check_booking is None:
+                first_check_booking = idx
+            if (
+                "confirm" in tags
+                and first_check_booking is not None
+                and idx > first_check_booking
+                and first_confirm_after_check is None
+            ):
+                first_confirm_after_check = idx
+            if any(tag in pending_question_tags for tag in tags) and active_reply_type != "time":
+                reasons.append(
+                    f"orphan_pending_question_turn:d{dialog_count}:t{idx + 1}"
+                )
+            reply_type = _normalized_reply_type(expectations)
+            if reply_type:
+                active_reply_type = reply_type
+            elif any(tag in pending_question_context_preserve_tags for tag in tags):
+                pass
+            else:
+                active_reply_type = None
+        if first_check_booking is not None and first_confirm_after_check is not None:
+            dialogs_with_check_confirm_sequence += 1
+
+    required = {}
+    for coverage_token, required_tags in required_tags_by_coverage.items():
+        if coverage_token not in coverage_tokens:
+            continue
+        for tag in required_tags:
+            present = tag_counts.get(tag, 0) > 0
+            required[tag] = present
+            if not present:
+                reasons.append(f"missing_tag:{tag}")
+
+    if weak_expectation_turns > 0 and not allow_weak_oracle:
+        reasons.append("weak_oracle_turn")
+    if acceptance_contract:
+        min_dialog_count = 10
+        if isinstance(requested_count, int) and requested_count < min_dialog_count:
+            reasons.append("acceptance_count_lt_10")
+        if dialog_count < min_dialog_count:
+            reasons.append("acceptance_dialogs_lt_10")
+        if not include_media:
+            reasons.append("acceptance_include_media_required")
+        required_acceptance_tokens = ("booking", "info", "interrupt", "handoff")
+        for token in required_acceptance_tokens:
+            if token not in coverage_tokens:
+                reasons.append(f"acceptance_missing_coverage:{token}")
+        if tag_counts.get("handoff", 0) <= 0:
+            reasons.append("acceptance_handoff_tag_missing")
+        if include_media and tag_counts.get("media", 0) <= 0:
+            reasons.append("acceptance_media_tag_missing")
+
+    weak_expectation_ratio = round(
+        weak_expectation_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    reply_type_coverage_ratio = round(
+        reply_type_coverage_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    action_coverage_ratio = round(
+        action_coverage_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    info_coverage_ratio = round(
+        info_coverage_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    mechanism_metadata_ratio = round(
+        mechanism_metadata_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    product_contract_ratio = round(
+        product_contract_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    product_outcome_ratio = round(
+        product_outcome_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "coverage_tokens": sorted(coverage_tokens),
+        "tag_counts": tag_counts,
+        "dialog_count": dialog_count,
+        "dialogs_with_check_confirm_sequence": dialogs_with_check_confirm_sequence,
+        "turn_count": turn_count,
+        "weak_expectation_turns": weak_expectation_turns,
+        "weak_expectation_ratio": weak_expectation_ratio,
+        "reply_type_coverage": reply_type_coverage_ratio,
+        "action_coverage": action_coverage_ratio,
+        "info_coverage": info_coverage_ratio,
+        "mechanism_metadata_coverage": mechanism_metadata_ratio,
+        "product_contract_coverage": product_contract_ratio,
+        "product_outcome_coverage": product_outcome_ratio,
+        "mechanism_metadata_turns": mechanism_metadata_turns,
+        "product_contract_turns": product_contract_turns,
+        "product_outcome_turns": product_outcome_turns,
+        "mechanism_labels": mechanism_labels,
+        "product_contracts": product_contracts,
+        "product_outcomes": product_outcomes,
+        "allow_weak_oracle": bool(allow_weak_oracle),
+    }
 
 
 def _llm_quality_build_run_integrity_status(*, dialogs, stats):
@@ -12082,7 +12597,7 @@ def _llm_quality_build_tool_evidence_status(
         return 0
 
     coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
-    calendar_intent_turns = sum(
+    raw_calendar_intent_turns = sum(
         _as_int(count)
         for intent, count in intents.items()
         if isinstance(intent, str) and intent.startswith("calendar.")
@@ -12099,10 +12614,25 @@ def _llm_quality_build_tool_evidence_status(
     booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
     booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
     booking_confirm_actions = _as_int(actions.get("booking_confirm"))
-    check_booking_intents = (
-        _as_int(intents.get("calendar.get_booking"))
-        + _as_int(intents.get("check_booking"))
-        + _as_int(intents.get("check_record"))
+    check_booking_prompt_actions = _as_int(actions.get("check_booking_prompt"))
+    calendar_get_booking_intents = _as_int(intents.get("calendar.get_booking"))
+    check_booking_alias_intents = (
+        _as_int(intents.get("check_booking")) + _as_int(intents.get("check_record"))
+    )
+    check_booking_reference_collect_turns = min(
+        check_booking_prompt_actions,
+        calendar_get_booking_intents + check_booking_alias_intents,
+    )
+    calendar_intent_turns = max(
+        0,
+        raw_calendar_intent_turns
+        - min(calendar_get_booking_intents, check_booking_reference_collect_turns),
+    )
+    check_booking_intents = max(
+        0,
+        calendar_get_booking_intents
+        + check_booking_alias_intents
+        - check_booking_reference_collect_turns,
     )
 
     calendar_evidence_total = (
@@ -12143,7 +12673,7 @@ def _llm_quality_build_tool_evidence_status(
     reasons = []
     if policy == "strict" and hooks_mode != "auto":
         reasons.append("tool_hooks_mode_not_auto")
-    if require_calendar and calendar_intent_candidates == 0:
+    if require_calendar and calendar_intent_candidates == 0 and calendar_evidence_total <= 0:
         reasons.append("calendar_intent_missing")
     if require_calendar and calendar_evidence_total <= 0:
         reasons.append("calendar_evidence_missing")
@@ -12178,6 +12708,8 @@ def _llm_quality_build_tool_evidence_status(
             "calendar_hook_events": calendar_hook_events,
             "confirm_hook_events": confirm_hook_events,
             "calendar_hook_candidates": calendar_hook_candidates,
+            "check_booking_prompt_actions": check_booking_prompt_actions,
+            "check_booking_reference_collect_turns": check_booking_reference_collect_turns,
             "booking_commit_trace_events": booking_commit_trace_events,
             "booking_confirm_trace_events": booking_confirm_trace_events,
             "calendar_opportunity_total": calendar_opportunity_total,
@@ -12437,78 +12969,6 @@ def _llm_quality_last_trace_stage(trace_entries):
             return entry.get("stage")
     return None
 
-
-def _llm_quality_root_trace_failure(trace_entries, reasons=None):
-    normalized_entries = [
-        entry for entry in (trace_entries or []) if isinstance(entry, dict) and entry.get("stage")
-    ]
-    if not normalized_entries:
-        return {"stage": None, "reason_code": None}
-
-    reason_tokens = {
-        str(reason or "").strip().lower()
-        for reason in (reasons or [])
-        if isinstance(reason, str) and reason.strip()
-    }
-    stage_hints = {
-        "booking_slot_stall": {
-            "pending_question_interaction",
-            "question_contract",
-            "consultant_runtime",
-        },
-        "booking_prompt_leak": {"question_contract", "consultant_runtime"},
-        "expected_action_mismatch": {"question_contract", "consultant_runtime"},
-        "expected_reply_mismatch": {
-            "pending_question_interaction",
-            "question_contract",
-            "consultant_runtime",
-        },
-        "expected_reply_type_mismatch": {
-            "pending_question_interaction",
-            "question_contract",
-            "consultant_runtime",
-        },
-        "false_booking_confirmation": {"question_contract", "consultant_runtime"},
-        "handoff_miss": {"consultant_runtime", "boundary", "turn_planner"},
-        "judge_fail": {"consultant_runtime", "pending_question_interaction"},
-    }
-    failure_decisions = {"blocked", "degrade", "fail", "handoff", "invalid", "reject"}
-    failure_outcomes = {"blocked", "fail", "handoff", "timeout"}
-
-    for entry in normalized_entries:
-        stage = entry.get("stage")
-        if not stage:
-            continue
-        reason_code = str(entry.get("reason_code") or "").strip() or None
-        decision_token = str(entry.get("decision") or "").strip().lower()
-        outcome_token = str(entry.get("outcome") or "").strip().lower()
-        if entry.get("error") or entry.get("exception"):
-            return {"stage": stage, "reason_code": reason_code}
-        if reason_code:
-            return {"stage": stage, "reason_code": reason_code}
-        if decision_token in failure_decisions or outcome_token in failure_outcomes:
-            return {"stage": stage, "reason_code": reason_code}
-        stage_token = str(stage).strip().lower()
-        if any(stage_token in stage_hints.get(reason, set()) for reason in reason_tokens):
-            return {"stage": stage, "reason_code": reason_code}
-
-    for reason in reason_tokens:
-        hinted_stages = stage_hints.get(reason, set())
-        if not hinted_stages:
-            continue
-        for entry in normalized_entries:
-            stage_token = str(entry.get("stage") or "").strip().lower()
-            if stage_token in hinted_stages:
-                return {
-                    "stage": entry.get("stage"),
-                    "reason_code": str(entry.get("reason_code") or "").strip() or None,
-                }
-
-    return {
-        "stage": _llm_quality_last_trace_stage(normalized_entries),
-        "reason_code": None,
-    }
-
 def _llm_quality_extract_booking_slots(meta, conv_meta):
     slots = {}
     raw_slots = (meta or {}).get("slots")
@@ -12644,7 +13104,6 @@ def _llm_quality_evaluate_turn(
     expected_meta_any=None,
     expected_meta_contains=None,
     expected_trace_contains=None,
-    turn_text=None,
 ):
     reasons = []
     meta_action = (meta or {}).get("action") if isinstance(meta, dict) else None
@@ -12655,12 +13114,7 @@ def _llm_quality_evaluate_turn(
     if state not in LLM_QUALITY_KNOWN_STATES:
         reasons.append("unknown_state")
     if expected_state and not _llm_quality_state_matches_expected(
-        expected_state,
-        state,
-        meta,
-        conv_meta,
-        handover_meta,
-        turn_text=turn_text,
+        expected_state, state, meta, conv_meta, handover_meta
     ):
         reasons.append("expected_state_mismatch")
     if expected_action and not _llm_quality_action_matches_expected(
@@ -12698,31 +13152,22 @@ def _llm_quality_evaluate_turn(
             clear_reason = str(meta.get("expected_reply_contract_reason") or "").strip()
             if clear_flag is True and clear_reason:
                 fallback_ok = True
-            if not fallback_ok and _llm_quality_has_explicit_service_booking_progression_allowance(
-                meta=meta,
-                turn_text=turn_text,
-                expected_reply_type=expected_reply_type,
-                actual_expected_reply_type=actual_expected_reply_type,
-                expected_meta=expected_meta,
-                expected_meta_any=expected_meta_any,
-                expected_trace_contains=expected_trace_contains,
-            ):
-                fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
-    # Scenario fixtures may carry stale `expected_reply=false` even when the
-    # runtime produced a normal bot-active reply contract.
-    expected_reply_for_check = _llm_quality_normalize_expected_reply_for_oracle(
-        expected_reply=expected_reply,
-        expected_response=expected_response,
-        expected_action=expected_action,
-        expected_reply_type=expected_reply_type,
-        expected_info_sections=expected_info_sections,
-        expected_state=expected_state,
-        booking_active=booking_active,
-        state=state,
-        meta=meta,
-    )
+    # Scenario fixtures may carry stale `expected_reply=false` even when runtime
+    # expectations are explicit (state/reply-type/info/booking signals).
+    expected_reply_for_check = expected_reply
+    if (
+        expected_reply is False
+        and expected_response is True
+        and (
+            expected_state is None
+            or expected_reply_type is not None
+            or bool(expected_info_sections)
+            or bool(booking_active)
+        )
+    ):
+        expected_reply_for_check = None
     if not _llm_quality_expected_reply_matches(
         expected_reply=expected_reply_for_check,
         expected_response=expected_response,
@@ -12756,30 +13201,6 @@ def _llm_quality_evaluate_turn(
             actual_expected_reply_type=actual_expected_reply_type,
         )
     )
-    booking_detail_lookup_fallback = _llm_quality_has_booking_detail_lookup_fallback(
-        info_tags=info_tags,
-        expected_info_sections=expected_info_sections,
-        meta=meta,
-        outbox_text=outbox_text,
-    )
-    resume_meta_trace_allowance = _llm_quality_has_resume_meta_trace_allowance(
-        meta=meta,
-        trace_entries=trace_entries,
-        expected_info_sections=expected_info_sections,
-        expected_meta_contains=expected_meta_contains,
-        expected_trace_contains=expected_trace_contains,
-    )
-    explicit_service_booking_progression_allowance = (
-        _llm_quality_has_explicit_service_booking_progression_allowance(
-            meta=meta,
-            turn_text=turn_text,
-            expected_reply_type=expected_reply_type,
-            actual_expected_reply_type=actual_expected_reply_type,
-            expected_meta=expected_meta,
-            expected_meta_any=expected_meta_any,
-            expected_trace_contains=expected_trace_contains,
-        )
-    )
     if expected_info_sections:
         skip_expected_info_check = (
             state in {"pending", "manager_active"}
@@ -12802,8 +13223,6 @@ def _llm_quality_evaluate_turn(
                 expected_answered = True
             if not expected_answered and pricing_service_clarify_info_fallback:
                 expected_answered = True
-            if not expected_answered and booking_detail_lookup_fallback:
-                expected_answered = True
         if not expected_answered:
             reasons.append("expected_info_section_miss")
     if (
@@ -12821,18 +13240,11 @@ def _llm_quality_evaluate_turn(
             expected_meta_contains,
             trace_entries,
         )
-        and not resume_meta_trace_allowance
-        and not explicit_service_booking_progression_allowance
     ):
         reasons.append("expected_meta_mismatch")
-    if (
-        expected_trace_contains
-        and not _llm_quality_trace_has_expected_entries(
-            trace_entries,
-            expected_trace_contains,
-        )
-        and not resume_meta_trace_allowance
-        and not explicit_service_booking_progression_allowance
+    if expected_trace_contains and not _llm_quality_trace_has_expected_entries(
+        trace_entries,
+        expected_trace_contains,
     ):
         reasons.append("expected_trace_miss")
     if _llm_quality_is_unobserved_turn(
@@ -12897,7 +13309,6 @@ def _llm_quality_evaluate_turn(
         and not catalog_service_choice_info_fallback
         and not master_query_missing_subject_info_fallback
         and not pricing_service_clarify_info_fallback
-        and not booking_detail_lookup_fallback
     ):
         reasons.append("info_section_miss")
     booking_stall_ignored = False
@@ -13679,7 +14090,7 @@ def _parse_llm_quality_args(argv):
         default=None,
         help="Emit scenario generation batch/attempt progress to stderr.",
     )
-    parser.add_argument("--llm-model", default="gpt-5.4-nano-2026-03-17")
+    parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument(
         "--llm-base-url",
         default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"),
@@ -13930,7 +14341,7 @@ def _parse_llm_quality_args(argv):
         "--judge-mode", choices=["off", "sample", "all", "critical"], default="off"
     )
     parser.add_argument("--judge-sample", type=float, default=0.1)
-    parser.add_argument("--judge-model", default="gpt-5.4-nano-2026-03-17")
+    parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument(
         "--judge-base-url",
         default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"),
@@ -14235,8 +14646,8 @@ def _parse_llm_quality_audit_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality-audit",
         description=(
-            "Post-run artifact audit for llm-quality. Produces manual_audit.md/json "
-            "and enforces artifact completeness when requested."
+            "Post-run artifact audit for llm-quality. Produces manual_audit.md/json, "
+            "turn workspace artifacts, family registry, and judge-conflict export."
         ),
     )
     parser.add_argument("--run-dir", required=True, help="Run output directory with summary/responses/trace.")
@@ -14253,6 +14664,17 @@ def _parse_llm_quality_audit_args(argv):
     )
     parser.add_argument("--status", choices=["pending", "done"], default="pending")
     parser.add_argument("--notes", default=None, help="Manual analyst notes.")
+    parser.add_argument(
+        "--human-semantic-valid",
+        choices=["true", "false", "unknown"],
+        default="unknown",
+        help="Turn-by-turn human semantic verdict for the run (`true`/`false`/`unknown`).",
+    )
+    parser.add_argument(
+        "--human-semantic-summary",
+        default=None,
+        help="Short summary of the human semantic audit verdict.",
+    )
     parser.add_argument(
         "--root-cause",
         action="append",
@@ -14291,6 +14713,29 @@ def _parse_llm_quality_audit_args(argv):
         "--fail-on-findings",
         action="store_true",
         help="Exit 2 when audit produced critical/high findings.",
+    )
+    parser.add_argument("--pretty", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _parse_llm_quality_trends_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py llm-quality-trends",
+        description=(
+            "Aggregate llm-quality manual audit and family registry artifacts across runs."
+        ),
+    )
+    parser.add_argument(
+        "--run-dir",
+        action="append",
+        required=True,
+        help="Run directory containing summary/manual_audit/family_registry artifacts (repeatable).",
+    )
+    parser.add_argument("--output", default=None, help="Optional JSON output path.")
+    parser.add_argument(
+        "--markdown-output",
+        default=None,
+        help="Optional markdown output path.",
     )
     parser.add_argument("--pretty", action="store_true")
     return parser.parse_args(argv)
@@ -14553,6 +14998,14 @@ def _run_llm_quality_audit(args):
 
     notes = str(args.notes or "").strip()
     status = str(args.status or "pending").strip().lower()
+    human_semantic_token = str(args.human_semantic_valid or "unknown").strip().casefold()
+    if human_semantic_token == "true":
+        human_semantic_valid = True
+    elif human_semantic_token == "false":
+        human_semantic_valid = False
+    else:
+        human_semantic_valid = None
+    human_semantic_summary = str(args.human_semantic_summary or "").strip() or None
     generated_at = datetime.now(timezone.utc).isoformat()
     run_id = (
         (summary_payload or {}).get("run_id")
@@ -14564,10 +15017,38 @@ def _run_llm_quality_audit(args):
 
     md_output = args.output or os.path.join(run_dir, "manual_audit.md")
     json_output = args.json_output or os.path.join(run_dir, "manual_audit.json")
+    workspace_md_output = os.path.join(run_dir, "manual_audit_workspace.md")
+    workspace_json_output = os.path.join(run_dir, "manual_audit_workspace.json")
+    family_registry_output = os.path.join(run_dir, "family_registry.json")
+    judge_conflicts_output = os.path.join(run_dir, "judge_conflicts.jsonl")
     md_output = os.path.abspath(os.path.expanduser(md_output))
     json_output = os.path.abspath(os.path.expanduser(json_output))
     os.makedirs(os.path.dirname(md_output), exist_ok=True)
     os.makedirs(os.path.dirname(json_output), exist_ok=True)
+    workspace_md_output = os.path.abspath(os.path.expanduser(workspace_md_output))
+    workspace_json_output = os.path.abspath(os.path.expanduser(workspace_json_output))
+    family_registry_output = os.path.abspath(os.path.expanduser(family_registry_output))
+    judge_conflicts_output = os.path.abspath(os.path.expanduser(judge_conflicts_output))
+    os.makedirs(os.path.dirname(workspace_md_output), exist_ok=True)
+    os.makedirs(os.path.dirname(workspace_json_output), exist_ok=True)
+    os.makedirs(os.path.dirname(family_registry_output), exist_ok=True)
+    os.makedirs(os.path.dirname(judge_conflicts_output), exist_ok=True)
+
+    workspace_payload = _llm_quality_build_manual_audit_workspace(
+        run_id=run_id,
+        generated_at=generated_at,
+        response_rows=response_rows,
+    )
+    judge_conflicts = _llm_quality_collect_judge_conflicts(
+        run_id=run_id,
+        response_rows=response_rows,
+    )
+    family_registry = _llm_quality_build_family_registry(
+        run_id=run_id,
+        generated_at=generated_at,
+        response_rows=response_rows,
+        findings=findings,
+    )
 
     lines = [
         "# LLM Quality Manual Audit",
@@ -14576,6 +15057,12 @@ def _run_llm_quality_audit(args):
         f"- generated_at: `{generated_at}`",
         f"- analyst: `{args.analyst}`",
         f"- status: `{status}`",
+        f"- human_semantic_valid: `{human_semantic_valid}`",
+        (
+            f"- human_semantic_summary: {human_semantic_summary}"
+            if human_semantic_summary
+            else "- human_semantic_summary: `None`"
+        ),
         f"- run_dir: `{run_dir}`",
         "",
         "## Artifact Integrity",
@@ -14611,10 +15098,18 @@ def _run_llm_quality_audit(args):
             f"- max_turn_seen: `{max_turn_seen}`",
             f"- expected_dialogs: `{expected_dialogs}`",
             "",
+            "## Generated Workflow Artifacts",
+            f"- manual_audit_workspace_md: `{workspace_md_output}`",
+            f"- manual_audit_workspace_json: `{workspace_json_output}`",
+            f"- family_registry_json: `{family_registry_output}`",
+            f"- judge_conflicts_jsonl: `{judge_conflicts_output}`",
+            f"- judge_conflict_count: `{len(judge_conflicts)}`",
+            f"- backlog_summary: `{family_registry.get('backlog_summary')}`",
+            "",
             "## Manual Review Checklist (MUST)",
             "- [ ] Reviewed `summary.json` fields and acceptance lanes manually.",
-            "- [ ] Reviewed `responses.jsonl` (at least first/middle/last failing or risky turns).",
-            "- [ ] Reviewed `trace_bundle.jsonl` for reason_code and boundary semantics.",
+            "- [ ] Reviewed every dialog and every turn in `responses.jsonl` for human semantic quality and product usefulness.",
+            "- [ ] Reviewed `trace_bundle.jsonl` turn-by-turn for reason_code, boundary semantics, and runtime causality.",
             "- [ ] Verified judge verdict alignment with contract evidence.",
             "- [ ] Captured true root causes and concrete follow-up actions (no workaround).",
             "",
@@ -14638,6 +15133,13 @@ def _run_llm_quality_audit(args):
     )
     with open(md_output, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines))
+    with open(workspace_md_output, "w", encoding="utf-8") as handle:
+        handle.write(workspace_payload.get("markdown") or "")
+    with open(workspace_json_output, "w", encoding="utf-8") as handle:
+        json.dump(workspace_payload, handle, ensure_ascii=False, indent=2)
+    with open(family_registry_output, "w", encoding="utf-8") as handle:
+        json.dump(family_registry, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_jsonl(judge_conflicts_output, judge_conflicts)
 
     payload = {
         "command": "llm-quality-audit",
@@ -14667,9 +15169,26 @@ def _run_llm_quality_audit(args):
         "analyst_root_causes": analyst_root_causes,
         "analyst_next_steps": analyst_next_steps,
         "oracle_arbitration": oracle_arbitration,
+        "human_semantic": {
+            "valid": human_semantic_valid,
+            "summary": human_semantic_summary,
+        },
         "notes": notes,
         "manual_audit_markdown": md_output,
         "manual_audit_json": json_output,
+        "artifacts": {
+            "manual_audit_markdown": md_output,
+            "manual_audit_json": json_output,
+            "manual_audit_workspace_markdown": workspace_md_output,
+            "manual_audit_workspace_json": workspace_json_output,
+            "family_registry_json": family_registry_output,
+            "judge_conflicts_jsonl": judge_conflicts_output,
+        },
+        "backlog_summary": family_registry.get("backlog_summary"),
+        "judge_conflicts": {
+            "count": len(judge_conflicts),
+            "path": judge_conflicts_output,
+        },
     }
     with open(json_output, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
@@ -14686,6 +15205,12 @@ def _run_llm_quality_audit(args):
             run_id=run_id,
             output_dir=run_dir,
         )
+        _llm_quality_sync_manual_audit_summary(
+            run_dir=run_dir,
+            status=status,
+            manual_audit_path=md_output,
+            manual_audit_json_path=json_output,
+        )
 
     print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
     highest_severity = max((severity_rank.get(str(item.get("severity")), 0) for item in findings), default=0)
@@ -14693,6 +15218,23 @@ def _run_llm_quality_audit(args):
         return 2
     if args.fail_on_findings and highest_severity >= severity_rank["high"]:
         return 2
+    return 0
+
+
+def _run_llm_quality_trends(args):
+    payload = _llm_quality_build_trends_payload(args.run_dir)
+    markdown = _llm_quality_trends_markdown(payload)
+    if args.output:
+        output_path = os.path.abspath(os.path.expanduser(str(args.output)))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+    if args.markdown_output:
+        markdown_path = os.path.abspath(os.path.expanduser(str(args.markdown_output)))
+        os.makedirs(os.path.dirname(markdown_path), exist_ok=True)
+        with open(markdown_path, "w", encoding="utf-8") as handle:
+            handle.write(markdown)
+    print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
     return 0
 
 
@@ -15793,39 +16335,11 @@ def _select_cases(cases, case_ids):
         raise SystemExit(f"webhook-fuzz: unknown case_ids: {', '.join(missing)}")
     return [case_map[case_id] for case_id in requested], requested
 
-def _resolve_eval_mode(container_name):
-    value = os.environ.get("EVAL_MODE")
-    if (value is None or value == "") and container_name:
-        value = _resolve_env_from_container(container_name, "EVAL_MODE")
-    normalized = str(value or "").strip().lower()
-    if normalized in {"local", "livecheck", "acceptance", "prod"}:
-        return normalized
-
-    legacy = os.environ.get("TEST_MODE")
-    if (legacy is None or legacy == "") and container_name:
-        legacy = _resolve_env_from_container(container_name, "TEST_MODE")
-    if str(legacy or "").strip().lower() in {"1", "true", "yes", "on"}:
-        return "local"
-    return "prod"
-
-
-def _resolve_transport_send_mode(container_name):
-    value = os.environ.get("TRANSPORT_SEND_MODE")
-    if (value is None or value == "") and container_name:
-        value = _resolve_env_from_container(container_name, "TRANSPORT_SEND_MODE")
-    normalized = str(value or "").strip().lower()
-    if normalized in {"off", "allowlist", "prod"}:
-        return normalized
-    eval_mode = _resolve_eval_mode(container_name)
-    if eval_mode == "livecheck":
-        return "allowlist"
-    if eval_mode != "prod":
-        return "off"
-    return "prod"
-
-
 def _resolve_test_mode(container_name):
-    return _resolve_eval_mode(container_name) != "prod"
+    value = os.environ.get("TEST_MODE")
+    if (value is None or value == "") and container_name:
+        value = _resolve_env_from_container(container_name, "TEST_MODE")
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 def _resolve_db_user_simple():
     env_user = os.environ.get("DB_USER")
@@ -16134,207 +16648,6 @@ def _fetch_latest_conversation_state(db_user, client_id, remote_jid):
         return None, None, None
     parts = row.split("\t", 1)
     return parts[0] if parts else None, parts[1] if len(parts) > 1 else None, None
-
-
-def _fetch_recent_conversation_metas(db_user, client_id, remote_jid, *, limit=5):
-    if not client_id or not remote_jid:
-        return [], "missing client_id or remote_jid"
-    safe_client = _escape_sql_literal(client_id)
-    safe_jid = _escape_sql_literal(remote_jid)
-    safe_limit = max(int(limit or 1), 1)
-    query = (
-        "SELECT COALESCE(json_agg(json_build_object("
-        "'conversation_id', s.id, "
-        "'state', s.state, "
-        "'last_message_at', s.last_message_at, "
-        "'started_at', s.started_at, "
-        "'context', s.context"
-        ")), '[]'::json)::text "
-        "FROM ("
-        "SELECT c.id, c.state, c.last_message_at, c.started_at, c.context "
-        "FROM conversations c "
-        "JOIN users u ON u.id = c.user_id "
-        f"WHERE c.client_id = '{safe_client}' AND u.remote_jid = '{safe_jid}' "
-        "ORDER BY c.last_message_at DESC NULLS LAST, c.started_at DESC "
-        f"LIMIT {safe_limit}"
-        ") s;"
-    )
-    row, error = _run_psql_query(db_user, query)
-    if error:
-        return [], error
-    if not row:
-        return [], None
-    try:
-        payload = json.loads(row)
-    except Exception:
-        return [], None
-    return payload if isinstance(payload, list) else [], None
-
-
-def _llm_quality_reset_result_has_ack(reset_result):
-    if not isinstance(reset_result, dict):
-        return False
-    decision_meta = reset_result.get("decision_meta")
-    if isinstance(decision_meta, dict):
-        if decision_meta.get("session_memory_reset") == "explicit_reset":
-            return True
-        if decision_meta.get("intent") == "reset":
-            return True
-    decision_trace = reset_result.get("decision_trace")
-    if not isinstance(decision_trace, list):
-        return False
-    for entry in decision_trace:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("stage") != "session_memory":
-            continue
-        if entry.get("decision") in {"reset", "reset_ack"} and entry.get("reason") == "explicit_reset":
-            return True
-    return False
-
-
-def _llm_quality_collect_preflight_contamination_reasons(
-    conversation_meta,
-    *,
-    current_run_id=None,
-    latest=False,
-):
-    if not isinstance(conversation_meta, dict):
-        return []
-    reasons = []
-    state = str(conversation_meta.get("state") or "").strip().casefold()
-    inspect_context_payload = bool(latest) or state in {"pending", "manager_active"}
-    if state in {"pending", "manager_active"}:
-        reasons.append(f"state:{state}")
-
-    context = conversation_meta.get("context")
-    if not isinstance(context, dict):
-        return reasons
-
-    reply_key = "_".join(("expected", "reply", "type"))
-    resume_key = "_".join(("resume", "slot"))
-    owner_key = "_".join(("interaction", "owner"))
-    pending_contract_key = "_".join(("pending", "question", "contract"))
-    last_question_key = "_".join(("last", "question", "type"))
-
-    if inspect_context_payload:
-        reply_value = context.get(reply_key)
-        if isinstance(reply_value, str) and reply_value.strip():
-            reasons.append("question_contract_live")
-
-        pending_resume = context.get("pending_resume")
-        if isinstance(pending_resume, dict):
-            pending_reply_value = pending_resume.get(reply_key)
-            if isinstance(pending_reply_value, str) and pending_reply_value.strip():
-                reasons.append("pending_resume_live")
-
-        booking = context.get("booking")
-        if isinstance(booking, dict):
-            if booking.get("active") is True:
-                reasons.append("booking_active")
-            live_booking_keys = [
-                key
-                for key in ("service", "datetime", "name", "appointment_id", "last_question")
-                if booking.get(key)
-            ]
-            if live_booking_keys:
-                reasons.append("booking_context_live")
-
-        session_memory = context.get("session_memory")
-        if isinstance(session_memory, dict):
-            if isinstance(session_memory.get(last_question_key), str) and session_memory.get(
-                last_question_key
-            ).strip():
-                reasons.append("session_memory_last_question")
-            unanswered_questions = session_memory.get("unanswered_questions")
-            if isinstance(unanswered_questions, list) and unanswered_questions:
-                reasons.append("session_memory_unanswered_questions")
-            session_state = session_memory.get("interaction_state")
-            if isinstance(session_state, dict) and any(
-                session_state.get(key) for key in (owner_key, resume_key)
-            ):
-                reasons.append("session_memory_resume_state")
-
-        re_entry_required = context.get("re_entry_required")
-        if isinstance(re_entry_required, dict) and re_entry_required.get("required") is True:
-            reasons.append("re_entry_required")
-
-        context_manager = context.get("context_manager")
-        if isinstance(context_manager, dict):
-            canonical_state = context_manager.get("canonical_dialog_state")
-            if isinstance(canonical_state, dict):
-                pending_contract = canonical_state.get(pending_contract_key)
-                if isinstance(pending_contract, dict) and pending_contract.get(reply_key):
-                    reasons.append("canonical_question_contract")
-                canonical_state_payload = canonical_state.get("interaction_state")
-                if isinstance(canonical_state_payload, dict) and any(
-                    canonical_state_payload.get(key) for key in (owner_key, resume_key)
-                ):
-                    reasons.append("canonical_resume_state")
-
-    decision_trace = context.get("decision_trace")
-    if reasons and isinstance(decision_trace, list) and decision_trace:
-        reasons.append("decision_trace_present")
-
-    simulation = context.get("simulation")
-    if isinstance(simulation, dict):
-        simulation_id = simulation.get("id")
-        if (
-            isinstance(current_run_id, str)
-            and current_run_id.strip()
-            and isinstance(simulation_id, str)
-            and simulation_id.strip()
-            and simulation_id.strip() != current_run_id.strip()
-        ):
-            if reasons or state in {"pending", "manager_active"}:
-                reasons.append("simulation_id_mismatch")
-
-    return reasons
-
-
-def _llm_quality_normalize_preflight_clear(preflight):
-    if isinstance(preflight, dict):
-        return preflight
-    return {
-        "action": "preflight_clear",
-        "state_before": None,
-        "state_after": None,
-        "cleared": True,
-        "actions": [],
-        "contaminated": False,
-        "contamination_reasons": [],
-        "recent_conversation_ids": [],
-    }
-
-
-def _llm_quality_collect_recent_preflight_contamination(
-    recent_conversations,
-    *,
-    current_run_id=None,
-):
-    contamination_reasons = []
-    contaminated_conversation_ids = []
-    for index, conversation_meta in enumerate(recent_conversations or []):
-        if not isinstance(conversation_meta, dict):
-            continue
-        conversation_id = conversation_meta.get("conversation_id")
-        reasons = _llm_quality_collect_preflight_contamination_reasons(
-            conversation_meta,
-            current_run_id=current_run_id,
-            latest=index == 0,
-        )
-        if not reasons:
-            continue
-        if conversation_id:
-            contaminated_conversation_ids.append(conversation_id)
-        for reason in reasons:
-            if conversation_id:
-                contamination_reasons.append(f"{conversation_id}:{reason}")
-            else:
-                contamination_reasons.append(reason)
-    if len(set(contaminated_conversation_ids)) > 1:
-        contamination_reasons.append("multiple_recent_conversations")
-    return list(dict.fromkeys(contamination_reasons))
 
 def _settle_state_after_manager_actions(
     db_user,
@@ -18642,7 +18955,6 @@ def _run_llm_quality(args):
         baseline_summary=args.baseline_summary,
         reset_before_dialog=bool(args.reset_before_dialog),
         allow_no_code_delta=bool(args.allow_no_code_delta),
-        resume_mode=bool(args.resume),
         allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         jid_mode=jid_mode_effective,
         runtime_commit=runtime_preflight.get("runtime_commit"),
@@ -19515,48 +19827,12 @@ def _run_llm_quality(args):
             reset_result = _send_session_reset(remote_jid)
             if reset_result:
                 actions.append(reset_result)
-        contamination_reasons = []
-        recent_conversations = []
-        recent_error = None
-        recent_conversations, recent_error = _fetch_recent_conversation_metas(
-            db_user,
-            client_id,
-            remote_jid,
-            limit=5,
-        )
-        if recent_error:
-            contamination_reasons.append(f"recent_conversation_lookup_error:{recent_error}")
-        else:
-            contamination_reasons.extend(
-                _llm_quality_collect_recent_preflight_contamination(
-                    recent_conversations,
-                    current_run_id=run_id,
-                )
-            )
-        reset_result = next(
-            (
-                action
-                for action in actions
-                if isinstance(action, dict) and action.get("action") == "session_reset"
-            ),
-            None,
-        )
-        if reset_result and not _llm_quality_reset_result_has_ack(reset_result):
-            contamination_reasons.append("reset_ack_missing")
-        contamination_reasons = list(dict.fromkeys(contamination_reasons))
         return {
             "action": "preflight_clear",
             "state_before": state,
             "state_after": state_after,
             "cleared": cleared,
             "actions": actions,
-            "contaminated": bool(contamination_reasons),
-            "contamination_reasons": contamination_reasons,
-            "recent_conversation_ids": [
-                item.get("conversation_id")
-                for item in recent_conversations
-                if isinstance(item, dict) and item.get("conversation_id")
-            ],
         }
 
     min_wait = min(args.min_wait, args.max_wait)
@@ -19769,56 +20045,6 @@ def _run_llm_quality(args):
                 preflight = _reset_dialog_state(remote_jid)
                 if preflight:
                     print(json.dumps(preflight, ensure_ascii=False))
-                    contaminated = bool(preflight.get("contaminated"))
-                    if contaminated:
-                        tried_fallback_jids = set()
-                        while contaminated:
-                            fallback_jid = None
-                            if (
-                                jid_mode_effective == "unique"
-                                and args.allow_non_allowlist
-                                and not args.remote_jid
-                                and not stored_remote_jid
-                            ):
-                                fallback_jid = _llm_quality_select_fallback_jid(
-                                    remote_jid,
-                                    allowlist_jids,
-                                    dialog_idx - 1,
-                                    run_id=run_id,
-                                    tried_jids=tried_fallback_jids,
-                                    skip_outbox=bool(args.skip_outbox),
-                                    allow_non_allowlist=bool(args.allow_non_allowlist),
-                                )
-                            if not fallback_jid or fallback_jid == remote_jid:
-                                break
-                            print(
-                                json.dumps(
-                                    {
-                                        "action": "preflight_fallback_jid",
-                                        "dialog_index": dialog_idx,
-                                        "remote_jid_before": remote_jid,
-                                        "remote_jid_after": fallback_jid,
-                                        "reasons": preflight.get("contamination_reasons") or [],
-                                    },
-                                    ensure_ascii=False,
-                                )
-                            )
-                            tried_fallback_jids.add(fallback_jid)
-                            remote_jid = fallback_jid
-                            if isinstance(resume_remote_jid_by_dialog, dict):
-                                resume_remote_jid_by_dialog[str(dialog_idx)] = remote_jid
-                            fallback_preflight = _reset_dialog_state(remote_jid)
-                            if fallback_preflight:
-                                print(json.dumps(fallback_preflight, ensure_ascii=False))
-                            preflight = _llm_quality_normalize_preflight_clear(
-                                fallback_preflight
-                            )
-                            contaminated = bool(preflight.get("contaminated"))
-                        if contaminated:
-                            raise SystemExit(
-                                "llm-quality: contaminated preflight (remote_jid="
-                                f"{remote_jid}, reasons={','.join(preflight.get('contamination_reasons') or ['unknown'])})"
-                            )
                     state_before = preflight.get("state_before")
                     cleared = bool(preflight.get("cleared"))
                     if state_before in {"pending", "manager_active"} and not cleared:
@@ -20326,12 +20552,6 @@ def _run_llm_quality(args):
                 info_sections = []
                 info_intents = []
                 info_mismatch = False
-                booking_detail_lookup_fallback = _llm_quality_has_booking_detail_lookup_fallback(
-                    info_tags=info_tags,
-                    expected_info_sections=expected_info_sections,
-                    meta=meta,
-                    outbox_text=outbox_text,
-                )
                 if expected_info_sections:
                     info_stats["turns_with_info_request"] += 1
                     answered_any, info_sections, info_intents = _llm_quality_expected_section_answered(
@@ -20363,11 +20583,7 @@ def _run_llm_quality(args):
                         info_stats["turns_info_answered"] += 1
                     else:
                         info_stats["turns_info_missed"] += 1
-                    if (
-                        not answered_any
-                        and state not in {"manager_active", "pending"}
-                        and not booking_detail_lookup_fallback
-                    ):
+                    if not answered_any and state not in {"manager_active", "pending"}:
                         info_mismatch = True
                         stats["info_mismatch"] += 1
                 elif info_tags:
@@ -20386,11 +20602,7 @@ def _run_llm_quality(args):
                             info_stats["by_tag"][tag]["answered"] += 1
                         else:
                             info_stats["by_tag"][tag]["missed"] += 1
-                    if (
-                        not answered_any
-                        and state not in {"manager_active", "pending"}
-                        and not booking_detail_lookup_fallback
-                    ):
+                    if not answered_any and state not in {"manager_active", "pending"}:
                         info_mismatch = True
                         stats["info_mismatch"] += 1
 
@@ -20480,24 +20692,12 @@ def _run_llm_quality(args):
                         expected_meta_any=expected_meta_any,
                         expected_meta_contains=expected_meta_contains,
                         expected_trace_contains=expected_trace_contains,
-                        turn_text=text,
                     )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
                 else:
                     stats["turns_passed"] += 1
                 trace_id = (meta or {}).get("trace_id") if isinstance(meta, dict) else None
-                expected_reply_oracle = _llm_quality_normalize_expected_reply_for_oracle(
-                    expected_reply=expected_reply,
-                    expected_response=expected_response,
-                    expected_action=expected_action,
-                    expected_reply_type=expected_reply_type,
-                    expected_info_sections=expected_info_sections,
-                    expected_state=expected_state,
-                    booking_active=booking_active,
-                    state=state,
-                    meta=meta,
-                )
                 judge_result = None
                 should_judge, judge_skip_reason = _should_judge_turn(
                     state,
@@ -20530,7 +20730,7 @@ def _run_llm_quality(args):
                             "action": expected_action,
                             "reply_type": expected_reply_type,
                             "state": expected_state,
-                            "expected_reply": expected_reply_oracle,
+                            "expected_reply": expected_reply,
                             "info_sections": expected_info_sections,
                         },
                         "decision_meta": {
@@ -20623,6 +20823,19 @@ def _run_llm_quality(args):
                     expected_response=expected_response,
                     bot_response=bot_response,
                 )
+                human_semantic_reasons = _llm_quality_collect_human_semantic_strict_reasons(
+                    judge_result=judge_result,
+                    meta=meta,
+                    turn_tags=turn_tags,
+                    expected_info_sections=expected_info_sections,
+                    actual_info_sections=info_sections,
+                    actual_info_intents=info_intents,
+                    expected_reply_type=expected_reply_type,
+                    actual_expected_reply_type=expected_reply_type_value,
+                )
+                for reason in human_semantic_reasons:
+                    if reason not in strict_reasons:
+                        strict_reasons.append(reason)
                 meta_action = (
                     (meta or {}).get("action")
                     if isinstance(meta, dict)
@@ -20685,10 +20898,6 @@ def _run_llm_quality(args):
                 if hard_reasons:
                     stats["turns_hard_failed"] += 1
 
-                root_trace_failure = _llm_quality_root_trace_failure(
-                    trace_entries,
-                    strict_reasons,
-                )
                 _record_failure(
                     strict_reasons,
                     {
@@ -20700,8 +20909,6 @@ def _run_llm_quality(args):
                         "conversation_id": conversation_id,
                         "trace_id": trace_id,
                         "last_trace_stage": _llm_quality_last_trace_stage(trace_entries),
-                        "root_trace_stage": root_trace_failure.get("stage"),
-                        "root_reason_code": root_trace_failure.get("reason_code"),
                         "conversation_state": state,
                         "expected_response": expected_response,
                         "bot_response": bot_response,
@@ -20732,14 +20939,13 @@ def _run_llm_quality(args):
                 tool_hook_results = []
                 tool_hook_result = None
                 send_calendar_hook = _llm_quality_should_send_calendar_hook(tool_signals, turn_tags)
-                send_confirm_hook = _llm_quality_should_send_confirm_hook(tool_signals, turn_tags)
                 if args.tool_hooks == "auto":
                     hook_key = conversation_id or f"dialog-{dialog_idx}"
                     hook_state = tool_hook_state.setdefault(
                         hook_key, {"confirm": 0, "cancel": 0, "calendar": 0}
                     )
                     hook_limit = max(args.tool_hook_limit, 1)
-                    if send_confirm_hook:
+                    if tool_signals.get("confirm") and "confirm" not in turn_tags:
                         if hook_state["confirm"] < hook_limit:
                             tool_hook_results.append(
                                 _send_tool_hook(
@@ -20830,10 +21036,6 @@ def _run_llm_quality(args):
                     "tool_signals": tool_signals,
                     "tool_hook": tool_hook_result,
                     "tool_hooks": tool_hook_results,
-                    "last_trace_stage": _llm_quality_last_trace_stage(trace_entries),
-                    "root_trace_stage": root_trace_failure.get("stage"),
-                    "earliest_failed_stage": root_trace_failure.get("stage"),
-                    "root_reason_code": root_trace_failure.get("reason_code"),
                     "evaluation": {
                         "ok": not evaluation_reasons,
                         "reasons": evaluation_reasons,
@@ -20879,9 +21081,6 @@ def _run_llm_quality(args):
                             "decision_trace": trace_entries,
                             "decision_trace_error": trace_error,
                             "last_trace_stage": _llm_quality_last_trace_stage(trace_entries),
-                            "root_trace_stage": root_trace_failure.get("stage"),
-                            "earliest_failed_stage": root_trace_failure.get("stage"),
-                            "root_reason_code": root_trace_failure.get("reason_code"),
                             "handover": handover_meta,
                             "outbox_summary": outbox_summary,
                             "outbox_payload_status": outbox_payload_status,
@@ -22063,7 +22262,6 @@ def _run_llm_quality_gates(args):
         baseline_summary=args.baseline_summary,
         reset_before_dialog=bool(args.reset_before_dialog),
         allow_no_code_delta=bool(args.allow_no_code_delta),
-        resume_mode=bool(args.resume),
         allow_non_canonical_lock_retry=bool(args.allow_non_canonical_lock_retry),
         jid_mode=args.jid_mode,
         runtime_commit=args.runtime_commit,
@@ -22504,15 +22702,15 @@ def _run_webhook_fuzz(args):
         or os.environ.get("CHATFLOW_INSTANCE_ID")
         or os.environ.get("INSTANCE_ID")
     )
-    eval_mode = _resolve_eval_mode(container_name)
+    test_mode_enabled = _resolve_test_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
     selected_cases, requested_case_ids = _select_cases(WEBHOOK_FUZZ_CASES, args.case_ids)
     if selected_cases is None:
         selected_cases = _pick_fuzz_cases(WEBHOOK_FUZZ_CASES, args.count, rng)
         requested_case_ids = []
 
-    if mode == "logic" and eval_mode == "prod":
-        raise SystemExit("webhook-fuzz: EVAL_MODE must be non-prod; logic mode is blocked for safety")
+    if mode == "logic" and not test_mode_enabled:
+        raise SystemExit("webhook-fuzz: TEST_MODE disabled; logic mode is blocked for safety")
 
     remote_jid = None
     if mode == "state":
@@ -25540,16 +25738,12 @@ def _run_livecheck_auto(args):
         raise SystemExit(
             f"livecheck-auto: client_slug {client_slug} not allowed; expected {SAFE_ALLOWLIST_CLIENT_SLUG}"
         )
-    eval_mode = _resolve_eval_mode(container_name)
-    transport_send_mode = _resolve_transport_send_mode(container_name)
+    test_mode_enabled = _resolve_test_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
     if not allowlist_jids:
         raise SystemExit("livecheck-auto: allowlist-jids is empty")
-    if transport_send_mode != "allowlist":
-        raise SystemExit(
-            "livecheck-auto: TRANSPORT_SEND_MODE must resolve to allowlist; "
-            f"got {transport_send_mode} (eval_mode={eval_mode})"
-        )
+    if not test_mode_enabled:
+        raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
     allow_non_allowlist = bool(args.allow_non_allowlist)
 
     db_user = _resolve_db_user_simple()
@@ -29395,6 +29589,8 @@ if len(sys.argv) > 1 and sys.argv[1] == "llm-quality":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-audit":
     raise SystemExit(_run_llm_quality_audit(_parse_llm_quality_audit_args(sys.argv[2:])))
+if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-trends":
+    raise SystemExit(_run_llm_quality_trends(_parse_llm_quality_trends_args(sys.argv[2:])))
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-gates":
     raise SystemExit(_run_llm_quality_gates(_parse_llm_quality_gates_args(sys.argv[2:])))
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-matrix":
@@ -29492,9 +29688,6 @@ else:
 
 if status == "running":
     env_checks = [
-        ("EVAL_MODE", True),
-        ("TRANSPORT_SEND_MODE", True),
-        ("OUTBOX_WORKER_MODE", True),
         ("TEST_MODE", True),
         ("OUTBOUND_ALLOWLIST_JIDS", True),
         ("OUTBOX_WORKER_ENABLED", True),

@@ -244,46 +244,6 @@ def test_detect_info_class_intents_special_offers_phrase_does_not_trigger_master
     assert meta.get("info_signals", {}).get("master") is False
 
 
-def test_detect_info_class_intents_promotions_signal():
-    intents, meta = _detect_info_class_intents(
-        "Есть ли у вас акции на маникюр?",
-        intent_decomp_set=set(),
-        client_slug="demo_salon",
-        service_query="Маникюр",
-    )
-
-    assert "promotions" in intents
-    assert "promotions_rules" not in intents
-    assert meta.get("info_signals", {}).get("promotions") is True
-    assert meta.get("info_signals", {}).get("promotions_rules") is False
-
-
-def test_detect_info_class_intents_promotions_signal_with_service_mention_rescue():
-    intents, meta = _detect_info_class_intents(
-        "Я слышал, что у вас есть акция на маникюр.",
-        intent_decomp_set=set(),
-        client_slug="demo_salon",
-    )
-
-    assert "promotions" in intents
-    assert "services_overview" not in intents
-    assert meta.get("info_signals", {}).get("promotions") is True
-    assert meta.get("promotions_request_rescue") is True
-
-
-def test_detect_info_class_intents_promotions_rules_signal():
-    intents, meta = _detect_info_class_intents(
-        "Акции и скидки суммируются?",
-        intent_decomp_set=set(),
-        client_slug="demo_salon",
-    )
-
-    assert "promotions_rules" in intents
-    assert "promotions" not in intents
-    assert meta.get("info_signals", {}).get("promotions") is False
-    assert meta.get("info_signals", {}).get("promotions_rules") is True
-
-
 def test_compose_multi_truth_reply_how_long_you_work_drops_duration_component():
     reply, meta = demo_salon_knowledge.compose_multi_truth_reply(
         "Как долго вы работаете?",
@@ -412,6 +372,41 @@ def test_build_info_intent_reply_location_uses_truth_address():
     assert "address" in info_sections or "location" in info_sections
 
 
+def test_build_info_intent_reply_location_scoped_request_excludes_hours():
+    reply, meta = _build_info_intent_reply(
+        "location",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Где находится салон?",
+        requested_info_intents=["location"],
+    )
+
+    assert isinstance(reply, str) and "адрес" in reply.casefold()
+    assert "работаем" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert fact_intents == ["location"]
+    assert info_sections == ["address"]
+
+
+def test_build_info_intent_reply_parking_scoped_request_excludes_location_bundle():
+    reply, meta = _build_info_intent_reply(
+        "parking",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Есть ли у вас парковка?",
+        requested_info_intents=["parking"],
+    )
+
+    assert isinstance(reply, str) and "парков" in reply.casefold()
+    assert "адрес" not in reply.casefold()
+    assert "работаем" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert fact_intents == ["parking"]
+    assert info_sections == ["parking"]
+
+
 def test_build_info_intent_reply_promotions_uses_truth_promotions():
     reply, meta = _build_info_intent_reply(
         "promotions",
@@ -421,22 +416,6 @@ def test_build_info_intent_reply_promotions_uses_truth_promotions():
     )
 
     assert isinstance(reply, str) and reply.strip()
-    fact_intents = (meta or {}).get("fact_intents") or []
-    info_sections = (meta or {}).get("info_sections") or []
-    assert "promotions" in fact_intents
-    assert "promotions" in info_sections
-
-
-def test_build_info_intent_reply_promotions_rules_uses_truth_promotions_rules():
-    reply, meta = _build_info_intent_reply(
-        "promotions_rules",
-        service_query=None,
-        client_slug="demo_salon",
-        message_text="Скидки суммируются?",
-    )
-
-    assert isinstance(reply, str) and reply.strip()
-    assert "сумм" in reply.casefold()
     fact_intents = (meta or {}).get("fact_intents") or []
     info_sections = (meta or {}).get("info_sections") or []
     assert "promotions" in fact_intents

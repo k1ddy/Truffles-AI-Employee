@@ -366,14 +366,16 @@ async def test_run_outbox_process_job_execute_supports_archive_and_single_messag
     def _fake_claim(
         _db,
         *,
-        context,
+        client_id,
+        allowed_branch_ids,
         limit,
         idle_seconds,
         max_wait_seconds,
         include_without_conversation,
     ):
         captured["claim"] = {
-            "context_client_id": context.client.id,
+            "client_id": client_id,
+            "allowed_branch_ids": allowed_branch_ids,
             "limit": limit,
             "idle_seconds": idle_seconds,
             "max_wait_seconds": max_wait_seconds,
@@ -382,7 +384,7 @@ async def test_run_outbox_process_job_execute_supports_archive_and_single_messag
         return []
 
     monkeypatch.setattr(console_router, "archive_pending_outbox", _fake_archive)
-    monkeypatch.setattr(console_router, "_claim_scoped_outbox_rows", _fake_claim)
+    monkeypatch.setattr(console_router, "claim_scoped_outbox_rows", _fake_claim)
 
     result = await console_router._run_outbox_process_job(
         db,
@@ -403,6 +405,45 @@ async def test_run_outbox_process_job_execute_supports_archive_and_single_messag
     assert result["results"]["processed"] == 0
     assert result["archive"] == {"matched": 3, "archived": 3}
     assert captured["claim"]["include_without_conversation"] is False
+    assert captured["claim"]["client_id"] == context.client.id
+    assert captured["claim"]["allowed_branch_ids"] is None
     assert captured["archive"]["older_than_seconds"] == 24 * 3600
     assert captured["archive"]["limit"] == 7
     assert captured["archive"]["only_without_conversation"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_outbox_process_job_execute_uses_shared_runtime_process_helper(monkeypatch):
+    db = Mock()
+    context = _build_context()
+    claimed_rows = [{"id": uuid4()}]
+    settings = SimpleNamespace(
+        limit=10,
+        idle_seconds=8,
+        max_wait_seconds=10,
+        max_attempts=5,
+        retry_backoff_seconds=2.0,
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(console_router, "claim_scoped_outbox_rows", lambda *_args, **_kwargs: claimed_rows)
+    monkeypatch.setattr(console_router, "load_outbox_process_settings", lambda: settings)
+
+    async def _fake_process_claimed(_db, rows, *, settings):
+        captured["rows"] = rows
+        captured["settings"] = settings
+        return {"claimed": 1, "sent": 1, "failed": 0, "retry_scheduled": 0}
+
+    monkeypatch.setattr(console_router, "process_claimed_outbox_rows", _fake_process_claimed)
+
+    result = await console_router._run_outbox_process_job(
+        db,
+        context=context,
+        mode="execute",
+        params={},
+    )
+
+    assert result["processed"] == 1
+    assert result["results"]["sent"] == 1
+    assert captured["rows"] == claimed_rows
+    assert captured["settings"] is settings

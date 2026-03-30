@@ -104,15 +104,6 @@ class HandoverConfirmationRuntimeHooks:
     msg_handover_declined: str
 
 
-@dataclass(frozen=True)
-class SessionMemoryRuntimeHooks:
-    set_context_manager: Callable[..., dict[str, Any]]
-    set_expected_reply_type: Callable[..., dict[str, Any]]
-    set_intent_queue: Callable[..., dict[str, Any]]
-    set_booking_context: Callable[..., dict[str, Any]]
-    clear_service_hint: Callable[..., dict[str, Any]]
-
-
 PENDING_RESUME_KEY = "pending_resume"
 DECISION_TRACE_KEY = "decision_trace"
 SIMULATION_CONTEXT_KEY = "simulation"
@@ -633,7 +624,11 @@ def capture_pending_resume_on_conversation(conversation: Conversation) -> bool:
         captured_context = {}
     if captured_context == original_context:
         return False
-    conversation.context = captured_context
+    conversation.context = _dialog_state_service().prepare_state_service_context_write(
+        original_context if isinstance(original_context, dict) else None,
+        captured_context,
+        decision_trace_key=DECISION_TRACE_KEY,
+    )
     return True
 
 
@@ -665,7 +660,12 @@ def restore_pending_resume_on_conversation(
 ) -> bool:
     restored_context, restored = _restore_pending_resume_context(conversation.context, now=now)
     if restored:
-        conversation.context = restored_context
+        existing_context = conversation.context if isinstance(conversation.context, dict) else None
+        conversation.context = _dialog_state_service().prepare_state_service_context_write(
+            existing_context,
+            restored_context,
+            decision_trace_key=DECISION_TRACE_KEY,
+        )
     return restored
 
 
@@ -679,17 +679,15 @@ def _build_pending_resume_snapshot_payload(
     booking_context: dict | None,
     session_memory: dict,
 ) -> dict[str, Any]:
-    snapshot_context = dict(context) if isinstance(context, dict) else {}
-    snapshot_context["context_manager"] = (
-        dict(context_manager) if isinstance(context_manager, dict) else {}
+    snapshot_context = _dialog_state_service().build_pending_resume_snapshot_context(
+        context,
+        context_manager=context_manager,
+        expected_reply_type=expected_reply_type,
+        expected_reply_reason=expected_reply_reason,
+        intent_queue=intent_queue,
+        booking_context=booking_context,
+        session_memory=session_memory,
     )
-    snapshot_context["expected_reply_type"] = expected_reply_type
-    snapshot_context["expected_reply_reason"] = expected_reply_reason
-    snapshot_context["intent_queue"] = list(intent_queue) if isinstance(intent_queue, list) else []
-    snapshot_context["booking"] = (
-        dict(booking_context) if isinstance(booking_context, dict) else {"active": False}
-    )
-    snapshot_context["session_memory"] = dict(session_memory) if isinstance(session_memory, dict) else {}
     return _dialog_state_service().capture_pending_resume_payload(
         snapshot_context,
         snapshot_keys=PENDING_RESUME_SNAPSHOT_KEYS,
@@ -1055,82 +1053,6 @@ def _should_reset_session_memory_trigger(
     if not normalized:
         return False
     return any(phrase in normalized for phrase in reset_phrases)
-
-
-def _reset_session_memory_context(
-    *,
-    context: dict,
-    context_manager: dict,
-    reason: str,
-    now: datetime,
-    session_memory_ttl_hours: int,
-    class_manager_key: str,
-    service_manager_key: str,
-    consult_manager_key: str,
-    canonical_state_key: str,
-    referent_key: str,
-    hooks: SessionMemoryRuntimeHooks,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    manager = _dialog_state_service().clear_context_manager_carryover_family(
-        context_manager,
-        class_manager_key=class_manager_key,
-        service_manager_key=service_manager_key,
-        consult_manager_key=consult_manager_key,
-        canonical_state_key=canonical_state_key,
-        referent_key=referent_key,
-    )
-    updated_context = hooks.set_context_manager(context, manager)
-    updated_context = hooks.set_expected_reply_type(updated_context, None)
-    updated_context = hooks.set_intent_queue(updated_context, [])
-    updated_context = hooks.set_booking_context(updated_context, {"active": False})
-    updated_context = hooks.clear_service_hint(updated_context)
-    updated_context = _dialog_state_service().set_context_session_memory(
-        updated_context,
-        None,
-        key="session_memory",
-    )
-    memory_payload = _dialog_state_service().touch_session_memory_payload(
-        {},
-        now=now,
-        default_ttl_hours=session_memory_ttl_hours,
-    )
-    snapshot = _build_session_memory_observability_snapshot(memory_payload)
-    snapshot["reason"] = reason
-    return (
-        updated_context,
-        manager,
-        snapshot,
-    )
-
-
-def _clear_session_memory_expected_reply_context(
-    *,
-    context: dict,
-    expected_reply_type: str | None,
-    now: datetime,
-    session_memory_ttl_hours: int,
-) -> tuple[dict[str, Any], dict[str, Any], bool]:
-    memory = context.get("session_memory") if isinstance(context.get("session_memory"), dict) else {}
-    if not memory:
-        return context, {}, False
-    memory, changed = _dialog_state_service().clear_session_memory_expected_reply(
-        memory,
-        expected_reply_type=expected_reply_type,
-    )
-    if not changed:
-        return context, memory, False
-
-    memory = _dialog_state_service().touch_session_memory_payload(
-        memory,
-        now=now,
-        default_ttl_hours=session_memory_ttl_hours,
-    )
-    updated_context = _dialog_state_service().set_context_session_memory(
-        context,
-        memory,
-        key="session_memory",
-    )
-    return updated_context, memory, True
 
 
 def _resolve_pending_no_handover_reset(

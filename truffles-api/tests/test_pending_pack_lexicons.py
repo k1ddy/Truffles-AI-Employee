@@ -30,11 +30,11 @@ def test_pending_wait_uses_pack_lexicon():
         return text, True
 
     with patch(
-        "app.routers.webhook._legacy.get_active_handover", return_value=handover
+        "app.routers.webhook.pending.get_active_handover", return_value=handover
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.pending._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._set_conversation_context"
+        "app.routers.webhook.pending._set_conversation_context"
     ):
         for message_text in ("рахмет", "понял"):
             saved_message = SimpleNamespace(message_metadata={})
@@ -90,11 +90,11 @@ def test_pending_sla_collect_only_sets_runtime_mode():
     with patch(
         "app.routers.webhook.pending.resolve_pending_sla_violation", return_value=decision
     ), patch(
-        "app.routers.webhook._legacy.get_active_handover", return_value=handover
+        "app.routers.webhook.pending.get_active_handover", return_value=handover
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.pending._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._set_conversation_context",
+        "app.routers.webhook.pending._set_conversation_context",
         side_effect=lambda conv, ctx: setattr(conv, "context", ctx),
     ):
         response = pending_router._handle_pending_gate(
@@ -143,13 +143,13 @@ def test_pending_ack_reuses_owner_restore_without_legacy_reentry_writer():
         return text, True
 
     with patch(
-        "app.routers.webhook._legacy.get_active_handover", return_value=handover
+        "app.routers.webhook.pending.get_active_handover", return_value=handover
     ), patch(
-        "app.routers.webhook._legacy.manager_resolve"
+        "app.routers.webhook.pending.manager_resolve"
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.pending._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._set_conversation_context",
+        "app.routers.webhook.pending._set_conversation_context",
         side_effect=lambda conv, ctx: setattr(conv, "context", ctx),
     ), patch(
         "app.routers.webhook._legacy._set_re_entry_required"
@@ -192,21 +192,21 @@ def test_handover_confirmation_reuses_owner_surface():
         return text, True
 
     with patch(
-        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+        "app.routers.webhook.pending._reset_low_confidence_retry"
     ) as reset_low_confidence_retry, patch(
-        "app.routers.webhook.context_manager._set_conversation_context",
+        "app.routers.webhook.pending._set_conversation_context",
         side_effect=lambda conv, ctx: setattr(conv, "context", ctx),
     ), patch(
-        "app.routers.webhook.context_manager._is_handover_confirmation_active",
+        "app.routers.webhook.pending._is_handover_confirmation_active",
         return_value=True,
     ), patch(
-        "app.services.ai_service.classify_confirmation",
+        "app.routers.webhook.pending.classify_confirmation",
         return_value="yes",
     ), patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.pending._reuse_active_handover",
         return_value=(SimpleNamespace(id="handover-1"), True, True),
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.pending._record_decision_trace"
     ) as record_decision_trace:
         response = pending_router._handle_handover_confirmation_gate(
             db=db,

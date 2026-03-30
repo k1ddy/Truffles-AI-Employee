@@ -145,6 +145,29 @@ def test_validate_llm_policy_core_output_accepts_sparse_booking_collect_projecti
     assert contract.referents["service"]["entity_id"] == "svc:manicure"
 
 
+def test_validate_llm_policy_core_output_normalizes_nullable_confidence():
+    payload = {
+        "intent": "booking",
+        "action": "collect",
+        "tool_action": "collect",
+        "tool_args": {},
+        "pack_refs": [],
+        "slots": {"service": "маникюр"},
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": None,
+        "reason": "collect:datetime",
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert error is None
+    assert contract is not None
+    assert contract.confidence == 0.0
+
+
 def test_validate_llm_policy_core_output_invalid():
     payload = {"action": "", "tool_action": "info", "slots": {}, "confidence": 1.2}
 

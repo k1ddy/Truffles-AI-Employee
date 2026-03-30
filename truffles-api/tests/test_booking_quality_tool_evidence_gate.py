@@ -20,7 +20,6 @@ def _load_tool_evidence_helpers():
         "_llm_quality_calendar_outcome_from_meta",
         "_llm_quality_extract_tool_signals",
         "_llm_quality_should_send_calendar_hook",
-        "_llm_quality_should_send_confirm_hook",
         "_llm_quality_parse_coverage_tokens",
         "_llm_quality_build_tool_evidence_status",
         "_llm_quality_build_infra_status",
@@ -131,90 +130,38 @@ def test_calendar_hook_allows_pending_for_non_list_slots():
     assert should_send(signal, []) is True
 
 
-def test_confirm_hook_allows_get_booking_even_when_turn_tagged_confirm():
-    ns = _load_tool_evidence_helpers()
-    should_send = ns["_llm_quality_should_send_confirm_hook"]
-
-    signal = {
-        "confirm": {"required": True, "decision": None, "outcome": "pending"},
-        "calendar": {
-            "intent": "calendar.get_booking",
-            "tool_decision": "not_found",
-            "outcome": "success",
-        },
-    }
-
-    assert should_send(signal, ["confirm"]) is True
-
-
-def test_confirm_hook_allows_check_booking_alias_even_when_turn_tagged_confirm():
-    ns = _load_tool_evidence_helpers()
-    should_send = ns["_llm_quality_should_send_confirm_hook"]
-
-    signal = {
-        "confirm": {"required": True, "decision": None, "outcome": "pending"},
-        "calendar": {
-            "intent": "check_booking",
-            "tool_decision": None,
-            "outcome": "pending",
-        },
-    }
-
-    assert should_send(signal, ["confirm"]) is True
-
-
-def test_confirm_hook_allows_check_record_alias_even_when_turn_tagged_confirm():
-    ns = _load_tool_evidence_helpers()
-    should_send = ns["_llm_quality_should_send_confirm_hook"]
-
-    signal = {
-        "confirm": {"required": True, "decision": None, "outcome": "pending"},
-        "calendar": {
-            "intent": "check_record",
-            "tool_decision": None,
-            "outcome": "pending",
-        },
-    }
-
-    assert should_send(signal, ["confirm"]) is True
-
-
-def test_confirm_hook_stays_skipped_for_confirm_tag_without_get_booking_status_path():
-    ns = _load_tool_evidence_helpers()
-    should_send = ns["_llm_quality_should_send_confirm_hook"]
-
-    signal = {
-        "confirm": {"required": True, "decision": "confirmed", "outcome": "success"},
-        "calendar": {
-            "intent": "calendar.book_slot",
-            "tool_decision": "confirmed",
-            "outcome": "success",
-        },
-    }
-
-    assert should_send(signal, ["confirm"]) is False
-
-
-def test_extract_tool_signals_normalizes_check_booking_intent_to_confirm_signal():
+def test_extract_tool_signals_skips_hooks_for_check_booking_reference_collect_prompt():
     ns = _load_tool_evidence_helpers()
     extract_tool_signals = ns["_llm_quality_extract_tool_signals"]
 
     signals = extract_tool_signals(
         {
-            "action": "escalate",
+            "action": "check_booking_prompt",
             "intent": "check_booking",
-            "llm_policy_core": {
-                "payload": {
-                    "tool_action": "calendar.get_booking",
-                }
-            },
+            "expected_reply_type": "name",
+        },
+        [],
+    )
+
+    assert signals == {}
+
+
+def test_extract_tool_signals_keeps_calendar_hooks_for_check_booking_after_lookup_attempt():
+    ns = _load_tool_evidence_helpers()
+    extract_tool_signals = ns["_llm_quality_extract_tool_signals"]
+
+    signals = extract_tool_signals(
+        {
+            "action": "reply",
+            "intent": "check_booking",
+            "tool_decision": "not_found",
         },
         [],
     )
 
     assert signals["confirm"]["required"] is True
     assert signals["calendar"]["intent"] == "check_booking"
-    assert signals["calendar"]["outcome"] == "pending"
+    assert signals["calendar"]["outcome"] == "success"
 
 
 def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidence():
@@ -359,38 +306,6 @@ def test_tool_evidence_strict_policy_accepts_runs_with_calendar_and_confirm_proo
     assert tool_evidence["reasons"] == []
 
 
-def test_tool_evidence_strict_policy_accepts_check_booking_alias_confirm_hook():
-    ns = _load_tool_evidence_helpers()
-    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
-    build_infra_status = ns["_llm_quality_build_infra_status"]
-
-    tool_evidence = build_tool_evidence_status(
-        scenario_coverage="booking,info,interrupt",
-        tool_hooks_mode="auto",
-        tool_evidence_policy="strict",
-        coverage_stats={
-            "intents": {"check_booking": 2},
-            "actions": {},
-            "trace_stages": {},
-            "tools": {"events": {"calendar": 2, "confirm": 2}},
-            "tool_hooks": {
-                "by_action": {"calendar": 2, "confirm": 2},
-                "required_by_action": {"calendar": 2},
-            },
-        },
-    )
-
-    assert tool_evidence["valid"] is True
-    assert tool_evidence["reasons"] == []
-    assert tool_evidence["required"]["confirm"] is True
-    assert tool_evidence["counts"]["check_booking_intents"] == 2
-    assert tool_evidence["counts"]["confirm_hook_events"] == 2
-
-    infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
-    assert infra["valid"] is True
-    assert infra["reasons"] == []
-
-
 def test_tool_evidence_strict_policy_accepts_observed_confirm_evidence_without_explicit_candidate():
     ns = _load_tool_evidence_helpers()
     build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
@@ -444,6 +359,57 @@ def test_tool_evidence_strict_policy_counts_check_booking_alias_intents():
 
     assert tool_evidence["valid"] is True
     assert tool_evidence["counts"]["check_booking_intents"] == 2
+
+
+def test_tool_evidence_strict_policy_ignores_check_booking_reference_collect_prompts():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"calendar.get_booking": 1},
+            "actions": {"check_booking_prompt": 1},
+            "trace_stages": {},
+            "tools": {"events": {}},
+            "tool_hooks": {"by_action": {}, "required_by_action": {}},
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert tool_evidence["reasons"] == []
+    assert tool_evidence["counts"]["check_booking_prompt_actions"] == 1
+    assert tool_evidence["counts"]["check_booking_reference_collect_turns"] == 1
+    assert tool_evidence["counts"]["calendar_intent_turns"] == 0
+    assert tool_evidence["counts"]["check_booking_intents"] == 0
+    assert tool_evidence["required"]["calendar"] is False
+    assert tool_evidence["required"]["confirm"] is False
+
+
+def test_tool_evidence_strict_policy_accepts_booking_commit_trace_without_calendar_intent_counter():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {},
+            "actions": {},
+            "trace_stages": {"booking_commit": 1},
+            "tools": {"events": {}},
+            "tool_hooks": {"by_action": {}, "required_by_action": {}},
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert "calendar_intent_missing" not in tool_evidence["reasons"]
+    assert tool_evidence["required"]["calendar"] is True
+    assert tool_evidence["counts"]["calendar_evidence_total"] == 1
+    assert tool_evidence["counts"]["calendar_intent_candidates"] == 0
 
 
 def test_tool_evidence_strict_policy_requires_auto_tool_hooks_mode():

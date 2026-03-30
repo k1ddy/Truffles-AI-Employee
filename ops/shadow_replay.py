@@ -16,6 +16,13 @@ import json
 import sys
 from typing import Any
 
+_RUNTIME_TRACE_SECTION_WEIGHTS = {
+    "owner_transition": 0.25,
+    "binding_transition": 0.25,
+    "action_transition": 0.20,
+    "state_transition": 0.30,
+}
+
 
 def _load_json(path: str) -> dict[str, Any]:
     if path == "-":
@@ -97,14 +104,132 @@ def _hash_payload(value: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _extract_runtime_trace_contract(bundle: dict[str, Any]) -> dict[str, Any] | None:
+    decision_meta = bundle.get("decision_meta")
+    if isinstance(decision_meta, dict) and isinstance(
+        decision_meta.get("runtime_trace_contract"), dict
+    ):
+        return dict(decision_meta["runtime_trace_contract"])
+
+    trace_items = bundle.get("decision_trace")
+    if isinstance(trace_items, list):
+        for entry in reversed(trace_items):
+            if not isinstance(entry, dict):
+                continue
+            runtime_trace_contract = entry.get("runtime_trace_contract")
+            if isinstance(runtime_trace_contract, dict):
+                return dict(runtime_trace_contract)
+    return None
+
+
+def _json_pointer_escape(token: Any) -> str:
+    return str(token).replace("~", "~0").replace("/", "~1")
+
+
+def _flatten_json_pointer_map(value: Any, prefix: str = "") -> dict[str, Any]:
+    if isinstance(value, dict):
+        if not value:
+            return {prefix or "": {}}
+        flattened: dict[str, Any] = {}
+        for key in sorted(value):
+            child_prefix = f"{prefix}/{_json_pointer_escape(key)}" if prefix else f"/{_json_pointer_escape(key)}"
+            flattened.update(_flatten_json_pointer_map(value[key], child_prefix))
+        return flattened
+    if isinstance(value, list):
+        if not value:
+            return {prefix or "": []}
+        flattened: dict[str, Any] = {}
+        for idx, item in enumerate(value):
+            child_prefix = f"{prefix}/{idx}" if prefix else f"/{idx}"
+            flattened.update(_flatten_json_pointer_map(item, child_prefix))
+        return flattened
+    return {prefix or "": value}
+
+
+def _pointer_section(pointer: str) -> str | None:
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        return None
+    token = pointer.split("/", 2)[1]
+    return token.replace("~1", "/").replace("~0", "~") or None
+
+
+def _score_runtime_trace_contract_diff(
+    baseline_contract: dict[str, Any] | None,
+    shadow_contract: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(baseline_contract, dict) or not isinstance(shadow_contract, dict):
+        return {
+            "status": "missing",
+            "score": 0.0,
+            "section_scores": {},
+            "mismatch_count": 1,
+            "mismatches": [
+                {
+                    "pointer": "",
+                    "section": "runtime_trace_contract",
+                    "baseline": baseline_contract,
+                    "shadow": shadow_contract,
+                }
+            ],
+        }
+
+    baseline_map = _flatten_json_pointer_map(baseline_contract)
+    shadow_map = _flatten_json_pointer_map(shadow_contract)
+    mismatches: list[dict[str, Any]] = []
+    section_scores: dict[str, float] = {}
+    total_weight = 0.0
+    weighted_score = 0.0
+
+    all_paths = sorted(set(baseline_map) | set(shadow_map))
+    for section, weight in _RUNTIME_TRACE_SECTION_WEIGHTS.items():
+        section_paths = [
+            pointer for pointer in all_paths if _pointer_section(pointer) == section
+        ]
+        if not section_paths:
+            continue
+        matches = 0
+        for pointer in section_paths:
+            baseline_value = baseline_map.get(pointer)
+            shadow_value = shadow_map.get(pointer)
+            if baseline_value == shadow_value and pointer in baseline_map and pointer in shadow_map:
+                matches += 1
+                continue
+            mismatches.append(
+                {
+                    "pointer": pointer,
+                    "section": section,
+                    "baseline": baseline_value,
+                    "shadow": shadow_value,
+                }
+            )
+        section_score = matches / len(section_paths)
+        section_scores[section] = round(section_score, 4)
+        total_weight += weight
+        weighted_score += weight * section_score
+
+    final_score = round(weighted_score / total_weight, 4) if total_weight else 1.0
+    return {
+        "status": "scored",
+        "score": final_score,
+        "section_scores": section_scores,
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches,
+    }
+
+
 def _summarize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     meta = _compact_meta(bundle.get("decision_meta"))
     trace_signature = _trace_signature(_trace_items(bundle.get("decision_trace")))
+    runtime_trace_contract = _extract_runtime_trace_contract(bundle)
     return {
         "meta": meta,
         "meta_hash": _hash_payload(meta),
         "trace": trace_signature,
         "trace_hash": _hash_payload(trace_signature),
+        "runtime_trace_contract": runtime_trace_contract,
+        "runtime_trace_contract_hash": (
+            _hash_payload(runtime_trace_contract) if isinstance(runtime_trace_contract, dict) else None
+        ),
     }
 
 
@@ -128,6 +253,12 @@ def _format_trace(trace: list[str]) -> str:
     if not trace:
         return "-"
     return " -> ".join(trace)
+
+
+def _format_runtime_trace_mismatch_pointers(mismatches: list[dict[str, Any]]) -> str:
+    if not mismatches:
+        return "-"
+    return ", ".join(str(item.get("pointer") or "") for item in mismatches[:8])
 
 
 def _build_report(
@@ -188,23 +319,34 @@ def _build_report(
                 f"- content: {str(message.get('content') or '')[:200]}",
                 f"- baseline.meta_hash: {summary['meta_hash']}",
                 f"- baseline.trace_hash: {summary['trace_hash']}",
+                f"- baseline.runtime_trace_contract_hash: {summary['runtime_trace_contract_hash'] or ''}",
                 f"- baseline.meta: {_format_meta(summary['meta'])}",
                 f"- baseline.trace: {_format_trace(summary['trace'])}",
             ]
         )
 
         if shadow_summary:
+            runtime_trace_diff = _score_runtime_trace_contract_diff(
+                summary.get("runtime_trace_contract"),
+                shadow_summary.get("runtime_trace_contract"),
+            )
             lines.extend(
                 [
                     f"- shadow.meta_hash: {shadow_summary['meta_hash']}",
                     f"- shadow.trace_hash: {shadow_summary['trace_hash']}",
+                    f"- shadow.runtime_trace_contract_hash: {shadow_summary['runtime_trace_contract_hash'] or ''}",
                     f"- shadow.meta: {_format_meta(shadow_summary['meta'])}",
                     f"- shadow.trace: {_format_trace(shadow_summary['trace'])}",
+                    f"- runtime_trace_contract.shadow_score: {runtime_trace_diff['score']}",
+                    f"- runtime_trace_contract.section_scores: {json.dumps(runtime_trace_diff['section_scores'], ensure_ascii=False, sort_keys=True)}",
+                    f"- runtime_trace_contract.mismatch_count: {runtime_trace_diff['mismatch_count']}",
+                    f"- runtime_trace_contract.mismatch_pointers: {_format_runtime_trace_mismatch_pointers(runtime_trace_diff['mismatches'])}",
                 ]
             )
             if (
                 summary["meta_hash"] != shadow_summary["meta_hash"]
                 or summary["trace_hash"] != shadow_summary["trace_hash"]
+                or runtime_trace_diff["score"] < 1.0
             ):
                 lines.append("- diff: mismatch")
             else:

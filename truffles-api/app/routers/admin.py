@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Client, ClientSettings, Prompt
 from app.services.alert_service import alert_warning
-from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.health_service import check_and_heal_conversations, get_system_health
 from app.services.metrics_daily_service import (
     ensure_metrics_daily_columns,
@@ -25,7 +24,7 @@ from app.services.metrics_daily_service import (
     get_metrics_daily_status_allowlist,
     run_metrics_daily_snapshot,
 )
-from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+from app.services.outbox_runtime_service import run_default_outbox_process
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -516,43 +515,7 @@ async def process_outbox(
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     _require_admin_token(x_admin_token)
-    limit = int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10"))
-    idle_seconds = int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8")))
-    max_wait_seconds = int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10")))
-    max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
-    retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
-    stale_seconds = int(float(os.environ.get("OUTBOX_STALE_PROCESSING_SECONDS", "120")))
-    stale_seconds = max(stale_seconds, 0)
-    max_wait_seconds = max(max_wait_seconds, 0)
-    released = release_stale_processing(
-        db,
-        stale_seconds=stale_seconds,
-        max_attempts=max_attempts,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
-    inbound_results = schedule_inbound_syncs(db)
-    rows = claim_pending_outbox_batches(
-        db,
-        limit=limit,
-        idle_seconds=idle_seconds,
-        max_wait_seconds=max_wait_seconds,
-        include_without_conversation=True,
-    )
-
-    from app.routers.webhook import _process_outbox_rows
-
-    results = await _process_outbox_rows(
-        db,
-        rows,
-        max_attempts=max_attempts,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
-    if inbound_results.get("scheduled") or inbound_results.get("errors"):
-        results["calendar_inbound"] = inbound_results
-    if released["released"] or released["failed"]:
-        results["released_stale"] = released["released"]
-        results["failed_stale"] = released["failed"]
-    return results
+    return await run_default_outbox_process(db, include_reminders=False)
 
 
 # === MEDIA CLEANUP ===

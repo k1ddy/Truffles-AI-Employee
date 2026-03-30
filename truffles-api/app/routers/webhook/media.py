@@ -15,12 +15,64 @@ from uuid import UUID, uuid4
 
 import httpx
 
+from app.logging_config import get_logger
 from app.models import Client, Message
 from app.schemas.webhook import WebhookBody
 from app.services.ai_service import normalize_for_matching, transcribe_audio_with_fallback
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import build_signed_media_url
 from app.services.telegram_service import TelegramService
+
+logger = get_logger("webhook")
+
+MEDIA_TYPE_ALIASES = {
+    "image": "photo",
+    "photo": "photo",
+    "jpg": "photo",
+    "jpeg": "photo",
+    "png": "photo",
+    "audio": "audio",
+    "voice": "audio",
+    "ptt": "audio",
+    "document": "document",
+    "pdf": "document",
+    "doc": "document",
+    "docx": "document",
+    "xlsx": "document",
+    "xls": "document",
+    "video": "video",
+}
+MEDIA_MAX_DEFAULT_MB = {"photo": 8, "audio": 8, "document": 10}
+MEDIA_RATE_LIMIT_DEFAULTS = {
+    "count": 5,
+    "window_seconds": 600,
+    "daily_count": 20,
+    "bytes_mb": 30,
+    "block_seconds": 900,
+}
+MEDIA_STORAGE_DEFAULT_DIR = os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media")
+MEDIA_STORAGE_MAX_BYTES = 25 * 1024 * 1024
+AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB = 2.0
+ASR_LOW_CONFIDENCE_MIN_CHARS = 6
+ASR_LOW_CONFIDENCE_MIN_WORDS = 3
+ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS = 6.0
+ASR_LOW_CONFIDENCE_NON_LETTER_RATIO = 0.4
+STYLE_REFERENCE_PATTERNS = (
+    re.compile(r"\bкак на (фото|картин\w+|примере)\b"),
+    re.compile(r"\bпо (фото|картин\w+|референс\w*)\b"),
+    re.compile(r"\bреференс\w*\b"),
+    re.compile(r"\bреф\b"),
+    re.compile(r"\bв стиле\b"),
+    re.compile(r"\bпохоже на\b"),
+    re.compile(r"\b(прислать|отправить|скинуть)\s+(фото|картин\w+|референс\w*)\b"),
+    re.compile(r"\b(send|share|upload)\s+(a\s+)?(photo|picture|reference)\b"),
+)
+STYLE_REFERENCE_HINT_TOKENS = ("фото", "картин", "референс", "реф", "пример")
+MSG_MEDIA_UNSUPPORTED = (
+    "Сейчас принимаем только фото, аудио и документы. Видео не поддерживаются. Опишите вопрос текстом."
+)
+MSG_MEDIA_TOO_LARGE = "Файл слишком большой. Пришлите, пожалуйста, фото/аудио поменьше или опишите текстом."
+MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за короткое время. Давайте продолжим позже или опишите текстом."
 
 
 class MediaInfo:
@@ -78,6 +130,12 @@ def _coerce_bool(value: object, default: bool) -> bool:
     return default
 
 
+def _is_env_enabled(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def _coerce_int(value: object, default: int, *, min_value: int | None = None) -> int:
     if value is None:
         result = default
@@ -121,8 +179,6 @@ def _default_allowed_media_hosts() -> list[str]:
 
 
 def _get_media_policy(client: Client | None) -> dict:
-    from . import _legacy as legacy
-
     overrides = {}
     if client and isinstance(client.config, dict):
         overrides = client.config.get("media") if isinstance(client.config.get("media"), dict) else {}
@@ -133,36 +189,50 @@ def _get_media_policy(client: Client | None) -> dict:
     max_sizes_mb = {
         "photo": _coerce_int(
             overrides.get("max_photo_mb", max_size_cfg.get("photo")),
-            legacy.MEDIA_MAX_DEFAULT_MB["photo"],
+            MEDIA_MAX_DEFAULT_MB["photo"],
             min_value=1,
         ),
         "audio": _coerce_int(
             overrides.get("max_audio_mb", max_size_cfg.get("audio")),
-            legacy.MEDIA_MAX_DEFAULT_MB["audio"],
+            MEDIA_MAX_DEFAULT_MB["audio"],
             min_value=1,
         ),
         "document": _coerce_int(
             overrides.get("max_document_mb", max_size_cfg.get("document")),
-            legacy.MEDIA_MAX_DEFAULT_MB["document"],
+            MEDIA_MAX_DEFAULT_MB["document"],
             min_value=1,
         ),
     }
 
     rate_limit = {
-        "count": _coerce_int(rate_cfg.get("count"), legacy.MEDIA_RATE_LIMIT_DEFAULTS["count"], min_value=1),
+        "count": _coerce_int(
+            rate_cfg.get("count"),
+            MEDIA_RATE_LIMIT_DEFAULTS["count"],
+            min_value=1,
+        ),
         "window_seconds": _coerce_int(
-            rate_cfg.get("window_seconds"), legacy.MEDIA_RATE_LIMIT_DEFAULTS["window_seconds"], min_value=30
+            rate_cfg.get("window_seconds"),
+            MEDIA_RATE_LIMIT_DEFAULTS["window_seconds"],
+            min_value=30,
         ),
         "daily_count": _coerce_int(
-            rate_cfg.get("daily_count"), legacy.MEDIA_RATE_LIMIT_DEFAULTS["daily_count"], min_value=1
+            rate_cfg.get("daily_count"),
+            MEDIA_RATE_LIMIT_DEFAULTS["daily_count"],
+            min_value=1,
         ),
-        "bytes_mb": _coerce_int(rate_cfg.get("bytes_mb"), legacy.MEDIA_RATE_LIMIT_DEFAULTS["bytes_mb"], min_value=1),
+        "bytes_mb": _coerce_int(
+            rate_cfg.get("bytes_mb"),
+            MEDIA_RATE_LIMIT_DEFAULTS["bytes_mb"],
+            min_value=1,
+        ),
         "block_seconds": _coerce_int(
-            rate_cfg.get("block_seconds"), legacy.MEDIA_RATE_LIMIT_DEFAULTS["block_seconds"], min_value=60
+            rate_cfg.get("block_seconds"),
+            MEDIA_RATE_LIMIT_DEFAULTS["block_seconds"],
+            min_value=60,
         ),
     }
 
-    storage_dir = overrides.get("storage_dir") or legacy.MEDIA_STORAGE_DEFAULT_DIR
+    storage_dir = overrides.get("storage_dir") or MEDIA_STORAGE_DEFAULT_DIR
     allowed_hosts_raw = overrides.get("allowed_hosts")
     allowed_hosts: list[str] = []
     if isinstance(allowed_hosts_raw, str):
@@ -187,11 +257,9 @@ def _get_media_policy(client: Client | None) -> dict:
 
 
 def _normalize_media_type(raw_type: str | None, mime: str | None) -> str:
-    from . import _legacy as legacy
-
     raw = (raw_type or "").strip().lower()
-    if raw in legacy.MEDIA_TYPE_ALIASES:
-        return legacy.MEDIA_TYPE_ALIASES[raw]
+    if raw in MEDIA_TYPE_ALIASES:
+        return MEDIA_TYPE_ALIASES[raw]
     if mime:
         if mime.startswith("image/"):
             return "photo"
@@ -268,14 +336,15 @@ def _get_media_rate_settings() -> tuple[str, float]:
 
 
 def _get_transcription_settings() -> tuple[bool, int, str, str | None, str, str | None, float, int]:
-    from . import _legacy as legacy
-
-    enabled = legacy._is_env_enabled(os.environ.get("AUDIO_TRANSCRIPTION_ENABLED"), default=False)
-    raw_max_mb = os.environ.get("AUDIO_TRANSCRIPTION_MAX_MB", str(legacy.AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB))
+    enabled = _is_env_enabled(os.environ.get("AUDIO_TRANSCRIPTION_ENABLED"), default=False)
+    raw_max_mb = os.environ.get(
+        "AUDIO_TRANSCRIPTION_MAX_MB",
+        str(AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB),
+    )
     try:
         max_mb = float(raw_max_mb)
     except (TypeError, ValueError):
-        max_mb = legacy.AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB
+        max_mb = AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB
     max_bytes = max(0, int(max_mb * 1024 * 1024))
     model = os.environ.get("AUDIO_TRANSCRIPTION_MODEL", "whisper-1")
     language = os.environ.get("AUDIO_TRANSCRIPTION_LANGUAGE")
@@ -323,33 +392,31 @@ def _non_letter_ratio(text: str) -> float:
 
 
 def _is_asr_low_confidence(text: str, duration_seconds: float | None) -> bool:
-    from . import _legacy as legacy
-
     cleaned = (text or "").strip()
     compact = re.sub(r"\s+", "", cleaned)
-    if len(compact) < legacy.ASR_LOW_CONFIDENCE_MIN_CHARS:
+    if len(compact) < ASR_LOW_CONFIDENCE_MIN_CHARS:
         return True
     words = _count_words(cleaned)
     if (
         duration_seconds is not None
-        and duration_seconds > legacy.ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS
-        and words < legacy.ASR_LOW_CONFIDENCE_MIN_WORDS
+        and duration_seconds > ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS
+        and words < ASR_LOW_CONFIDENCE_MIN_WORDS
     ):
         return True
-    if _non_letter_ratio(cleaned) >= legacy.ASR_LOW_CONFIDENCE_NON_LETTER_RATIO:
+    if _non_letter_ratio(cleaned) >= ASR_LOW_CONFIDENCE_NON_LETTER_RATIO:
         return True
     return False
 
 
 def _is_style_reference_request(text: str | None, *, has_media: bool) -> bool:
-    from . import _legacy as legacy
-
     normalized = normalize_for_matching(text or "")
     if not normalized:
         return False
-    if not has_media and not any(token in normalized for token in legacy.STYLE_REFERENCE_HINT_TOKENS):
+    if not has_media and not any(
+        token in normalized for token in STYLE_REFERENCE_HINT_TOKENS
+    ):
         return False
-    return any(pattern.search(normalized) for pattern in legacy.STYLE_REFERENCE_PATTERNS)
+    return any(pattern.search(normalized) for pattern in STYLE_REFERENCE_PATTERNS)
 
 
 def _read_media_bytes_from_storage(storage_path: str | None, max_bytes: int) -> tuple[bytes | None, str | None]:
@@ -506,8 +573,6 @@ def _check_media_rate_limit_fallback(
     size_bytes: int,
     rate_limit: dict,
 ) -> MediaDecision:
-    from . import _legacy as legacy
-
     now_ts = time.time()
     _purge_media_rate_cache(now_ts)
 
@@ -518,7 +583,7 @@ def _check_media_rate_limit_fallback(
         return MediaDecision(
             allowed=False,
             reason="rate_limited",
-            response=legacy.MSG_MEDIA_RATE_LIMIT,
+            response=MSG_MEDIA_RATE_LIMIT,
             retry_after=retry_after,
         )
 
@@ -542,7 +607,7 @@ def _check_media_rate_limit_fallback(
         return MediaDecision(
             allowed=False,
             reason="rate_limited",
-            response=legacy.MSG_MEDIA_RATE_LIMIT,
+            response=MSG_MEDIA_RATE_LIMIT,
             retry_after=rate_limit["block_seconds"],
         )
 
@@ -551,7 +616,7 @@ def _check_media_rate_limit_fallback(
         return MediaDecision(
             allowed=False,
             reason="rate_limited",
-            response=legacy.MSG_MEDIA_RATE_LIMIT,
+            response=MSG_MEDIA_RATE_LIMIT,
             retry_after=rate_limit["block_seconds"],
         )
 
@@ -560,7 +625,7 @@ def _check_media_rate_limit_fallback(
         return MediaDecision(
             allowed=False,
             reason="rate_limited",
-            response=legacy.MSG_MEDIA_RATE_LIMIT,
+            response=MSG_MEDIA_RATE_LIMIT,
             retry_after=rate_limit["block_seconds"],
         )
 
@@ -574,8 +639,6 @@ async def _check_media_rate_limit(
     size_bytes: int,
     rate_limit: dict,
 ) -> MediaDecision:
-    from . import _legacy as legacy
-
     global _media_rate_warned
     if not redis_client:
         if not _media_rate_warned:
@@ -591,7 +654,7 @@ async def _check_media_rate_limit(
     try:
         blocked = await redis_client.get(block_key)
     except Exception as exc:
-        legacy.logger.warning("Media rate limit redis check failed", extra={"context": {"error": str(exc)}})
+        logger.warning("Media rate limit redis check failed", extra={"context": {"error": str(exc)}})
         return _check_media_rate_limit_fallback(
             key_base=key_base,
             size_bytes=size_bytes,
@@ -599,7 +662,11 @@ async def _check_media_rate_limit(
         )
 
     if blocked:
-        return MediaDecision(allowed=False, reason="rate_limited", response=legacy.MSG_MEDIA_RATE_LIMIT)
+        return MediaDecision(
+            allowed=False,
+            reason="rate_limited",
+            response=MSG_MEDIA_RATE_LIMIT,
+        )
 
     count_key = f"{key_base}:count"
     bytes_key = f"{key_base}:bytes"
@@ -616,7 +683,7 @@ async def _check_media_rate_limit(
         if daily == 1:
             await redis_client.expire(day_key, 86400)
     except Exception as exc:
-        legacy.logger.warning("Media rate limit redis update failed", extra={"context": {"error": str(exc)}})
+        logger.warning("Media rate limit redis update failed", extra={"context": {"error": str(exc)}})
         return _check_media_rate_limit_fallback(
             key_base=key_base,
             size_bytes=size_bytes,
@@ -632,11 +699,11 @@ async def _check_media_rate_limit(
         try:
             await redis_client.setex(block_key, rate_limit["block_seconds"], "1")
         except Exception as exc:
-            legacy.logger.warning("Media rate limit redis block failed", extra={"context": {"error": str(exc)}})
+            logger.warning("Media rate limit redis block failed", extra={"context": {"error": str(exc)}})
         return MediaDecision(
             allowed=False,
             reason="rate_limited",
-            response=legacy.MSG_MEDIA_RATE_LIMIT,
+            response=MSG_MEDIA_RATE_LIMIT,
             retry_after=rate_limit["block_seconds"],
         )
 
@@ -652,10 +719,12 @@ async def _evaluate_media_decision(
     redis_client,
     count_rate_limit: bool = True,
 ) -> MediaDecision:
-    from . import _legacy as legacy
-
     if not policy.get("enabled"):
-        return MediaDecision(allowed=False, reason="disabled", response=legacy.MSG_MEDIA_UNSUPPORTED)
+        return MediaDecision(
+            allowed=False,
+            reason="disabled",
+            response=MSG_MEDIA_UNSUPPORTED,
+        )
 
     allowed = {
         "photo": policy.get("allow_photo", True),
@@ -664,13 +733,21 @@ async def _evaluate_media_decision(
     }
 
     if media.media_type not in allowed or not allowed.get(media.media_type, False):
-        return MediaDecision(allowed=False, reason="unsupported_type", response=legacy.MSG_MEDIA_UNSUPPORTED)
+        return MediaDecision(
+            allowed=False,
+            reason="unsupported_type",
+            response=MSG_MEDIA_UNSUPPORTED,
+        )
 
-    max_mb = policy.get("max_size_mb", legacy.MEDIA_MAX_DEFAULT_MB).get(media.media_type, 8)
+    max_mb = policy.get("max_size_mb", MEDIA_MAX_DEFAULT_MB).get(media.media_type, 8)
     max_bytes = max_mb * 1024 * 1024
     size_bytes = media.size_bytes
     if size_bytes is not None and size_bytes > max_bytes:
-        return MediaDecision(allowed=False, reason="too_large", response=legacy.MSG_MEDIA_TOO_LARGE)
+        return MediaDecision(
+            allowed=False,
+            reason="too_large",
+            response=MSG_MEDIA_TOO_LARGE,
+        )
 
     if not count_rate_limit:
         return MediaDecision(allowed=True)
@@ -680,7 +757,7 @@ async def _evaluate_media_decision(
         redis_client=redis_client,
         key_base=f"media:{client_id}:{remote_jid}",
         size_bytes=size_for_limit,
-        rate_limit=policy.get("rate_limit", legacy.MEDIA_RATE_LIMIT_DEFAULTS),
+        rate_limit=policy.get("rate_limit", MEDIA_RATE_LIMIT_DEFAULTS),
     )
     if not decision.allowed:
         return decision
@@ -727,12 +804,10 @@ async def _store_media_locally(
     conversation_id: UUID,
     message_id: str | None,
 ) -> dict:
-    from . import _legacy as legacy
-
     if not policy.get("store_media", True):
         return {"stored": False, "error": "store_disabled"}
 
-    storage_dir = Path(str(policy.get("storage_dir") or legacy.MEDIA_STORAGE_DEFAULT_DIR))
+    storage_dir = Path(str(policy.get("storage_dir") or MEDIA_STORAGE_DEFAULT_DIR))
     target_dir = storage_dir / client_slug / str(conversation_id)
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -740,8 +815,8 @@ async def _store_media_locally(
     file_id = _safe_media_id(message_id)
     target_path = target_dir / f"{file_id}{ext}"
 
-    max_mb = policy.get("max_size_mb", legacy.MEDIA_MAX_DEFAULT_MB).get(media.media_type, 8)
-    max_bytes = min(max_mb * 1024 * 1024, legacy.MEDIA_STORAGE_MAX_BYTES)
+    max_mb = policy.get("max_size_mb", MEDIA_MAX_DEFAULT_MB).get(media.media_type, 8)
+    max_bytes = min(max_mb * 1024 * 1024, MEDIA_STORAGE_MAX_BYTES)
 
     if media.base64_data:
         estimated = (len(media.base64_data) * 3) // 4
@@ -919,14 +994,12 @@ def _serialize_media_decision(decision: MediaDecision) -> dict:
 
 
 def _media_response_for_reason(reason: str | None) -> str | None:
-    from . import _legacy as legacy
-
     if reason == "too_large":
-        return legacy.MSG_MEDIA_TOO_LARGE
+        return MSG_MEDIA_TOO_LARGE
     if reason == "rate_limited":
-        return legacy.MSG_MEDIA_RATE_LIMIT
+        return MSG_MEDIA_RATE_LIMIT
     if reason in {"unsupported_type", "disabled"}:
-        return legacy.MSG_MEDIA_UNSUPPORTED
+        return MSG_MEDIA_UNSUPPORTED
     return None
 
 

@@ -7,7 +7,6 @@ from uuid import UUID
 
 import pytest
 
-from app.core.booking_prompt_owner import resolve_pending_booking_reactivation_candidate
 from app.models import Conversation
 from app.routers.webhook import decision as decision_router
 from app.routers.webhook import dedup as dedup_module
@@ -15,6 +14,9 @@ from app.routers.webhook import trace as trace_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
 from app.services import reasoning_core
 from tests import build_test_semantic_decision_payload
+from tests.support_booking_prompt_owner_shadow import (
+    resolve_pending_booking_reactivation_candidate,
+)
 
 
 def test_reasoning_core_stage_snapshot_matches_trace() -> None:
@@ -553,6 +555,31 @@ def test_build_conversation_snapshot_uses_routing_matrix_and_projection_bridge()
     assert snapshot.service_referent is None
 
 
+def test_build_conversation_snapshot_reads_routing_from_snapshot_owner(monkeypatch) -> None:
+    conversation = Conversation(
+        id=UUID("00000000-0000-0000-0000-000000000540"),
+        client_id=UUID("00000000-0000-0000-0000-000000000541"),
+        user_id=UUID("00000000-0000-0000-0000-000000000542"),
+        channel="whatsapp",
+        status="active",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        state="bot_active",
+        bot_status="active",
+        branch_id=None,
+        context={},
+    )
+
+    monkeypatch.setattr(
+        reasoning_core,
+        "build_routing_policy_snapshot",
+        lambda state: type("RoutingStub", (), {"allow_bot_reply": state == "bot_active"})(),
+    )
+
+    snapshot = reasoning_core._build_conversation_snapshot(conversation)
+
+    assert snapshot.allow_bot_reply is True
+
+
 def test_build_conversation_snapshot_prefers_canonical_question_contract_over_stale_projection() -> None:
     conversation = Conversation(
         id=UUID("00000000-0000-0000-0000-000000000144"),
@@ -615,6 +642,48 @@ def test_build_conversation_snapshot_projects_service_referent_from_canonical_st
                     },
                 },
             }
+        },
+    )
+
+    snapshot = reasoning_core._build_conversation_snapshot(conversation)
+
+    assert snapshot.service_referent == "маникюр"
+
+
+def test_build_conversation_snapshot_prefers_conversation_projection_service_referent_over_stale_canonical_state() -> None:
+    conversation = Conversation(
+        id=UUID("00000000-0000-0000-0000-000000000243"),
+        client_id=UUID("00000000-0000-0000-0000-000000000244"),
+        user_id=UUID("00000000-0000-0000-0000-000000000245"),
+        channel="whatsapp",
+        status="active",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        state="bot_active",
+        bot_status="active",
+        branch_id=None,
+        context={
+            "consultant_runtime": {
+                "conversation_projection": {
+                    "schema_version": "conversation_projection.v1",
+                    "projection_version": "v1",
+                    "semantic_slots": {"service": "маникюр"},
+                }
+            },
+            "context_manager": {
+                "message_count": 6,
+                "canonical_dialog_state": {
+                    "owner_id": "context_manager.dialog_state.v1",
+                    "version": "v1",
+                    "current_referents": {
+                        "service": {
+                            "value": "педикюр",
+                            "source": "semantic_match",
+                            "message_count": 5,
+                            "ttl": 4,
+                        }
+                    },
+                },
+            },
         },
     )
 
@@ -730,6 +799,57 @@ def test_build_conversation_snapshot_prefers_session_memory_pending_question_con
     assert snapshot.booking_time_token == "17:45"
 
 
+def test_build_conversation_snapshot_does_not_resurrect_session_memory_when_runtime_projection_exists() -> None:
+    now = datetime.now(timezone.utc)
+    conversation = Conversation(
+        id=UUID("00000000-0000-0000-0000-000000000447"),
+        client_id=UUID("00000000-0000-0000-0000-000000000448"),
+        user_id=UUID("00000000-0000-0000-0000-000000000449"),
+        channel="whatsapp",
+        status="active",
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        state="bot_active",
+        bot_status="active",
+        branch_id=None,
+        context={
+            "consultant_runtime": {
+                "conversation_projection": {
+                    "schema_version": "conversation_projection.v1",
+                    "projection_version": "v1",
+                    "current_goal": "booking",
+                    "booking_state": {
+                        "active": True,
+                        "datetime": "2026-02-12 17:45",
+                        "last_question": "datetime",
+                    },
+                }
+            },
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": decision_router.EXPECTED_REPLY_SERVICE,
+                "pending_question_contract": {
+                    "expected_reply_type": decision_router.EXPECTED_REPLY_TIME,
+                    "reason": "booking_interrupt",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "last_updated_at": now.isoformat(),
+                "ttl_hours": 24,
+            },
+        },
+    )
+
+    snapshot = reasoning_core._build_conversation_snapshot(
+        conversation,
+        message_text="завтра в 18:00",
+        client_slug="demo_salon",
+    )
+
+    assert snapshot.reply_slot is None
+    assert snapshot.resume_reason is None
+    assert snapshot.booking_active is True
+
+
 def test_run_secret_enforced_preflight_reuses_http_preflight(monkeypatch) -> None:
     payload = WebhookRequest(
         client_slug="demo_salon",
@@ -790,6 +910,7 @@ def test_build_sender_branch_ignore_artifact_uses_new_core_contracts() -> None:
 
     assert artifact.turn_result.contract_status == "blocked"
     assert artifact.turn_result.outcome == "FACT"
+    assert artifact.turn_result.policy_decision.action == "preflight_reject"
     assert artifact.turn_result.boundary_override is not None
     assert artifact.turn_result.boundary_override.reason_code == reasoning_core.REASONING_CORE_SENDER_BRANCH_IGNORE_REASON
     assert artifact.turn_result.reply.reply_kind == "system"

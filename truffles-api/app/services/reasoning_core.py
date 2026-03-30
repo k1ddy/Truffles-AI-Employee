@@ -18,13 +18,21 @@ from sqlalchemy.orm import Session
 from app.core import BlockBoundaryRequest, DegradeBoundaryRequest, DialogStateService, TurnExecutor, TurnPlanner
 from app.logging_config import get_trace_id, start_span
 from app.models import Client, Conversation, Message, User
-from app.routers.webhook import decision as decision_router
+from app.routers.webhook.booking import _resolve_datetime_offline
+from app.routers.webhook.http import _find_message_by_message_id
+from app.routers.webhook.info import _is_short_reply, _looks_like_info_query
 from app.routers.webhook.media import _extract_media_info
-from app.routers.webhook.runtime_primitives import SERVICE_CARRYOVER_TTL_MESSAGES
+from app.routers.webhook.runtime_primitives import (
+    EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
+    SERVICE_CARRYOVER_TTL_MESSAGES,
+)
 from app.routers.webhook.trace import DECISION_STAGE_ORDER_SNAPSHOT, _record_decision_trace
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.booking_signal_service import extract_time_token
-
+from app.services.policy_snapshot_service import build_routing_policy_snapshot
+from app.routers.webhook.policy import _looks_like_policy_topic
 
 STAGE_ORDER_SNAPSHOT = DECISION_STAGE_ORDER_SNAPSHOT
 REASONING_CORE_DEGRADE_REASON = "runtime_exception"
@@ -121,7 +129,6 @@ def _build_runtime_exception_artifact(
     artifact = TurnExecutor().build_degrade_boundary_artifact_from_request(
         request=DegradeBoundaryRequest(
             reason_code=REASONING_CORE_DEGRADE_REASON,
-            action="handoff",
             intent="runtime_error",
             interaction_owner=REASONING_CORE_DEGRADE_OWNER,
             interaction_relation="runtime_exception",
@@ -142,7 +149,6 @@ def _build_empty_message_artifact() -> ReasoningCorePreflightArtifact:
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=REASONING_CORE_PREFLIGHT_REASON,
-            action="preflight_reject",
             intent="empty_message",
             interaction_owner=REASONING_CORE_PREFLIGHT_OWNER,
             interaction_relation="empty_message",
@@ -159,7 +165,6 @@ def _build_missing_remote_jid_artifact() -> ReasoningCorePreflightArtifact:
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=REASONING_CORE_MISSING_REMOTE_JID_REASON,
-            action="preflight_reject",
             intent="missing_remote_jid",
             interaction_owner=REASONING_CORE_MISSING_REMOTE_JID_OWNER,
             interaction_relation="missing_remote_jid",
@@ -176,7 +181,6 @@ def _build_missing_tenant_context_artifact() -> ReasoningCorePreflightArtifact:
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=REASONING_CORE_MISSING_TENANT_CONTEXT_REASON,
-            action="preflight_reject",
             intent="missing_tenant_context",
             interaction_owner=REASONING_CORE_MISSING_TENANT_CONTEXT_OWNER,
             interaction_relation="missing_tenant_context",
@@ -193,7 +197,6 @@ def _build_sender_branch_ignore_artifact() -> ReasoningCorePreflightArtifact:
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=REASONING_CORE_SENDER_BRANCH_IGNORE_REASON,
-            action="ignore",
             intent="sender_is_branch",
             interaction_owner=REASONING_CORE_SENDER_BRANCH_IGNORE_OWNER,
             interaction_relation="sender_is_branch",
@@ -215,7 +218,6 @@ def _build_tenant_context_reject_artifact(
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=rejection.reason_code,
-            action="preflight_reject",
             intent=rejection.reason_code,
             interaction_owner=rejection.interaction_owner,
             interaction_relation=rejection.reason_code,
@@ -236,7 +238,6 @@ def _build_remote_branch_phone_ignore_artifact(
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=REASONING_CORE_REMOTE_BRANCH_PHONE_REASON,
-            action="ignore",
             intent="remote_is_branch_phone",
             interaction_owner=REASONING_CORE_REMOTE_BRANCH_PHONE_OWNER,
             interaction_relation="remote_is_branch_phone",
@@ -259,7 +260,6 @@ def _build_duplicate_message_artifact(
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code=REASONING_CORE_DUPLICATE_REASON,
-            action="ignore",
             intent="duplicate_message_id",
             interaction_owner=REASONING_CORE_DUPLICATE_OWNER,
             interaction_relation="duplicate_message_id",
@@ -300,55 +300,18 @@ def _resolve_snapshot_booking_time_token(*, booking_datetime_value: str | None) 
 
 
 def _resolve_snapshot_service_referent(context: dict[str, object], *, booking_active: bool) -> str | None:
+    dialog_state_service = DialogStateService()
     booking_state = context.get("booking") if isinstance(context, dict) else None
     if booking_active and isinstance(booking_state, dict):
         booking_service = booking_state.get("service")
         if isinstance(booking_service, str) and booking_service.strip():
             return booking_service.strip()
-
-    manager = context.get("context_manager") if isinstance(context, dict) else None
-    if not isinstance(manager, dict):
-        return None
-
-    try:
-        message_count = int(manager.get("message_count"))
-    except (TypeError, ValueError):
-        return None
-    if message_count <= 0:
-        return None
-
-    canonical_projection = DialogStateService().normalize_context_manager_canonical_state(
-        manager.get("canonical_dialog_state") if isinstance(manager.get("canonical_dialog_state"), dict) else None
+    return dialog_state_service.project_context_service_referent(
+        context,
+        context_manager_key="context_manager",
+        service_carryover_key="service_carryover",
+        service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
     )
-    referents = canonical_projection.get("current_referents")
-    service_payload = referents.get("service") if isinstance(referents, dict) else None
-    if isinstance(service_payload, dict):
-        service_value = service_payload.get("value")
-        if isinstance(service_value, str) and service_value.strip():
-            ttl = service_payload.get("ttl")
-            last_count = service_payload.get("message_count")
-            try:
-                last_count_value = int(last_count)
-            except (TypeError, ValueError):
-                last_count_value = message_count
-            age = max(message_count - last_count_value, 0)
-            if not isinstance(ttl, int) or ttl <= 0 or age <= ttl:
-                return service_value.strip()
-
-    legacy_payload = manager.get("service_carryover")
-    if not isinstance(legacy_payload, dict):
-        return None
-    projected = DialogStateService().get_service_carryover(
-        legacy_payload,
-        message_count=message_count,
-        default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
-    )
-    if not isinstance(projected, dict):
-        return None
-    service_query = projected.get("service_query")
-    if isinstance(service_query, str) and service_query.strip():
-        return service_query.strip()
-    return None
 
 
 def _build_conversation_snapshot(
@@ -360,6 +323,16 @@ def _build_conversation_snapshot(
     context = conversation.context if isinstance(conversation.context, dict) else {}
     dialog_state_service = DialogStateService()
     now = datetime.now(timezone.utc)
+    runtime_payload = context.get("consultant_runtime") if isinstance(context.get("consultant_runtime"), dict) else None
+    has_explicit_runtime_projection = (
+        dialog_state_service.normalize_runtime_conversation_projection(
+            runtime_payload.get("conversation_projection")
+            if isinstance(runtime_payload, dict)
+            else None
+        )
+        is not None
+    )
+    loaded_runtime = dialog_state_service.load_runtime_payload(context)
     context_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
         context,
         session_memory_key="__disabled_session_memory__",
@@ -376,11 +349,24 @@ def _build_conversation_snapshot(
             else context.get(_EXPECTED_REPLY_REASON_FIELD)
         ),
     ).model_dump()
-    booking_state = dict(context.get("booking") or {}) if isinstance(context.get("booking"), dict) else {}
+    booking_state = (
+        dict(loaded_runtime.get("booking_payload") or {})
+        if isinstance(loaded_runtime.get("booking_payload"), dict)
+        else {}
+    )
     booking_active = bool(booking_state.get("active"))
-    normalized_goal = dialog_state_service.project_context_current_goal(context)
+    normalized_goal = (
+        loaded_runtime.get("current_goal")
+        if isinstance(loaded_runtime.get("current_goal"), str) and loaded_runtime.get("current_goal")
+        else dialog_state_service.project_context_current_goal(context)
+    )
 
-    if expected_reply.get(_EXPECTED_REPLY_TYPE_FIELD) is None and isinstance(message_text, str) and message_text.strip():
+    if (
+        expected_reply.get(_EXPECTED_REPLY_TYPE_FIELD) is None
+        and isinstance(message_text, str)
+        and message_text.strip()
+        and not has_explicit_runtime_projection
+    ):
         session_memory = context.get("session_memory") if isinstance(context.get("session_memory"), dict) else None
         re_entry_required = context.get("re_entry_required")
         if (
@@ -407,22 +393,22 @@ def _build_conversation_snapshot(
                 if isinstance(memory_pending_question_contract, dict)
                 else None
             )
-            is_short_reply = decision_router._is_short_reply(message_text)
+            is_short_reply = _is_short_reply(message_text)
             if (
                 not is_short_reply
-                and memory_expected_reply == decision_router.EXPECTED_REPLY_TIME
-                and decision_router._extract_datetime(message_text, client_slug=client_slug)
+                and memory_expected_reply == EXPECTED_REPLY_TIME
+                and _resolve_datetime_offline(message_text, client_slug=client_slug).get("value")
             ):
                 is_short_reply = True
             if (
                 memory_expected_reply in {
-                    decision_router.EXPECTED_REPLY_SERVICE,
-                    decision_router.EXPECTED_REPLY_TIME,
-                    decision_router.EXPECTED_REPLY_NAME,
+                    EXPECTED_REPLY_SERVICE,
+                    EXPECTED_REPLY_TIME,
+                    EXPECTED_REPLY_NAME,
                 }
                 and is_short_reply
-                and not decision_router._looks_like_info_query(message_text, client_slug=client_slug)
-                and not decision_router._looks_like_policy_topic(message_text, policy_type=None, policy_pack=None)
+                and not _looks_like_info_query(message_text, client_slug=client_slug)
+                and not _looks_like_policy_topic(message_text, policy_type=None, policy_pack=None)
                 and (
                     not normalized_memory_goal or not normalized_goal or normalized_memory_goal == normalized_goal
                 )
@@ -435,7 +421,11 @@ def _build_conversation_snapshot(
                 ):
                     expected_reply[_EXPECTED_REPLY_REASON_FIELD] = memory_expected_reply_reason.strip()
 
-    pending_boundary = dialog_state_service.derive_pending_booking_resume_boundary_payload(context, now=now)
+    pending_boundary = (
+        None
+        if has_explicit_runtime_projection
+        else dialog_state_service.derive_pending_booking_resume_boundary_payload(context, now=now)
+    )
     boundary_booking_state = pending_boundary.get("booking_state") if isinstance(pending_boundary, dict) else None
     if expected_reply.get(_EXPECTED_REPLY_TYPE_FIELD) is None and isinstance(pending_boundary, dict):
         boundary_expected_reply = pending_boundary.get("expected_reply_type")
@@ -455,7 +445,7 @@ def _build_conversation_snapshot(
     booking_datetime_value = _resolve_snapshot_booking_datetime_value(merged_context, booking_active=booking_active)
     booking_time_token = _resolve_snapshot_booking_time_token(booking_datetime_value=booking_datetime_value)
     service_referent = _resolve_snapshot_service_referent(merged_context, booking_active=booking_active)
-    routing = decision_router.ROUTING_MATRIX.get(conversation.state, {})
+    routing = build_routing_policy_snapshot(conversation.state)
     return ReasoningCoreConversationSnapshot(
         conversation_id=conversation.id,
         state=conversation.state,
@@ -465,7 +455,7 @@ def _build_conversation_snapshot(
         resume_reason=expected_reply.get(_EXPECTED_REPLY_REASON_FIELD),
         current_goal=normalized_goal,
         booking_active=booking_active,
-        allow_bot_reply=bool(routing.get("allow_bot_reply", False)),
+        allow_bot_reply=routing.allow_bot_reply,
         booking_time_token=booking_time_token,
         booking_datetime_value=booking_datetime_value,
         service_referent=service_referent,
@@ -532,7 +522,11 @@ def _resolve_secret_preflight_trace_conversation(
         if conversation:
             return conversation
     if trace_client and trace_message_id:
-        saved_message = decision_router._find_message_by_message_id(db, trace_client.id, trace_message_id)
+        saved_message = _find_message_by_message_id(
+            db,
+            client_id=trace_client.id,
+            message_id=trace_message_id,
+        )
         if saved_message:
             return db.query(Conversation).filter(Conversation.id == saved_message.conversation_id).first()
     if trace_client and trace_remote_jid:

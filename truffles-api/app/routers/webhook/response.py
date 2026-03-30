@@ -11,8 +11,80 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+from app.logging_config import get_logger
 from app.models import Conversation, Message, User
-from app.routers.webhook.runtime_primitives import MSG_BOOKING_CTA
+from app.routers.webhook.booking import _get_booking_context, _next_booking_prompt
+from app.routers.webhook.booking_signal_runtime import (
+    _extract_service_hint,
+    _is_booking_request,
+    _looks_like_time_only_request,
+)
+from app.routers.webhook.class_router_runtime import (
+    CONSULT_INTERRUPT_INTENTS,
+    CONTROLLER_CONFIDENCE_THRESHOLD,
+    DomainIntent,
+    _build_controller_meta_output,
+    _ensure_controller_output_meta,
+    _resolve_class_router_result,
+    _resolve_controller_signal_class,
+    _router_observability_updates_from_class_router,
+)
+from app.routers.webhook.context_manager import (
+    _get_context_manager,
+    _get_conversation_context,
+    _get_low_confidence_retry_count,
+    _record_context_manager_decision,
+    _reset_low_confidence_retry,
+    _set_consult_context,
+    _set_context_manager,
+    _set_conversation_context,
+    _set_expected_reply_context,
+    _set_handover_confirmation,
+    _set_low_confidence_retry_count,
+)
+from app.routers.webhook.guards import (
+    _get_clarify_attempt_state,
+    _handle_clarify_limit_escalation,
+    _register_clarify_attempt,
+    _should_escalate_for_clarify,
+)
+from app.routers.webhook.knowledge_runtime import (
+    _derive_rag_status,
+    _merge_rag_scores,
+    _record_knowledge_backlog,
+)
+from app.routers.webhook.media import _is_style_reference_request
+from app.routers.webhook.policy import _detect_llm_guard_topics, _get_policy_handler
+from app.routers.webhook.runtime_primitives import (
+    CLARIFY_MAX_ATTEMPTS,
+    CONSULT_CONTEXT_TTL_MESSAGES,
+    EVENING_GREETING_KEY,
+    EVENING_GREETING_TTL_HOURS,
+    EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
+    LOW_CONFIDENCE_MAX_RETRIES,
+    MSG_AI_ERROR,
+    MSG_BOOKING_ASK_DATETIME,
+    MSG_BOOKING_ASK_NAME,
+    MSG_BOOKING_ASK_SERVICE,
+    MSG_BOOKING_CTA,
+    MSG_ESCALATED,
+    MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    MSG_HANDOVER_CONFIRM,
+    MSG_LOW_CONFIDENCE_RETRY,
+    MSG_PENDING_LOW_CONFIDENCE,
+    MSG_STYLE_REFERENCE_NEED_MEDIA,
+    QUIET_HOURS_NOTICE_KEY,
+    QUIET_HOURS_NOTICE_TTL_MINUTES,
+    _append_followup,
+    _combine_sidecar,
+    should_offer_low_confidence_retry,
+)
+from app.routers.webhook.session_memory import (
+    _record_session_memory_update,
+    _update_session_memory_goal,
+)
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
     _record_decision_trace,
@@ -21,9 +93,26 @@ from app.routers.webhook.trace import (
     _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookResponse
-from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
+from app.services.ai_service import (
+    OUT_OF_DOMAIN_RESPONSE,
+    is_low_signal_message,
+    normalize_for_matching,
+    rewrite_for_service_match,
+)
+from app.services.handover_owner_service import (
+    ActiveHandoverReuseRuntimeHooks,
+    _reuse_active_handover,
+    escalate_to_pending,
+    get_active_handover,
+    send_telegram_notification,
+)
+from app.services.message_service import generate_bot_response
+from app.services.pack_runtime_service import semantic_service_match
 from app.services.pack_runtime_service import _normalize_text
 from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
+
+logger = get_logger("webhook")
 
 
 def _maybe_append_booking_cta(
@@ -246,11 +335,9 @@ def _finalize_bot_response(
 ) -> str | None:
     if not text:
         return text
-    from . import _legacy as legacy
-
     if not allow_quiet_hours:
         return text
-    if conversation.state != legacy.ConversationState.BOT_ACTIVE.value:
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
         return text
     if now is None:
         now = datetime.now(timezone.utc)
@@ -264,25 +351,25 @@ def _finalize_bot_response(
 
     if quiet_hours_notice:
         if _should_emit_notice(
-            context.get(legacy.QUIET_HOURS_NOTICE_KEY),
+            context.get(QUIET_HOURS_NOTICE_KEY),
             now=now,
-            ttl=timedelta(minutes=legacy.QUIET_HOURS_NOTICE_TTL_MINUTES),
+            ttl=timedelta(minutes=QUIET_HOURS_NOTICE_TTL_MINUTES),
         ):
             text = _apply_quiet_hours_notice(text, quiet_hours_notice)
-            context[legacy.QUIET_HOURS_NOTICE_KEY] = {"last_sent_at": now.isoformat()}
+            context[QUIET_HOURS_NOTICE_KEY] = {"last_sent_at": now.isoformat()}
             context_changed = True
     else:
-        if context.pop(legacy.QUIET_HOURS_NOTICE_KEY, None) is not None:
+        if context.pop(QUIET_HOURS_NOTICE_KEY, None) is not None:
             context_changed = True
 
     if evening_greeting:
         if _should_emit_notice(
-            context.get(legacy.EVENING_GREETING_KEY),
+            context.get(EVENING_GREETING_KEY),
             now=now,
-            ttl=timedelta(hours=legacy.EVENING_GREETING_TTL_HOURS),
+            ttl=timedelta(hours=EVENING_GREETING_TTL_HOURS),
         ):
             text = _apply_evening_greeting(text, evening_greeting)
-            context[legacy.EVENING_GREETING_KEY] = {"last_sent_at": now.isoformat()}
+            context[EVENING_GREETING_KEY] = {"last_sent_at": now.isoformat()}
             context_changed = True
 
     if context_changed:
@@ -505,9 +592,8 @@ def _record_rag_meta(
                 _record_decision_trace(conversation, entry)
         timing_context["rag_trace"] = []
     rag_scores = timing_context.get("rag_scores") if isinstance(timing_context, dict) else None
-    from . import _legacy as legacy
 
-    rag_scores = legacy._merge_rag_scores(rag_scores if isinstance(rag_scores, dict) else None)
+    rag_scores = _merge_rag_scores(rag_scores if isinstance(rag_scores, dict) else None)
     if saved_message:
         branch_id = None
         knowledge_tag = None
@@ -517,7 +603,7 @@ def _record_rag_meta(
         decision_meta = {}
         if isinstance(saved_message.message_metadata, dict):
             decision_meta = saved_message.message_metadata.get("decision_meta") or {}
-        rag_confident, rag_reason = legacy._derive_rag_status(
+        rag_confident, rag_reason = _derive_rag_status(
             rag_scores=rag_scores,
             rag_best_score=(
                 timing_context.get("rag_best_score") if isinstance(timing_context, dict) else None
@@ -603,14 +689,13 @@ def _should_append_booking_followup_for_consult(
         return False
     action_token = str(consult_action or "").strip().casefold()
     if action_token in {"consult_reply", "consult_clarify"}:
-        from . import _legacy as legacy
 
-        if expected_reply_type not in {legacy.EXPECTED_REPLY_TIME, legacy.EXPECTED_REPLY_NAME}:
+        if expected_reply_type not in {EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
             return True
         if not isinstance(message_text, str) or not message_text.strip():
             return False
 
-        if not legacy._is_booking_request(message_text, client_slug=client_slug):
+        if not _is_booking_request(message_text, client_slug=client_slug):
             return False
     return True
 
@@ -625,18 +710,17 @@ def _should_shift_locked_consult_topic_to_service_choice(
     expected_reply_type: str | None,
     client_slug: str | None,
 ) -> bool:
-    from . import _legacy as legacy
 
     if not booking_goal_locked or booking_followup_appended:
         return False
-    if expected_reply_type != legacy.EXPECTED_REPLY_TIME:
+    if expected_reply_type != EXPECTED_REPLY_TIME:
         return False
     action_token = str(consult_action or "").strip().casefold()
     if action_token != "consult_reply":
         return False
     if not isinstance(message_text, str) or not message_text.strip():
         return False
-    if legacy._is_booking_request(message_text, client_slug=client_slug):
+    if _is_booking_request(message_text, client_slug=client_slug):
         return False
     if not isinstance(consult_meta, dict):
         return False
@@ -658,25 +742,24 @@ def _apply_locked_consult_topic_shift(
     message_count: int,
     now: datetime,
 ) -> None:
-    from . import _legacy as legacy
 
-    context = legacy._get_conversation_context(conversation)
-    context_manager = legacy._get_context_manager(context)
+    context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
     context_manager["current_goal"] = "consult"
-    context_manager = legacy._set_consult_context(
+    context_manager = _set_consult_context(
         context_manager,
         consult_meta=consult_meta,
         message_count=message_count,
     )
-    context = legacy._set_context_manager(context, context_manager)
-    legacy._set_conversation_context(conversation, context)
-    context, memory = legacy._update_session_memory_goal(
+    context = _set_context_manager(context, context_manager)
+    _set_conversation_context(conversation, context)
+    context, memory = _update_session_memory_goal(
         context,
         active_goal="consult",
         now=now,
     )
-    legacy._set_conversation_context(conversation, context)
-    legacy._record_session_memory_update(
+    _set_conversation_context(conversation, context)
+    _record_session_memory_update(
         conversation,
         saved_message,
         memory=memory,
@@ -686,43 +769,43 @@ def _apply_locked_consult_topic_shift(
         "stage": "consult_context",
         "decision": "set",
         "current_goal": "consult",
-        "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        "ttl": CONSULT_CONTEXT_TTL_MESSAGES,
     }
     consult_topic = consult_meta.get("consult_topic")
     if consult_topic:
         consult_trace["consult_topic"] = consult_topic
-    legacy._record_decision_trace(conversation, consult_trace)
+    _record_decision_trace(conversation, consult_trace)
     if saved_message:
-        legacy._update_message_decision_metadata(saved_message, {"current_goal": "consult"})
+        _update_message_decision_metadata(saved_message, {"current_goal": "consult"})
 
-    context = legacy._get_conversation_context(conversation)
-    legacy._set_expected_reply_context(
+    context = _get_conversation_context(conversation)
+    _set_expected_reply_context(
         conversation=conversation,
         saved_message=saved_message,
         context=context,
-        expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+        expected_reply_type=EXPECTED_REPLY_SERVICE,
         reason="consult_topic_shift",
         now=now,
     )
-    consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+    consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
     consult_meta["expected_reply_reason"] = "consult_topic_shift"
     consult_meta["consult_topic_shift_expected_reply"] = True
-    legacy._record_decision_trace(
+    _record_decision_trace(
         conversation,
         {
             "stage": "consult_flow",
             "decision": "consult_topic_shift_expected_reply",
-            "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+            "expected_reply_type": EXPECTED_REPLY_SERVICE,
             "expected_reply_reason": "consult_topic_shift",
-            "previous_expected_reply_type": legacy.EXPECTED_REPLY_TIME,
+            "previous_expected_reply_type": EXPECTED_REPLY_TIME,
         },
     )
     if saved_message:
-        legacy._update_message_decision_metadata(
+        _update_message_decision_metadata(
             saved_message,
             {
                 "consult_topic_shift_expected_reply": True,
-                "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                "expected_reply_type": EXPECTED_REPLY_SERVICE,
                 "expected_reply_reason": "consult_topic_shift",
             },
         )
@@ -761,7 +844,6 @@ def _record_class_router_trace_from_result(
 ) -> None:
     if not isinstance(class_router_result, dict):
         return
-    from . import _legacy as legacy
 
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
     controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
@@ -803,9 +885,7 @@ def _record_class_router_trace_from_result(
         "controller_error": controller_error,
         "controller_goal": controller_goal,
     }
-    trace_payload.update(
-        legacy._router_observability_updates_from_class_router(class_router_result)
-    )
+    trace_payload.update(_router_observability_updates_from_class_router(class_router_result))
     _record_decision_trace(conversation, trace_payload)
 
 
@@ -865,16 +945,13 @@ def _handle_consult_flow(
         has_consult_recommendation_signal,
     )
 
-    from . import _legacy as legacy
 
     def _build_consult_class_router_result() -> dict[str, Any]:
-        controller_output = legacy._build_controller_meta_output(error="skipped")
+        controller_output = _build_controller_meta_output(error="skipped")
         controller_output["class"] = "consult"
         controller_output["goal"] = "consult"
-        controller_output["confidence"] = max(legacy.CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
-        controller_output = legacy._ensure_controller_output_meta(
-            controller_output, error="skipped"
-        )
+        controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+        controller_output = _ensure_controller_output_meta(controller_output, error="skipped")
         router_state = {
             "used": True,
             "attempted": False,
@@ -882,7 +959,7 @@ def _handle_consult_flow(
             "confidence": controller_output["confidence"],
             "error": "skipped",
             "fallback_reason": None,
-            "signal_class": legacy._resolve_controller_signal_class(
+            "signal_class": _resolve_controller_signal_class(
                 intent_decomp_set=intent_decomp_set,
                 booking_signal=booking_signal,
             ),
@@ -891,12 +968,12 @@ def _handle_consult_flow(
             "output": controller_output,
             "sla": None,
         }
-        return legacy._resolve_class_router_result(
+        return _resolve_class_router_result(
             info_intents=info_class_intents,
             info_meta=None,
             booking_signal=booking_signal,
             class_carryover=None,
-            domain_intent=legacy.DomainIntent.UNKNOWN,
+            domain_intent=DomainIntent.UNKNOWN,
             domain_meta=None,
             router_state=router_state,
             explicit_service_signal=False,
@@ -927,11 +1004,11 @@ def _handle_consult_flow(
         if consult_context.get("topic") or consult_context.get("question") or consult_context.get("questions"):
             consult_context_active = True
     consult_interrupt_intents = (
-        intent_decomp_set & legacy.CONSULT_INTERRUPT_INTENTS if intent_decomp_set else set()
+        intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_set else set()
     )
     consult_interrupt_text = False
     if message_text:
-        normalized = legacy.normalize_for_matching(message_text)
+        normalized = normalize_for_matching(message_text)
         if normalized:
             if (
                 ("совмещ" in normalized or "в один день" in normalized)
@@ -1012,9 +1089,9 @@ def _handle_consult_flow(
         or (
             expected_reply_type
             in {
-                legacy.EXPECTED_REPLY_SERVICE,
-                legacy.EXPECTED_REPLY_TIME,
-                legacy.EXPECTED_REPLY_NAME,
+                EXPECTED_REPLY_SERVICE,
+                EXPECTED_REPLY_TIME,
+                EXPECTED_REPLY_NAME,
             }
             and not consult_intent
         )
@@ -1112,7 +1189,7 @@ def _handle_consult_flow(
                 source=consult_snapshot_source,
             )
             _record_consult_snapshot_signal(consult_snapshot_meta)
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 _build_consult_snapshot_trace(
                     consult_snapshot_result,
@@ -1134,8 +1211,8 @@ def _handle_consult_flow(
                     consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
                     consult_guard = {"reason": "snapshot_missing"}
                     if message_text:
-                        clarify_prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
-                        clarify_count = legacy._register_clarify_attempt(
+                        clarify_prompt = MSG_EXPECTED_SERVICE_OFF_TOPIC
+                        clarify_count = _register_clarify_attempt(
                             conversation=conversation,
                             saved_message=saved_message,
                             intent="consult",
@@ -1152,16 +1229,16 @@ def _handle_consult_flow(
                             "source": "pack",
                         }
                         if not booking_goal_locked or consult_intent_signal:
-                            context = legacy._get_conversation_context(conversation)
-                            context = legacy._set_expected_reply_context(
+                            context = _get_conversation_context(conversation)
+                            context = _set_expected_reply_context(
                                 conversation=conversation,
                                 saved_message=saved_message,
                                 context=context,
-                                expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                                expected_reply_type=EXPECTED_REPLY_SERVICE,
                                 reason="snapshot_missing",
                                 now=now,
                             )
-                            consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                            consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
                         consult_decision = PackDecision(
                             action="reply",
                             response=clarify_prompt,
@@ -1185,7 +1262,7 @@ def _handle_consult_flow(
                 source="shadow",
             )
             _record_consult_snapshot_signal(consult_snapshot_meta)
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 _build_consult_snapshot_trace(
                     consult_snapshot_result,
@@ -1264,7 +1341,7 @@ def _handle_consult_flow(
                     intent_decomp_payload = dict(intent_decomp_payload)
                     intent_decomp_payload["consult_intent"] = True
             service_matcher = None
-            handler_override = legacy._get_policy_handler(None, client_slug=client_slug)
+            handler_override = _get_policy_handler(None, client_slug=client_slug)
             if isinstance(handler_override, dict):
                 service_matcher = handler_override.get("service_matcher")
             if service_matcher is None and isinstance(policy_handler, dict):
@@ -1334,7 +1411,7 @@ def _handle_consult_flow(
                 timing_context=timing_context,
             )
             if topic_candidates:
-                legacy._record_decision_trace(
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "consult_topic_resolver",
@@ -1366,7 +1443,7 @@ def _handle_consult_flow(
                         "actions": list(controller_output.actions),
                     }
                 )
-            legacy._record_decision_trace(conversation, controller_trace)
+            _record_decision_trace(conversation, controller_trace)
 
             consult_pack_topic_id = None
             if controller_output and controller_output.topic_id in topic_map:
@@ -1404,7 +1481,7 @@ def _handle_consult_flow(
                     consult_flow_trace["consult_playbook_id"] = consult_pack_topic_id
                 if consult_question:
                     consult_flow_trace["consult_question"] = consult_question
-                legacy._record_decision_trace(conversation, consult_flow_trace)
+                _record_decision_trace(conversation, consult_flow_trace)
 
             guard_reason = None
             non_consult_intent = (
@@ -1467,16 +1544,16 @@ def _handle_consult_flow(
                         should_escalate = True
 
                 if guard_reason and not should_escalate:
-                    context = legacy._get_conversation_context(conversation)
-                    context_manager = legacy._get_context_manager(context)
+                    context = _get_conversation_context(conversation)
+                    context_manager = _get_context_manager(context)
                     clarify_limit = (
                         topic.clarify_limit
                         if topic
                         else playbook.default_policy.clarify_limit
                         if playbook.default_policy and playbook.default_policy.clarify_limit is not None
-                        else legacy.CLARIFY_MAX_ATTEMPTS
+                        else CLARIFY_MAX_ATTEMPTS
                     )
-                    clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, "consult")
+                    clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
                     if clarify_count >= clarify_limit:
                         consult_guard = consult_guard or {}
                         consult_guard["reason"] = "clarify_limit_exceeded"
@@ -1500,7 +1577,7 @@ def _handle_consult_flow(
                     }
                     consult_decision = PackDecision(
                         action="escalate",
-                        response=legacy.MSG_ESCALATED,
+                        response=MSG_ESCALATED,
                         intent="consult_escalate",
                         meta=consult_meta,
                     )
@@ -1518,8 +1595,8 @@ def _handle_consult_flow(
                             conversation_id=str(conversation.id),
                         )
                     if not clarify_prompt:
-                        clarify_prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
-                    clarify_count = legacy._register_clarify_attempt(
+                        clarify_prompt = MSG_EXPECTED_SERVICE_OFF_TOPIC
+                    clarify_count = _register_clarify_attempt(
                         conversation=conversation,
                         saved_message=saved_message,
                         intent="consult",
@@ -1545,16 +1622,16 @@ def _handle_consult_flow(
                         "source": "pack",
                     }
                     if not booking_goal_locked or consult_intent_signal:
-                        context = legacy._get_conversation_context(conversation)
-                        context = legacy._set_expected_reply_context(
+                        context = _get_conversation_context(conversation)
+                        context = _set_expected_reply_context(
                             conversation=conversation,
                             saved_message=saved_message,
                             context=context,
-                            expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                            expected_reply_type=EXPECTED_REPLY_SERVICE,
                             reason="consult_clarify",
                             now=now,
                         )
-                        consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                        consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
                     consult_decision = PackDecision(
                         action="reply",
                         response=clarify_prompt,
@@ -1662,7 +1739,7 @@ def _handle_consult_flow(
                         "state": conversation.state,
                     }
                 matcher_trace.update(service_meta)
-                legacy._record_decision_trace(conversation, matcher_trace)
+                _record_decision_trace(conversation, matcher_trace)
             consult_meta.setdefault("source", "service_availability")
             consult_meta["service_decision_intent"] = service_availability_decision.intent
             if service_meta:
@@ -1693,7 +1770,7 @@ def _handle_consult_flow(
                     if value is not None and consult_meta.get(key) is None:
                         consult_meta[key] = value
             if consult_decision and consult_decision.action == "reply":
-                combined_response = legacy._append_followup(consult_decision.response, service_reply)
+                combined_response = _append_followup(consult_decision.response, service_reply)
                 consult_decision = PackDecision(
                     action="reply",
                     response=combined_response,
@@ -1717,8 +1794,8 @@ def _handle_consult_flow(
         consult_signal = True
 
     if consult_signal and not consult_short_circuit:
-        context = legacy._get_conversation_context(conversation)
-        context_manager = legacy._get_context_manager(context)
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
         if consult_flow_override:
             consult_flow_decision = consult_flow_override
         elif consult_decision:
@@ -1730,9 +1807,9 @@ def _handle_consult_flow(
                 )
             if consult_decision.action == "reply" and consult_llm_used:
                 consult_flow_decision = "consult_llm"
-        elif legacy._should_escalate_for_clarify(context_manager, "consult"):
-            clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, "consult")
-            legacy._record_context_manager_decision(
+        elif _should_escalate_for_clarify(context_manager, "consult"):
+            clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
+            _record_context_manager_decision(
                 conversation,
                 saved_message,
                 decision="clarify_limit",
@@ -1747,38 +1824,38 @@ def _handle_consult_flow(
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
             consult_decision = PackDecision(
                 action="escalate",
-                response=legacy.MSG_ESCALATED,
+                response=MSG_ESCALATED,
                 intent="consult_no_service",
                 meta=consult_meta,
             )
             consult_flow_decision = "consult_escalate"
         else:
-            clarify_count = legacy._register_clarify_attempt(
+            clarify_count = _register_clarify_attempt(
                 conversation=conversation,
                 saved_message=saved_message,
                 intent="consult",
                 now=now,
                 reason="consult",
             )
-            consult_meta["consult_questions"] = [legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC]
+            consult_meta["consult_questions"] = [MSG_EXPECTED_SERVICE_OFF_TOPIC]
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
             consult_meta["clarify_reason"] = "consult"
             if booking_goal_locked:
                 consult_meta["clarify_suppressed"] = True
             else:
-                context = legacy._get_conversation_context(conversation)
-                context = legacy._set_expected_reply_context(
+                context = _get_conversation_context(conversation)
+                context = _set_expected_reply_context(
                     conversation=conversation,
                     saved_message=saved_message,
                     context=context,
-                    expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                    expected_reply_type=EXPECTED_REPLY_SERVICE,
                     reason="consult_clarify",
                     now=now,
                 )
-                consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
             consult_decision = PackDecision(
                 action="reply",
-                response=legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC,
+                response=MSG_EXPECTED_SERVICE_OFF_TOPIC,
                 intent="consult_reply",
                 meta=consult_meta,
             )
@@ -1807,7 +1884,7 @@ def _handle_consult_flow(
                 "state": conversation.state,
             }
             if consult_flow_decision == "consult_clarify":
-                consult_flow_trace["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
                 consult_flow_trace["reason"] = "consult_clarify"
             elif consult_flow_decision == "consult_escalate":
                 guard_reason = None
@@ -1832,24 +1909,24 @@ def _handle_consult_flow(
             consult_variant_id = consult_meta.get("consult_variant_id")
             if consult_variant_id:
                 consult_flow_trace["consult_variant_id"] = consult_variant_id
-            legacy._record_decision_trace(conversation, consult_flow_trace)
+            _record_decision_trace(conversation, consult_flow_trace)
         if consult_decision.action == "reply":
             if not booking_goal_locked:
-                context = legacy._get_conversation_context(conversation)
-                context_manager = legacy._get_context_manager(context)
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
                 context_manager["current_goal"] = "consult"
-                context_manager = legacy._set_consult_context(
+                context_manager = _set_consult_context(
                     context_manager,
                     consult_meta=consult_meta,
                     message_count=message_count,
                 )
-                context = legacy._set_context_manager(context, context_manager)
-                legacy._set_conversation_context(conversation, context)
-                context, memory = legacy._update_session_memory_goal(
+                context = _set_context_manager(context, context_manager)
+                _set_conversation_context(conversation, context)
+                context, memory = _update_session_memory_goal(
                     context, active_goal="consult", now=now
                 )
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_session_memory_update(
+                _set_conversation_context(conversation, context)
+                _record_session_memory_update(
                     conversation,
                     saved_message,
                     memory=memory,
@@ -1859,14 +1936,14 @@ def _handle_consult_flow(
                     "stage": "consult_context",
                     "decision": "set",
                     "current_goal": "consult",
-                    "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+                    "ttl": CONSULT_CONTEXT_TTL_MESSAGES,
                 }
                 consult_topic = consult_meta.get("consult_topic")
                 if consult_topic:
                     consult_trace["consult_topic"] = consult_topic
-                legacy._record_decision_trace(conversation, consult_trace)
+                _record_decision_trace(conversation, consult_trace)
                 if saved_message:
-                    legacy._update_message_decision_metadata(saved_message, {"current_goal": "consult"})
+                    _update_message_decision_metadata(saved_message, {"current_goal": "consult"})
         consult_trace = {
             "stage": "consult",
             "decision": consult_decision.action,
@@ -1874,8 +1951,8 @@ def _handle_consult_flow(
             "state": conversation.state,
         }
         consult_trace.update(consult_meta)
-        legacy._record_decision_trace(conversation, consult_trace)
-        legacy._record_message_decision_meta(
+        _record_decision_trace(conversation, consult_trace)
+        _record_message_decision_meta(
             saved_message,
             action=consult_decision.action,
             intent=consult_decision.intent,
@@ -1883,14 +1960,14 @@ def _handle_consult_flow(
             fast_intent=False,
         )
         if saved_message and consult_meta:
-            legacy._update_message_decision_metadata(saved_message, consult_meta)
+            _update_message_decision_metadata(saved_message, consult_meta)
 
         if consult_decision.action == "escalate":
-            bot_response = consult_decision.response or legacy.MSG_ESCALATED
-            legacy._reset_low_confidence_retry(conversation)
+            bot_response = consult_decision.response or MSG_ESCALATED
+            _reset_low_confidence_retry(conversation)
 
             result_message = "Consult escalation"
-            _, reused, telegram_sent = legacy._reuse_active_handover(
+            _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
                 user=user,
@@ -1898,19 +1975,19 @@ def _handle_consult_flow(
                 source="consult",
                 intent=consult_decision.intent,
                 hooks=ActiveHandoverReuseRuntimeHooks(
-                    get_active_handover=legacy.get_active_handover,
-                    transition_state=legacy.transition_state,
-                    send_telegram_notification=legacy.send_telegram_notification,
-                    record_decision_trace=legacy._record_decision_trace,
+                    get_active_handover=get_active_handover,
+                    transition_state=transition_state,
+                    send_telegram_notification=send_telegram_notification,
+                    record_decision_trace=_record_decision_trace,
                 ),
             )
             if reused:
                 result_message = f"Consult reuse, telegram={'sent' if telegram_sent else 'failed'}"
-            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
                 "allow_handover_create"
             ):
                 record_escalation_metric("intent")
-                result = legacy.escalate_to_pending(
+                result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
                     user_message=message_text,
@@ -1919,7 +1996,7 @@ def _handle_consult_flow(
                 )
                 if result.ok:
                     handover = result.value
-                    telegram_sent = legacy.send_telegram_notification(
+                    telegram_sent = send_telegram_notification(
                         db=db,
                         handover=handover,
                         conversation=conversation,
@@ -1951,23 +2028,23 @@ def _handle_consult_flow(
 
         bot_response = consult_decision.response
         normalized_message_text = (
-            legacy.normalize_for_matching(message_text) if isinstance(message_text, str) else ""
+            normalize_for_matching(message_text) if isinstance(message_text, str) else ""
         )
         style_reference_offer = bool(
             isinstance(message_text, str)
             and message_text.strip()
             and (
-                legacy._is_style_reference_request(message_text, has_media=False)
+                _is_style_reference_request(message_text, has_media=False)
                 or "фото" in normalized_message_text
                 or "референс" in normalized_message_text
             )
         )
         if style_reference_offer:
             if bot_response:
-                bot_response = legacy._combine_sidecar(bot_response, legacy.MSG_STYLE_REFERENCE_NEED_MEDIA)
+                bot_response = _combine_sidecar(bot_response, MSG_STYLE_REFERENCE_NEED_MEDIA)
             else:
-                bot_response = legacy.MSG_STYLE_REFERENCE_NEED_MEDIA
-        bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
+                bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+        bot_response = _combine_sidecar(bot_response, intent_queue_followup)
         booking_followup = None
         append_booking_followup = _should_append_booking_followup_for_consult(
             booking_goal_locked=booking_goal_locked,
@@ -1977,20 +2054,20 @@ def _handle_consult_flow(
             client_slug=client_slug,
         )
         if append_booking_followup:
-            if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
-                booking_followup = legacy.MSG_BOOKING_ASK_SERVICE
-            elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
-                booking_followup = legacy.MSG_BOOKING_ASK_DATETIME
-            elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
-                booking_followup = legacy.MSG_BOOKING_ASK_NAME
+            if expected_reply_type == EXPECTED_REPLY_SERVICE:
+                booking_followup = MSG_BOOKING_ASK_SERVICE
+            elif expected_reply_type == EXPECTED_REPLY_TIME:
+                booking_followup = MSG_BOOKING_ASK_DATETIME
+            elif expected_reply_type == EXPECTED_REPLY_NAME:
+                booking_followup = MSG_BOOKING_ASK_NAME
             else:
-                context = legacy._get_conversation_context(conversation)
-                context_manager = legacy._get_context_manager(context)
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
                 refusal_flags = (
                     context_manager.get("refusal_flags") if isinstance(context_manager, dict) else None
                 )
-                booking_state = legacy._get_booking_context(context)
-                _, booking_followup = legacy._next_booking_prompt(
+                booking_state = _get_booking_context(context)
+                _, booking_followup = _next_booking_prompt(
                     booking_state,
                     refusal_flags=refusal_flags,
                 )
@@ -2014,7 +2091,7 @@ def _handle_consult_flow(
                 )
         if booking_followup:
             consult_meta["booking_followup"] = True
-        bot_response = legacy._append_followup(bot_response, booking_followup)
+        bot_response = _append_followup(bot_response, booking_followup)
         cta_will_append = _should_append_booking_cta(
             bot_response,
             conversation_state=conversation.state,
@@ -2027,45 +2104,45 @@ def _handle_consult_flow(
             and str(consult_decision.intent or "").strip().casefold() == "consult_reply"
             and expected_reply_type
             not in {
-                legacy.EXPECTED_REPLY_SERVICE,
-                legacy.EXPECTED_REPLY_TIME,
-                legacy.EXPECTED_REPLY_NAME,
+                EXPECTED_REPLY_SERVICE,
+                EXPECTED_REPLY_TIME,
+                EXPECTED_REPLY_NAME,
             }
         ):
             service_hint = (
-                legacy._extract_service_hint(message_text, client_slug)
+                _extract_service_hint(message_text, client_slug)
                 if isinstance(message_text, str) and message_text.strip()
                 else None
             )
             if isinstance(service_hint, str) and service_hint.strip():
-                context = legacy._get_conversation_context(conversation)
-                context = legacy._set_expected_reply_context(
+                context = _get_conversation_context(conversation)
+                context = _set_expected_reply_context(
                     conversation=conversation,
                     saved_message=saved_message,
                     context=context,
-                    expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                    expected_reply_type=EXPECTED_REPLY_SERVICE,
                     reason="consult_booking_cta",
                     now=now,
                 )
-                consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
                 consult_meta["expected_reply_reason"] = "consult_booking_cta"
                 consult_meta["consult_booking_cta_expected_reply"] = True
-                legacy._record_decision_trace(
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "consult_flow",
                         "decision": "booking_cta_expected_reply",
-                        "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                        "expected_reply_type": EXPECTED_REPLY_SERVICE,
                         "expected_reply_reason": "consult_booking_cta",
                         "service_hint": service_hint.strip(),
                     },
                 )
                 if saved_message:
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {
                             "consult_booking_cta_expected_reply": True,
-                            "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                            "expected_reply_type": EXPECTED_REPLY_SERVICE,
                             "expected_reply_reason": "consult_booking_cta",
                         },
                     )
@@ -2075,7 +2152,7 @@ def _handle_consult_flow(
             allow_booking_flow=routing["allow_booking_flow"],
             has_followup=bool(booking_followup or intent_queue_followup),
         )
-        legacy._reset_low_confidence_retry(conversation)
+        _reset_low_confidence_retry(conversation)
         bot_response, sent = send_and_save(bot_response)
         result_message = "Consult reply sent" if sent else "Consult reply send failed"
         db.commit()
@@ -2120,7 +2197,6 @@ def _handle_llm_primary(
     send_and_save: Callable[..., tuple[str | None, bool]],
     record_escalation_metric: Callable[[str], None],
 ) -> LlmPrimaryOutcome:
-    from . import _legacy as legacy
 
     llm_primary_result = None
     llm_primary_failed = False
@@ -2142,13 +2218,13 @@ def _handle_llm_primary(
         client_config=client_config,
         timing_context=timing_context,
     )
-    llm_primary_result = legacy.generate_bot_response(
+    llm_primary_result = generate_bot_response(
         db,
         conversation,
         message_text,
         client_slug,
         append_user_message=append_user_message,
-        pending_hint=conversation.state == legacy.ConversationState.PENDING.value,
+        pending_hint=conversation.state == ConversationState.PENDING.value,
         timing_context=timing_context,
     )
     _record_rag_meta(
@@ -2191,17 +2267,17 @@ def _handle_llm_primary(
             llm_primary_reason=llm_primary_reason,
         )
     if response_text and confidence != "low_confidence":
-        blocked_topics = legacy._detect_llm_guard_topics(
+        blocked_topics = _detect_llm_guard_topics(
             response_text,
             policy_type=policy_type,
             policy_pack=policy_pack,
         )
         if blocked_topics:
-            bot_response = legacy.MSG_ESCALATED
-            legacy._reset_low_confidence_retry(conversation)
+            bot_response = MSG_ESCALATED
+            _reset_low_confidence_retry(conversation)
 
             result_message = "LLM guard escalation"
-            _, reused, telegram_sent = legacy._reuse_active_handover(
+            _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
                 user=user,
@@ -2209,19 +2285,19 @@ def _handle_llm_primary(
                 source="llm_guard",
                 intent="llm_guard",
                 hooks=ActiveHandoverReuseRuntimeHooks(
-                    get_active_handover=legacy.get_active_handover,
-                    transition_state=legacy.transition_state,
-                    send_telegram_notification=legacy.send_telegram_notification,
-                    record_decision_trace=legacy._record_decision_trace,
+                    get_active_handover=get_active_handover,
+                    transition_state=transition_state,
+                    send_telegram_notification=send_telegram_notification,
+                    record_decision_trace=_record_decision_trace,
                 ),
             )
             if reused:
                 result_message = f"LLM guard reuse, telegram={'sent' if telegram_sent else 'failed'}"
-            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
                 "allow_handover_create"
             ):
                 record_escalation_metric("intent")
-                result = legacy.escalate_to_pending(
+                result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
                     user_message=message_text,
@@ -2230,7 +2306,7 @@ def _handle_llm_primary(
                 )
                 if result.ok:
                     handover = result.value
-                    telegram_sent = legacy.send_telegram_notification(
+                    telegram_sent = send_telegram_notification(
                         db=db,
                         handover=handover,
                         conversation=conversation,
@@ -2294,8 +2370,8 @@ def _handle_llm_primary(
             )
 
         bot_response = response_text
-        bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
-        legacy._reset_low_confidence_retry(conversation)
+        bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+        _reset_low_confidence_retry(conversation)
         trace = _attach_llm_cache_flag(
             {
                 "stage": "ai_response",
@@ -2390,16 +2466,15 @@ def _handle_ai_response_action(
     send_response: Callable[[str], bool],
     finalize_response: Callable[..., str | None],
 ) -> AiResponseOutcome:
-    from . import _legacy as legacy
 
     llm_primary_used = False
     llm_primary_failed = False
     llm_primary_reason = None
     bot_response = None
     result_message = None
-    if message_text and legacy.is_low_signal_message(message_text) and not expected_reply_shortcircuit:
-        bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
-        legacy._reset_low_confidence_retry(conversation)
+    if message_text and is_low_signal_message(message_text) and not expected_reply_shortcircuit:
+        bot_response = OUT_OF_DOMAIN_RESPONSE
+        _reset_low_confidence_retry(conversation)
         _record_decision_trace(
             conversation,
             {
@@ -2442,13 +2517,13 @@ def _handle_ai_response_action(
             client_config=client_config,
             timing_context=timing_context,
         )
-        gen_result = legacy.generate_bot_response(
+        gen_result = generate_bot_response(
             db,
             conversation,
             message_text,
             client_slug,
             append_user_message=append_user_message,
-            pending_hint=conversation.state == legacy.ConversationState.PENDING.value,
+            pending_hint=conversation.state == ConversationState.PENDING.value,
             timing_context=timing_context,
         )
         _record_rag_meta(
@@ -2458,7 +2533,7 @@ def _handle_ai_response_action(
         )
 
     if not gen_result.ok:
-        bot_response = legacy.MSG_AI_ERROR
+        bot_response = MSG_AI_ERROR
         _record_decision_trace(
             conversation,
             {
@@ -2486,7 +2561,7 @@ def _handle_ai_response_action(
             if timing_context and timing_context.get("llm_timeout")
             else "low_confidence"
         )
-        legacy._record_knowledge_backlog(
+        _record_knowledge_backlog(
             db,
             client_id=client_id,
             conversation_id=conversation.id,
@@ -2582,7 +2657,7 @@ def _handle_ai_response_action(
                 )
                 if isinstance(info_reply, str) and info_reply.strip():
                     bot_response = info_reply.strip()
-                    legacy._reset_low_confidence_retry(conversation)
+                    _reset_low_confidence_retry(conversation)
                     _record_decision_trace(
                         conversation,
                         {
@@ -2644,7 +2719,7 @@ def _handle_ai_response_action(
                 and not (class_router_result.get("in_signals") or [])
                 and not expected_reply_shortcircuit
             ):
-                bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                bot_response = OUT_OF_DOMAIN_RESPONSE
                 _record_decision_trace(
                     conversation,
                     {
@@ -2678,7 +2753,7 @@ def _handle_ai_response_action(
                     llm_primary_reason=llm_primary_reason,
                 )
             if out_of_domain_signal and not expected_reply_shortcircuit:
-                bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                bot_response = OUT_OF_DOMAIN_RESPONSE
                 _record_decision_trace(
                     conversation,
                     {
@@ -2713,8 +2788,8 @@ def _handle_ai_response_action(
                     llm_primary_failed=llm_primary_failed,
                     llm_primary_reason=llm_primary_reason,
                 )
-            if legacy._looks_like_time_only_request(message_text):
-                bot_response = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
+            if _looks_like_time_only_request(message_text):
+                bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
                 _record_decision_trace(
                     conversation,
                     {
@@ -2757,7 +2832,7 @@ def _handle_ai_response_action(
             raw_source = None
             if not out_of_domain_signal:
                 if message_text and client_slug:
-                    explicit_service_hint = legacy._extract_service_hint(
+                    explicit_service_hint = _extract_service_hint(
                         message_text, client_slug
                     )
                 if isinstance(intent_decomp_payload, dict):
@@ -2821,7 +2896,7 @@ def _handle_ai_response_action(
                                 },
                             )
                     else:
-                        bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                        bot_response = OUT_OF_DOMAIN_RESPONSE
                         _record_decision_trace(
                             conversation,
                             {
@@ -2866,9 +2941,9 @@ def _handle_ai_response_action(
                         )
                 if service_semantic_allowed:
                     semantic_attempted = True
-                    semantic_result = legacy.semantic_service_match(message_text, client_slug)
+                    semantic_result = semantic_service_match(message_text, client_slug)
                     if not semantic_result:
-                        rewrite_query = legacy.rewrite_for_service_match(
+                        rewrite_query = rewrite_for_service_match(
                             message_text,
                             client_slug,
                             client_config=client_config,
@@ -2879,11 +2954,11 @@ def _handle_ai_response_action(
                             timing_context=timing_context,
                         )
                         if rewrite_query:
-                            semantic_result = legacy.semantic_service_match(rewrite_query, client_slug)
+                            semantic_result = semantic_service_match(rewrite_query, client_slug)
             if semantic_result:
                 rewrite_used = bool(rewrite_query)
                 bot_response = semantic_result.response
-                legacy._reset_low_confidence_retry(conversation)
+                _reset_low_confidence_retry(conversation)
                 _record_decision_trace(
                     conversation,
                     {
@@ -2982,7 +3057,7 @@ def _handle_ai_response_action(
                 )
                 if reply:
                     bot_response = reply
-                    legacy._reset_low_confidence_retry(conversation)
+                    _reset_low_confidence_retry(conversation)
                     _record_decision_trace(
                         conversation,
                         {
@@ -3037,8 +3112,8 @@ def _handle_ai_response_action(
                         llm_primary_failed=llm_primary_failed,
                         llm_primary_reason=llm_primary_reason,
                     )
-            if conversation.state == legacy.ConversationState.PENDING.value:
-                bot_response = legacy.MSG_PENDING_LOW_CONFIDENCE
+            if conversation.state == ConversationState.PENDING.value:
+                bot_response = MSG_PENDING_LOW_CONFIDENCE
                 _record_decision_trace(
                     conversation,
                     {
@@ -3050,19 +3125,19 @@ def _handle_ai_response_action(
                 bot_response, sent = send_and_save(bot_response)
                 result_message = "Low confidence while pending, responded without re-escalation"
             else:
-                context = legacy._get_conversation_context(conversation)
-                retry_count = legacy._get_low_confidence_retry_count(context)
-                if legacy.should_offer_low_confidence_retry(conversation, now):
+                context = _get_conversation_context(conversation)
+                retry_count = _get_low_confidence_retry_count(context)
+                if should_offer_low_confidence_retry(conversation, now):
                     retry_count = 0
 
-                if retry_count < legacy.LOW_CONFIDENCE_MAX_RETRIES:
+                if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
                     clarify_intent = current_goal or "info"
-                    context_manager = legacy._get_context_manager(context)
-                    if legacy._should_escalate_for_clarify(context_manager, clarify_intent):
-                        clarify_count, _ = legacy._get_clarify_attempt_state(
+                    context_manager = _get_context_manager(context)
+                    if _should_escalate_for_clarify(context_manager, clarify_intent):
+                        clarify_count, _ = _get_clarify_attempt_state(
                             context_manager, clarify_intent
                         )
-                        legacy._record_context_manager_decision(
+                        _record_context_manager_decision(
                             conversation,
                             saved_message,
                             decision="clarify_limit",
@@ -3072,7 +3147,7 @@ def _handle_ai_response_action(
                                 "clarify_limit": True,
                             },
                         )
-                        clarify_limit_response = legacy._handle_clarify_limit_escalation(
+                        clarify_limit_response = _handle_clarify_limit_escalation(
                             db=db,
                             conversation=conversation,
                             user=user,
@@ -3092,7 +3167,7 @@ def _handle_ai_response_action(
                                 llm_primary_reason=llm_primary_reason,
                             )
                         # Defensive fallback: avoid propagating empty response metadata to webhook output.
-                        bot_response = legacy.MSG_ESCALATED
+                        bot_response = MSG_ESCALATED
                         bot_response, sent = send_and_save(bot_response)
                         fallback_message = (
                             "Clarify limit fallback sent"
@@ -3106,17 +3181,17 @@ def _handle_ai_response_action(
                             llm_primary_failed=llm_primary_failed,
                             llm_primary_reason=llm_primary_reason,
                         )
-                    legacy._register_clarify_attempt(
+                    _register_clarify_attempt(
                         conversation=conversation,
                         saved_message=saved_message,
                         intent=clarify_intent,
                         now=now,
                         reason="low_confidence_retry",
                     )
-                    bot_response = legacy.MSG_LOW_CONFIDENCE_RETRY
+                    bot_response = MSG_LOW_CONFIDENCE_RETRY
                     conversation.retry_offered_at = now
-                    context = legacy._set_low_confidence_retry_count(context, retry_count + 1)
-                    legacy._set_conversation_context(conversation, context)
+                    context = _set_low_confidence_retry_count(context, retry_count + 1)
+                    _set_conversation_context(conversation, context)
                     _record_decision_trace(
                         conversation,
                         {
@@ -3136,10 +3211,10 @@ def _handle_ai_response_action(
                         "trigger_value": "low_confidence",
                         "user_message": message_text,
                     }
-                    context = legacy._set_handover_confirmation(context, confirmation)
-                    legacy._set_conversation_context(conversation, context)
+                    context = _set_handover_confirmation(context, confirmation)
+                    _set_conversation_context(conversation, context)
 
-                    bot_response = legacy.MSG_HANDOVER_CONFIRM
+                    bot_response = MSG_HANDOVER_CONFIRM
                     _record_decision_trace(
                         conversation,
                         {
@@ -3169,10 +3244,10 @@ def _handle_ai_response_action(
 
     elif response_text:
         bot_response = response_text
-        legacy.logger.debug(
+        logger.debug(
             f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}..."
         )
-        legacy._reset_low_confidence_retry(conversation)
+        _reset_low_confidence_retry(conversation)
         llm_primary_used = True
         trace = _attach_llm_cache_flag(
             {
@@ -3187,7 +3262,7 @@ def _handle_ai_response_action(
         bot_response, sent = send_and_save(bot_response)
         result_message = "Message sent" if sent else "Failed to send"
     else:
-        legacy._record_knowledge_backlog(
+        _record_knowledge_backlog(
             db,
             client_id=client_id,
             conversation_id=conversation.id,
@@ -3197,7 +3272,7 @@ def _handle_ai_response_action(
         )
         explicit_service_hint = None
         if message_text and client_slug:
-            explicit_service_hint = legacy._extract_service_hint(message_text, client_slug)
+            explicit_service_hint = _extract_service_hint(message_text, client_slug)
         intent_decomp_explicit_query = None
         info_intent_hint = False
         if isinstance(intent_decomp_payload, dict):
@@ -3228,7 +3303,7 @@ def _handle_ai_response_action(
             or int(class_router_result.get("anchors_in_hits") or 0) > 0
         )
         if not has_domain_signal and not expected_reply_shortcircuit:
-            bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+            bot_response = OUT_OF_DOMAIN_RESPONSE
             _record_decision_trace(
                 conversation,
                 {
@@ -3261,16 +3336,16 @@ def _handle_ai_response_action(
                 llm_primary_failed=llm_primary_failed,
                 llm_primary_reason=llm_primary_reason,
             )
-        context = legacy._get_conversation_context(conversation)
-        retry_count = legacy._get_low_confidence_retry_count(context)
-        if legacy.should_offer_low_confidence_retry(conversation, now):
+        context = _get_conversation_context(conversation)
+        retry_count = _get_low_confidence_retry_count(context)
+        if should_offer_low_confidence_retry(conversation, now):
             retry_count = 0
 
-        if retry_count < legacy.LOW_CONFIDENCE_MAX_RETRIES:
-            bot_response = legacy.MSG_LOW_CONFIDENCE_RETRY
+        if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
+            bot_response = MSG_LOW_CONFIDENCE_RETRY
             conversation.retry_offered_at = now
-            context = legacy._set_low_confidence_retry_count(context, retry_count + 1)
-            legacy._set_conversation_context(conversation, context)
+            context = _set_low_confidence_retry_count(context, retry_count + 1)
+            _set_conversation_context(conversation, context)
             _record_decision_trace(
                 conversation,
                 {
@@ -3290,10 +3365,10 @@ def _handle_ai_response_action(
                 "trigger_value": "low_confidence",
                 "user_message": message_text,
             }
-            context = legacy._set_handover_confirmation(context, confirmation)
-            legacy._set_conversation_context(conversation, context)
+            context = _set_handover_confirmation(context, confirmation)
+            _set_conversation_context(conversation, context)
 
-            bot_response = legacy.MSG_HANDOVER_CONFIRM
+            bot_response = MSG_HANDOVER_CONFIRM
             _record_decision_trace(
                 conversation,
                 {

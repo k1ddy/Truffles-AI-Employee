@@ -1,4 +1,5 @@
 import ast
+import json
 from pathlib import Path
 
 
@@ -28,6 +29,35 @@ def _load_suppress_helper():
     return namespace["_llm_quality_should_suppress_missed_question_judge_fail"]
 
 
+def _load_judge_prompt_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+
+    wanted_assignments = {
+        "LLM_QUALITY_JUDGE_REASONS",
+        "LLM_QUALITY_JUDGE_VERDICTS",
+        "LLM_QUALITY_JUDGE_PAYLOAD_LIMITS",
+    }
+    wanted_functions = {
+        "_llm_quality_compact_for_judge_payload",
+        "_llm_quality_build_judge_prompt",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if names & wanted_assignments:
+                selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {"json": json}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_build_judge_prompt"]
+
+
 def test_suppresses_missed_question_for_provider_unavailable_booking_reply():
     fn = _load_suppress_helper()
 
@@ -46,6 +76,29 @@ def test_suppresses_missed_question_for_provider_unavailable_booking_reply():
     )
 
     assert suppress is True
+
+
+def test_judge_prompt_uses_contract_language_for_handoff_and_booking_lookup():
+    build_prompt = _load_judge_prompt_helper()
+
+    prompt = build_prompt(
+        {
+            "conversation_state": "pending",
+            "expected_reply": False,
+            "decision_meta": {
+                "action": "fact",
+                "tool_action": "calendar.get_booking",
+                "tool_decision": "not_found",
+                "expected_reply_type": "name",
+            },
+        }
+    )
+
+    assert "An explicit handoff or status acknowledgement" in prompt
+    assert "do not require bot silence" in prompt
+    assert "calendar.get_booking" in prompt
+    assert "any bot reply is wrong" not in prompt
+    assert "If expected_reply is false but the bot replied, mark fail." not in prompt
 
 
 def test_does_not_suppress_when_judge_reason_is_not_missed_question():

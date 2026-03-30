@@ -26,7 +26,11 @@ from app.routers.public_entrypoint_contract import PublicEntrypointMaterializati
 from app.routers.webhook import _legacy as legacy_router
 from app.routers.webhook import _legacy as webhook_router
 from app.routers.webhook import booking as webhook_booking
+from app.routers.webhook import guards as webhook_guards
 from app.routers.webhook import http as http_router
+from app.routers.webhook import info as webhook_info
+from app.routers.webhook import policy as webhook_policy
+from app.routers.webhook import response as webhook_response
 from app.routers.webhook.context_manager import (
     _get_expected_reply_reason,
     _get_expected_reply_type,
@@ -34,10 +38,6 @@ from app.routers.webhook.context_manager import (
     _is_handover_confirmation_active,
     _set_expected_reply_type,
 )
-from app.routers.webhook import guards as webhook_guards
-from app.routers.webhook import info as webhook_info
-from app.routers.webhook import policy as webhook_policy
-from app.routers.webhook import response as webhook_response
 from app.routers.webhook.decision import (
     _classify_policy_core_degrade_reason,
     _detect_tool_contract_error,
@@ -59,8 +59,7 @@ from app.schemas.webhook import (
     WebhookResponse,
     WebhookTenantContext,
 )
-from app.services import escalation_service
-from app.services import handover_owner_service
+from app.services import escalation_service, handover_owner_service
 from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
@@ -2038,10 +2037,10 @@ def test_signal_snapshot_written_on_class_router():
     with patch(
         "app.routers.webhook.decision._detect_intent_signals", return_value=signals
     ), patch(
-        "app.routers.webhook._legacy.classify_domain_with_scores",
+        "app.routers.webhook.decision.classify_domain_with_scores",
         return_value=(DomainIntent.IN_DOMAIN, 0.77, 0.12, domain_meta),
     ), patch(
-        "app.routers.webhook._legacy._resolve_class_router_result",
+        "app.routers.webhook.decision._resolve_class_router_result",
         return_value=class_router_result,
     ), patch(
         "app.routers.webhook.decision._has_explicit_service_signal", return_value=True
@@ -2521,6 +2520,74 @@ def test_context_manager_expected_reply_getters_prefer_canonical_question_contra
         .get("pending_question_contract")
         is None
     )
+
+
+def test_context_manager_expected_reply_getters_prefer_conversation_projection_over_canonical_question_contract():
+    context = {
+        "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
+        "expected_reply_reason": "booking_prompt",
+        "consultant_runtime": {
+            "conversation_projection": {
+                "schema_version": "conversation_projection.v1",
+                "projection_version": "v1",
+                "pending_question_contract": {
+                    "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                    "reason": "runtime_projection",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "missing_information": {
+                    "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                    "reason": "runtime_projection",
+                },
+            }
+        },
+        "context_manager": {
+            "canonical_dialog_state": {
+                "pending_question_contract": {
+                    "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+                    "reason": "stale_canonical",
+                    "next_question": "name",
+                    "open_questions": ["name"],
+                }
+            }
+        },
+    }
+
+    assert _get_expected_reply_type(context) == webhook_router.EXPECTED_REPLY_TIME
+    assert _get_expected_reply_reason(context) == "runtime_projection"
+
+
+def test_context_manager_set_conversation_context_preserves_simulation_and_merges_trace():
+    conversation = SimpleNamespace(
+        context={
+            "simulation": {"mode": True, "id": "sim-1"},
+            "simulation_mode": True,
+            "decision_trace": [
+                {"stage": "seed", "decision": "start", "recorded_at": "t1"},
+                {"stage": "carry", "decision": "keep", "recorded_at": "t2"},
+            ],
+        }
+    )
+
+    webhook_router._set_conversation_context(
+        conversation,
+        {
+            "context_manager": {"current_goal": "booking"},
+            "decision_trace": [
+                {"stage": "seed", "decision": "start", "recorded_at": "t1"},
+                {"stage": "new", "decision": "append", "recorded_at": "t3"},
+            ],
+        },
+    )
+
+    assert conversation.context["simulation"] == {"mode": True, "id": "sim-1"}
+    assert conversation.context["simulation_mode"] is True
+    assert conversation.context["decision_trace"] == [
+        {"stage": "seed", "decision": "start", "recorded_at": "t1"},
+        {"stage": "carry", "decision": "keep", "recorded_at": "t2"},
+        {"stage": "new", "decision": "append", "recorded_at": "t3"},
+    ]
 
 
 def test_set_expected_reply_context_records_canonical_pending_question_contract_in_evidence():
@@ -3036,13 +3103,13 @@ def test_expected_reply_contract_prefers_canonical_context_question_contract_ove
     trace_calls: list[dict[str, object]] = []
 
     with patch(
-        "app.routers.webhook._legacy._record_decision_trace",
+        "app.routers.webhook.decision._record_decision_trace",
         side_effect=lambda conv, trace: trace_calls.append(dict(trace)),
     ), patch(
         "app.routers.webhook.decision._match_expected_reply_candidates",
         return_value=(False, None, []),
     ), patch(
-        "app.routers.webhook._legacy.interpret_expected_reply",
+        "app.routers.webhook.decision.interpret_expected_reply",
         return_value={"ok": False, "payload": {}, "error": "no_match", "raw": None},
     ):
         state = decision_router._apply_expected_reply_contract(
@@ -3284,7 +3351,7 @@ def test_expected_reply_time_slot_mismatch_captures_alternate_name_without_clear
         "app.routers.webhook.decision._is_booking_confirm_enabled",
         return_value=True,
     ), patch(
-        "app.routers.webhook._legacy.interpret_expected_reply",
+        "app.routers.webhook.decision.interpret_expected_reply",
         return_value=expected_reply_result,
     ):
         state = decision_router._apply_expected_reply_contract(
@@ -3372,7 +3439,7 @@ def test_expected_reply_time_slot_mismatch_captures_alternate_name_without_booki
         "app.routers.webhook.decision._is_booking_confirm_enabled",
         return_value=True,
     ), patch(
-        "app.routers.webhook._legacy.interpret_expected_reply",
+        "app.routers.webhook.decision.interpret_expected_reply",
         return_value=expected_reply_result,
     ):
         state = decision_router._apply_expected_reply_contract(
@@ -3929,20 +3996,20 @@ def test_truth_gate_fallback_escalation_passes_active_handover_hooks():
     )
 
     with patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.info._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry"
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.info._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.info._record_message_decision_meta"
     ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
+        "app.routers.webhook.info._update_message_decision_metadata"
     ), patch(
-        "app.routers.webhook._legacy._maybe_store_class_carryover"
+        "app.routers.webhook.context_manager._maybe_store_class_carryover"
     ), patch(
-        "app.routers.webhook._legacy._maybe_store_service_carryover"
+        "app.routers.webhook.context_manager._maybe_store_service_carryover"
     ):
         response = webhook_info._handle_truth_gate_fallback(
             db=db,
@@ -4001,19 +4068,19 @@ def test_policy_escalation_passes_active_handover_hooks():
         return None, True, True
 
     with patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.policy._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry"
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
     ), patch(
-        "app.routers.webhook._legacy._set_router_observability",
+        "app.routers.webhook.policy._set_router_observability",
         return_value={},
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.policy._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.policy._record_message_decision_meta"
     ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
+        "app.routers.webhook.policy._update_message_decision_metadata"
     ):
         response = webhook_policy._apply_policy_decision(
             decision,
@@ -4063,18 +4130,18 @@ def test_clarify_limit_escalation_passes_active_handover_hooks():
         return None, True, True
 
     with patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.guards._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry"
+        "app.routers.webhook.guards._reset_low_confidence_retry"
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.guards._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.guards._record_message_decision_meta"
     ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
+        "app.routers.webhook.guards._update_message_decision_metadata"
     ), patch(
-        "app.routers.webhook._legacy.save_message"
+        "app.routers.webhook.guards.save_message"
     ):
         response = webhook_guards._handle_clarify_limit_escalation(
             db=db,
@@ -4114,16 +4181,16 @@ def test_llm_guard_escalation_passes_active_handover_hooks():
     ), patch(
         "app.routers.webhook.response._record_rag_meta"
     ), patch(
-        "app.routers.webhook._legacy.generate_bot_response",
+        "app.routers.webhook.response.generate_bot_response",
         return_value=Result.success(("медицинский ответ", "high")),
     ), patch(
-        "app.routers.webhook._legacy._detect_llm_guard_topics",
+        "app.routers.webhook.response._detect_llm_guard_topics",
         return_value=["medical"],
     ), patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.response._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry"
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
     ), patch(
         "app.routers.webhook.response._record_decision_trace"
     ), patch(
@@ -4178,12 +4245,12 @@ def test_booking_interrupt_reschedule_passes_active_handover_hooks():
         "app.routers.webhook.booking._looks_like_booking_reschedule_request",
         return_value=True,
     ), patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.booking._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.booking._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.booking._record_message_decision_meta"
     ):
         response = webhook_booking._handle_booking_interrupt(
             db=db,
@@ -4262,16 +4329,16 @@ def test_booking_interrupt_info_escalation_passes_active_handover_hooks():
         return None, True, True
 
     with patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.booking._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.booking._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.booking._record_message_decision_meta"
     ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
+        "app.routers.webhook.booking._update_message_decision_metadata"
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry"
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
     ):
         response = webhook_booking._handle_booking_interrupt(
             db=db,
@@ -4354,16 +4421,16 @@ def test_booking_same_day_escalation_passes_active_handover_hooks():
         return None, True, True
 
     with patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.booking._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry"
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.booking._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.booking._record_message_decision_meta"
     ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
+        "app.routers.webhook.booking._update_message_decision_metadata"
     ):
         outcome = webhook_booking._handle_booking_flow(
             db=db,
@@ -4427,15 +4494,15 @@ def test_booking_human_request_escalation_passes_active_handover_hooks():
         return None, True, True
 
     with patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.booking._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
-        "app.routers.webhook._legacy.is_human_request_message",
+        "app.routers.webhook.booking.is_human_request_message",
         return_value=True,
     ), patch(
-        "app.routers.webhook._legacy._record_decision_trace"
+        "app.routers.webhook.booking._record_decision_trace"
     ), patch(
-        "app.routers.webhook._legacy._record_message_decision_meta"
+        "app.routers.webhook.booking._record_message_decision_meta"
     ):
         outcome = webhook_booking._handle_booking_flow(
             db=db,
@@ -5420,7 +5487,8 @@ def test_reuse_active_handover_captures_interaction_state_in_pending_resume():
     assert snapshot.get("booking", {}).get("service") == "Стрижка"
     assert snapshot.get("session_memory", {}).get("last_question_type") is None
     assert snapshot.get("session_memory", {}).get("pending_question_contract") == {
-        "expected_reply_type": "time"
+        "expected_reply_type": "time",
+        "reason": "booking_prompt",
     }
     assert snapshot.get("session_memory", {}).get("interaction_state", {}).get("resume_slot") == "datetime"
     assert (

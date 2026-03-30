@@ -1,7 +1,7 @@
 from app.services.owner_resolver import (
     TimeoutOwnerBoundaryInput,
-    build_semantic_contract_view,
     build_owner_resolution_input,
+    build_semantic_contract_view,
     extract_specialist_preference,
     resolve_interaction_owner,
     resolve_timeout_owner_boundary,

@@ -38,10 +38,14 @@ class DuplicateMessageProbe:
     fallback_reason: str | None = None
 
 
-def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
-    from . import _legacy as legacy
+def _is_env_enabled(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
 
-    enabled = legacy._is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+
+def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
+    enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
     inactivity_seconds = float(os.environ.get("DEBOUNCE_INACTIVITY_SECONDS", "1.5"))
     ttl_seconds = int(float(os.environ.get("DEBOUNCE_TTL_SECONDS", "30")))
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
@@ -50,9 +54,7 @@ def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
 
 
 def _get_message_buffer_settings() -> tuple[bool, int]:
-    from . import _legacy as legacy
-
-    enabled = legacy._is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+    enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
     max_messages = int(float(os.environ.get("DEBOUNCE_MAX_BUFFER_MESSAGES", "8")))
     return enabled, max_messages
 
@@ -65,10 +67,8 @@ def _get_dedup_settings() -> tuple[int, str, float]:
 
 
 def _is_fast_dedup_bypass_enabled() -> bool:
-    from . import _legacy as legacy
-
-    test_mode = legacy._is_env_enabled(os.environ.get("TEST_MODE"), default=False)
-    fast_dedup = legacy._is_env_enabled(os.environ.get("LLM_QUALITY_FAST_DEDUP"), default=False)
+    test_mode = _is_env_enabled(os.environ.get("TEST_MODE"), default=False)
+    fast_dedup = _is_env_enabled(os.environ.get("LLM_QUALITY_FAST_DEDUP"), default=False)
     return bool(test_mode and fast_dedup)
 
 

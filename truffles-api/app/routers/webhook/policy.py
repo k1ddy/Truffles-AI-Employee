@@ -9,17 +9,37 @@ from sqlalchemy.orm import Session
 
 from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
-from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
-from app.services.intent_service import Intent
+from app.services.handover_owner_service import (
+    _reuse_active_handover,
+    escalate_to_pending,
+    get_active_handover,
+    send_telegram_notification,
+)
+from app.services.intent_service import Intent, _normalize_text, should_escalate
 from app.services.pack_runtime_service import (
     PackDecision,
     get_pack_decision,
     get_pack_price_item,
     get_pack_price_reply,
+    get_pack_service_decision,
     load_policy_pack,
 )
-from app.services.policy_registry_service import resolve_effective_policy_overrides
+from app.services.policy_snapshot_service import (
+    build_policy_pack_snapshot,
+    build_routing_policy_snapshot,
+    resolve_policy_type,
+)
+from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
+
+from .trace import (
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _set_router_observability,
+    _update_message_decision_metadata,
+)
+from .runtime_primitives import MSG_ESCALATED, _combine_sidecar, _contains_any
 
 _POLICY_SECTIONS = (
     "payment_info",
@@ -71,49 +91,14 @@ _DEFAULT_HARD_LAW_SECTIONS = (
     "refund",
 )
 
-_ALLOWED_OPERATIONAL_POLICY_OVERRIDE_SECTIONS = {
-    "payment_info",
-    "discounts",
-}
+def _context_runtime():
+    from . import context_manager as context_router
 
-
-def _looks_like_policy_pack(value: object) -> bool:
-    if not isinstance(value, dict):
-        return False
-    if value.get("hard_law") or value.get("guard_topics"):
-        return True
-    return any(key in value for key in _POLICY_SECTIONS)
-
-
-def _extract_policy_pack_from_config(config: dict | None) -> dict | None:
-    if not isinstance(config, dict):
-        return None
-    direct = config.get("policy_pack")
-    if _looks_like_policy_pack(direct):
-        return dict(direct)
-    client_pack = config.get("client_pack")
-    if isinstance(client_pack, dict):
-        policy = client_pack.get("policy")
-        if _looks_like_policy_pack(policy):
-            return dict(policy)
-    legacy = config.get("policy")
-    if _looks_like_policy_pack(legacy):
-        return dict(legacy)
-    return None
+    return context_router
 
 
 def _get_routing_policy(state: str) -> dict[str, bool]:
-    from . import _legacy as legacy
-
-    policy = legacy.ROUTING_MATRIX.get(state)
-    if policy:
-        return dict(policy)
-    return {
-        "allow_booking_flow": False,
-        "allow_truth_gate_reply": False,
-        "allow_handover_create": False,
-        "allow_bot_reply": False,
-    }
+    return build_routing_policy_snapshot(state).as_compat_policy()
 
 
 def _should_run_booking_flow(
@@ -134,9 +119,7 @@ def _should_run_demo_truth_gate(policy: dict[str, bool], booking_wants_flow: boo
 
 
 def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool:
-    from . import _legacy as legacy
-
-    return bool(policy.get("allow_handover_create")) and legacy.should_escalate(intent)
+    return bool(policy.get("allow_handover_create")) and should_escalate(intent)
 
 
 def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> dict | None:
@@ -147,110 +130,17 @@ def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> di
     return policy_pack if isinstance(policy_pack, dict) and policy_pack else None
 
 
-def _normalize_policy_override_payload(
-    payload: dict | None,
-) -> dict[str, dict[str, str]]:
-    if not isinstance(payload, dict):
-        return {}
-    resolved: dict[str, dict[str, str]] = {}
-    for section_key, section_payload in payload.items():
-        if section_key not in _ALLOWED_OPERATIONAL_POLICY_OVERRIDE_SECTIONS:
-            continue
-        if not isinstance(section_payload, dict):
-            continue
-        response = section_payload.get("response")
-        if not isinstance(response, str):
-            continue
-        normalized_response = response.strip()
-        if not normalized_response:
-            continue
-        resolved[section_key] = {"response": normalized_response}
-    return resolved
-
-
-def _resolve_runtime_policy_overrides() -> dict[str, dict[str, str]]:
-    runtime = get_runtime_capabilities()
-    if runtime is None:
-        return {}
-    override_payload = runtime.payload.policy_overrides.model_dump(exclude_none=True)
-    return _normalize_policy_override_payload(override_payload)
-
-
-def _resolve_registry_policy_overrides(*, db: Session | None) -> dict[str, dict[str, str]]:
-    runtime = get_runtime_capabilities()
-    if db is None or runtime is None or runtime.client_id is None:
-        return {}
-    overrides = resolve_effective_policy_overrides(
-        db,
-        client_id=runtime.client_id,
-        branch_id=runtime.branch_id,
-    )
-    if overrides is None:
-        return {}
-    return _normalize_policy_override_payload(overrides.model_dump(exclude_none=True))
-
-
-def _apply_policy_overrides(
-    policy_pack: dict | None,
-    *,
-    overrides: dict[str, dict[str, str]],
-) -> dict | None:
-    if not isinstance(policy_pack, dict):
-        return None
-    if not overrides:
-        return policy_pack
-    hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
-    merged = dict(policy_pack)
-    for section_key, section_override in overrides.items():
-        if section_key in hard_law_sections:
-            continue
-        section = _get_policy_section(policy_pack, section_key)
-        if not isinstance(section, dict):
-            continue
-        updated_section = dict(section)
-        response = section_override.get("response")
-        if isinstance(response, str) and response.strip():
-            updated_section["response"] = response.strip()
-        merged[section_key] = updated_section
-    return merged
-
-
-def _apply_registry_policy_overrides(
-    policy_pack: dict | None,
-    *,
-    db: Session | None,
-) -> dict | None:
-    return _apply_policy_overrides(
-        policy_pack,
-        overrides=_resolve_registry_policy_overrides(db=db),
-    )
-
-
-def _apply_runtime_policy_overrides(policy_pack: dict | None) -> dict | None:
-    return _apply_policy_overrides(
-        policy_pack,
-        overrides=_resolve_runtime_policy_overrides(),
-    )
-
-
 def _get_policy_pack(
     client: Client | None,
     *,
     client_slug: str | None,
     db: Session | None = None,
 ) -> dict | None:
-    if not client or not isinstance(client.config, dict):
-        return None
-    policy_pack = _extract_policy_pack_from_config(client.config)
-    if policy_pack:
-        policy_pack = _apply_registry_policy_overrides(policy_pack, db=db)
-        return _apply_runtime_policy_overrides(policy_pack)
-    policy_type = _get_policy_type(client, client_slug=client_slug)
-    if policy_type:
-        policy_pack = _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
-        policy_pack = _apply_registry_policy_overrides(policy_pack, db=db)
-        return _apply_runtime_policy_overrides(policy_pack)
-    return None
+    return build_policy_pack_snapshot(
+        client,
+        client_slug=client_slug,
+        db=db,
+    ).policy_pack
 
 
 
@@ -364,9 +254,7 @@ def _detect_policy_section(
     policy_pack: dict | None,
     sections: list[str],
 ) -> tuple[str, dict | None] | None:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_text(message_text or "")
     if not normalized or not sections:
         return None
     for section_key in sections:
@@ -389,9 +277,7 @@ def _detect_hard_law_match(
     policy_pack: dict | None,
     intent_hints: list[str] | None = None,
 ) -> tuple[str, dict | None] | None:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_text(message_text or "")
     hard_law_sections = _resolve_hard_law_sections(policy_pack)
     match = _detect_policy_section(
         message_text,
@@ -401,21 +287,23 @@ def _detect_hard_law_match(
     if match:
         section_key, section = match
         if section_key == "complaint":
-            normalized = legacy._normalize_text(message_text)
-            if normalized and legacy._contains_any(
+            normalized = _normalize_text(message_text or "")
+            if normalized and _contains_any(
                 normalized,
                 ["без задерж", "без опозд", "без опоз"],
             ):
                 return None
         if section_key == "medical":
-            normalized = legacy._normalize_text(message_text)
+            normalized = _normalize_text(message_text or "")
             consult_override = _policy_str_list(
                 section.get("consult_override_keywords") if isinstance(section, dict) else None
             )
-            if normalized and consult_override and legacy._contains_any(normalized, consult_override):
+            if normalized and consult_override and _contains_any(
+                normalized, consult_override
+            ):
                 return None
         if section_key == "cancel":
-            normalized = legacy._normalize_text(message_text)
+            normalized = _normalize_text(message_text or "")
             if normalized:
                 policy_question_cues = [
                     "за сколько",
@@ -438,8 +326,8 @@ def _detect_hard_law_match(
                     "отмена записи",
                     "отмена запись",
                 ]
-                asks_policy = legacy._contains_any(normalized, policy_question_cues)
-                direct_request = legacy._contains_any(normalized, cancel_request_cues)
+                asks_policy = _contains_any(normalized, policy_question_cues)
+                direct_request = _contains_any(normalized, cancel_request_cues)
                 if asks_policy and not direct_request:
                     return None
         return match
@@ -495,9 +383,7 @@ def _resolve_complaint_guard(policy_pack: dict | None) -> tuple[list[str], list[
 
 
 def _detect_booking_cancel(message_text: str | None, *, policy_pack: dict | None) -> bool:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_text(message_text or "")
     if not normalized:
         return False
     section = _get_policy_section(policy_pack, "cancel")
@@ -527,8 +413,8 @@ def _detect_booking_cancel(message_text: str | None, *, policy_pack: dict | None
         "отмена записи",
         "отмена запись",
     ]
-    asks_policy = legacy._contains_any(normalized, policy_question_cues)
-    direct_request = legacy._contains_any(normalized, cancel_request_cues)
+    asks_policy = _contains_any(normalized, policy_question_cues)
+    direct_request = _contains_any(normalized, cancel_request_cues)
     if asks_policy and not direct_request:
         return False
     return True
@@ -585,9 +471,7 @@ def _detect_llm_guard_topics(
     policy_pack: dict | None = None,
     client_slug: str | None = None,
 ) -> list[str]:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(response_text)
+    normalized = _normalize_text(response_text)
     if not normalized:
         return []
     policy_pack = (
@@ -612,11 +496,9 @@ def _looks_like_promotions_request(
     policy_pack: dict | None = None,
     client_slug: str | None = None,
 ) -> bool:
-    from . import _legacy as legacy
-
     if not message_text:
         return False
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_text(message_text)
     if not normalized:
         return False
     policy_pack = (
@@ -626,14 +508,14 @@ def _looks_like_promotions_request(
     )
     discounts = _get_policy_section(policy_pack, "discounts")
     keywords = _policy_str_list(discounts.get("keywords") if isinstance(discounts, dict) else None)
-    if keywords and legacy._contains_any(normalized, keywords):
+    if keywords and _contains_any(normalized, keywords):
         return True
     birthday_window = discounts.get("birthday_window") if isinstance(discounts, dict) else None
     if isinstance(birthday_window, dict):
         phrase = birthday_window.get("phrase")
         day_words = _policy_str_list(birthday_window.get("day_words"))
         if isinstance(phrase, str) and phrase.strip():
-            if phrase in normalized and legacy._contains_any(normalized, day_words):
+            if phrase in normalized and _contains_any(normalized, day_words):
                 return True
     return False
 
@@ -727,13 +609,11 @@ def _format_discounts_policy_reply(
 
 
 def _pack_escalation_gate(messages: list[str], *, client_slug: str | None):
-    from . import _legacy as legacy
-
     for message in messages:
         decision = get_pack_decision(message, client_slug=client_slug)
         if not decision or decision.action != "escalate":
             continue
-        if decision.intent in {"medical"} and legacy._is_hygiene_context_text(message):
+        if decision.intent in {"medical"} and _is_hygiene_context_text(message):
             continue
         return decision
     return None
@@ -751,35 +631,56 @@ def _pack_price_sidecar(
     return None, None
 
 
+_HYGIENE_KEYWORDS = [
+    "стерилиз",
+    "дезраств",
+    "дезинф",
+    "ультразвук",
+    "уз-ванн",
+    "сухожар",
+    "крафт",
+    "однораз",
+    "инструмент",
+    "обрабатыва",
+]
+
+
+def _is_hygiene_context_text(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in _HYGIENE_KEYWORDS)
+
+
+_DEFAULT_POLICY_HANDLER = {
+    "escalation_gate": _pack_escalation_gate,
+    "service_matcher": get_pack_service_decision,
+    "truth_gate": get_pack_decision,
+    "price_item": get_pack_price_item,
+    "price_sidecar": _pack_price_sidecar,
+}
+
+
+_POLICY_HANDLERS = {
+    "default": _DEFAULT_POLICY_HANDLER,
+}
+
+
 def _get_policy_type(client: Client | None, *, client_slug: str | None) -> str | None:
-    if not client or not isinstance(client.config, dict):
-        return None
-    policy = client.config.get("policy")
-    if isinstance(policy, dict):
-        policy_type = policy.get("type") or policy.get("policy_type")
-        if isinstance(policy_type, str) and policy_type.strip():
-            return policy_type.strip()
-    legacy = client.config.get("policy_type")
-    if isinstance(legacy, str) and legacy.strip():
-        return legacy.strip()
-    if isinstance(client_slug, str) and client_slug.strip():
-        return client_slug.strip()
-    return None
+    return resolve_policy_type(client, client_slug=client_slug)
 
 
 def _get_policy_handler(client: Client | None, *, client_slug: str | None) -> dict | None:
-    from . import _legacy as legacy
-
-    policy_type = _get_policy_type(client, client_slug=client_slug)
+    snapshot = build_policy_pack_snapshot(client, client_slug=client_slug)
+    policy_type = snapshot.policy_type
     if not policy_type:
         return None
-    handler = legacy._POLICY_HANDLERS.get(policy_type) or legacy._POLICY_HANDLERS.get("default")
+    handler = _POLICY_HANDLERS.get(policy_type) or _POLICY_HANDLERS.get("default")
     if not handler:
         return None
-    policy_pack = _get_policy_pack(client, client_slug=client_slug)
     payload = dict(handler)
     payload["policy_type"] = policy_type
-    payload["policy_pack"] = policy_pack
+    payload["policy_pack"] = snapshot.policy_pack
     return payload
 
 
@@ -808,19 +709,18 @@ def _apply_policy_decision(
     record_escalation_metric,
     log_timing,
 ) -> WebhookResponse:
-    from . import _legacy as legacy
-
-    bot_response = decision.response or legacy.MSG_ESCALATED
+    context_router = _context_runtime()
+    bot_response = decision.response or MSG_ESCALATED
     if sidecar:
-        bot_response = legacy._combine_sidecar(bot_response, sidecar)
-    legacy._reset_low_confidence_retry(conversation)
+        bot_response = _combine_sidecar(bot_response, sidecar)
+    context_router._reset_low_confidence_retry(conversation)
     record_policy_count(client_slug, policy_gate)
     if decision.action == "escalate":
         record_escalation_metric(policy_gate)
 
     result_message = "Policy reply sent"
     if decision.action == "escalate":
-        _, reused, telegram_sent = legacy._reuse_active_handover(
+        _, reused, telegram_sent = _reuse_active_handover(
             db=db,
             conversation=conversation,
             user=user,
@@ -828,18 +728,18 @@ def _apply_policy_decision(
             source=policy_source,
             intent=decision.intent,
             hooks=ActiveHandoverReuseRuntimeHooks(
-                get_active_handover=legacy.get_active_handover,
-                transition_state=legacy.transition_state,
-                send_telegram_notification=legacy.send_telegram_notification,
-                record_decision_trace=legacy._record_decision_trace,
+                get_active_handover=get_active_handover,
+                transition_state=transition_state,
+                send_telegram_notification=send_telegram_notification,
+                record_decision_trace=_record_decision_trace,
             ),
         )
         if reused:
             result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
-        elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+        elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
             "allow_handover_create", False
         ):
-            result = legacy.escalate_to_pending(
+            result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
                 user_message=message_text,
@@ -848,7 +748,7 @@ def _apply_policy_decision(
             )
             if result.ok:
                 handover = result.value
-                telegram_sent = legacy.send_telegram_notification(
+                telegram_sent = send_telegram_notification(
                     db=db,
                     handover=handover,
                     conversation=conversation,
@@ -862,7 +762,7 @@ def _apply_policy_decision(
             result_message = "Policy escalation skipped (already pending)"
 
     router_skip_reason = "law_gate" if policy_gate == "hard_law" else "policy_gate"
-    router_gate_meta = legacy._set_router_observability(
+    router_gate_meta = _set_router_observability(
         saved_message,
         eligible=False,
         reason=router_skip_reason,
@@ -883,8 +783,8 @@ def _apply_policy_decision(
     if booking_wants_flow is not None:
         trace_payload["booking_wants_flow"] = booking_wants_flow
     trace_payload.update(router_gate_meta)
-    legacy._record_decision_trace(conversation, trace_payload)
-    legacy._record_message_decision_meta(
+    _record_decision_trace(conversation, trace_payload)
+    _record_message_decision_meta(
         saved_message,
         action=decision.action,
         intent=decision.intent,
@@ -899,7 +799,7 @@ def _apply_policy_decision(
             meta_updates["policy_section"] = policy_section
         if isinstance(risk_level, str) and risk_level:
             meta_updates["risk_level"] = risk_level
-        legacy._update_message_decision_metadata(saved_message, meta_updates)
+        _update_message_decision_metadata(saved_message, meta_updates)
     bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
     if not sent:
         result_message = f"{result_message}; response_send=failed"
@@ -948,15 +848,15 @@ def _handle_hard_law_gate(
     hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_pack)
     if not hard_law_match:
         return None
-    from . import _legacy as legacy
-
     section_key, section = hard_law_match
     if section_key == "medical":
-        normalized = legacy._normalize_text(message_text)
+        normalized = _normalize_text(message_text or "")
         consult_override = _policy_str_list(
             section.get("consult_override_keywords") if isinstance(section, dict) else None
         )
-        if normalized and consult_override and legacy._contains_any(normalized, consult_override):
+        if normalized and consult_override and _contains_any(
+            normalized, consult_override
+        ):
             return None
     risk_level = _resolve_policy_risk_level(section) or "high"
     intent = _resolve_policy_intent(section_key, section)
@@ -1018,8 +918,6 @@ def _handle_policy_escalation_gate(
     record_escalation_metric,
     log_timing,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
-
     if bypass_domain_flows or not routing["allow_truth_gate_reply"] or not message_text:
         return None
 
@@ -1075,7 +973,7 @@ def _handle_policy_escalation_gate(
         if guard_only and section_key not in hard_law_sections:
             risk_level = _resolve_policy_risk_level(section)
             intent = _resolve_policy_intent(section_key, section)
-            router_gate_meta = legacy._set_router_observability(
+            router_gate_meta = _set_router_observability(
                 saved_message,
                 eligible=False,
                 reason="policy_guard_only",
@@ -1095,7 +993,7 @@ def _handle_policy_escalation_gate(
             if booking_wants_flow is not None:
                 trace_payload["booking_wants_flow"] = booking_wants_flow
             trace_payload.update(router_gate_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
                 meta_updates = {
                     "policy_guard_only": True,
@@ -1107,31 +1005,31 @@ def _handle_policy_escalation_gate(
                     meta_updates["policy_pack_missing"] = True
                 if isinstance(risk_level, str) and risk_level:
                     meta_updates["risk_level"] = risk_level
-                legacy._update_message_decision_metadata(saved_message, meta_updates)
+                _update_message_decision_metadata(saved_message, meta_updates)
             return None
         if section_key == "complaint":
-            normalized_text = legacy._normalize_text(message_text)
+            normalized_text = _normalize_text(message_text)
             explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_pack)
             complaint_signal = bool(
                 normalized_text
                 and explicit_keywords
-                and legacy._contains_any(normalized_text, explicit_keywords)
+                and _contains_any(normalized_text, explicit_keywords)
             )
             consult_override = bool(
                 (consult_intent or current_goal == "consult")
                 and normalized_text
                 and consult_override_keywords
-                and legacy._contains_any(normalized_text, consult_override_keywords)
+                and _contains_any(normalized_text, consult_override_keywords)
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "complaint_signal": complaint_signal,
                         "consult_override": consult_override,
                     },
                 )
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "complaint_guard",
@@ -1191,6 +1089,4 @@ def _handle_policy_escalation_gate(
 
 
 def _get_escalation_fallback() -> str:
-    from . import _legacy as legacy
-
-    return legacy.MSG_ESCALATED
+    return MSG_ESCALATED

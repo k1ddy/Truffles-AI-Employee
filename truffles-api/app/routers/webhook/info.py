@@ -9,16 +9,42 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.core import DialogStateService
+from app.routers.webhook.booking_signal_runtime import (
+    _extract_datetime,
+    _extract_service_hint,
+    _has_explicit_service_signal,
+)
+from app.routers.webhook.class_router_runtime import (
+    CONTROLLER_CONFIDENCE_THRESHOLD,
+    DomainIntent,
+    _build_controller_meta_output,
+    _controller_meta_updates_from_class_router,
+    _ensure_controller_output_meta,
+    _resolve_class_router_result,
+    _resolve_controller_signal_class,
+    _router_observability_updates_from_class_router,
+)
+from app.routers.webhook.info_followup_runtime import (
+    _looks_like_carryover_followup,
+    _looks_like_hours_followup,
+)
 from app.routers.webhook.runtime_primitives import (
     BOOKING_CTA_SERVICE_INTENTS,
+    EXPECTED_REPLY_SERVICE,
     INFO_ANCHOR_GROUPS,
     INFO_INTENT_PRIORITY_GENERIC,
     INFO_INTENT_PRIORITY_SERVICE,
     INFO_INTENTS,
+    MSG_BOOKING_ASK_DATETIME,
+    MSG_BOOKING_ASK_NAME,
+    MSG_ESCALATED,
+    MSG_EXPECTED_SERVICE_OFF_TOPIC,
     QUESTION_WORD_PREFIXES,
     SESSION_MEMORY_SHORT_TOKENS,
+    _combine_sidecar,
 )
 from app.schemas.webhook import WebhookResponse
+from app.services.ai_service import _current_openai_api_key, normalize_for_matching
 from app.services.booking_signal_service import (
     extract_daypart_token as _extract_daypart_token,
 )
@@ -27,9 +53,16 @@ from app.services.expected_reply_contract import (
     truth_gate_expected_reply_prompt_contract,
 )
 from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
+from app.services.handover_owner_service import (
+    _reuse_active_handover,
+    escalate_to_pending,
+    get_active_handover,
+    send_telegram_notification,
+)
 from app.services.pack_runtime_service import (
-    _detect_promotion_intent,
+    _match_service,
     _build_fact_meta,
+    _detect_promotion_intent,
     _has_contact_signal,
     _has_duration_signal,
     _has_guest_waiting_signal,
@@ -48,8 +81,17 @@ from app.services.pack_runtime_service import (
     load_yaml_truth,
     phrase_match_intent,
     resolve_master_intent,
+    semantic_question_type,
 )
+from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
 from app.services.signal_manifest_service import get_info_regex_pattern
+
+from .trace import (
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -58,6 +100,30 @@ if TYPE_CHECKING:
 
 
 _TOKENIZE_WORD_RE = get_info_regex_pattern("tokenize_word_pattern") or re.compile(r"\w+")
+
+
+def _context_runtime():
+    from . import context_manager as context_router
+
+    return context_router
+
+
+def _guards_runtime():
+    from . import guards as guards_router
+
+    return guards_router
+
+
+def _response_runtime():
+    from . import response as response_router
+
+    return response_router
+
+
+def _booking_runtime():
+    from . import booking as booking_router
+
+    return booking_router
 
 
 def _tokenize_for_matching(normalized: str) -> list[str]:
@@ -153,19 +219,16 @@ def _looks_like_services_overview_message(
     normalized = _normalize_text(text)
     if not normalized:
         return False
-    if any(marker in normalized for marker in ("акци", "скидк", "промо")) and not any(
-        marker in normalized for marker in ("услуг", "процед", "сервис")
-    ):
+    if _detect_promotion_intent(normalized, client_slug=client_slug) is not None:
         return False
-    markers = get_signal_lexicon_list(client_slug, "services_overview_phrases")
-    if not markers:
-        markers = get_system_lexicon_list("services_overview_phrases")
-    if bool(markers and _normalized_contains_any(normalized, markers)):
+    if client_slug and "services_overview" in phrase_match_intent(text, client_slug):
         return True
-    return bool(
-        ("информац" in normalized or "какие" in normalized or "что у вас" in normalized)
-        and any(marker in normalized for marker in ("услуг", "процед", "сервис"))
-    )
+    markers = _signal_phrase_list(client_slug, "services_overview_phrases")
+    for phrase in get_system_lexicon_list("services_overview_phrases"):
+        token = phrase.strip() if isinstance(phrase, str) else ""
+        if token and token not in markers:
+            markers.append(token)
+    return bool(markers and _normalized_contains_any(normalized, markers))
 
 
 def _detect_location_policy_pack_refs(
@@ -256,8 +319,6 @@ def _looks_like_promotions_policy_message(
         return False
     if _detect_promotion_intent(normalized, client_slug=client_slug) is not None:
         return True
-    if any(marker in normalized for marker in ("акци", "скидк", "промо")):
-        return True
     if _looks_like_services_overview_message(text, client_slug=client_slug):
         return False
     from app.routers.webhook.policy import _looks_like_promotions_request
@@ -333,11 +394,9 @@ def _detect_info_class_intents(
     client_slug: str | None = None,
     service_query: str | None = None,
 ) -> tuple[set[str], dict[str, Any]]:
-    from . import _legacy as legacy
-
     intents = {intent for intent in intent_decomp_set if intent in INFO_INTENTS}
     meta: dict[str, Any] = {}
-    normalized = legacy.normalize_for_matching(message_text) if message_text else ""
+    normalized = normalize_for_matching(message_text) if message_text else ""
     if not normalized:
         return intents, meta
 
@@ -356,12 +415,12 @@ def _detect_info_class_intents(
 
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug)
-    price_signal = legacy._has_price_signal(
+    price_signal = _has_price_signal(
         normalized,
         message_text,
         client_slug=client_slug,
     )
-    duration_signal = legacy._has_duration_signal(
+    duration_signal = _has_duration_signal(
         normalized,
         message_text,
         client_slug=client_slug,
@@ -378,11 +437,6 @@ def _detect_info_class_intents(
             or _signal_any_match(normalized, client_slug, "prep_brows_lashes_extra_terms")
         )
     )
-    if not prep_brows_lashes_signal:
-        prep_brows_lashes_signal = bool(
-            _normalized_contains_any(normalized, ("подготов", "перед процедур", "что-то нужно делать"))
-            and _normalized_contains_any(normalized, ("ресниц", "бров", "ламинир"))
-        )
     hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_keywords")
     if not hygiene_signal:
         hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_dry_heat_terms")
@@ -408,7 +462,7 @@ def _detect_info_class_intents(
         if isinstance(address_full, str) and address_full.strip():
             address_tokens = [
                 token
-                for token in legacy.normalize_for_matching(address_full).split()
+                for token in normalize_for_matching(address_full).split()
                 if len(token) >= 4 and not token.isdigit()
             ]
             if address_tokens:
@@ -546,7 +600,7 @@ def _detect_info_class_intents(
         intents.add("master")
     question_type = None
     try:
-        question_type = legacy.semantic_question_type(message_text, include_kinds=INFO_INTENTS)
+        question_type = semantic_question_type(message_text, include_kinds=INFO_INTENTS)
     except Exception:
         question_type = None
     if question_type and question_type.kind in INFO_INTENTS:
@@ -648,9 +702,7 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
         if client_slug:
             if "order_booking" in phrase_match_intent(message_text, client_slug):
                 return True
-        from . import _legacy as legacy
-
-        normalized = legacy.normalize_for_matching(message_text)
+        normalized = normalize_for_matching(message_text)
         if normalized and client_slug:
             truth = load_yaml_truth(client_slug)
             address = truth.get("salon", {}).get("address", {}) if isinstance(truth, dict) else {}
@@ -658,7 +710,7 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
             if isinstance(address_full, str) and address_full.strip():
                 address_tokens = [
                     token
-                    for token in legacy.normalize_for_matching(address_full).split()
+                    for token in normalize_for_matching(address_full).split()
                     if len(token) >= 4 and not token.isdigit()
                 ]
                 has_address_hint = _normalized_contains_any(normalized, address_tokens)
@@ -681,13 +733,11 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
 
 
 def _truth_gate_expected_reply_prompt(expected_reply_type: str | None) -> tuple[str | None, str | None]:
-    from . import _legacy as legacy
-
     prompt_key, intent = truth_gate_expected_reply_prompt_contract(expected_reply_type)
     prompt_map = {
-        "service_clarify": legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC,
-        "booking_ask_datetime": legacy.MSG_BOOKING_ASK_DATETIME,
-        "booking_ask_name": legacy.MSG_BOOKING_ASK_NAME,
+        "service_clarify": MSG_EXPECTED_SERVICE_OFF_TOPIC,
+        "booking_ask_datetime": MSG_BOOKING_ASK_DATETIME,
+        "booking_ask_name": MSG_BOOKING_ASK_NAME,
     }
     if not prompt_key or not intent:
         return None, None
@@ -702,19 +752,17 @@ def _should_override_truth_gate_off_topic(
     current_goal: str | None,
     client_slug: str | None,
 ) -> bool:
-    from . import _legacy as legacy
-
     has_message_text = bool(message_text)
-    is_short_reply = legacy._is_short_reply(message_text) if has_message_text else False
+    is_short_reply = _is_short_reply(message_text) if has_message_text else False
     has_booking_slot_signal = (
-        legacy._is_booking_slot_signal(message_text, client_slug=client_slug)
+        _booking_runtime()._is_booking_slot_signal(message_text, client_slug=client_slug)
         if has_message_text
         else False
     )
     has_service_hint = bool(get_pack_service_hint(message_text, client_slug=client_slug)) if has_message_text else False
-    has_datetime_slot = bool(legacy._extract_datetime(message_text)) if has_message_text else False
+    has_datetime_slot = bool(_extract_datetime(message_text)) if has_message_text else False
     has_name_slot = bool(
-        legacy._validate_name_slot(
+        _booking_runtime()._validate_name_slot(
             message_text,
             allow_freeform=True,
             client_slug=client_slug,
@@ -741,9 +789,7 @@ def _build_info_intent_reply(
     message_text: str | None = None,
     include_info_bundle: bool = True,
 ) -> tuple[str | None, dict | None]:
-    from . import _legacy as legacy
-
-    normalized = legacy.normalize_for_matching(message_text) if message_text else ""
+    normalized = normalize_for_matching(message_text) if message_text else ""
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug) if normalized else False
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug) if normalized else False
     location_signal = False
@@ -1024,8 +1070,6 @@ class InfoFlowResult:
 def _record_class_router_trace(*, conversation: Any, class_router_result: dict | None) -> None:
     if not conversation or not isinstance(class_router_result, dict):
         return
-    from . import _legacy as legacy
-
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
     controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
     controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
@@ -1067,9 +1111,9 @@ def _record_class_router_trace(*, conversation: Any, class_router_result: dict |
         "controller_goal": controller_goal,
     }
     trace_payload.update(
-        legacy._router_observability_updates_from_class_router(class_router_result)
+        _router_observability_updates_from_class_router(class_router_result)
     )
-    legacy._record_decision_trace(conversation, trace_payload)
+    _record_decision_trace(conversation, trace_payload)
 
 
 def _handle_info_flow(
@@ -1109,8 +1153,6 @@ def _handle_info_flow(
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
 ) -> InfoFlowResult:
-    from . import _legacy as legacy
-
     force_truth_gate = False
     if not (
         routing.get("allow_bot_reply")
@@ -1142,7 +1184,7 @@ def _handle_info_flow(
                     return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
                 bot_response = multi_reply
                 composer_meta = None
-                bot_response, composer_meta = legacy._compose_fact_response(
+                bot_response, composer_meta = _response_runtime()._compose_fact_response(
                     bot_response,
                     client_slug=client_slug,
                     conversation_id=str(conversation.id),
@@ -1151,7 +1193,7 @@ def _handle_info_flow(
                     allow_booking_flow=routing["allow_booking_flow"],
                     has_followup=False,
                 )
-                legacy._reset_low_confidence_retry(conversation)
+                _context_runtime()._reset_low_confidence_retry(conversation)
 
                 result_message = "Multi-truth reply sent"
                 trace_payload = {
@@ -1165,8 +1207,8 @@ def _handle_info_flow(
                     trace_payload.update(multi_meta)
                 if composer_meta:
                     trace_payload.update(composer_meta)
-                legacy._record_decision_trace(conversation, trace_payload)
-                legacy._record_message_decision_meta(
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
                     saved_message,
                     action="reply",
                     intent="multi_truth",
@@ -1174,10 +1216,10 @@ def _handle_info_flow(
                     fast_intent=False,
                 )
                 if saved_message and isinstance(multi_meta, dict):
-                    legacy._update_message_decision_metadata(saved_message, multi_meta)
+                    _update_message_decision_metadata(saved_message, multi_meta)
                 if saved_message and composer_meta:
-                    legacy._update_message_decision_metadata(saved_message, composer_meta)
-                legacy._maybe_store_class_carryover(
+                    _update_message_decision_metadata(saved_message, composer_meta)
+                _context_runtime()._maybe_store_class_carryover(
                     conversation=conversation,
                     class_name="info_bundle",
                     intents=["multi_truth"],
@@ -1185,7 +1227,7 @@ def _handle_info_flow(
                     message_count=message_count,
                     reason="multi_truth",
                 )
-                legacy._maybe_store_service_carryover(
+                _context_runtime()._maybe_store_service_carryover(
                     conversation=conversation,
                     service_meta=multi_meta if isinstance(multi_meta, dict) else None,
                     intent="multi_truth",
@@ -1206,17 +1248,17 @@ def _handle_info_flow(
                     force_truth_gate=force_truth_gate,
                 )
 
-    explicit_service_signal = legacy._has_explicit_service_signal(
+    explicit_service_signal = _has_explicit_service_signal(
         message_text,
         client_slug=client_slug,
         intent_decomp_payload=intent_decomp_payload,
     )
-    class_router_result = legacy._resolve_class_router_result(
+    class_router_result = _resolve_class_router_result(
         info_intents=info_class_intents,
         info_meta=info_class_meta,
         booking_signal=booking_signal,
         class_carryover=class_carryover,
-        domain_intent=legacy.DomainIntent.UNKNOWN,
+        domain_intent=DomainIntent.UNKNOWN,
         domain_meta=None,
         router_state=router_state,
         explicit_service_signal=explicit_service_signal,
@@ -1239,7 +1281,7 @@ def _handle_info_flow(
         and message_text
         and not info_class_intents
     ):
-        normalized = legacy.normalize_for_matching(message_text)
+        normalized = normalize_for_matching(message_text)
         service_hint = get_pack_service_hint(message_text, client_slug=client_slug)
         if service_hint:
             if _has_parking_signal(normalized, client_slug=client_slug) or _has_guest_waiting_signal(
@@ -1254,8 +1296,8 @@ def _handle_info_flow(
                     "service_question_keywords",
                 ) or ("?" in message_text and len(normalized.split()) <= 4)
                 if presence_hint and not (
-                    legacy._has_price_signal(normalized, message_text)
-                    or legacy._has_duration_signal(normalized, message_text)
+                    _has_price_signal(normalized, message_text)
+                    or _has_duration_signal(normalized, message_text)
                 ):
                     skip_info_class_for_service = True
     router_service_query = None
@@ -1292,9 +1334,9 @@ def _handle_info_flow(
                 if isinstance(candidate, str) and candidate.strip():
                     router_service_query = candidate.strip()
         if message_text and client_slug:
-            normalized_for_alias = legacy._normalize_service_text(message_text)
+            normalized_for_alias = _normalize_text(message_text)
             if normalized_for_alias:
-                alias_match = legacy._match_service(normalized_for_alias, client_slug=client_slug)
+                alias_match = _match_service(normalized_for_alias, client_slug=client_slug)
                 if isinstance(alias_match, dict):
                     alias_name = alias_match.get("name")
                     if isinstance(alias_name, str) and alias_name.strip():
@@ -1319,7 +1361,7 @@ def _handle_info_flow(
         or router_service_query
         or alias_service_query
     )
-    service_carryover_meta = legacy._get_service_carryover(
+    service_carryover_meta = _context_runtime()._get_service_carryover(
         context_manager, message_count=message_count
     )
     carryover_service_query = None
@@ -1365,10 +1407,10 @@ def _handle_info_flow(
             )
         if not (allow_service_carryover and carryover_intents):
             carryover_service_query = None
-    normalized_followup = legacy.normalize_for_matching(message_text) if message_text else ""
+    normalized_followup = normalize_for_matching(message_text) if message_text else ""
     force_hours_followup = (
         carryover_has_hours
-        and legacy._looks_like_hours_followup(message_text)
+        and _looks_like_hours_followup(message_text)
         and not explicit_service_signal
     )
     explicit_info_signal = bool(
@@ -1394,7 +1436,7 @@ def _handle_info_flow(
         and normalized_followup
         and not explicit_service_signal
         and not explicit_info_signal
-        and legacy._looks_like_carryover_followup(message_text)
+        and _looks_like_carryover_followup(message_text)
     )
     base_info_override = False
     if isinstance(info_signals, dict):
@@ -1418,7 +1460,7 @@ def _handle_info_flow(
             and {"pricing", "duration"} & info_class_intents_for_reply
             and not effective_semantic_lock
         ):
-            info_service_query = legacy._extract_service_hint(message_text, client_slug)
+            info_service_query = _extract_service_hint(message_text, client_slug)
         if (
             not force_hours_followup
             and not info_service_query
@@ -1516,7 +1558,7 @@ def _handle_info_flow(
                 return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
             bot_response = "\n\n".join(replies)
             composer_meta = None
-            bot_response, composer_meta = legacy._compose_fact_response(
+            bot_response, composer_meta = _response_runtime()._compose_fact_response(
                 bot_response,
                 client_slug=client_slug,
                 conversation_id=str(conversation.id),
@@ -1525,8 +1567,8 @@ def _handle_info_flow(
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=False,
             )
-            bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
-            legacy._reset_low_confidence_retry(conversation)
+            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+            _context_runtime()._reset_low_confidence_retry(conversation)
             _record_class_router_trace(
                 conversation=conversation,
                 class_router_result=class_router_result,
@@ -1541,8 +1583,8 @@ def _handle_info_flow(
             trace_payload.update(info_meta_combined)
             if composer_meta:
                 trace_payload.update(composer_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
-            legacy._record_message_decision_meta(
+            _record_decision_trace(conversation, trace_payload)
+            _record_message_decision_meta(
                 saved_message,
                 action="reply",
                 intent="info_bundle",
@@ -1554,15 +1596,15 @@ def _handle_info_flow(
                 if info_meta_combined:
                     meta_updates.update(info_meta_combined)
                 meta_updates.update(
-                    legacy._controller_meta_updates_from_class_router(class_router_result)
+                    _controller_meta_updates_from_class_router(class_router_result)
                 )
                 meta_updates.update(
-                    legacy._router_observability_updates_from_class_router(class_router_result)
+                    _router_observability_updates_from_class_router(class_router_result)
                 )
-                legacy._update_message_decision_metadata(saved_message, meta_updates)
+                _update_message_decision_metadata(saved_message, meta_updates)
             if saved_message and composer_meta:
-                legacy._update_message_decision_metadata(saved_message, composer_meta)
-            legacy._maybe_store_class_carryover(
+                _update_message_decision_metadata(saved_message, composer_meta)
+            _context_runtime()._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
                 intents=answer_intents,
@@ -1570,7 +1612,7 @@ def _handle_info_flow(
                 message_count=message_count,
                 reason="class_router",
             )
-            legacy._maybe_store_service_carryover(
+            _context_runtime()._maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta=info_meta_combined,
                 intent="info_bundle",
@@ -1578,7 +1620,7 @@ def _handle_info_flow(
                 reason="class_router",
             )
             if consult_return_pending:
-                bot_response = legacy._apply_consult_return(
+                bot_response = _context_runtime()._apply_consult_return(
                     conversation=conversation,
                     saved_message=saved_message,
                     bot_response=bot_response,
@@ -1622,7 +1664,7 @@ def _handle_info_flow(
                 return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
             bot_response = base_bundle_reply.strip()
             composer_meta = None
-            bot_response, composer_meta = legacy._compose_fact_response(
+            bot_response, composer_meta = _response_runtime()._compose_fact_response(
                 bot_response,
                 client_slug=client_slug,
                 conversation_id=str(conversation.id),
@@ -1631,8 +1673,8 @@ def _handle_info_flow(
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=bool(multi_intent_other_followup),
             )
-            bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
-            legacy._reset_low_confidence_retry(conversation)
+            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+            _context_runtime()._reset_low_confidence_retry(conversation)
             _record_class_router_trace(
                 conversation=conversation,
                 class_router_result=class_router_result,
@@ -1648,8 +1690,8 @@ def _handle_info_flow(
                 trace_payload.update(base_bundle_meta)
             if composer_meta:
                 trace_payload.update(composer_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
-            legacy._record_message_decision_meta(
+            _record_decision_trace(conversation, trace_payload)
+            _record_message_decision_meta(
                 saved_message,
                 action="reply",
                 intent="info_bundle",
@@ -1661,15 +1703,15 @@ def _handle_info_flow(
                 if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                     meta_updates.update(base_bundle_meta)
                 meta_updates.update(
-                    legacy._controller_meta_updates_from_class_router(class_router_result)
+                    _controller_meta_updates_from_class_router(class_router_result)
                 )
                 meta_updates.update(
-                    legacy._router_observability_updates_from_class_router(class_router_result)
+                    _router_observability_updates_from_class_router(class_router_result)
                 )
-                legacy._update_message_decision_metadata(saved_message, meta_updates)
+                _update_message_decision_metadata(saved_message, meta_updates)
             if saved_message and composer_meta:
-                legacy._update_message_decision_metadata(saved_message, composer_meta)
-            legacy._maybe_store_class_carryover(
+                _update_message_decision_metadata(saved_message, composer_meta)
+            _context_runtime()._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
                 intents=sorted(info_class_intents_for_reply or {"guest_policy"}),
@@ -1677,7 +1719,7 @@ def _handle_info_flow(
                 message_count=message_count,
                 reason="guest_policy_lock",
             )
-            legacy._maybe_store_service_carryover(
+            _context_runtime()._maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta=base_bundle_meta if isinstance(base_bundle_meta, dict) else None,
                 intent="info_bundle",
@@ -1685,7 +1727,7 @@ def _handle_info_flow(
                 reason="guest_policy_lock",
             )
             if consult_return_pending:
-                bot_response = legacy._apply_consult_return(
+                bot_response = _context_runtime()._apply_consult_return(
                     conversation=conversation,
                     saved_message=saved_message,
                     bot_response=bot_response,
@@ -1707,7 +1749,7 @@ def _handle_info_flow(
             )
 
     if message_text:
-        normalized_message = legacy.normalize_for_matching(message_text)
+        normalized_message = normalize_for_matching(message_text)
         info_signal_override = False
         if isinstance(info_signals, dict):
             info_signal_override = any(
@@ -1738,8 +1780,8 @@ def _handle_info_flow(
         force_truth_gate = bool(
             info_class_intents_for_reply & force_truth_gate_intents
             or info_signal_override
-            or legacy._has_price_signal(normalized_message, message_text)
-            or legacy._has_duration_signal(normalized_message, message_text)
+            or _has_price_signal(normalized_message, message_text)
+            or _has_duration_signal(normalized_message, message_text)
         )
     service_matcher = policy_handler.get("service_matcher")
     service_decision = None
@@ -1761,13 +1803,13 @@ def _handle_info_flow(
             db.commit()
             return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
         bot_response = service_decision.response
-        bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
+        bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
         composer_meta = None
         if (
             service_decision.action == "reply"
             and service_decision.intent in BOOKING_CTA_SERVICE_INTENTS
         ):
-            bot_response, composer_meta = legacy._compose_fact_response(
+            bot_response, composer_meta = _response_runtime()._compose_fact_response(
                 bot_response,
                 client_slug=client_slug,
                 conversation_id=str(conversation.id),
@@ -1777,7 +1819,7 @@ def _handle_info_flow(
                 has_followup=bool(multi_intent_other_followup),
             )
         if consult_return_pending:
-            bot_response = legacy._apply_consult_return(
+            bot_response = _context_runtime()._apply_consult_return(
                 conversation=conversation,
                 saved_message=saved_message,
                 bot_response=bot_response,
@@ -1785,17 +1827,17 @@ def _handle_info_flow(
                 consult_context=consult_context,
                 reason=consult_return_reason or "service_matcher",
             )
-        legacy._reset_low_confidence_retry(conversation)
+        _context_runtime()._reset_low_confidence_retry(conversation)
 
         result_message = "Service matcher reply sent"
         clarify_reason = None
         if service_decision.intent == "service_clarify":
             clarify_intent = current_goal or "info"
-            context = legacy._get_conversation_context(conversation)
-            context_manager = legacy._get_context_manager(context)
-            if legacy._should_escalate_for_clarify(context_manager, clarify_intent):
-                clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, clarify_intent)
-                legacy._record_context_manager_decision(
+            context = _context_runtime()._get_conversation_context(conversation)
+            context_manager = _context_runtime()._get_context_manager(context)
+            if _guards_runtime()._should_escalate_for_clarify(context_manager, clarify_intent):
+                clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager, clarify_intent)
+                _context_runtime()._record_context_manager_decision(
                     conversation,
                     saved_message,
                     decision="clarify_limit",
@@ -1806,7 +1848,7 @@ def _handle_info_flow(
                     },
                 )
                 return InfoFlowResult(
-                    response=legacy._handle_clarify_limit_escalation(
+                    response=_guards_runtime()._handle_clarify_limit_escalation(
                         db=db,
                         conversation=conversation,
                         user=user,
@@ -1819,7 +1861,7 @@ def _handle_info_flow(
                     ),
                     force_truth_gate=force_truth_gate,
                 )
-            legacy._register_clarify_attempt(
+            _guards_runtime()._register_clarify_attempt(
                 conversation=conversation,
                 saved_message=saved_message,
                 intent=clarify_intent,
@@ -1845,12 +1887,12 @@ def _handle_info_flow(
                     if "pricing" in intent_set or "duration" in intent_set:
                         clarify_reason = "missing_service_query"
             if service_decision.action != "escalate":
-                context = legacy._get_conversation_context(conversation)
-                context = legacy._set_expected_reply_context(
+                context = _context_runtime()._get_conversation_context(conversation)
+                context = _context_runtime()._set_expected_reply_context(
                     conversation=conversation,
                     saved_message=saved_message,
                     context=context,
-                    expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                    expected_reply_type=EXPECTED_REPLY_SERVICE,
                     reason="service_clarify",
                     now=now,
                 )
@@ -1863,8 +1905,8 @@ def _handle_info_flow(
             trace_payload.update(service_decision.meta)
         if composer_meta:
             trace_payload.update(composer_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        legacy._record_message_decision_meta(
+        _record_decision_trace(conversation, trace_payload)
+        _record_message_decision_meta(
             saved_message,
             action=service_decision.action,
             intent=service_decision.intent,
@@ -1872,12 +1914,12 @@ def _handle_info_flow(
             fast_intent=False,
         )
         if saved_message and isinstance(getattr(service_decision, "meta", None), dict):
-            legacy._update_message_decision_metadata(saved_message, service_decision.meta)
+            _update_message_decision_metadata(saved_message, service_decision.meta)
         if saved_message and composer_meta:
-            legacy._update_message_decision_metadata(saved_message, composer_meta)
+            _update_message_decision_metadata(saved_message, composer_meta)
         if saved_message and clarify_reason:
-            legacy._update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
-        legacy._maybe_store_service_carryover(
+            _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
+        _context_runtime()._maybe_store_service_carryover(
             conversation=conversation,
             service_meta=service_decision.meta if isinstance(service_decision.meta, dict) else None,
             intent=service_decision.intent,
@@ -1899,7 +1941,7 @@ def _handle_info_flow(
             elif question_type == "duration":
                 info_carryover_intents.append("duration")
         if info_carryover_intents or decision_meta.get("info_sections"):
-            legacy._maybe_store_class_carryover(
+            _context_runtime()._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
                 intents=info_carryover_intents,
@@ -1954,14 +1996,12 @@ def _handle_truth_gate_fallback(
 ) -> WebhookResponse | None:
     from app.services.pack_runtime_service import PackDecision, ensure_resolver_meta
 
-    from . import _legacy as legacy
-
     def _build_out_of_domain_class_router_result() -> dict[str, Any]:
-        controller_output = legacy._build_controller_meta_output(error="skipped")
+        controller_output = _build_controller_meta_output(error="skipped")
         controller_output["class"] = "out_of_domain"
         controller_output["goal"] = "out_of_domain"
-        controller_output["confidence"] = max(legacy.CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
-        controller_output = legacy._ensure_controller_output_meta(
+        controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+        controller_output = _ensure_controller_output_meta(
             controller_output, error="skipped"
         )
         router_state = {
@@ -1971,7 +2011,7 @@ def _handle_truth_gate_fallback(
             "confidence": controller_output["confidence"],
             "error": "skipped",
             "fallback_reason": None,
-            "signal_class": legacy._resolve_controller_signal_class(
+            "signal_class": _resolve_controller_signal_class(
                 intent_decomp_set=set(intent_decomp_intents),
                 booking_signal=False,
             ),
@@ -1980,12 +2020,12 @@ def _handle_truth_gate_fallback(
             "output": controller_output,
             "sla": None,
         }
-        return legacy._resolve_class_router_result(
+        return _resolve_class_router_result(
             info_intents=set(),
             info_meta=None,
             booking_signal=False,
             class_carryover=None,
-            domain_intent=legacy.DomainIntent.OUT_OF_DOMAIN,
+            domain_intent=DomainIntent.OUT_OF_DOMAIN,
             domain_meta=None,
             router_state=router_state,
             explicit_service_signal=False,
@@ -2009,25 +2049,25 @@ def _handle_truth_gate_fallback(
                 if isinstance(service_query, str) and service_query.strip():
                     price_item = price_item_fn(service_query, client_slug=client_slug)
             if price_item:
-                context = legacy._get_conversation_context(conversation)
-                context = legacy._set_service_hint(context, price_item, now)
-                legacy._set_conversation_context(conversation, context)
+                context = _context_runtime()._get_conversation_context(conversation)
+                context = _booking_runtime()._set_service_hint(context, price_item, now)
+                _context_runtime()._set_conversation_context(conversation, context)
             elif not (
                 isinstance(getattr(decision, "meta", None), dict)
                 and decision.meta.get("service_query")
             ):
                 decision = PackDecision(
                     action="escalate",
-                    response=legacy.MSG_ESCALATED,
+                    response=MSG_ESCALATED,
                     intent="price_query",
                 )
         if decision.intent == "service_clarify" and decision.action != "escalate":
             clarify_intent = current_goal or "info"
-            context = legacy._get_conversation_context(conversation)
-            context_manager = legacy._get_context_manager(context)
-            if legacy._should_escalate_for_clarify(context_manager, clarify_intent):
-                clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, clarify_intent)
-                legacy._record_context_manager_decision(
+            context = _context_runtime()._get_conversation_context(conversation)
+            context_manager = _context_runtime()._get_context_manager(context)
+            if _guards_runtime()._should_escalate_for_clarify(context_manager, clarify_intent):
+                clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager, clarify_intent)
+                _context_runtime()._record_context_manager_decision(
                     conversation,
                     saved_message,
                     decision="clarify_limit",
@@ -2039,12 +2079,12 @@ def _handle_truth_gate_fallback(
                 )
                 decision = PackDecision(
                     action="escalate",
-                    response=legacy.MSG_ESCALATED,
+                    response=MSG_ESCALATED,
                     intent="clarify_limit",
                     meta={"clarify_limit": True},
                 )
             else:
-                legacy._register_clarify_attempt(
+                _guards_runtime()._register_clarify_attempt(
                     conversation=conversation,
                     saved_message=saved_message,
                     intent=clarify_intent,
@@ -2055,12 +2095,12 @@ def _handle_truth_gate_fallback(
             "service_clarify",
             "duration_or_price_clarify",
         }:
-            context = legacy._get_conversation_context(conversation)
-            context = legacy._set_expected_reply_context(
+            context = _context_runtime()._get_conversation_context(conversation)
+            context = _context_runtime()._set_expected_reply_context(
                 conversation=conversation,
                 saved_message=saved_message,
                 context=context,
-                expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                expected_reply_type=EXPECTED_REPLY_SERVICE,
                 reason=decision.intent,
                 now=now,
             )
@@ -2084,14 +2124,14 @@ def _handle_truth_gate_fallback(
                 "services_overview",
             }
             if decision.intent in cta_intents:
-                bot_response = legacy._maybe_append_booking_cta(
+                bot_response = _response_runtime()._maybe_append_booking_cta(
                     bot_response,
                     conversation_state=conversation.state,
                     allow_booking_flow=routing["allow_booking_flow"],
                     has_followup=bool(consult_return_pending),
                 )
         if consult_return_pending:
-            bot_response = legacy._apply_consult_return(
+            bot_response = _context_runtime()._apply_consult_return(
                 conversation=conversation,
                 saved_message=saved_message,
                 bot_response=bot_response,
@@ -2099,11 +2139,11 @@ def _handle_truth_gate_fallback(
                 consult_context=consult_context,
                 reason=consult_return_reason or "truth_gate",
             )
-        legacy._reset_low_confidence_retry(conversation)
+        _context_runtime()._reset_low_confidence_retry(conversation)
 
         result_message = "Truth gate fallback reply sent"
         if decision.action == "escalate":
-            _, reused, telegram_sent = legacy._reuse_active_handover(
+            _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
                 user=user,
@@ -2111,17 +2151,17 @@ def _handle_truth_gate_fallback(
                 source="truth_gate",
                 intent=decision.intent,
                 hooks=ActiveHandoverReuseRuntimeHooks(
-                    get_active_handover=legacy.get_active_handover,
-                    transition_state=legacy.transition_state,
-                    send_telegram_notification=legacy.send_telegram_notification,
-                    record_decision_trace=legacy._record_decision_trace,
+                    get_active_handover=get_active_handover,
+                    transition_state=transition_state,
+                    send_telegram_notification=send_telegram_notification,
+                    record_decision_trace=_record_decision_trace,
                 ),
             )
             if reused:
                 result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
-            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
+            elif conversation.state == ConversationState.BOT_ACTIVE.value:
                 record_escalation_metric("intent")
-                result = legacy.escalate_to_pending(
+                result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
                     user_message=message_text,
@@ -2130,7 +2170,7 @@ def _handle_truth_gate_fallback(
                 )
                 if result.ok:
                     handover = result.value
-                    telegram_sent = legacy.send_telegram_notification(
+                    telegram_sent = send_telegram_notification(
                         db=db,
                         handover=handover,
                         conversation=conversation,
@@ -2144,8 +2184,8 @@ def _handle_truth_gate_fallback(
                 result_message = "Truth gate escalation skipped (already pending)"
 
         if decision.intent == "off_topic":
-            context = legacy._get_conversation_context(conversation)
-            expected_reply_type = legacy._get_expected_reply_type(context)
+            context = _context_runtime()._get_conversation_context(conversation)
+            expected_reply_type = _context_runtime()._get_expected_reply_type(context)
             saved_meta = None
             if saved_message is not None:
                 # Tests may pass lightweight message doubles that only expose
@@ -2178,7 +2218,7 @@ def _handle_truth_gate_fallback(
                     expected_reply_type
                 )
                 if followup_prompt and followup_intent:
-                    context = legacy._set_expected_reply_context(
+                    context = _context_runtime()._set_expected_reply_context(
                         conversation=conversation,
                         saved_message=saved_message,
                         context=context,
@@ -2220,9 +2260,9 @@ def _handle_truth_gate_fallback(
                     }
                     if pending_question_contract:
                         trace_payload["pending_question_contract"] = pending_question_contract
-                    legacy._record_decision_trace(conversation, trace_payload)
-            context_manager = legacy._get_context_manager(context)
-            class_carryover = legacy._get_class_carryover(
+                    _record_decision_trace(conversation, trace_payload)
+            context_manager = _context_runtime()._get_context_manager(context)
+            class_carryover = _context_runtime()._get_class_carryover(
                 context_manager,
                 message_count=message_count,
             )
@@ -2231,11 +2271,11 @@ def _handle_truth_gate_fallback(
                 if isinstance(class_carryover, dict)
                 else None
             )
-            normalized = legacy.normalize_for_matching(message_text) if message_text else ""
+            normalized = normalize_for_matching(message_text) if message_text else ""
             tokens = _tokenize_for_matching(normalized) if normalized else []
             short_noisy_followup = bool(
                 llm_primary_reason == "low_confidence"
-                and conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+                and conversation.state == ConversationState.BOT_ACTIVE.value
                 and current_goal == "info"
                 and isinstance(class_carryover, dict)
                 and class_carryover.get("class") == "info_bundle"
@@ -2271,7 +2311,7 @@ def _handle_truth_gate_fallback(
                         meta=meta,
                     )
                     bot_response = decision.response
-                    legacy._record_decision_trace(
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "truth_gate",
@@ -2322,8 +2362,8 @@ def _handle_truth_gate_fallback(
             trace_payload["multi_truth"] = True
         if isinstance(getattr(decision, "meta", None), dict):
             trace_payload.update(decision.meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        legacy._record_message_decision_meta(
+        _record_decision_trace(conversation, trace_payload)
+        _record_message_decision_meta(
             saved_message,
             action=decision.action,
             intent=decision.intent,
@@ -2331,7 +2371,7 @@ def _handle_truth_gate_fallback(
             fast_intent=False,
         )
         if saved_message and isinstance(getattr(decision, "meta", None), dict):
-            legacy._update_message_decision_metadata(saved_message, decision.meta)
+            _update_message_decision_metadata(saved_message, decision.meta)
         if saved_message and decision.intent == "service_clarify":
             clarify_reason = None
             service_meta = getattr(decision, "meta", None)
@@ -2353,7 +2393,7 @@ def _handle_truth_gate_fallback(
                     if "pricing" in intent_set or "duration" in intent_set:
                         clarify_reason = "missing_service_query"
             if clarify_reason:
-                legacy._update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
+                _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
         decision_meta = decision.meta if isinstance(getattr(decision, "meta", None), dict) else {}
         info_carryover_intents: list[str] = []
         if decision.intent in INFO_INTENTS:
@@ -2367,7 +2407,7 @@ def _handle_truth_gate_fallback(
             elif question_type == "duration":
                 info_carryover_intents.append("duration")
         if info_carryover_intents or decision_meta.get("info_sections"):
-            legacy._maybe_store_class_carryover(
+            _context_runtime()._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
                 intents=info_carryover_intents,
@@ -2375,7 +2415,7 @@ def _handle_truth_gate_fallback(
                 message_count=message_count,
                 reason="truth_gate",
             )
-        legacy._maybe_store_service_carryover(
+        _context_runtime()._maybe_store_service_carryover(
             conversation=conversation,
             service_meta=decision.meta if isinstance(decision.meta, dict) else None,
             intent=decision.intent,
@@ -2426,11 +2466,9 @@ def _handle_offline_info_class(
     maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
-
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
     controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
-    offline_controller = (not legacy._current_openai_api_key()) or controller_error == "no_api_key"
+    offline_controller = (not _current_openai_api_key()) or controller_error == "no_api_key"
     info_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
     for item in class_router_result.get("carryover_intents") or []:
         if isinstance(item, str) and item.strip():
@@ -2493,7 +2531,7 @@ def _handle_offline_info_class(
                 return guard_response
             bot_response = base_bundle_reply.strip()
             composer_meta = None
-            bot_response, composer_meta = legacy._compose_fact_response(
+            bot_response, composer_meta = _response_runtime()._compose_fact_response(
                 bot_response,
                 client_slug=client_slug,
                 conversation_id=str(conversation.id),
@@ -2502,8 +2540,8 @@ def _handle_offline_info_class(
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=False,
             )
-            bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
-            legacy._reset_low_confidence_retry(conversation)
+            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+            _context_runtime()._reset_low_confidence_retry(conversation)
             trace_payload = {
                 "stage": "info_class",
                 "decision": "reply",
@@ -2515,8 +2553,8 @@ def _handle_offline_info_class(
                 trace_payload.update(info_meta_combined)
             if composer_meta:
                 trace_payload.update(composer_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
-            legacy._record_message_decision_meta(
+            _record_decision_trace(conversation, trace_payload)
+            _record_message_decision_meta(
                 saved_message,
                 action="reply",
                 intent="info_bundle",
@@ -2528,15 +2566,15 @@ def _handle_offline_info_class(
                 if info_meta_combined:
                     meta_updates.update(info_meta_combined)
                 meta_updates.update(
-                    legacy._controller_meta_updates_from_class_router(class_router_result)
+                    _controller_meta_updates_from_class_router(class_router_result)
                 )
                 meta_updates.update(
-                    legacy._router_observability_updates_from_class_router(class_router_result)
+                    _router_observability_updates_from_class_router(class_router_result)
                 )
-                legacy._update_message_decision_metadata(saved_message, meta_updates)
+                _update_message_decision_metadata(saved_message, meta_updates)
             if saved_message and composer_meta:
-                legacy._update_message_decision_metadata(saved_message, composer_meta)
-            legacy._maybe_store_class_carryover(
+                _update_message_decision_metadata(saved_message, composer_meta)
+            _context_runtime()._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
                 intents=sorted(info_intents_for_reply),
@@ -2544,7 +2582,7 @@ def _handle_offline_info_class(
                 message_count=message_count,
                 reason="class_router_offline",
             )
-            legacy._maybe_store_service_carryover(
+            _context_runtime()._maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta=info_meta_combined,
                 intent="info_bundle",
@@ -2552,7 +2590,7 @@ def _handle_offline_info_class(
                 reason="class_router_offline",
             )
             if consult_return_pending:
-                bot_response = legacy._apply_consult_return(
+                bot_response = _context_runtime()._apply_consult_return(
                     conversation=conversation,
                     saved_message=saved_message,
                     bot_response=bot_response,

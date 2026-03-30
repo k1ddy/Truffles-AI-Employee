@@ -126,10 +126,10 @@ def build_runtime_safety_snapshot(
     warning_flags: list[str] = []
 
     if outbox_worker_mode == "local_debug" and not database_is_local:
-        danger_flags.append("outbox_local_debug_on_nonlocal_db")
+        danger_flags.append("test_mode_outbox_worker_on_nonlocal_db")
 
     if outbox_worker_mode == "local_debug" and not allowlist:
-        danger_flags.append("outbox_local_debug_without_allowlist")
+        danger_flags.append("test_mode_outbox_worker_without_allowlist")
 
     if eval_mode != "prod" and outbox_worker_mode == "prod":
         danger_flags.append("outbox_prod_mode_in_nonprod_eval")

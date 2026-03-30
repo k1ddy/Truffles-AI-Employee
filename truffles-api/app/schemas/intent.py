@@ -326,6 +326,19 @@ def _normalize_optional_semantic_token(
     return token
 
 
+def _normalize_optional_confidence(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, bool):
+        raise ValueError("confidence_invalid")
+    if not isinstance(value, (int, float)):
+        raise ValueError("confidence_invalid")
+    normalized = float(value)
+    if normalized < 0 or normalized > 1:
+        raise ValueError("confidence_invalid")
+    return normalized
+
+
 def _normalize_master_service_value(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -607,6 +620,11 @@ class LlmPolicyCoreOutput(BaseModel):
         if info.field_name == "intent":
             return _MASTER_QUERY_INTENT_ALIASES.get(normalized, normalized)
         return normalized
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _validate_confidence(cls, value: Any) -> float:
+        return _normalize_optional_confidence(value)
 
     @field_validator(
         "tool_action_hint",

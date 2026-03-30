@@ -21,6 +21,7 @@ from app.services.chatflow_service import (
     send_whatsapp_media,
 )
 from app.services.console_errors import ConsoleAPIError
+from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.learned_response_service import (
     create_learned_response,
     notify_learned_response_pending,
@@ -31,7 +32,6 @@ from app.services.message_service import save_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.runtime_mode_service import should_use_outbox_send
 from app.services.state_service import is_simulation_context
-from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("manager_message_service")
@@ -44,6 +44,17 @@ MANAGER_CONNECTED_TEMPLATE = "👤 Менеджер {name} подключилс�
 MANAGER_DISCONNECTED_MESSAGE = "🤖 Заявка закрыта, бот снова отвечает."
 CONSOLE_MEDIA_MAX_MB = {"photo": 8, "audio": 8, "document": 10}
 CONSOLE_MEDIA_CHUNK_BYTES = 1024 * 1024
+
+
+def _is_env_enabled(value: Optional[str], *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_use_outbox_send() -> bool:
+    default = should_use_outbox_send(os.environ)
+    return _is_env_enabled(os.environ.get("OUTBOX_SEND_ENABLED"), default=default)
 
 
 def _safe_media_id(value: Optional[str]) -> str:
@@ -699,7 +710,7 @@ async def process_console_media_upload(
         db.commit()
         return saved_message, "failed", "instance_id_not_found"
 
-    use_outbox_send = should_use_outbox_send(os.environ)
+    use_outbox_send = _should_use_outbox_send()
     if use_outbox_send:
         now = datetime.now(timezone.utc)
         outbox_idempotency_key = idempotency_key or build_inbound_message_id(
@@ -959,7 +970,7 @@ def process_manager_media(
     )
     if not instance_id:
         return False, "Instance ID not found", took_handover, handover
-    use_outbox_send = should_use_outbox_send(os.environ)
+    use_outbox_send = _should_use_outbox_send()
     if use_outbox_send:
         now = datetime.now(timezone.utc)
         idempotency_key = build_inbound_message_id(

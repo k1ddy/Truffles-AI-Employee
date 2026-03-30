@@ -16,6 +16,12 @@ from app.models.branch import Branch
 from app.models.service import Service
 from app.models.specialist import Specialist
 from app.models.specialist_service import SpecialistService
+from app.routers.webhook.runtime_primitives import (
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
+    MSG_BOOKING_ASK_DATETIME,
+    MSG_BOOKING_ASK_SERVICE,
+)
 from app.schemas.intent import validate_tool_args_shape
 from app.services.appointment_reminder_service import (
     mark_pending_reminders_failed,
@@ -62,22 +68,18 @@ from app.services.pack_runtime_service import (
     load_yaml_truth,
 )
 from app.services.tool_certification_service import resolve_tool_certification_decision
+from app.services.tool_registry_snapshot_service import (
+    declared_tool_action_set,
+    resolve_tool_registry_entry,
+)
 
-CALENDAR_TOOL_ACTIONS = {
-    "calendar.list_slots",
-    "calendar.book_slot",
-    "calendar.get_booking",
-    "calendar.reschedule",
-    "calendar.cancel",
-}
-
-CATALOG_TOOL_ACTIONS = {
-    "catalog.service_query",
-    "catalog.location",
-    "catalog.portfolio",
-}
-
-TOOL_ACTIONS = CALENDAR_TOOL_ACTIONS | CATALOG_TOOL_ACTIONS
+TOOL_ACTIONS = declared_tool_action_set()
+CALENDAR_TOOL_ACTIONS = frozenset(
+    action for action in TOOL_ACTIONS if action.startswith("calendar.")
+)
+CATALOG_TOOL_ACTIONS = frozenset(
+    action for action in TOOL_ACTIONS if action.startswith("catalog.")
+)
 
 _CALENDAR_PROVIDER_HARD_FAILURES = {
     "connection_missing",
@@ -112,7 +114,7 @@ BookingCreateBoundaryError = BookingWriteBoundaryError
 
 
 def is_tool_action(action: str | None) -> bool:
-    return bool(action) and action in TOOL_ACTIONS
+    return resolve_tool_registry_entry(action) is not None
 
 
 def _calendar_provider_should_block(reason: str | None) -> bool:
@@ -1518,13 +1520,11 @@ def execute_tool_action(
             prompt = None
             expected_reply_type = None
             if missing_type == "datetime":
-                from app.routers.webhook import _legacy as legacy
-
-                prompt = legacy.MSG_BOOKING_ASK_DATETIME
+                prompt = MSG_BOOKING_ASK_DATETIME
                 time_token = _extract_time_token(message_text)
                 if time_token:
                     prompt = f"На какую дату вам удобно, если время {time_token}?"
-                expected_reply_type = legacy.EXPECTED_REPLY_TIME
+                expected_reply_type = EXPECTED_REPLY_TIME
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -1929,10 +1929,8 @@ def execute_tool_action(
                 expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         if error:
-            from app.routers.webhook import _legacy as legacy
-
             missing_slot = "datetime" if error == "missing_start_at" else None
-            prompt = legacy.MSG_BOOKING_ASK_DATETIME if missing_slot == "datetime" else None
+            prompt = MSG_BOOKING_ASK_DATETIME if missing_slot == "datetime" else None
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -1949,7 +1947,7 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "missing_slot": missing_slot,
                 },
-                expected_reply_type=legacy.EXPECTED_REPLY_TIME if missing_slot else None,
+                expected_reply_type=EXPECTED_REPLY_TIME if missing_slot else None,
             )
         decision_meta, trace = _with_provider_health_meta(
             {
@@ -2275,12 +2273,10 @@ def execute_tool_action(
         )
         price_hint = bool(hint_set & {"pricing", "price", "payment", "payment_info"})
         if not service_query:
-            from app.routers.webhook import _legacy as legacy
-
-            reply = legacy.MSG_BOOKING_ASK_SERVICE
+            reply = MSG_BOOKING_ASK_SERVICE
             info_sections: list[str] = []
             tool_decision = "missing_slot"
-            expected_reply_type = legacy.EXPECTED_REPLY_SERVICE
+            expected_reply_type = EXPECTED_REPLY_SERVICE
             if "services_overview" in hint_set:
                 overview_reply = _format_services_overview_reply(
                     db,

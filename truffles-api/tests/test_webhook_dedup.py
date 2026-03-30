@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.routers import webhook
-from app.routers.webhook import _legacy as legacy_module
+from app.routers.webhook import decision as decision_router
 from app.routers.webhook import dedup as dedup_module
 from app.routers.webhook import guards as guards_module
 
@@ -241,14 +241,14 @@ def test_lookup_preexisting_duplicate_message_falls_back_to_messages_table_on_ow
 def test_handle_post_debounce_muted_state_gate_skips_muted_without_booking_signal(monkeypatch):
     captured_trace: dict[str, object] = {}
 
-    monkeypatch.setattr(legacy_module, "_coerce_batch_messages", lambda text, batch: [text])
-    monkeypatch.setattr(legacy_module, "is_opt_out_message", lambda _text: False)
-    monkeypatch.setattr(legacy_module, "_evaluate_booking_signal", lambda *args, **kwargs: (False, None))
-    monkeypatch.setattr(legacy_module, "_get_conversation_context", lambda conversation: {})
-    monkeypatch.setattr(legacy_module, "_get_booking_context", lambda context: {})
-    monkeypatch.setattr(legacy_module, "_get_reengage_confirmation", lambda context: None)
+    monkeypatch.setattr(decision_router, "_coerce_batch_messages", lambda text, batch: [text])
+    monkeypatch.setattr(guards_module, "is_opt_out_message", lambda _text: False)
+    monkeypatch.setattr(decision_router, "_evaluate_booking_signal", lambda *args, **kwargs: (False, None))
+    monkeypatch.setattr(guards_module, "_get_conversation_context", lambda conversation: {})
+    monkeypatch.setattr(guards_module, "_get_booking_context", lambda context: {})
+    monkeypatch.setattr(guards_module, "_get_reengage_confirmation", lambda context: None)
     monkeypatch.setattr(
-        legacy_module,
+        guards_module,
         "_record_decision_trace",
         lambda conversation, payload: captured_trace.update(payload),
     )

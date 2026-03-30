@@ -18,8 +18,70 @@ from rapidfuzz import fuzz, process
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
+from app.routers.webhook.booking_runtime import (
+    MSG_BOOKING_ASK_ALL,
+    MSG_BOOKING_CANCELLED,
+    MSG_BOOKING_REENGAGE,
+    MSG_BOOKING_SLOT_LOCK_STUB,
+    NAME_NOISE_TOKENS,
+    NAME_PATTERN,
+    _is_booking_cancel,
+    _matches_guest_policy_lexicon,
+)
+from app.routers.webhook.booking_signal_runtime import (
+    TIME_HOUR_PATTERN,
+    TIME_PATTERN,
+    _extract_datetime,
+    _extract_service_hint,
+    _is_booking_request,
+)
+from app.routers.webhook.context_runtime import (
+    SERVICE_HINT_AT_KEY,
+    SERVICE_HINT_KEY,
+    SERVICE_HINT_WINDOW_MINUTES,
+    _is_refusal_flag_active,
+)
+from app.routers.webhook.guard_runtime import MSG_FACT_GUARD_CLARIFY
+from app.routers.webhook.pending_runtime import MSG_PENDING_ESCALATION
+from app.routers.webhook.info import _detect_info_class_intents, _looks_like_info_query
+from app.routers.webhook.class_router_runtime import (
+    CONTROLLER_CONFIDENCE_THRESHOLD,
+    DomainIntent,
+    _build_controller_meta_output,
+    _ensure_controller_output_meta,
+    _resolve_class_router_result,
+    _resolve_controller_signal_class,
+    _router_observability_updates_from_class_router,
+)
+from app.routers.webhook.media import _is_style_reference_request
+from app.routers.webhook.runtime_primitives import (
+    BOOKING_TIME_SERVICE_INTENTS,
+    EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_PHONE,
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
+    INFO_INTENTS,
+    MSG_AI_ERROR,
+    MSG_BOOKING_ASK_DATETIME,
+    MSG_BOOKING_ASK_NAME,
+    MSG_BOOKING_ASK_SERVICE,
+    MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE,
+    MSG_ESCALATED,
+    MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    MSG_STYLE_REFERENCE_NEED_MEDIA,
+    _combine_sidecar,
+)
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
+from app.services.ai_service import (
+    detect_refusal_flags,
+    is_acknowledgement_message,
+    is_bot_status_question,
+    is_greeting_message,
+    is_low_signal_message,
+    is_thanks_message,
+    normalize_for_matching,
+)
 from app.services.booking_signal_service import (
     clean_name_candidate as _clean_name_candidate_impl,
 )
@@ -70,8 +132,33 @@ from app.services.expected_reply_contract import (
     should_skip_booking_interrupt_for_expected_reply,
     should_use_expected_service_off_topic_prompt,
 )
-from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
-from app.services.pack_runtime_service import get_system_lexicon_list, phrase_match_intent
+from app.services.handover_owner_service import (
+    ActiveHandoverReuseRuntimeHooks,
+    _reuse_active_handover,
+    escalate_to_pending,
+    get_active_handover,
+    send_telegram_notification,
+)
+from app.services.intent_service import (
+    is_frustration_message,
+    is_human_request_message,
+    is_opt_out_message,
+)
+from app.services.pack_runtime_service import (
+    _format_service_not_found_reply,
+    _normalize_text,
+    get_system_lexicon_list,
+    load_yaml_truth,
+    phrase_match_intent,
+)
+from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
+
+from .trace import (
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -81,18 +168,25 @@ if TYPE_CHECKING:
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
 
-
 @dataclass(frozen=True)
 class SlotCandidate:
     text: str
     flags: tuple[str, ...]
 
+def _context_runtime():
+    from . import context_manager as context_router
+
+    return context_router
+
+def _guards_runtime():
+    from . import guards as guards_router
+
+    return guards_router
 
 def _is_env_enabled(value: str | None, *, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
-
 
 def _get_booking_confirm_threshold() -> float:
     raw = os.environ.get("BOOKING_CONFIRM_CONFIDENCE_THRESHOLD", "0.9")
@@ -102,18 +196,12 @@ def _get_booking_confirm_threshold() -> float:
         return 0.9
     return max(0.0, min(threshold, 1.0))
 
-
 def _is_booking_confirm_enabled() -> bool:
     return _is_env_enabled(os.environ.get("BOOKING_CONFIRM_ENABLED"), default=False)
-
-
-
 
 def _build_slot_candidates(
     message_text: str, *, expected_reply_type: str | None
 ) -> list[SlotCandidate]:
-    from . import _legacy as legacy
-
     raw = (message_text or "").strip()
     if not raw:
         return []
@@ -130,7 +218,7 @@ def _build_slot_candidates(
     allow_layout_swap = should_allow_layout_swap_for_expected_reply(expected_reply_type)
     if allow_layout_swap and _looks_like_layout_swap(raw):
         swapped = _swap_keyboard_layout(raw)
-        swapped_normalized = legacy._normalize_text(swapped)
+        swapped_normalized = _normalize_text(swapped)
         if swapped_normalized and swapped_normalized != raw:
             _push(swapped_normalized, ("layout_swap", "normalized"))
         swapped_collapsed = _collapse_repeats(swapped_normalized)
@@ -139,7 +227,7 @@ def _build_slot_candidates(
 
     _push(raw, ())
 
-    normalized = legacy._normalize_text(raw)
+    normalized = _normalize_text(raw)
     if normalized and normalized != raw:
         _push(normalized, ("normalized",))
     collapsed = _collapse_repeats(normalized)
@@ -148,26 +236,22 @@ def _build_slot_candidates(
 
     return candidates
 
-
 def _get_booking_context(context: dict) -> dict:
     booking = context.get("booking") if isinstance(context, dict) else None
     if isinstance(booking, dict):
         return dict(booking)
     return {}
 
-
 def _set_booking_context(context: dict, booking: dict) -> dict:
     context = dict(context)
     context["booking"] = booking
     return context
-
 
 def _get_booking_confirmation(booking: dict) -> dict | None:
     confirmation = booking.get("confirmation") if isinstance(booking, dict) else None
     if isinstance(confirmation, dict):
         return dict(confirmation)
     return None
-
 
 def _set_booking_confirmation(booking: dict, confirmation: dict | None) -> dict:
     booking = dict(booking)
@@ -176,7 +260,6 @@ def _set_booking_confirmation(booking: dict, confirmation: dict | None) -> dict:
     else:
         booking.pop("confirmation", None)
     return booking
-
 
 def _build_booking_confirmation_prompt(slot_key: str, value: str) -> str:
     if slot_key == "service":
@@ -187,7 +270,6 @@ def _build_booking_confirmation_prompt(slot_key: str, value: str) -> str:
         return f"Я правильно понял, вас зовут {value}?"
     return f"Подтвердите, пожалуйста: {value}. Верно?"
 
-
 def _should_defer_booking_confirmation_for_info(
     *,
     confirmation: dict | None,
@@ -195,15 +277,12 @@ def _should_defer_booking_confirmation_for_info(
     message_text: str | None,
     client_slug: str | None,
 ) -> bool:
-    from . import _legacy as legacy
-
     return bool(
         confirmation
         and basic_info_message
         and message_text
-        and legacy._looks_like_info_query(message_text, client_slug=client_slug)
+        and _looks_like_info_query(message_text, client_slug=client_slug)
     )
-
 
 def _should_defer_booking_flow_for_info_interrupt(
     *,
@@ -219,34 +298,25 @@ def _should_defer_booking_flow_for_info_interrupt(
         and not booking_related
     )
 
-
 def _set_service_hint(context: dict, service: str, now: datetime) -> dict:
-    from . import _legacy as legacy
-
     context = dict(context)
-    context[legacy.SERVICE_HINT_KEY] = service
-    context[legacy.SERVICE_HINT_AT_KEY] = now.isoformat()
+    context[SERVICE_HINT_KEY] = service
+    context[SERVICE_HINT_AT_KEY] = now.isoformat()
     return context
-
 
 def _clear_service_hint(context: dict) -> dict:
-    from . import _legacy as legacy
-
     context = dict(context)
-    context.pop(legacy.SERVICE_HINT_KEY, None)
-    context.pop(legacy.SERVICE_HINT_AT_KEY, None)
+    context.pop(SERVICE_HINT_KEY, None)
+    context.pop(SERVICE_HINT_AT_KEY, None)
     return context
 
-
 def _get_recent_service_hint(context: dict, now: datetime) -> str | None:
-    from . import _legacy as legacy
-
     if not isinstance(context, dict):
         return None
-    value = context.get(legacy.SERVICE_HINT_KEY)
+    value = context.get(SERVICE_HINT_KEY)
     if not value:
         return None
-    timestamp_raw = context.get(legacy.SERVICE_HINT_AT_KEY)
+    timestamp_raw = context.get(SERVICE_HINT_AT_KEY)
     if not timestamp_raw:
         return None
     try:
@@ -255,33 +325,25 @@ def _get_recent_service_hint(context: dict, now: datetime) -> str | None:
         return None
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
-    if (now - timestamp) > timedelta(minutes=legacy.SERVICE_HINT_WINDOW_MINUTES):
+    if (now - timestamp) > timedelta(minutes=SERVICE_HINT_WINDOW_MINUTES):
         return None
     return str(value).strip() or None
 
-
 def _is_blocked_slot_message(message_text: str) -> bool:
-    from . import _legacy as legacy
-
-    return legacy.is_opt_out_message(message_text) or legacy.is_frustration_message(message_text)
-
+    return is_opt_out_message(message_text) or is_frustration_message(message_text)
 
 def _is_noise_slot_message(message_text: str) -> bool:
-    from . import _legacy as legacy
-
     return (
-        legacy.is_low_signal_message(message_text)
-        or legacy.is_acknowledgement_message(message_text)
-        or legacy.is_greeting_message(message_text)
-        or legacy.is_thanks_message(message_text)
-        or legacy.is_bot_status_question(message_text)
-        or legacy.is_human_request_message(message_text)
+        is_low_signal_message(message_text)
+        or is_acknowledgement_message(message_text)
+        or is_greeting_message(message_text)
+        or is_thanks_message(message_text)
+        or is_bot_status_question(message_text)
+        or is_human_request_message(message_text)
     )
-
 
 def _clean_name_candidate(value: str) -> str:
     return _clean_name_candidate_impl(value)
-
 
 @lru_cache(maxsize=16)
 def _load_datetime_lexicon(client_slug: str | None) -> dict:
@@ -292,15 +354,12 @@ def _load_datetime_lexicon(client_slug: str | None) -> dict:
     lexicon = domain_pack.get("datetime_lexicon") if isinstance(domain_pack, dict) else None
     return lexicon if isinstance(lexicon, dict) else {}
 
-
 @lru_cache(maxsize=16)
 def _build_datetime_variant_index(client_slug: str | None) -> tuple[
     dict[str, str],
     set[str],
     list[tuple[tuple[str, ...], str, str]],
 ]:
-    from . import _legacy as legacy
-
     lexicon = _load_datetime_lexicon(client_slug)
     variant_map: dict[str, str] = {}
     canonical_set: set[str] = set()
@@ -316,7 +375,7 @@ def _build_datetime_variant_index(client_slug: str | None) -> tuple[
             canonical_raw = payload.get("canonical_ru")
             if not isinstance(canonical_raw, str):
                 continue
-            canonical = legacy._normalize_text(canonical_raw)
+            canonical = _normalize_text(canonical_raw)
             if not canonical:
                 continue
             canonical_set.add(canonical)
@@ -329,7 +388,7 @@ def _build_datetime_variant_index(client_slug: str | None) -> tuple[
                 for variant in variants:
                     if not isinstance(variant, str):
                         continue
-                    normalized = legacy._normalize_text(variant)
+                    normalized = _normalize_text(variant)
                     if not normalized:
                         continue
                     variant_map[normalized] = canonical
@@ -338,15 +397,12 @@ def _build_datetime_variant_index(client_slug: str | None) -> tuple[
     entries.sort(key=lambda item: len(item[0]), reverse=True)
     return variant_map, canonical_set, entries
 
-
 def _canonicalize_datetime_text(
     message_text: str,
     *,
     client_slug: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_text(message_text)
     if not normalized:
         return "", []
 
@@ -401,7 +457,6 @@ def _canonicalize_datetime_text(
         )
 
     return " ".join(replaced_tokens), matches
-
 
 def _resolve_datetime_offline(
     message_text: str,
@@ -475,9 +530,6 @@ def _resolve_datetime_offline(
     }
     return result
 
-
-
-
 def _validate_service_slot(
     message_text: str,
     *,
@@ -486,9 +538,7 @@ def _validate_service_slot(
 ) -> str | None:
     if _is_blocked_slot_message(message_text):
         return None
-    from . import _legacy as legacy
-
-    extracted = legacy._extract_service_hint(message_text, client_slug)
+    extracted = _extract_service_hint(message_text, client_slug)
     if extracted:
         return extracted
     if client_slug:
@@ -499,7 +549,6 @@ def _validate_service_slot(
             return fallback
     return None
 
-
 def _validate_datetime_slot(
     message_text: str,
     *,
@@ -508,16 +557,14 @@ def _validate_datetime_slot(
 ) -> str | None:
     if _is_blocked_slot_message(message_text):
         return None
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_text(message_text)
     has_duration_context = _has_duration_context_marker(normalized)
-    booking_signal = bool(legacy._is_booking_request(message_text, client_slug=client_slug))
+    booking_signal = bool(_is_booking_request(message_text, client_slug=client_slug))
 
     def _allow_partial_daypart_candidate(value: str) -> bool:
         if not isinstance(value, str) or not value.strip():
             return False
-        if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
+        if TIME_PATTERN.search(value) or TIME_HOUR_PATTERN.search(value):
             return True
         is_daypart_only = bool(
             _pick_daypart_token(value)
@@ -545,7 +592,7 @@ def _validate_datetime_slot(
             return False
         return True
 
-    extracted = legacy._extract_datetime(message_text, client_slug=client_slug)
+    extracted = _extract_datetime(message_text, client_slug=client_slug)
     if extracted and _allow_partial_daypart_candidate(extracted):
         return extracted
     resolved_partial = _normalize_resolved_datetime_value(
@@ -553,7 +600,7 @@ def _validate_datetime_slot(
         normalized_text=normalized,
     )
     if resolved_partial:
-        resolved_normalized = legacy.normalize_for_matching(resolved_partial)
+        resolved_normalized = normalize_for_matching(resolved_partial)
         if (
             resolved_normalized
             and _has_daypart_stem(resolved_normalized)
@@ -576,7 +623,6 @@ def _validate_datetime_slot(
     minute = match.get("minute") or "00"
     return f"{hour:02d}:{minute}"
 
-
 def _validate_name_slot(
     message_text: str,
     *,
@@ -587,15 +633,13 @@ def _validate_name_slot(
         return None
     if _is_noise_slot_message(message_text):
         return None
-    from . import _legacy as legacy
-
-    name_match = legacy.NAME_PATTERN.search(message_text)
+    name_match = NAME_PATTERN.search(message_text)
     if name_match:
         candidate = name_match.group(1)
     elif not allow_freeform:
         return None
     else:
-        if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(
+        if _extract_service_hint(message_text, client_slug) or _extract_datetime(
             message_text, client_slug=client_slug
         ):
             return None
@@ -605,7 +649,7 @@ def _validate_name_slot(
         return None
     if any(char.isdigit() for char in cleaned):
         return None
-    normalized = legacy._normalize_text(cleaned)
+    normalized = _normalize_text(cleaned)
     tokens = normalized.split()
     if not tokens or len(tokens) > 3:
         return None
@@ -629,10 +673,9 @@ def _validate_name_slot(
         and set(tokens).intersection(booking_object_tokens)
     ):
         return None
-    if all(token in legacy.NAME_NOISE_TOKENS for token in tokens):
+    if all(token in NAME_NOISE_TOKENS for token in tokens):
         return None
     return cleaned
-
 
 def _validate_phone_slot(
     message_text: str,
@@ -645,7 +688,6 @@ def _validate_phone_slot(
         return None
     return _normalize_phone_digits(message_text)
 
-
 BOOKING_SLOT_VALIDATORS = {
     "service": _validate_service_slot,
     "datetime": _validate_datetime_slot,
@@ -653,20 +695,16 @@ BOOKING_SLOT_VALIDATORS = {
     "phone": _validate_phone_slot,
 }
 
-
 def _expected_reply_for_booking_question(last_question: str | None) -> str | None:
-    from . import _legacy as legacy
-
     if last_question == "service":
-        return legacy.EXPECTED_REPLY_SERVICE
+        return EXPECTED_REPLY_SERVICE
     if last_question == "datetime":
-        return legacy.EXPECTED_REPLY_TIME
+        return EXPECTED_REPLY_TIME
     if last_question == "name":
-        return legacy.EXPECTED_REPLY_NAME
+        return EXPECTED_REPLY_NAME
     if last_question == "phone":
-        return legacy.EXPECTED_REPLY_PHONE
+        return EXPECTED_REPLY_PHONE
     return None
-
 
 def _match_expected_reply(
     *,
@@ -703,15 +741,12 @@ def _match_expected_reply(
             return True, value, list(candidate.flags)
     return False, None, []
 
-
 def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None, value: str) -> dict:
     if not expected_reply_type or not value:
         return context
     slot_key = expected_reply_slot_key(expected_reply_type)
     if not slot_key:
         return context
-    from . import _legacy as legacy
-
     def _merge_datetime_slot(existing_value: str, incoming_value: str) -> str | None:
         existing = existing_value.strip()
         incoming = incoming_value.strip()
@@ -725,8 +760,8 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
         merged_daypart = existing_daypart or incoming_daypart
         if merged_day and merged_daypart:
             return f"{merged_day} {merged_daypart}".strip()
-        existing_normalized = legacy.normalize_for_matching(existing)
-        incoming_normalized = legacy.normalize_for_matching(incoming)
+        existing_normalized = normalize_for_matching(existing)
+        incoming_normalized = normalize_for_matching(incoming)
         if (
             existing_normalized
             and incoming_normalized
@@ -739,9 +774,9 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
             and incoming_normalized in existing_normalized
         ):
             return existing
-        if legacy.TIME_PATTERN.search(existing) or legacy.TIME_HOUR_PATTERN.search(existing):
+        if TIME_PATTERN.search(existing) or TIME_HOUR_PATTERN.search(existing):
             return None
-        if not (legacy.TIME_PATTERN.search(incoming) or legacy.TIME_HOUR_PATTERN.search(incoming)):
+        if not (TIME_PATTERN.search(incoming) or TIME_HOUR_PATTERN.search(incoming)):
             return None
         return f"{existing} {incoming}".strip()
 
@@ -763,7 +798,6 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
     booking_state[slot_key] = value
     return _set_booking_context(context, booking_state)
 
-
 def _is_booking_related_message(
     message_text: str | None,
     client_slug: str | None,
@@ -773,30 +807,25 @@ def _is_booking_related_message(
 ) -> bool:
     if not message_text:
         return False
-    from . import _legacy as legacy
-
-    if legacy._is_booking_request(message_text, client_slug=client_slug):
+    if _is_booking_request(message_text, client_slug=client_slug):
         return True
-    refusal_flags = legacy.detect_refusal_flags(message_text)
+    refusal_flags = detect_refusal_flags(message_text)
     if refusal_flags.get("name") or refusal_flags.get("phone"):
         return True
-    if allow_service and legacy._extract_service_hint(message_text, client_slug):
+    if allow_service and _extract_service_hint(message_text, client_slug):
         return True
-    if legacy._extract_datetime(message_text, client_slug=client_slug):
+    if _extract_datetime(message_text, client_slug=client_slug):
         return True
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
     return False
 
-
 def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None) -> bool:
     if not message_text:
         return False
-    from . import _legacy as legacy
-
     if _looks_like_phone(message_text):
         return True
-    if legacy._looks_like_info_query(message_text, client_slug=client_slug) and not legacy._is_booking_request(
+    if _looks_like_info_query(message_text, client_slug=client_slug) and not _is_booking_request(
         message_text,
         client_slug=client_slug,
     ):
@@ -808,20 +837,16 @@ def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None
         allow_service=False,
     )
 
-
 def _select_last_non_booking_message(messages: list[str], *, client_slug: str | None) -> str | None:
-    from . import _legacy as legacy
-
     for message in reversed(messages or []):
         if not message:
             continue
         if _is_booking_related_message(message, client_slug, allow_name=False, allow_service=False):
             continue
-        if legacy._looks_like_info_query(message, client_slug=client_slug):
+        if _looks_like_info_query(message, client_slug=client_slug):
             return message
         return message
     return None
-
 
 def _select_booking_interrupt_text(
     *,
@@ -842,7 +867,6 @@ def _select_booking_interrupt_text(
         return batch_non_booking_message
     return message_text
 
-
 def _resolve_booking_info_intents(
     *,
     intent_decomp_used: bool,
@@ -854,8 +878,6 @@ def _resolve_booking_info_intents(
     booking_interrupt_text: str | None,
     client_slug: str | None,
 ) -> list[str]:
-    from . import _legacy as legacy
-
     booking_info_intents: list[str] = []
     should_prefer_info_class = should_prefer_info_class_for_booking_interrupt(
         info_class_intents_present=bool(info_class_intents),
@@ -865,10 +887,10 @@ def _resolve_booking_info_intents(
     if should_prefer_info_class:
         booking_info_intents = sorted(info_class_intents)
     elif intent_decomp_used:
-        booking_info_intents = sorted(intent_decomp_set & legacy.INFO_INTENTS)
+        booking_info_intents = sorted(intent_decomp_set & INFO_INTENTS)
 
     if booking_interrupt_text:
-        anchor_intents, _ = legacy._detect_info_class_intents(
+        anchor_intents, _ = _detect_info_class_intents(
             booking_interrupt_text,
             intent_decomp_set=set(),
             client_slug=client_slug,
@@ -882,15 +904,12 @@ def _resolve_booking_info_intents(
 
     return booking_info_intents
 
-
 def _looks_like_booking_reschedule_request(
     message_text: str | None,
     *,
     client_slug: str | None = None,
 ) -> bool:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text or "")
+    normalized = _normalize_text(message_text or "")
     if not normalized:
         return False
     try:
@@ -909,9 +928,9 @@ def _looks_like_booking_reschedule_request(
     reschedule_markers = get_system_lexicon_list("booking_reschedule_keywords")
     if any(marker in normalized for marker in reschedule_markers):
         return True
-    if intent_signals & legacy.INFO_INTENTS:
+    if intent_signals & INFO_INTENTS:
         return False
-    if legacy._looks_like_info_query(message_text, client_slug=client_slug):
+    if _looks_like_info_query(message_text, client_slug=client_slug):
         return False
     booking_reference_markers = get_system_lexicon_list("booking_request")
     booking_keyword_markers = get_system_lexicon_list("booking_keywords")
@@ -922,7 +941,6 @@ def _looks_like_booking_reschedule_request(
         return False
     cancel_markers = get_system_lexicon_list("booking_cancel_keywords")
     return any(marker in normalized for marker in cancel_markers)
-
 
 def _select_expected_reply_message(
     messages: list[str],
@@ -946,7 +964,6 @@ def _select_expected_reply_message(
     )
     return last_message if matched else None
 
-
 def _apply_booking_slot(
     booking: dict,
     slot_key: str,
@@ -960,9 +977,7 @@ def _apply_booking_slot(
             return booking
         existing_datetime = str(booking.get("datetime") or "").strip()
         if existing_datetime:
-            from . import _legacy as legacy
-
-            if legacy.TIME_PATTERN.search(existing_datetime) or legacy.TIME_HOUR_PATTERN.search(
+            if TIME_PATTERN.search(existing_datetime) or TIME_HOUR_PATTERN.search(
                 existing_datetime
             ):
                 return booking
@@ -973,7 +988,6 @@ def _apply_booking_slot(
     if value:
         booking[slot_key] = value
     return booking
-
 
 def _update_booking_from_message(booking: dict, message_text: str, *, client_slug: str | None) -> dict:
     booking = dict(booking)
@@ -1001,7 +1015,6 @@ def _update_booking_from_message(booking: dict, message_text: str, *, client_slu
 
     return booking
 
-
 def _update_booking_from_messages(
     booking: dict,
     messages: list[str],
@@ -1013,7 +1026,6 @@ def _update_booking_from_messages(
         updated = _update_booking_from_message(updated, message, client_slug=client_slug)
     return updated
 
-
 def _is_datetime_grounded_for_prompt(
     datetime_value: str | None,
     *,
@@ -1022,9 +1034,7 @@ def _is_datetime_grounded_for_prompt(
     if not isinstance(datetime_value, str) or not datetime_value.strip():
         return False
     value = datetime_value.strip()
-    from . import _legacy as legacy
-
-    if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
+    if TIME_PATTERN.search(value) or TIME_HOUR_PATTERN.search(value):
         return True
     if not _pick_daypart_token(value):
         return False
@@ -1048,7 +1058,6 @@ def _is_datetime_grounded_for_prompt(
         for token in canonical_tokens
     )
 
-
 def _next_booking_prompt(
     booking: dict,
     *,
@@ -1058,15 +1067,11 @@ def _next_booking_prompt(
     booking = dict(booking)
     if not booking.get("service"):
         booking["last_question"] = "service"
-        from . import _legacy as legacy
-
-        return booking, legacy.MSG_BOOKING_ASK_SERVICE
+        return booking, MSG_BOOKING_ASK_SERVICE
     datetime_value = booking.get("datetime")
     datetime_grounded = _is_datetime_grounded_for_prompt(datetime_value, client_slug=client_slug)
     if not datetime_grounded:
         booking["last_question"] = "datetime"
-        from . import _legacy as legacy
-
         if isinstance(datetime_value, str) and datetime_value.strip():
             has_daypart_only = bool(
                 _pick_daypart_token(datetime_value)
@@ -1085,25 +1090,20 @@ def _next_booking_prompt(
                 else:
                     prompt = f"Понял, {datetime_value.strip()}. Подскажите, пожалуйста, точное время."
                 return booking, prompt
-        return booking, legacy.MSG_BOOKING_ASK_DATETIME
+        return booking, MSG_BOOKING_ASK_DATETIME
     if not booking.get("name"):
-        from . import _legacy as legacy
-
-        if legacy._is_refusal_flag_active(refusal_flags, "name"):
+        if _is_refusal_flag_active(refusal_flags, "name"):
             booking["last_question"] = None
             return booking, None
         booking["last_question"] = "name"
-        return booking, legacy.MSG_BOOKING_ASK_NAME
+        return booking, MSG_BOOKING_ASK_NAME
     booking["last_question"] = None
     return booking, None
-
 
 def _should_collect_booking_details(message_text: str | None) -> bool:
     if not message_text:
         return False
-    from . import _legacy as legacy
-
-    normalized = legacy.normalize_for_matching(message_text)
+    normalized = normalize_for_matching(message_text)
     if not normalized:
         return False
     detail_markers = get_system_lexicon_list("booking_collect_detail_markers")
@@ -1120,7 +1120,6 @@ def _should_collect_booking_details(message_text: str | None) -> bool:
         return True
     return False
 
-
 def _apply_collect_all_prompt(
     booking_state: dict,
     prompt: str | None,
@@ -1128,12 +1127,9 @@ def _apply_collect_all_prompt(
 ) -> tuple[dict, str | None]:
     if not prompt or not _should_collect_booking_details(message_text):
         return booking_state, prompt
-    from . import _legacy as legacy
-
     booking_state = dict(booking_state)
     booking_state["last_question"] = None
-    return booking_state, legacy.MSG_BOOKING_ASK_ALL
-
+    return booking_state, MSG_BOOKING_ASK_ALL
 
 def _is_booking_time_service_decision(decision: PackDecision | None) -> bool:
     if not decision or getattr(decision, "action", None) != "reply":
@@ -1141,31 +1137,24 @@ def _is_booking_time_service_decision(decision: PackDecision | None) -> bool:
     intent = getattr(decision, "intent", None)
     if not isinstance(intent, str):
         return False
-    from . import _legacy as legacy
-
-    return intent.strip().casefold() in legacy.BOOKING_TIME_SERVICE_INTENTS
-
+    return intent.strip().casefold() in BOOKING_TIME_SERVICE_INTENTS
 
 def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) -> str:
     service = booking.get("service") or "не указано"
     datetime_pref = booking.get("datetime") or "не указано"
     name = booking.get("name")
-    from . import _legacy as legacy
-
-    name_refused = legacy._is_refusal_flag_active(refusal_flags, "name")
+    name_refused = _is_refusal_flag_active(refusal_flags, "name")
     if not name and name_refused:
         name_value = "отказ"
     else:
         name_value = name or "не указано"
     summary = f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name_value}."
-    if legacy._is_refusal_flag_active(refusal_flags, "phone"):
+    if _is_refusal_flag_active(refusal_flags, "phone"):
         summary = f"{summary} Телефон: отказ."
     return summary
 
-
 def _normalize_phone_digits(value: str | None) -> str | None:
     return _normalize_phone_digits_impl(value)
-
 
 def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: datetime) -> datetime | None:
     if not value or not value.strip():
@@ -1197,14 +1186,12 @@ def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: date
         parsed = parsed.replace(tzinfo=tz)
     return parsed
 
-
 def _normalize_booking_setting(value: Any) -> Any:
     if value is None:
         return None
     if isinstance(value, str) and not value.strip():
         return None
     return value
-
 
 def _resolve_booking_settings(settings: dict | None, *, provider_ready: bool | None = None) -> tuple[str, str, str]:
     raw = settings if isinstance(settings, dict) else {}
@@ -1225,7 +1212,6 @@ def _resolve_booking_settings(settings: dict | None, *, provider_ready: bool | N
     if booking_mode == "confirm_slots" and provider_ready is False:
         effective_mode = "collect_preferences"
     return booking_mode, availability_provider, effective_mode
-
 
 def _resolve_default_specialist_id(
     db: Session,
@@ -1295,7 +1281,6 @@ def _resolve_default_specialist_id(
     if fallback_id:
         return fallback_id, "branch_default"
     return None, "specialist_not_found"
-
 
 def _create_booking_appointment(
     *,
@@ -1505,11 +1490,9 @@ def _create_booking_appointment(
     meta["reminder_jobs_scheduled"] = len(reminders)
     return appointment, meta
 
-
 def _is_appointment_overlap_integrity_error(exc: Exception) -> bool:
     text = str(getattr(exc, "orig", exc) or exc).casefold()
     return "appointments_no_overlap" in text or "exclusion constraint" in text
-
 
 @dataclass(frozen=True)
 class BookingFlowResult:
@@ -1517,21 +1500,16 @@ class BookingFlowResult:
     booking_t0: float | None
     booking_logged: bool
 
-
 def _build_booking_class_router_result(
     *,
     intent_decomp_set: set[str] | None,
     booking_signal: bool,
 ) -> dict[str, Any]:
-    from . import _legacy as legacy
-
-    controller_output = legacy._build_controller_meta_output(error="skipped")
+    controller_output = _build_controller_meta_output(error="skipped")
     controller_output["class"] = "booking"
     controller_output["goal"] = "booking"
-    controller_output["confidence"] = max(legacy.CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
-    controller_output = legacy._ensure_controller_output_meta(
-        controller_output, error="skipped"
-    )
+    controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+    controller_output = _ensure_controller_output_meta(controller_output, error="skipped")
     router_state = {
         "used": True,
         "attempted": False,
@@ -1539,7 +1517,7 @@ def _build_booking_class_router_result(
         "confidence": controller_output["confidence"],
         "error": "skipped",
         "fallback_reason": None,
-        "signal_class": legacy._resolve_controller_signal_class(
+        "signal_class": _resolve_controller_signal_class(
             intent_decomp_set=intent_decomp_set or set(),
             booking_signal=booking_signal,
         ),
@@ -1548,17 +1526,16 @@ def _build_booking_class_router_result(
         "output": controller_output,
         "sla": None,
     }
-    return legacy._resolve_class_router_result(
+    return _resolve_class_router_result(
         info_intents=set(),
         info_meta=None,
         booking_signal=booking_signal,
         class_carryover=None,
-        domain_intent=legacy.DomainIntent.UNKNOWN,
+        domain_intent=DomainIntent.UNKNOWN,
         domain_meta=None,
         router_state=router_state,
         explicit_service_signal=False,
     )
-
 
 def _record_booking_class_router_trace(
     *,
@@ -1567,7 +1544,6 @@ def _record_booking_class_router_trace(
 ) -> None:
     if not isinstance(class_router_result, dict):
         return
-    from . import _legacy as legacy
 
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
     controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
@@ -1609,11 +1585,8 @@ def _record_booking_class_router_trace(
         "controller_error": controller_error,
         "controller_goal": controller_goal,
     }
-    trace_payload.update(
-        legacy._router_observability_updates_from_class_router(class_router_result)
-    )
-    legacy._record_decision_trace(conversation, trace_payload)
-
+    trace_payload.update(_router_observability_updates_from_class_router(class_router_result))
+    _record_decision_trace(conversation, trace_payload)
 
 def _handle_booking_interrupt(
     *,
@@ -1670,15 +1643,14 @@ def _handle_booking_interrupt(
         resolve_master_intent,
     )
 
-    from . import _legacy as legacy
     from .info import _build_info_intent_reply as _build_booking_interrupt_info_reply
 
-    booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(booking_context or {})
+    booking_state = booking if isinstance(booking, dict) else _get_booking_context(booking_context or {})
     if booking_state.get("active") and all(booking_state.get(key) for key in BOOKING_SLOT_ORDER):
         return None
     has_info_interrupt = bool(info_class_intents)
     if not has_info_interrupt and intent_decomp_set:
-        has_info_interrupt = bool(intent_decomp_set & legacy.INFO_INTENTS)
+        has_info_interrupt = bool(intent_decomp_set & INFO_INTENTS)
     if should_skip_booking_interrupt_for_expected_reply(
         expected_reply_type=expected_reply_type,
         expected_reply_blocked_by_info=expected_reply_blocked_by_info,
@@ -1696,11 +1668,11 @@ def _handle_booking_interrupt(
             booking_interrupt_text,
             client_slug=client_slug,
         )
-        and conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        and conversation.state == ConversationState.BOT_ACTIVE.value
         and routing.get("allow_handover_create", False)
     ):
         handover_message = booking_interrupt_text or message_text or "Клиент просит изменить время записи."
-        _, reused, telegram_sent = legacy._reuse_active_handover(
+        _, reused, telegram_sent = _reuse_active_handover(
             db=db,
             conversation=conversation,
             user=user,
@@ -1708,10 +1680,10 @@ def _handle_booking_interrupt(
             source="booking_interrupt",
             intent="reschedule_request",
             hooks=ActiveHandoverReuseRuntimeHooks(
-                get_active_handover=legacy.get_active_handover,
-                transition_state=legacy.transition_state,
-                send_telegram_notification=legacy.send_telegram_notification,
-                record_decision_trace=legacy._record_decision_trace,
+                get_active_handover=get_active_handover,
+                transition_state=transition_state,
+                send_telegram_notification=send_telegram_notification,
+                record_decision_trace=_record_decision_trace,
             ),
         )
         if reused:
@@ -1719,7 +1691,7 @@ def _handle_booking_interrupt(
                 f"Booking reschedule handoff reused, telegram={'sent' if telegram_sent else 'failed'}"
             )
         else:
-            result = legacy.escalate_to_pending(
+            result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
                 user_message=handover_message,
@@ -1728,7 +1700,7 @@ def _handle_booking_interrupt(
             )
             if result.ok:
                 handover = result.value
-                telegram_sent = legacy.send_telegram_notification(
+                telegram_sent = send_telegram_notification(
                     db=db,
                     handover=handover,
                     conversation=conversation,
@@ -1740,7 +1712,7 @@ def _handle_booking_interrupt(
                 )
             else:
                 result_message = f"Booking reschedule handoff failed: {result.error}"
-        legacy._record_decision_trace(
+        _record_decision_trace(
             conversation,
             {
                 "stage": "booking_interrupt",
@@ -1749,14 +1721,14 @@ def _handle_booking_interrupt(
                 "state": conversation.state,
             },
         )
-        legacy._record_message_decision_meta(
+        _record_message_decision_meta(
             saved_message,
             action="escalate",
             intent="reschedule_request",
             source="booking_interrupt",
             fast_intent=False,
         )
-        bot_response, sent = send_and_save(legacy.MSG_ESCALATED)
+        bot_response, sent = send_and_save(MSG_ESCALATED)
         if not sent:
             result_message = f"{result_message}; response_send=failed"
         db.commit()
@@ -1856,7 +1828,7 @@ def _handle_booking_interrupt(
         if (
             pending_question_target_value is None
             and master_resolution.explicit
-            and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+            and expected_reply_type == EXPECTED_REPLY_TIME
             and booking_state.get("active")
         ):
             # For active-time info interrupts the pending target must stay aligned
@@ -1876,7 +1848,7 @@ def _handle_booking_interrupt(
         )
         guest_policy_hit = bool(
             booking_interrupt_text
-            and legacy._matches_guest_policy_lexicon(
+            and _matches_guest_policy_lexicon(
                 booking_interrupt_text, client_slug=client_slug
             )
         )
@@ -2106,7 +2078,7 @@ def _handle_booking_interrupt(
                         client_slug=client_slug,
                         intent_decomp=intent_decomp_payload,
                     )
-                    if legacy._is_booking_time_service_decision(candidate):
+                    if _is_booking_time_service_decision(candidate):
                         info_decision = candidate
                         info_source = "service_matcher"
                 if not info_decision:
@@ -2116,7 +2088,7 @@ def _handle_booking_interrupt(
                             client_slug=client_slug,
                             intent_decomp=intent_decomp_payload,
                         )
-                        if legacy._is_booking_time_service_decision(candidate):
+                        if _is_booking_time_service_decision(candidate):
                             info_decision = candidate
                             info_source = "truth_gate"
 
@@ -2165,7 +2137,7 @@ def _handle_booking_interrupt(
                 not info_decision
                 and pending_question_act == "ask_about_requested_slot"
                 and pending_question_target_value in {None, "time"}
-                and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                and expected_reply_type == EXPECTED_REPLY_TIME
                 and expected_reply_matched is not True
                 and expected_reply_blocked_by_info
                 and booking_time_service_candidate
@@ -2173,29 +2145,29 @@ def _handle_booking_interrupt(
                 context = (
                     booking_context
                     if isinstance(booking_context, dict)
-                    else legacy._get_conversation_context(conversation)
+                    else _context_runtime()._get_conversation_context(conversation)
                 )
                 booking_state = (
-                    booking if isinstance(booking, dict) else legacy._get_booking_context(context)
+                    booking if isinstance(booking, dict) else _get_booking_context(context)
                 )
                 booking_active = bool(booking_state.get("active"))
                 if not booking_active:
                     booking_state = dict(booking_state)
                     booking_state["active"] = True
                     booking_state["started_at"] = now.isoformat()
-                booking_state = legacy._update_booking_from_messages(
+                booking_state = _update_booking_from_messages(
                     booking_state,
                     booking_messages,
                     client_slug=client_slug,
                 )
                 if booking_active and not booking_state.get("service"):
-                    service_hint = legacy._get_recent_service_hint(context, now)
+                    service_hint = _get_recent_service_hint(context, now)
                     if service_hint:
                         booking_state["service"] = service_hint
-                        context = legacy._clear_service_hint(context)
-                context_manager = legacy._get_context_manager(context)
+                        context = _clear_service_hint(context)
+                context_manager = _context_runtime()._get_context_manager(context)
                 refusal_flags = context_manager.get("refusal_flags")
-                booking_state, prompt = legacy._next_booking_prompt(
+                booking_state, prompt = _next_booking_prompt(
                     booking_state, refusal_flags=refusal_flags
                 )
                 booking_state, prompt = _apply_collect_all_prompt(
@@ -2203,13 +2175,13 @@ def _handle_booking_interrupt(
                     prompt,
                     message_text,
                 )
-                context = legacy._set_booking_context(context, booking_state)
-                legacy._set_conversation_context(conversation, context)
-                booking_expected = legacy._expected_reply_for_booking_question(
+                context = _set_booking_context(context, booking_state)
+                _context_runtime()._set_conversation_context(conversation, context)
+                booking_expected = _expected_reply_for_booking_question(
                     booking_state.get("last_question")
                 )
-                if booking_expected == legacy.EXPECTED_REPLY_TIME:
-                    context = legacy._set_expected_reply_context(
+                if booking_expected == EXPECTED_REPLY_TIME:
+                    context = _context_runtime()._set_expected_reply_context(
                         conversation=conversation,
                         saved_message=saved_message,
                         context=context,
@@ -2217,7 +2189,7 @@ def _handle_booking_interrupt(
                         reason="booking_slot_guidance",
                         now=now,
                     )
-                    legacy._record_decision_trace(
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "pending_question_interaction",
@@ -2230,7 +2202,7 @@ def _handle_booking_interrupt(
                             "expected_reply_type": booking_expected,
                         },
                     )
-                    legacy._record_message_decision_meta(
+                    _record_message_decision_meta(
                         saved_message,
                         action="reply",
                         intent="booking",
@@ -2238,7 +2210,7 @@ def _handle_booking_interrupt(
                         fast_intent=False,
                     )
                     if saved_message:
-                        legacy._update_message_decision_metadata(
+                        _update_message_decision_metadata(
                             saved_message,
                             {
                                 "pending_question_act": pending_question_act,
@@ -2247,19 +2219,19 @@ def _handle_booking_interrupt(
                                 "pending_question_owner": "booking_slot_guidance",
                             },
                         )
-                    bot_response = legacy.MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
+                    bot_response = MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
                     style_reference_signal = bool(
                         message_text
-                        and legacy._is_style_reference_request(message_text, has_media=has_media)
+                        and _is_style_reference_request(message_text, has_media=has_media)
                     )
                     if style_reference_signal and not has_media:
-                        bot_response = legacy._combine_sidecar(
-                            legacy.MSG_STYLE_REFERENCE_NEED_MEDIA,
+                        bot_response = _combine_sidecar(
+                            MSG_STYLE_REFERENCE_NEED_MEDIA,
                             bot_response,
                         )
                     bot_response = bot_response.strip()
                     if consult_return_pending:
-                        bot_response = legacy._apply_consult_return(
+                        bot_response = _context_runtime()._apply_consult_return(
                             conversation=conversation,
                             saved_message=saved_message,
                             bot_response=bot_response,
@@ -2267,7 +2239,7 @@ def _handle_booking_interrupt(
                             consult_context=consult_context,
                             reason=consult_return_reason or "booking_slot_guidance",
                         )
-                    legacy._reset_low_confidence_retry(conversation)
+                    _context_runtime()._reset_low_confidence_retry(conversation)
                     bot_response, sent = send_and_save(bot_response)
                     result_message = (
                         "Booking slot guidance sent"
@@ -2284,7 +2256,7 @@ def _handle_booking_interrupt(
             if not info_decision and expected_reply_blocked_by_info:
                 info_decision = PackDecision(
                     action="reply",
-                    response=legacy.MSG_FACT_GUARD_CLARIFY,
+                    response=MSG_FACT_GUARD_CLARIFY,
                     intent="info_clarify",
                     meta={
                         "fact_source": "info_clarify",
@@ -2338,10 +2310,10 @@ def _handle_booking_interrupt(
                         "policy_type": policy_type,
                     }
                     gate_trace.update(info_meta)
-                    legacy._record_decision_trace(conversation, gate_trace)
+                    _record_decision_trace(conversation, gate_trace)
                 trace_payload.update(info_meta)
-                legacy._record_decision_trace(conversation, trace_payload)
-                legacy._record_message_decision_meta(
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
                     saved_message,
                     action=info_decision.action,
                     intent=info_decision.intent,
@@ -2349,7 +2321,7 @@ def _handle_booking_interrupt(
                     fast_intent=False,
                 )
                 if saved_message:
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {
                             **info_meta,
@@ -2358,11 +2330,11 @@ def _handle_booking_interrupt(
                             "booking_interrupt_info": True,
                         },
                     )
-                bot_response = info_decision.response or legacy.MSG_ESCALATED
-                legacy._reset_low_confidence_retry(conversation)
+                bot_response = info_decision.response or MSG_ESCALATED
+                _context_runtime()._reset_low_confidence_retry(conversation)
 
                 result_message = "Booking interrupt escalation"
-                _, reused, telegram_sent = legacy._reuse_active_handover(
+                _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
                     conversation=conversation,
                     user=user,
@@ -2370,18 +2342,18 @@ def _handle_booking_interrupt(
                     source=info_source or "booking_interrupt",
                     intent=info_decision.intent,
                     hooks=ActiveHandoverReuseRuntimeHooks(
-                        get_active_handover=legacy.get_active_handover,
-                        transition_state=legacy.transition_state,
-                        send_telegram_notification=legacy.send_telegram_notification,
-                        record_decision_trace=legacy._record_decision_trace,
+                        get_active_handover=get_active_handover,
+                        transition_state=transition_state,
+                        send_telegram_notification=send_telegram_notification,
+                        record_decision_trace=_record_decision_trace,
                     ),
                 )
                 if reused:
                     result_message = f"Booking interrupt reuse, telegram={'sent' if telegram_sent else 'failed'}"
-                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
                     "allow_handover_create", False
                 ):
-                    result = legacy.escalate_to_pending(
+                    result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
                         user_message=message_text,
@@ -2390,7 +2362,7 @@ def _handle_booking_interrupt(
                     )
                     if result.ok:
                         handover = result.value
-                        telegram_sent = legacy.send_telegram_notification(
+                        telegram_sent = send_telegram_notification(
                             db=db,
                             handover=handover,
                             conversation=conversation,
@@ -2449,7 +2421,7 @@ def _handle_booking_interrupt(
                     db.commit()
                     return guard_response
                 booking_time_service_interrupt = bool(
-                    booking_time_service_candidate and legacy._is_booking_time_service_decision(info_decision)
+                    booking_time_service_candidate and _is_booking_time_service_decision(info_decision)
                 )
                 booking_interrupt_info = bool(
                     info_decision
@@ -2460,17 +2432,17 @@ def _handle_booking_interrupt(
                 context = (
                     booking_context
                     if isinstance(booking_context, dict)
-                    else legacy._get_conversation_context(conversation)
+                    else _context_runtime()._get_conversation_context(conversation)
                 )
                 booking_state = (
-                    booking if isinstance(booking, dict) else legacy._get_booking_context(context)
+                    booking if isinstance(booking, dict) else _get_booking_context(context)
                 )
                 booking_active = bool(booking_state.get("active"))
                 if not booking_active:
                     booking_state = dict(booking_state)
                     booking_state["active"] = True
                     booking_state["started_at"] = now.isoformat()
-                booking_state = legacy._update_booking_from_messages(
+                booking_state = _update_booking_from_messages(
                     booking_state,
                     booking_messages,
                     client_slug=client_slug,
@@ -2481,13 +2453,13 @@ def _handle_booking_interrupt(
                         booking_state["service"] = service_query.strip()
                 # Do not auto-fill stale service hints on the first booking turn.
                 if booking_active and not booking_state.get("service"):
-                    service_hint = legacy._get_recent_service_hint(context, now)
+                    service_hint = _get_recent_service_hint(context, now)
                     if service_hint:
                         booking_state["service"] = service_hint
-                        context = legacy._clear_service_hint(context)
-                context_manager = legacy._get_context_manager(context)
+                        context = _clear_service_hint(context)
+                context_manager = _context_runtime()._get_context_manager(context)
                 refusal_flags = context_manager.get("refusal_flags")
-                booking_state, prompt = legacy._next_booking_prompt(
+                booking_state, prompt = _next_booking_prompt(
                     booking_state, refusal_flags=refusal_flags
                 )
                 booking_state, prompt = _apply_collect_all_prompt(
@@ -2495,9 +2467,9 @@ def _handle_booking_interrupt(
                     prompt,
                     message_text,
                 )
-                context = legacy._set_booking_context(context, booking_state)
-                legacy._set_conversation_context(conversation, context)
-                booking_expected = legacy._expected_reply_for_booking_question(
+                context = _set_booking_context(context, booking_state)
+                _context_runtime()._set_conversation_context(conversation, context)
+                booking_expected = _expected_reply_for_booking_question(
                     booking_state.get("last_question")
                 )
                 booking_prompt_repeat = should_repeat_booking_prompt(
@@ -2506,7 +2478,7 @@ def _handle_booking_interrupt(
                     booking_expected_reply_type=booking_expected,
                 )
                 if prompt and booking_expected:
-                    context = legacy._set_expected_reply_context(
+                    context = _context_runtime()._set_expected_reply_context(
                         conversation=conversation,
                         saved_message=saved_message,
                         context=context,
@@ -2523,12 +2495,12 @@ def _handle_booking_interrupt(
                         prompt = None
                     else:
                         clarify_intent = current_goal or "info"
-                        context_manager = legacy._get_context_manager(context)
-                        if legacy._should_escalate_for_clarify(context_manager, clarify_intent):
-                            clarify_count, _ = legacy._get_clarify_attempt_state(
+                        context_manager = _context_runtime()._get_context_manager(context)
+                        if _guards_runtime()._should_escalate_for_clarify(context_manager, clarify_intent):
+                            clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(
                                 context_manager, clarify_intent
                             )
-                            legacy._record_context_manager_decision(
+                            _context_runtime()._record_context_manager_decision(
                                 conversation,
                                 saved_message,
                                 decision="clarify_limit",
@@ -2538,7 +2510,7 @@ def _handle_booking_interrupt(
                                     "clarify_limit": True,
                                 },
                             )
-                            return legacy._handle_clarify_limit_escalation(
+                            return _guards_runtime()._handle_clarify_limit_escalation(
                                 db=db,
                                 conversation=conversation,
                                 user=user,
@@ -2549,18 +2521,18 @@ def _handle_booking_interrupt(
                                 send_response=send_response,
                                 finalize_response=finalize_response,
                             )
-                        legacy._register_clarify_attempt(
+                        _guards_runtime()._register_clarify_attempt(
                             conversation=conversation,
                             saved_message=saved_message,
                             intent=clarify_intent,
                             now=now,
                             reason="service_clarify",
                         )
-                        context = legacy._set_expected_reply_context(
+                        context = _context_runtime()._set_expected_reply_context(
                             conversation=conversation,
                             saved_message=saved_message,
                             context=context,
-                            expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                            expected_reply_type=EXPECTED_REPLY_SERVICE,
                             reason="service_clarify",
                             now=now,
                         )
@@ -2571,8 +2543,8 @@ def _handle_booking_interrupt(
                     client_slug=client_slug,
                 )
                 if prompt and not booking_time_service_interrupt and not booking_interrupt_info and booking_prompt_repeat:
-                    context_manager = legacy._get_context_manager(context)
-                    clarify_guard_reason = legacy._booking_clarify_guard_reason(
+                    context_manager = _context_runtime()._get_context_manager(context)
+                    clarify_guard_reason = _guards_runtime()._booking_clarify_guard_reason(
                         booking_interrupt_info=booking_interrupt_info,
                         basic_info_message=basic_info_message,
                         session_memory_reset_reason=session_memory_reset_reason,
@@ -2582,14 +2554,14 @@ def _handle_booking_interrupt(
                     )
                     if clarify_guard_reason:
                         if saved_message:
-                            legacy._update_message_decision_metadata(
+                            _update_message_decision_metadata(
                                 saved_message,
                                 {
                                     "clarify_guard": True,
                                     "clarify_guard_reason": clarify_guard_reason,
                                 },
                             )
-                        legacy._record_decision_trace(
+                        _record_decision_trace(
                             conversation,
                             {
                                 "stage": "clarify_guard",
@@ -2598,9 +2570,9 @@ def _handle_booking_interrupt(
                                 "reason": clarify_guard_reason,
                             },
                         )
-                    elif legacy._should_escalate_for_clarify(context_manager, "booking"):
-                        clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, "booking")
-                        legacy._record_context_manager_decision(
+                    elif _guards_runtime()._should_escalate_for_clarify(context_manager, "booking"):
+                        clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager, "booking")
+                        _context_runtime()._record_context_manager_decision(
                             conversation,
                             saved_message,
                             decision="clarify_limit",
@@ -2610,7 +2582,7 @@ def _handle_booking_interrupt(
                                 "clarify_limit": True,
                             },
                         )
-                        return legacy._handle_clarify_limit_escalation(
+                        return _guards_runtime()._handle_clarify_limit_escalation(
                             db=db,
                             conversation=conversation,
                             user=user,
@@ -2622,7 +2594,7 @@ def _handle_booking_interrupt(
                             finalize_response=finalize_response,
                         )
                     elif clarify_guard_reason is None:
-                        legacy._register_clarify_attempt(
+                        _guards_runtime()._register_clarify_attempt(
                             conversation=conversation,
                             saved_message=saved_message,
                             intent="booking",
@@ -2681,19 +2653,19 @@ def _handle_booking_interrupt(
                     booking_wants_flow
                     and not expected_reply_blocked_by_info
                     and "pricing" in set(trace_info_intents or [])
-                    and booking_expected == legacy.EXPECTED_REPLY_NAME
+                    and booking_expected == EXPECTED_REPLY_NAME
                 )
                 specialist_name_followup_signal = bool(
                     booking_interrupt_info
                     and info_decision.intent == "master"
                     and pending_question_target_value == "specialist"
-                    and booking_expected == legacy.EXPECTED_REPLY_NAME
+                    and booking_expected == EXPECTED_REPLY_NAME
                 )
                 specialist_time_followup_signal = bool(
                     booking_interrupt_info
                     and info_decision.intent == "master"
                     and pending_question_target_value in {"specialist", "time"}
-                    and booking_expected == legacy.EXPECTED_REPLY_TIME
+                    and booking_expected == EXPECTED_REPLY_TIME
                 )
                 booking_prompt_kept = bool(
                     prompt_text
@@ -2731,7 +2703,7 @@ def _handle_booking_interrupt(
                     trace_payload["info_sections"] = info_sections
                 if pending_question_target_value:
                     trace_payload["pending_question_target"] = pending_question_target_value
-                legacy._record_decision_trace(conversation, trace_payload)
+                _record_decision_trace(conversation, trace_payload)
 
                 if info_source == "service_matcher":
                     matcher_trace = {
@@ -2740,7 +2712,7 @@ def _handle_booking_interrupt(
                         "state": conversation.state,
                     }
                     matcher_trace.update(info_meta)
-                    legacy._record_decision_trace(conversation, matcher_trace)
+                    _record_decision_trace(conversation, matcher_trace)
                 elif info_source == "truth_gate":
                     gate_trace = {
                         "stage": "truth_gate",
@@ -2751,7 +2723,7 @@ def _handle_booking_interrupt(
                         "policy_type": policy_type,
                     }
                     gate_trace.update(info_meta)
-                    legacy._record_decision_trace(conversation, gate_trace)
+                    _record_decision_trace(conversation, gate_trace)
                 elif info_source == "multi_truth":
                     multi_trace = {
                         "stage": "multi_truth",
@@ -2761,9 +2733,9 @@ def _handle_booking_interrupt(
                         "intents": booking_info_intents,
                     }
                     multi_trace.update(info_meta)
-                    legacy._record_decision_trace(conversation, multi_trace)
+                    _record_decision_trace(conversation, multi_trace)
 
-                legacy._record_message_decision_meta(
+                _record_message_decision_meta(
                     saved_message,
                     action=info_decision.action,
                     intent=info_decision.intent,
@@ -2784,18 +2756,18 @@ def _handle_booking_interrupt(
                         message_meta_updates[
                             "carryover_ignored_reason"
                         ] = "info_reply_no_stale_booking_prompt"
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         message_meta_updates,
                     )
-                legacy._maybe_store_service_carryover(
+                _context_runtime()._maybe_store_service_carryover(
                     conversation=conversation,
                     service_meta=info_meta,
                     intent=info_decision.intent,
                     message_count=message_count,
                     reason="booking_interrupt",
                 )
-                legacy._maybe_store_class_carryover(
+                _context_runtime()._maybe_store_class_carryover(
                     conversation=conversation,
                     class_name="info_bundle",
                     intents=booking_info_intents,
@@ -2809,21 +2781,21 @@ def _handle_booking_interrupt(
                 else:
                     bot_response = info_response_text
                     if booking_prompt_kept and prompt_text and bot_response:
-                        bot_response = legacy._combine_sidecar(bot_response, prompt_text)
+                        bot_response = _combine_sidecar(bot_response, prompt_text)
                 if not bot_response:
                     bot_response = prompt_text
                 style_reference_signal = bool(
                     message_text
-                    and legacy._is_style_reference_request(message_text, has_media=has_media)
+                    and _is_style_reference_request(message_text, has_media=has_media)
                 )
                 if style_reference_signal and not has_media:
-                    bot_response = legacy._combine_sidecar(
-                        legacy.MSG_STYLE_REFERENCE_NEED_MEDIA,
+                    bot_response = _combine_sidecar(
+                        MSG_STYLE_REFERENCE_NEED_MEDIA,
                         bot_response,
                     )
                 bot_response = bot_response.strip()
                 if consult_return_pending:
-                    bot_response = legacy._apply_consult_return(
+                    bot_response = _context_runtime()._apply_consult_return(
                         conversation=conversation,
                         saved_message=saved_message,
                         bot_response=bot_response,
@@ -2831,7 +2803,7 @@ def _handle_booking_interrupt(
                         consult_context=consult_context,
                         reason=consult_return_reason or "booking_interrupt",
                     )
-                legacy._reset_low_confidence_retry(conversation)
+                _context_runtime()._reset_low_confidence_retry(conversation)
                 bot_response, sent = send_and_save(bot_response)
                 result_message = "Booking info interrupt sent" if sent else "Booking info interrupt failed"
                 db.commit()
@@ -2842,7 +2814,6 @@ def _handle_booking_interrupt(
                     bot_response=bot_response,
                 )
     return None
-
 
 def _handle_booking_flow(
     *,
@@ -2881,8 +2852,6 @@ def _handle_booking_flow(
     log_timing: Callable[[str, float, dict | None], None],
     record_escalation_metric: Callable[[str], None],
 ) -> BookingFlowResult:
-    from . import _legacy as legacy
-
     policy_price_sidecar = None
     if (
         not bypass_domain_flows
@@ -2900,10 +2869,10 @@ def _handle_booking_flow(
                 booking_context = (
                     booking_context
                     if isinstance(booking_context, dict)
-                    else legacy._get_conversation_context(conversation)
+                    else _context_runtime()._get_conversation_context(conversation)
                 )
-                booking_context = legacy._set_service_hint(booking_context, price_item, now)
-                legacy._set_conversation_context(conversation, booking_context)
+                booking_context = _set_service_hint(booking_context, price_item, now)
+                _context_runtime()._set_conversation_context(conversation, booking_context)
 
     if (
         message_text
@@ -2919,12 +2888,12 @@ def _handle_booking_flow(
                 and decision.action == "escalate"
                 and decision.intent == "same_day_booking"
             ):
-                bot_response = decision.response or legacy.MSG_ESCALATED
-                legacy._reset_low_confidence_retry(conversation)
+                bot_response = decision.response or MSG_ESCALATED
+                _context_runtime()._reset_low_confidence_retry(conversation)
                 record_escalation_metric("intent")
 
                 result_message = "Booking same-day escalation"
-                _, reused, telegram_sent = legacy._reuse_active_handover(
+                _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
                     conversation=conversation,
                     user=user,
@@ -2932,18 +2901,18 @@ def _handle_booking_flow(
                     source="booking",
                     intent=decision.intent,
                     hooks=ActiveHandoverReuseRuntimeHooks(
-                        get_active_handover=legacy.get_active_handover,
-                        transition_state=legacy.transition_state,
-                        send_telegram_notification=legacy.send_telegram_notification,
-                        record_decision_trace=legacy._record_decision_trace,
+                        get_active_handover=get_active_handover,
+                        transition_state=transition_state,
+                        send_telegram_notification=send_telegram_notification,
+                        record_decision_trace=_record_decision_trace,
                     ),
                 )
                 if reused:
                     result_message = f"Booking same-day reuse, telegram={'sent' if telegram_sent else 'failed'}"
-                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
                     "allow_handover_create", False
                 ):
-                    result = legacy.escalate_to_pending(
+                    result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
                         user_message=message_text,
@@ -2952,7 +2921,7 @@ def _handle_booking_flow(
                     )
                     if result.ok:
                         handover = result.value
-                        telegram_sent = legacy.send_telegram_notification(
+                        telegram_sent = send_telegram_notification(
                             db=db,
                             handover=handover,
                             conversation=conversation,
@@ -2977,8 +2946,8 @@ def _handle_booking_flow(
                 }
                 if isinstance(getattr(decision, "meta", None), dict):
                     trace_payload.update(decision.meta)
-                legacy._record_decision_trace(conversation, trace_payload)
-                legacy._record_message_decision_meta(
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
                     saved_message,
                     action=decision.action,
                     intent=decision.intent,
@@ -2986,7 +2955,7 @@ def _handle_booking_flow(
                     fast_intent=False,
                 )
                 if saved_message and isinstance(getattr(decision, "meta", None), dict):
-                    legacy._update_message_decision_metadata(saved_message, decision.meta)
+                    _update_message_decision_metadata(saved_message, decision.meta)
 
                 bot_response, sent = send_and_save(bot_response)
                 if not sent:
@@ -3010,9 +2979,9 @@ def _handle_booking_flow(
         context = (
             booking_context
             if isinstance(booking_context, dict)
-            else legacy._get_conversation_context(conversation)
+            else _context_runtime()._get_conversation_context(conversation)
         )
-        booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(context)
+        booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
         booking_active = bool(booking_state.get("active"))
 
         # If expected-reply/booking flow was bypassed for a manager request, do not
@@ -3020,10 +2989,10 @@ def _handle_booking_flow(
         if (
             booking_active
             and message_text
-            and legacy.is_human_request_message(message_text)
+            and is_human_request_message(message_text)
             and not booking_wants_flow
         ):
-            _, reused, telegram_sent = legacy._reuse_active_handover(
+            _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
                 user=user,
@@ -3031,22 +3000,22 @@ def _handle_booking_flow(
                 source="booking",
                 intent="human_request",
                 hooks=ActiveHandoverReuseRuntimeHooks(
-                    get_active_handover=legacy.get_active_handover,
-                    transition_state=legacy.transition_state,
-                    send_telegram_notification=legacy.send_telegram_notification,
-                    record_decision_trace=legacy._record_decision_trace,
+                    get_active_handover=get_active_handover,
+                    transition_state=transition_state,
+                    send_telegram_notification=send_telegram_notification,
+                    record_decision_trace=_record_decision_trace,
                 ),
             )
             if reused:
-                bot_response = legacy.MSG_ESCALATED
+                bot_response = MSG_ESCALATED
                 result_message = (
                     f"Booking human-request handoff reused, telegram={'sent' if telegram_sent else 'failed'}"
                 )
-            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
                 "allow_handover_create", False
             ):
                 record_escalation_metric("intent")
-                result = legacy.escalate_to_pending(
+                result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
                     user_message=message_text,
@@ -3055,25 +3024,25 @@ def _handle_booking_flow(
                 )
                 if result.ok:
                     handover = result.value
-                    telegram_sent = legacy.send_telegram_notification(
+                    telegram_sent = send_telegram_notification(
                         db=db,
                         handover=handover,
                         conversation=conversation,
                         user=user,
                         message=message_text,
                     )
-                    bot_response = legacy.MSG_ESCALATED
+                    bot_response = MSG_ESCALATED
                     result_message = (
                         f"Booking human-request handoff, telegram={'sent' if telegram_sent else 'failed'}"
                     )
                 else:
-                    bot_response = legacy.MSG_AI_ERROR
+                    bot_response = MSG_AI_ERROR
                     result_message = "Booking human-request handoff failed"
             else:
-                bot_response = legacy.MSG_PENDING_ESCALATION
+                bot_response = MSG_PENDING_ESCALATION
                 result_message = "Booking human-request handoff skipped (already pending)"
 
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking",
@@ -3082,7 +3051,7 @@ def _handle_booking_flow(
                     "booking_wants_flow": booking_wants_flow,
                 },
             )
-            legacy._record_message_decision_meta(
+            _record_message_decision_meta(
                 saved_message,
                 action="escalate",
                 intent="human_request",
@@ -3103,9 +3072,9 @@ def _handle_booking_flow(
                 booking_state["active"] = True
                 booking_state["datetime"] = None
                 booking_state["last_question"] = "datetime"
-                context = legacy._set_booking_context(context, booking_state)
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_decision_trace(
+                context = _set_booking_context(context, booking_state)
+                _context_runtime()._set_conversation_context(conversation, context)
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "booking_commit",
@@ -3114,7 +3083,7 @@ def _handle_booking_flow(
                         "skip_reason": "appointment_overlap_conflict",
                     },
                 )
-                legacy._record_message_decision_meta(
+                _record_message_decision_meta(
                     saved_message,
                     action="booking_prompt",
                     intent="booking",
@@ -3122,7 +3091,7 @@ def _handle_booking_flow(
                     fast_intent=False,
                 )
                 conflict_prompt = "Похоже, это время уже занято. На какую дату и время вам удобно?"
-                conflict_prompt = legacy._combine_sidecar(
+                conflict_prompt = _combine_sidecar(
                     conflict_prompt, multi_intent_booking_followup
                 )
                 conflict_prompt, sent_conflict = send_and_save(conflict_prompt)
@@ -3154,7 +3123,7 @@ def _handle_booking_flow(
             )
 
         if booking_active and expected_reply_blocked_by_info and not booking_wants_flow:
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking",
@@ -3163,7 +3132,7 @@ def _handle_booking_flow(
                 },
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "booking_flow_deferred": True,
@@ -3172,11 +3141,11 @@ def _handle_booking_flow(
                 )
             return BookingFlowResult(response=None, booking_t0=booking_t0, booking_logged=booking_logged)
 
-        if booking_active and legacy._is_booking_cancel(message_text, policy_pack=policy_pack):
+        if booking_active and _is_booking_cancel(message_text, policy_pack=policy_pack):
             booking_state = {"active": False}
-            context = legacy._set_booking_context(context, booking_state)
-            legacy._set_conversation_context(conversation, context)
-            legacy._record_decision_trace(
+            context = _set_booking_context(context, booking_state)
+            _context_runtime()._set_conversation_context(conversation, context)
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking",
@@ -3184,14 +3153,14 @@ def _handle_booking_flow(
                     "state": conversation.state,
                 },
             )
-            legacy._record_message_decision_meta(
+            _record_message_decision_meta(
                 saved_message,
                 action="booking_cancelled",
                 intent="booking",
                 source="booking",
                 fast_intent=False,
             )
-            bot_response = legacy._combine_sidecar(legacy.MSG_BOOKING_CANCELLED, multi_intent_booking_followup)
+            bot_response = _combine_sidecar(MSG_BOOKING_CANCELLED, multi_intent_booking_followup)
             bot_response, sent = send_and_save(bot_response)
             result_message = "Booking cancelled" if sent else "Booking cancel response failed"
             log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
@@ -3218,7 +3187,7 @@ def _handle_booking_flow(
         if confirmation_info_interrupt:
             slot_key = confirmation.get("slot") if isinstance(confirmation, dict) else None
             slot_value = confirmation.get("value") if isinstance(confirmation, dict) else None
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking_confirm",
@@ -3228,7 +3197,7 @@ def _handle_booking_flow(
                 },
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "slot_confirmation_deferred": True,
@@ -3251,9 +3220,9 @@ def _handle_booking_flow(
                 if decision == "no" and slot_key in BOOKING_SLOT_ORDER:
                     booking_state[slot_key] = None
                 booking_state = _set_booking_confirmation(booking_state, None)
-                context = legacy._set_booking_context(context, booking_state)
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_decision_trace(
+                context = _set_booking_context(context, booking_state)
+                _context_runtime()._set_conversation_context(conversation, context)
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "booking_confirm",
@@ -3265,7 +3234,7 @@ def _handle_booking_flow(
                     },
                 )
                 if saved_message:
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {
                             "slot_confirmation_decision": decision,
@@ -3274,9 +3243,9 @@ def _handle_booking_flow(
                         },
                     )
                 if decision == "no":
-                    context_manager = legacy._get_context_manager(context)
+                    context_manager = _context_runtime()._get_context_manager(context)
                     refusal_flags = context_manager.get("refusal_flags")
-                    booking_state, prompt = legacy._next_booking_prompt(
+                    booking_state, prompt = _next_booking_prompt(
                         booking_state, refusal_flags=refusal_flags
                     )
                     booking_state, prompt = _apply_collect_all_prompt(
@@ -3285,11 +3254,11 @@ def _handle_booking_flow(
                         message_text,
                     )
                     if prompt:
-                        booking_expected = legacy._expected_reply_for_booking_question(
+                        booking_expected = _expected_reply_for_booking_question(
                             booking_state.get("last_question")
                         )
                         if booking_expected:
-                            context = legacy._set_expected_reply_context(
+                            context = _context_runtime()._set_expected_reply_context(
                                 conversation=conversation,
                                 saved_message=saved_message,
                                 context=context,
@@ -3297,7 +3266,7 @@ def _handle_booking_flow(
                                 reason="booking_confirm_reject",
                                 now=now,
                             )
-                        legacy._record_decision_trace(
+                        _record_decision_trace(
                             conversation,
                             {
                                 "stage": "booking",
@@ -3307,14 +3276,14 @@ def _handle_booking_flow(
                                 "source": "booking_confirm",
                             },
                         )
-                        legacy._record_message_decision_meta(
+                        _record_message_decision_meta(
                             saved_message,
                             action="booking_prompt",
                             intent="booking",
                             source="booking_confirm",
                             fast_intent=False,
                         )
-                        bot_response = legacy._combine_sidecar(
+                        bot_response = _combine_sidecar(
                             prompt, multi_intent_booking_followup
                         )
                         bot_response, sent = send_and_save(bot_response)
@@ -3343,9 +3312,9 @@ def _handle_booking_flow(
                 confirmation = dict(confirmation)
                 confirmation["asked_at"] = now.isoformat()
                 booking_state = _set_booking_confirmation(dict(booking_state), confirmation)
-                context = legacy._set_booking_context(context, booking_state)
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_decision_trace(
+                context = _set_booking_context(context, booking_state)
+                _context_runtime()._set_conversation_context(conversation, context)
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "booking_confirm",
@@ -3356,7 +3325,7 @@ def _handle_booking_flow(
                         "source": confirmation.get("source"),
                     },
                 )
-                legacy._record_message_decision_meta(
+                _record_message_decision_meta(
                     saved_message,
                     action="booking_confirm",
                     intent="booking",
@@ -3369,7 +3338,7 @@ def _handle_booking_flow(
                         "datetime": booking_state.get("datetime"),
                         "name": booking_state.get("name"),
                     }
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {
                             "slot_confirmation_required": True,
@@ -3381,7 +3350,7 @@ def _handle_booking_flow(
                             "slot_snapshot": slot_snapshot,
                         },
                     )
-                bot_response = legacy._combine_sidecar(prompt, multi_intent_booking_followup)
+                bot_response = _combine_sidecar(prompt, multi_intent_booking_followup)
                 bot_response, sent = send_and_save(bot_response)
                 result_message = (
                     "Booking confirmation requested"
@@ -3403,7 +3372,7 @@ def _handle_booking_flow(
                 )
 
         booking_related = any(
-            legacy._is_booking_related_message(msg, client_slug) for msg in booking_messages
+            _is_booking_related_message(msg, client_slug) for msg in booking_messages
         )
         if _should_defer_booking_flow_for_info_interrupt(
             booking_active=booking_active,
@@ -3411,7 +3380,7 @@ def _handle_booking_flow(
             booking_related=booking_related,
             basic_info_message=basic_info_message,
         ):
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking",
@@ -3421,7 +3390,7 @@ def _handle_booking_flow(
                 },
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "booking_flow_deferred": True,
@@ -3435,18 +3404,18 @@ def _handle_booking_flow(
             and (
                 expected_reply_type
                 in {
-                    legacy.EXPECTED_REPLY_SERVICE,
-                    legacy.EXPECTED_REPLY_TIME,
-                    legacy.EXPECTED_REPLY_NAME,
+                    EXPECTED_REPLY_SERVICE,
+                    EXPECTED_REPLY_TIME,
+                    EXPECTED_REPLY_NAME,
                 }
                 or last_question in BOOKING_SLOT_ORDER
             )
         )
         if booking_active and not booking_signal and not booking_related and not slot_lock_active:
             booking_state = {"active": False}
-            context = legacy._set_booking_context(context, booking_state)
-            legacy._set_conversation_context(conversation, context)
-            legacy._record_decision_trace(
+            context = _set_booking_context(context, booking_state)
+            _context_runtime()._set_conversation_context(conversation, context)
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking",
@@ -3454,14 +3423,14 @@ def _handle_booking_flow(
                     "state": conversation.state,
                 },
             )
-            legacy._record_message_decision_meta(
+            _record_message_decision_meta(
                 saved_message,
                 action="booking_paused",
                 intent="booking",
                 source="booking",
                 fast_intent=False,
             )
-            bot_response = legacy._combine_sidecar(legacy.MSG_BOOKING_REENGAGE, multi_intent_booking_followup)
+            bot_response = _combine_sidecar(MSG_BOOKING_REENGAGE, multi_intent_booking_followup)
             bot_response, sent = send_and_save(bot_response)
             result_message = "Booking paused" if sent else "Booking pause response failed"
             log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
@@ -3484,20 +3453,20 @@ def _handle_booking_flow(
                 booking_state["active"] = True
                 booking_state["started_at"] = now.isoformat()
 
-            booking_state = legacy._update_booking_from_messages(
+            booking_state = _update_booking_from_messages(
                 booking_state,
                 booking_messages,
                 client_slug=client_slug,
             )
-            context_manager = legacy._get_context_manager(context)
+            context_manager = _context_runtime()._get_context_manager(context)
             # Only reuse service carryover while already inside an active booking flow.
             if booking_active and not booking_state.get("service"):
-                service_hint = legacy._get_recent_service_hint(context, now)
+                service_hint = _get_recent_service_hint(context, now)
                 if service_hint:
                     booking_state["service"] = service_hint
-                    context = legacy._clear_service_hint(context)
+                    context = _clear_service_hint(context)
                 else:
-                    carryover = legacy._get_service_carryover(
+                    carryover = _context_runtime()._get_service_carryover(
                         context_manager, message_count=message_count
                     )
                     service_query = (
@@ -3507,7 +3476,7 @@ def _handle_booking_flow(
                     )
                     if isinstance(service_query, str) and service_query.strip():
                         booking_state["service"] = service_query.strip()
-                        legacy._record_decision_trace(
+                        _record_decision_trace(
                             conversation,
                             {
                                 "stage": "service_carryover",
@@ -3529,7 +3498,7 @@ def _handle_booking_flow(
                             },
                         )
                         if saved_message:
-                            legacy._update_message_decision_metadata(
+                            _update_message_decision_metadata(
                                 saved_message,
                                 {
                                     "service_query": service_query.strip(),
@@ -3546,7 +3515,7 @@ def _handle_booking_flow(
                                 },
                             )
             refusal_flags = context_manager.get("refusal_flags")
-            booking_state, prompt = legacy._next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+            booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
             booking_state, prompt = _apply_collect_all_prompt(
                 booking_state,
                 prompt,
@@ -3559,23 +3528,23 @@ def _handle_booking_flow(
                 and isinstance(message_text, str)
                 and message_text.strip()
             ):
-                normalized_invalid_choice = legacy.normalize_for_matching(message_text)
+                normalized_invalid_choice = normalize_for_matching(message_text)
                 booking_like_signal = "запис" in normalized_invalid_choice
                 if not booking_like_signal:
                     booking_like_signal = bool(
-                        legacy._extract_datetime(message_text, client_slug=client_slug)
+                        _extract_datetime(message_text, client_slug=client_slug)
                     )
                 unknown_service_request_signal = any(
                     marker in normalized_invalid_choice
                     for marker in ("хочу", "можно", "нужн", "надо", "сдела", "подравн")
                 ) and not booking_like_signal
                 if unknown_service_request_signal:
-                    service_not_found_reply = legacy._format_service_not_found_reply(
-                        legacy.load_yaml_truth(client_slug)
+                    service_not_found_reply = _format_service_not_found_reply(
+                        load_yaml_truth(client_slug)
                     )
                     if service_not_found_reply:
                         prompt = service_not_found_reply
-                        legacy._record_decision_trace(
+                        _record_decision_trace(
                             conversation,
                             {
                                 "stage": "booking",
@@ -3586,12 +3555,12 @@ def _handle_booking_flow(
             slot_lock_reprompt = bool(slot_lock_active and not booking_related and not booking_signal)
             if slot_lock_reprompt and prompt:
                 if should_use_expected_service_off_topic_prompt(expected_reply_type):
-                    prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
+                    prompt = MSG_EXPECTED_SERVICE_OFF_TOPIC
                 else:
-                    prompt = legacy._combine_sidecar(prompt, legacy.MSG_BOOKING_SLOT_LOCK_STUB)
-            context = legacy._set_booking_context(context, booking_state)
-            legacy._set_conversation_context(conversation, context)
-            booking_expected = legacy._expected_reply_for_booking_question(booking_state.get("last_question"))
+                    prompt = _combine_sidecar(prompt, MSG_BOOKING_SLOT_LOCK_STUB)
+            context = _set_booking_context(context, booking_state)
+            _context_runtime()._set_conversation_context(conversation, context)
+            booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
             booking_prompt_repeat = should_repeat_booking_prompt(
                 expected_reply_type=expected_reply_type,
                 expected_reply_matched=expected_reply_matched,
@@ -3602,7 +3571,7 @@ def _handle_booking_flow(
                 client_slug=client_slug,
             )
             if prompt and booking_expected:
-                context = legacy._set_expected_reply_context(
+                context = _context_runtime()._set_expected_reply_context(
                     conversation=conversation,
                     saved_message=saved_message,
                     context=context,
@@ -3612,9 +3581,9 @@ def _handle_booking_flow(
                 )
 
             if prompt:
-                context_manager = legacy._get_context_manager(context)
+                context_manager = _context_runtime()._get_context_manager(context)
                 if booking_prompt_repeat:
-                    clarify_guard_reason = legacy._booking_clarify_guard_reason(
+                    clarify_guard_reason = _guards_runtime()._booking_clarify_guard_reason(
                         booking_interrupt_info=False,
                         basic_info_message=basic_info_message,
                         session_memory_reset_reason=session_memory_reset_reason,
@@ -3624,14 +3593,14 @@ def _handle_booking_flow(
                     )
                     if clarify_guard_reason:
                         if saved_message:
-                            legacy._update_message_decision_metadata(
+                            _update_message_decision_metadata(
                                 saved_message,
                                 {
                                     "clarify_guard": True,
                                     "clarify_guard_reason": clarify_guard_reason,
                                 },
                             )
-                        legacy._record_decision_trace(
+                        _record_decision_trace(
                             conversation,
                             {
                                 "stage": "clarify_guard",
@@ -3640,9 +3609,9 @@ def _handle_booking_flow(
                                 "reason": clarify_guard_reason,
                             },
                         )
-                    elif legacy._should_escalate_for_clarify(context_manager, "booking"):
-                        clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, "booking")
-                        legacy._record_context_manager_decision(
+                    elif _guards_runtime()._should_escalate_for_clarify(context_manager, "booking"):
+                        clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager, "booking")
+                        _context_runtime()._record_context_manager_decision(
                             conversation,
                             saved_message,
                             decision="clarify_limit",
@@ -3653,7 +3622,7 @@ def _handle_booking_flow(
                             },
                         )
                         return BookingFlowResult(
-                            response=legacy._handle_clarify_limit_escalation(
+                            response=_guards_runtime()._handle_clarify_limit_escalation(
                                 db=db,
                                 conversation=conversation,
                                 user=user,
@@ -3668,14 +3637,14 @@ def _handle_booking_flow(
                             booking_logged=booking_logged,
                         )
                     elif clarify_guard_reason is None:
-                        legacy._register_clarify_attempt(
+                        _guards_runtime()._register_clarify_attempt(
                             conversation=conversation,
                             saved_message=saved_message,
                             intent="booking",
                             now=now,
                             reason="booking_prompt",
                         )
-                legacy._record_decision_trace(
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "booking",
@@ -3684,7 +3653,7 @@ def _handle_booking_flow(
                         "missing_slot": booking_state.get("last_question"),
                     },
                 )
-                legacy._record_message_decision_meta(
+                _record_message_decision_meta(
                     saved_message,
                     action="booking_prompt",
                     intent="booking",
@@ -3697,7 +3666,7 @@ def _handle_booking_flow(
                         "datetime": booking_state.get("datetime"),
                         "name": booking_state.get("name"),
                     }
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {
                             "slot_lock": slot_lock_active,
@@ -3705,10 +3674,10 @@ def _handle_booking_flow(
                             "slot_confirmation_required": False,
                         },
                     )
-                bot_response = legacy._combine_sidecar(prompt, policy_price_sidecar)
-                bot_response = legacy._combine_sidecar(bot_response, multi_intent_booking_followup)
+                bot_response = _combine_sidecar(prompt, policy_price_sidecar)
+                bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
                 if consult_return_pending:
-                    bot_response = legacy._apply_consult_return(
+                    bot_response = _context_runtime()._apply_consult_return(
                         conversation=conversation,
                         saved_message=saved_message,
                         bot_response=bot_response,
@@ -3732,7 +3701,7 @@ def _handle_booking_flow(
                     booking_logged=booking_logged,
                 )
 
-            context_manager = legacy._get_context_manager(context)
+            context_manager = _context_runtime()._get_context_manager(context)
             refusal_flags = context_manager.get("refusal_flags")
             booking_summary = _build_booking_summary(booking_state, refusal_flags=refusal_flags)
 
@@ -3747,8 +3716,8 @@ def _handle_booking_flow(
                 saved_message=saved_message,
             )
             if saved_message and appointment_meta:
-                legacy._update_message_decision_metadata(saved_message, appointment_meta)
-            legacy._record_decision_trace(
+                _update_message_decision_metadata(saved_message, appointment_meta)
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking_commit",
@@ -3763,7 +3732,7 @@ def _handle_booking_flow(
                 },
             )
             if routing.get("allow_handover_create"):
-                _, reused, telegram_sent = legacy._reuse_active_handover(
+                _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
                     conversation=conversation,
                     user=user,
@@ -3771,19 +3740,19 @@ def _handle_booking_flow(
                     source="booking",
                     intent="booking",
                     hooks=ActiveHandoverReuseRuntimeHooks(
-                        get_active_handover=legacy.get_active_handover,
-                        transition_state=legacy.transition_state,
-                        send_telegram_notification=legacy.send_telegram_notification,
-                        record_decision_trace=legacy._record_decision_trace,
+                        get_active_handover=get_active_handover,
+                        transition_state=transition_state,
+                        send_telegram_notification=send_telegram_notification,
+                        record_decision_trace=_record_decision_trace,
                     ),
                 )
                 if reused:
-                    bot_response = legacy._combine_sidecar(legacy.MSG_ESCALATED, policy_price_sidecar)
+                    bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                     result_message = f"Booking reuse, telegram={'sent' if telegram_sent else 'failed'}"
                     trace_decision = "reuse_handover"
                 else:
                     record_escalation_metric("intent")
-                    result = legacy.escalate_to_pending(
+                    result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
                         user_message=booking_summary,
@@ -3793,34 +3762,34 @@ def _handle_booking_flow(
 
                     if result.ok:
                         handover = result.value
-                        telegram_sent = legacy.send_telegram_notification(
+                        telegram_sent = send_telegram_notification(
                             db=db,
                             handover=handover,
                             conversation=conversation,
                             user=user,
                             message=booking_summary,
                         )
-                        bot_response = legacy._combine_sidecar(legacy.MSG_ESCALATED, policy_price_sidecar)
+                        bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                         result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
                         trace_decision = "escalated"
                     else:
                         if result.error_code == "no_telegram":
-                            bot_response = legacy._combine_sidecar(legacy.MSG_ESCALATED, policy_price_sidecar)
+                            bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                             result_message = "Booking captured without telegram"
                             trace_decision = "captured_pending"
                         else:
-                            bot_response = legacy.MSG_AI_ERROR
+                            bot_response = MSG_AI_ERROR
                             result_message = f"Booking escalation failed: {result.error}"
                             trace_decision = "escalation_failed"
             else:
-                bot_response = legacy._combine_sidecar(legacy.MSG_ESCALATED, policy_price_sidecar)
+                bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                 result_message = "Booking captured while pending"
                 trace_decision = "captured_pending"
 
-            bot_response = legacy._combine_sidecar(bot_response, multi_intent_booking_followup)
-            context = legacy._set_booking_context(context, {"active": False})
-            legacy._set_conversation_context(conversation, context)
-            legacy._record_decision_trace(
+            bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
+            context = _set_booking_context(context, {"active": False})
+            _context_runtime()._set_conversation_context(conversation, context)
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking",
@@ -3828,7 +3797,7 @@ def _handle_booking_flow(
                     "state": conversation.state,
                 },
             )
-            legacy._record_message_decision_meta(
+            _record_message_decision_meta(
                 saved_message,
                 action=f"booking_{trace_decision}",
                 intent="booking",
@@ -3852,7 +3821,6 @@ def _handle_booking_flow(
                 booking_logged=booking_logged,
             )
     return BookingFlowResult(response=None, booking_t0=booking_t0, booking_logged=booking_logged)
-
 
 __all__ = [
     "BOOKING_SLOT_ORDER",

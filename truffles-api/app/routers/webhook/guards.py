@@ -7,24 +7,70 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.core import DialogStateService
+from app.logging_config import get_logger
 from app.models import Conversation, Message, User
+from app.routers.webhook.booking import _get_booking_context, _set_booking_context
+from app.routers.webhook.guard_runtime import (
+    MSG_FACT_GUARD_CLARIFY,
+    MSG_MUTED_LONG,
+    MSG_MUTED_TEMP,
+    MSG_REENGAGE_CONFIRM,
+    MSG_REENGAGE_DECLINED,
+    MULTI_INTENT_LABELS,
+    SESSION_TIMEOUT_HOURS,
+    _coerce_batch_messages,
+    get_mute_settings,
+)
+from app.routers.webhook.booking_signal_runtime import _evaluate_booking_signal
+from app.routers.webhook.context_manager import (
+    _get_context_manager,
+    _get_conversation_context,
+    _get_reengage_confirmation,
+    _is_reengage_confirmation_active,
+    _record_context_manager_decision,
+    _reset_low_confidence_retry,
+    _set_context_manager,
+    _set_conversation_context,
+    _set_reengage_confirmation,
+    _update_compact_summary,
+)
+from app.routers.webhook.runtime_primitives import CLARIFY_MAX_ATTEMPTS, MSG_ESCALATED
 from app.routers.webhook.trace import (
+    _record_decision_trace,
     _record_message_decision_meta,
     _retain_decision_trace,
+    _set_router_observability,
     _update_message_decision_metadata,
 )
 from app.schemas.webhook import WebhookResponse
-from app.services.ai_service import normalize_for_matching
-from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
+from app.services.ai_service import (
+    is_acknowledgement_message,
+    is_low_signal_message,
+    normalize_for_matching,
+)
+from app.services.handover_owner_service import (
+    ActiveHandoverReuseRuntimeHooks,
+    _reuse_active_handover,
+    escalate_to_pending,
+    get_active_handover,
+    send_telegram_notification,
+)
 from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
+from app.services.intent_service import is_opt_out_message
+from app.services.message_service import save_message
 from app.services.sla_runtime_service import (
     SLA_RUNTIME_CONTEXT_KEY,
     SLA_RUNTIME_MODE_COLLECT_ONLY,
     is_collect_only_runtime_active,
 )
+from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
+
+logger = get_logger("webhook")
 
 DECISION_TRACE_KEY = "decision_trace"
 _DIALOG_STATE_SERVICE = DialogStateService()
+
 
 
 def _is_human_lock_trace_entry(item: dict, *, lock_until: str | None = None) -> bool:
@@ -46,9 +92,7 @@ def _ensure_human_lock_trace_persisted(
     conversation: Conversation,
     trace_payload: dict,
 ) -> bool:
-    from . import _legacy as legacy
-
-    context = legacy._get_conversation_context(conversation)
+    context = _get_conversation_context(conversation)
     existing_trace = context.get(DECISION_TRACE_KEY)
     if isinstance(existing_trace, list):
         trace_list = [item for item in existing_trace if isinstance(item, dict)]
@@ -67,7 +111,7 @@ def _ensure_human_lock_trace_persisted(
     fallback_trace["recorded_at"] = datetime.now(timezone.utc).isoformat()
     trace_list.append(fallback_trace)
     context[DECISION_TRACE_KEY] = _retain_decision_trace(trace_list)
-    legacy._set_conversation_context(conversation, context)
+    _set_conversation_context(conversation, context)
     return True
 
 
@@ -82,11 +126,10 @@ def _set_intent_queue(context: dict, queue: list[str] | None) -> dict:
 def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | None:
     if not primary:
         return None
-    from . import _legacy as legacy
 
     labels = []
     for intent in secondary:
-        label = legacy.MULTI_INTENT_LABELS.get(intent)
+        label = MULTI_INTENT_LABELS.get(intent)
         if label:
             labels.append(label)
     if not labels:
@@ -98,7 +141,6 @@ def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | N
 
 
 def _match_intent_choice_from_text(intent_queue: list[str], message_text: str) -> str | None:
-    from . import _legacy as legacy
 
     normalized = normalize_for_matching(message_text)
     if not normalized:
@@ -110,7 +152,7 @@ def _match_intent_choice_from_text(intent_queue: list[str], message_text: str) -
         return None
     matches = []
     for intent in intent_queue:
-        label = legacy.MULTI_INTENT_LABELS.get(intent)
+        label = MULTI_INTENT_LABELS.get(intent)
         if not label:
             continue
         label_normalized = normalize_for_matching(label)
@@ -151,11 +193,10 @@ def _select_intent_from_queue(
 def _format_intent_queue_prompt(intent_queue: list[str]) -> str | None:
     if not intent_queue:
         return None
-    from . import _legacy as legacy
 
     labels = []
     for intent in intent_queue:
-        label = legacy.MULTI_INTENT_LABELS.get(intent)
+        label = MULTI_INTENT_LABELS.get(intent)
         if label:
             labels.append(f"по {label}")
     if not labels:
@@ -178,10 +219,9 @@ def _set_clarify_attempt(manager: dict, intent: str, count: int, now: datetime) 
 
 
 def _should_escalate_for_clarify(manager: dict, intent: str) -> bool:
-    from . import _legacy as legacy
 
     count, _ = _get_clarify_attempt_state(manager, intent)
-    return count >= legacy.CLARIFY_MAX_ATTEMPTS
+    return count >= CLARIFY_MAX_ATTEMPTS
 
 
 def _booking_clarify_guard_reason(
@@ -193,8 +233,6 @@ def _booking_clarify_guard_reason(
     message_text: str | None,
     booking_slot_signal: bool,
 ) -> str | None:
-    from . import _legacy as legacy
-
     if booking_interrupt_info:
         return "booking_interrupt_info"
     if session_memory_reset_reason:
@@ -206,8 +244,8 @@ def _booking_clarify_guard_reason(
     if booking_slot_signal:
         return "booking_slot_signal"
     if message_text and (
-        legacy.is_low_signal_message(message_text)
-        or legacy.is_acknowledgement_message(message_text)
+        is_low_signal_message(message_text)
+        or is_acknowledgement_message(message_text)
     ):
         return "low_signal"
     return None
@@ -221,24 +259,23 @@ def _register_clarify_attempt(
     now: datetime,
     reason: str,
 ) -> int:
-    from . import _legacy as legacy
 
-    context = legacy._get_conversation_context(conversation)
-    manager = legacy._get_context_manager(context)
+    context = _get_conversation_context(conversation)
+    manager = _get_context_manager(context)
     count, _ = _get_clarify_attempt_state(manager, intent)
     count += 1
     manager = _set_clarify_attempt(manager, intent, count, now)
-    context = legacy._set_context_manager(context, manager)
-    legacy._set_conversation_context(conversation, context)
+    context = _set_context_manager(context, manager)
+    _set_conversation_context(conversation, context)
     attempt_payload = {"intent": intent, "count": count, "last_at": now.isoformat()}
-    legacy._record_context_manager_decision(
+    _record_context_manager_decision(
         conversation,
         saved_message,
         decision="clarify_attempt",
         updates={"clarify_attempt": attempt_payload, "clarify_reason": reason},
     )
-    if count >= legacy.CLARIFY_MAX_ATTEMPTS:
-        legacy._update_compact_summary(
+    if count >= CLARIFY_MAX_ATTEMPTS:
+        _update_compact_summary(
             conversation=conversation,
             saved_message=saved_message,
             reason="clarify_limit",
@@ -260,13 +297,12 @@ def _handle_clarify_limit_escalation(
     send_response,
     finalize_response=None,
 ) -> WebhookResponse:
-    from . import _legacy as legacy
 
-    bot_response = legacy.MSG_ESCALATED
-    legacy._reset_low_confidence_retry(conversation)
+    bot_response = MSG_ESCALATED
+    _reset_low_confidence_retry(conversation)
     result_message = f"{source} clarify limit escalation"
 
-    _, reused, telegram_sent = legacy._reuse_active_handover(
+    _, reused, telegram_sent = _reuse_active_handover(
         db=db,
         conversation=conversation,
         user=user,
@@ -274,16 +310,16 @@ def _handle_clarify_limit_escalation(
         source=source,
         intent=escalation_intent,
         hooks=ActiveHandoverReuseRuntimeHooks(
-            get_active_handover=legacy.get_active_handover,
-            transition_state=legacy.transition_state,
-            send_telegram_notification=legacy.send_telegram_notification,
-            record_decision_trace=legacy._record_decision_trace,
+            get_active_handover=get_active_handover,
+            transition_state=transition_state,
+            send_telegram_notification=send_telegram_notification,
+            record_decision_trace=_record_decision_trace,
         ),
     )
     if reused:
         result_message = f"{source} clarify limit reuse, telegram={'sent' if telegram_sent else 'failed'}"
-    elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and allow_handover:
-        result = legacy.escalate_to_pending(
+    elif conversation.state == ConversationState.BOT_ACTIVE.value and allow_handover:
+        result = escalate_to_pending(
             db=db,
             conversation=conversation,
             user_message=message_text,
@@ -292,7 +328,7 @@ def _handle_clarify_limit_escalation(
         )
         if result.ok:
             handover = result.value
-            telegram_sent = legacy.send_telegram_notification(
+            telegram_sent = send_telegram_notification(
                 db=db,
                 handover=handover,
                 conversation=conversation,
@@ -305,7 +341,7 @@ def _handle_clarify_limit_escalation(
     else:
         result_message = f"{source} clarify limit escalation skipped (already pending)"
 
-    legacy._record_decision_trace(
+    _record_decision_trace(
         conversation,
         {
             "stage": source,
@@ -314,7 +350,7 @@ def _handle_clarify_limit_escalation(
             "state": conversation.state,
         },
     )
-    legacy._record_message_decision_meta(
+    _record_message_decision_meta(
         saved_message,
         action="escalate",
         intent=escalation_intent,
@@ -322,10 +358,10 @@ def _handle_clarify_limit_escalation(
         fast_intent=False,
     )
     if saved_message:
-        legacy._update_message_decision_metadata(saved_message, {"clarify_limit": True})
+        _update_message_decision_metadata(saved_message, {"clarify_limit": True})
     if finalize_response:
         bot_response = finalize_response(bot_response)
-    legacy.save_message(
+    save_message(
         db,
         conversation.id,
         conversation.client_id,
@@ -351,7 +387,6 @@ def _apply_session_timeout_reset(
     previous_last_message_at: datetime | None,
     now: datetime,
 ) -> None:
-    from . import _legacy as legacy
 
     if not previous_last_message_at:
         return
@@ -359,12 +394,12 @@ def _apply_session_timeout_reset(
     if last_seen.tzinfo is None:
         last_seen = last_seen.replace(tzinfo=timezone.utc)
     time_since_last = now - last_seen
-    if time_since_last > timedelta(hours=legacy.SESSION_TIMEOUT_HOURS):
+    if time_since_last > timedelta(hours=SESSION_TIMEOUT_HOURS):
         conversation.bot_status = "active"
         conversation.bot_muted_until = None
         conversation.no_count = 0
-        legacy._set_conversation_context(conversation, {})
-        legacy.logger.info(f"Session reset: {time_since_last} since last message")
+        _set_conversation_context(conversation, {})
+        logger.info(f"Session reset: {time_since_last} since last message")
 
 
 def _handle_reengage_and_mute_gate(
@@ -383,12 +418,11 @@ def _handle_reengage_and_mute_gate(
 ) -> tuple[WebhookResponse | None, list[str], bool]:
     from app.services.ai_service import classify_confirmation
 
-    from . import _legacy as legacy
 
-    batch_messages = legacy._coerce_batch_messages(message_text, batch_messages)
+    batch_messages = _coerce_batch_messages(message_text, batch_messages)
     signal_messages = list(batch_messages)
-    opt_out_in_batch = any(legacy.is_opt_out_message(msg) for msg in signal_messages)
-    booking_signal, _ = legacy._evaluate_booking_signal(
+    opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
+    booking_signal, _ = _evaluate_booking_signal(
         signal_messages,
         client_slug=client_slug,
         message_text=message_text,
@@ -396,14 +430,14 @@ def _handle_reengage_and_mute_gate(
     if expected_reply_shortcircuit:
         booking_signal = True
 
-    context = legacy._get_conversation_context(conversation)
-    booking_state = legacy._get_booking_context(context)
+    context = _get_conversation_context(conversation)
+    booking_state = _get_booking_context(context)
     booking_active = bool(booking_state.get("active"))
     reengage_override = False
     normalized_remote_jid = normalize_remote_jid(remote_jid)
 
     if (
-        conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        conversation.state == ConversationState.BOT_ACTIVE.value
         and normalized_remote_jid
     ):
         human_lock = get_active_human_lock(
@@ -425,7 +459,7 @@ def _handle_reengage_and_mute_gate(
                 "remote_jid": normalized_remote_jid,
                 "lock_until": lock_until.isoformat() if lock_until else None,
             }
-            legacy._record_decision_trace(conversation, trace_payload)
+            _record_decision_trace(conversation, trace_payload)
             trace_persisted = _ensure_human_lock_trace_persisted(
                 conversation=conversation,
                 trace_payload=trace_payload,
@@ -469,31 +503,31 @@ def _handle_reengage_and_mute_gate(
                 reengage_override,
             )
 
-    if conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
-        reengage_confirmation = legacy._get_reengage_confirmation(context)
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        reengage_confirmation = _get_reengage_confirmation(context)
         if reengage_confirmation:
-            if not legacy._is_reengage_confirmation_active(reengage_confirmation, now):
-                context = legacy._set_reengage_confirmation(context, None)
-                legacy._set_conversation_context(conversation, context)
+            if not _is_reengage_confirmation_active(reengage_confirmation, now):
+                context = _set_reengage_confirmation(context, None)
+                _set_conversation_context(conversation, context)
             else:
                 decision = classify_confirmation(message_text)
                 if decision == "yes":
-                    context = legacy._set_reengage_confirmation(context, None)
-                    legacy._set_conversation_context(conversation, context)
+                    context = _set_reengage_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
                     conversation.bot_status = "active"
                     conversation.bot_muted_until = None
                     conversation.no_count = 0
                     reengage_override = True
                     stored_messages = reengage_confirmation.get("booking_messages")
                     if isinstance(stored_messages, list) and stored_messages:
-                        batch_messages = legacy._coerce_batch_messages("", stored_messages)
+                        batch_messages = _coerce_batch_messages("", stored_messages)
                         signal_messages = list(batch_messages)
-                        booking_signal, _ = legacy._evaluate_booking_signal(
+                        booking_signal, _ = _evaluate_booking_signal(
                             signal_messages,
                             client_slug=client_slug,
                             message_text=signal_messages[-1] if signal_messages else message_text,
                         )
-                    legacy._record_decision_trace(
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "routing",
@@ -505,16 +539,16 @@ def _handle_reengage_and_mute_gate(
                         },
                     )
                 elif decision == "no":
-                    context = legacy._set_reengage_confirmation(context, None)
-                    legacy._set_conversation_context(conversation, context)
-                    mute_first, mute_second = legacy.get_mute_settings(db, client_id)
+                    context = _set_reengage_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    mute_first, mute_second = get_mute_settings(db, client_id)
                     if conversation.no_count == 0:
                         conversation.bot_muted_until = now + timedelta(minutes=mute_first)
                         conversation.no_count = 1
                     else:
                         conversation.bot_muted_until = now + timedelta(hours=mute_second)
                         conversation.no_count += 1
-                    legacy._record_decision_trace(
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "routing",
@@ -525,7 +559,7 @@ def _handle_reengage_and_mute_gate(
                             "opt_out_in_batch": opt_out_in_batch,
                         },
                     )
-                    bot_response = legacy.MSG_REENGAGE_DECLINED
+                    bot_response = MSG_REENGAGE_DECLINED
                     bot_response, sent = send_and_save(bot_response)
                     result_message = (
                         "Re-engage declined" if sent else "Re-engage decline send failed"
@@ -543,9 +577,9 @@ def _handle_reengage_and_mute_gate(
                     )
                 else:
                     reengage_confirmation["asked_at"] = now.isoformat()
-                    context = legacy._set_reengage_confirmation(context, reengage_confirmation)
-                    legacy._set_conversation_context(conversation, context)
-                    legacy._record_decision_trace(
+                    context = _set_reengage_confirmation(context, reengage_confirmation)
+                    _set_conversation_context(conversation, context)
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "routing",
@@ -556,7 +590,7 @@ def _handle_reengage_and_mute_gate(
                             "opt_out_in_batch": opt_out_in_batch,
                         },
                     )
-                    bot_response = legacy.MSG_REENGAGE_CONFIRM
+                    bot_response = MSG_REENGAGE_CONFIRM
                     bot_response, sent = send_and_save(bot_response)
                     result_message = (
                         "Re-engage confirmation requested"
@@ -575,17 +609,17 @@ def _handle_reengage_and_mute_gate(
                         reengage_override,
                     )
 
-    if conversation.state == legacy.ConversationState.BOT_ACTIVE.value and opt_out_in_batch and booking_signal:
+    if conversation.state == ConversationState.BOT_ACTIVE.value and opt_out_in_batch and booking_signal:
         confirmation_payload = {
             "asked_at": now.isoformat(),
             "booking_messages": signal_messages,
         }
-        context = legacy._set_reengage_confirmation(context, confirmation_payload)
+        context = _set_reengage_confirmation(context, confirmation_payload)
         if booking_active:
             booking_state["active"] = False
-            context = legacy._set_booking_context(context, booking_state)
-        legacy._set_conversation_context(conversation, context)
-        legacy._record_decision_trace(
+            context = _set_booking_context(context, booking_state)
+        _set_conversation_context(conversation, context)
+        _record_decision_trace(
             conversation,
             {
                 "stage": "routing",
@@ -596,7 +630,7 @@ def _handle_reengage_and_mute_gate(
                 "opt_out_in_batch": opt_out_in_batch,
             },
         )
-        bot_response = legacy.MSG_REENGAGE_CONFIRM
+        bot_response = MSG_REENGAGE_CONFIRM
         bot_response, sent = send_and_save(bot_response)
         result_message = (
             "Re-engage confirmation requested"
@@ -623,7 +657,7 @@ def _handle_reengage_and_mute_gate(
             conversation.bot_status = "active"
             conversation.bot_muted_until = None
             conversation.no_count = 0
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "routing",
@@ -636,7 +670,7 @@ def _handle_reengage_and_mute_gate(
                 },
             )
         else:
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "routing",
@@ -673,7 +707,6 @@ def _handle_post_debounce_muted_state_gate(
     client_slug: str,
     now: datetime,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
 
     is_muted = conversation.bot_status == "muted" or (
         conversation.bot_muted_until and conversation.bot_muted_until > now
@@ -681,18 +714,18 @@ def _handle_post_debounce_muted_state_gate(
     if not is_muted:
         return None
 
-    signal_messages = legacy._coerce_batch_messages(message_text, batch_messages)
-    opt_out_in_batch = any(legacy.is_opt_out_message(msg) for msg in signal_messages)
-    booking_signal, _ = legacy._evaluate_booking_signal(
+    signal_messages = _coerce_batch_messages(message_text, batch_messages)
+    opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
+    booking_signal, _ = _evaluate_booking_signal(
         signal_messages,
         client_slug=client_slug,
         message_text=message_text,
     )
-    context = legacy._get_conversation_context(conversation)
-    booking_active = bool(legacy._get_booking_context(context).get("active"))
-    reengage_confirmation = legacy._get_reengage_confirmation(context)
+    context = _get_conversation_context(conversation)
+    booking_active = bool(_get_booking_context(context).get("active"))
+    reengage_confirmation = _get_reengage_confirmation(context)
 
-    if reengage_confirmation and legacy._is_reengage_confirmation_active(reengage_confirmation, now):
+    if reengage_confirmation and _is_reengage_confirmation_active(reengage_confirmation, now):
         conversation.bot_status = "active"
         conversation.bot_muted_until = None
         conversation.no_count = 0
@@ -703,7 +736,7 @@ def _handle_post_debounce_muted_state_gate(
         conversation.no_count = 0
         return None
 
-    legacy._record_decision_trace(
+    _record_decision_trace(
         conversation,
         {
             "stage": "routing",
@@ -735,27 +768,26 @@ def _handle_opt_out_mute_gate(
     now: datetime,
     send_and_save,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
 
     if (
-        conversation.state != legacy.ConversationState.BOT_ACTIVE.value
+        conversation.state != ConversationState.BOT_ACTIVE.value
         or not opt_out_in_batch
         or booking_signal
     ):
         return None
 
-    mute_first, mute_second = legacy.get_mute_settings(db, client_id)
+    mute_first, mute_second = get_mute_settings(db, client_id)
     if conversation.no_count == 0:
         conversation.bot_muted_until = now + timedelta(minutes=mute_first)
         conversation.no_count = 1
-        bot_response = legacy.MSG_MUTED_TEMP
+        bot_response = MSG_MUTED_TEMP
         trace_decision = "muted_first"
     else:
         conversation.bot_muted_until = now + timedelta(hours=mute_second)
         conversation.no_count += 1
-        bot_response = legacy.MSG_MUTED_LONG
+        bot_response = MSG_MUTED_LONG
         trace_decision = "muted_second"
-    legacy._record_decision_trace(
+    _record_decision_trace(
         conversation,
         {
             "stage": "rejection",
@@ -764,7 +796,7 @@ def _handle_opt_out_mute_gate(
             "no_count": conversation.no_count,
         },
     )
-    legacy._record_message_decision_meta(
+    _record_message_decision_meta(
         saved_message,
         action="rejection",
         intent="opt_out",
@@ -792,12 +824,11 @@ def _handle_sla_collect_only_gate(
     now: datetime,
     send_and_save,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
 
-    if conversation.state != legacy.ConversationState.BOT_ACTIVE.value:
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
         return None
 
-    context = legacy._get_conversation_context(conversation)
+    context = _get_conversation_context(conversation)
     runtime = context.get(SLA_RUNTIME_CONTEXT_KEY) if isinstance(context, dict) else None
     if not isinstance(runtime, dict):
         return None
@@ -807,13 +838,13 @@ def _handle_sla_collect_only_gate(
         now=now,
     ):
         context.pop(SLA_RUNTIME_CONTEXT_KEY, None)
-        legacy._set_conversation_context(conversation, context)
+        _set_conversation_context(conversation, context)
         return None
 
     if not is_collect_only_runtime_active(context, now=now):
         return None
 
-    router_pending_meta = legacy._set_router_observability(
+    router_pending_meta = _set_router_observability(
         saved_message,
         eligible=False,
         reason="sla_collect_only",
@@ -828,8 +859,8 @@ def _handle_sla_collect_only_gate(
         "sla_profile_version": runtime.get("profile_version"),
     }
     trace_payload.update(router_pending_meta)
-    legacy._record_decision_trace(conversation, trace_payload)
-    legacy._record_message_decision_meta(
+    _record_decision_trace(conversation, trace_payload)
+    _record_message_decision_meta(
         saved_message,
         action="reply",
         intent="sla_collect_only",
@@ -837,7 +868,7 @@ def _handle_sla_collect_only_gate(
         fast_intent=False,
     )
     if saved_message:
-        legacy._update_message_decision_metadata(
+        _update_message_decision_metadata(
             saved_message,
             {
                 "sla_runtime_mode": SLA_RUNTIME_MODE_COLLECT_ONLY,
@@ -847,7 +878,7 @@ def _handle_sla_collect_only_gate(
                 "sla_runtime_profile_version": runtime.get("profile_version"),
             },
         )
-    bot_response, sent = send_and_save(legacy.MSG_FACT_GUARD_CLARIFY)
+    bot_response, sent = send_and_save(MSG_FACT_GUARD_CLARIFY)
     result_message = (
         "SLA collect_only guard response sent"
         if sent

@@ -236,6 +236,27 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
     return [item for idx, item in enumerate(trace_list) if idx in keep_indices]
 
 
+def _router_observability_meta(*, eligible: bool, reason: str) -> dict[str, Any]:
+    return {
+        "router_eligible": bool(eligible),
+        "router_skipped_reason": reason,
+        "controller_eligible": bool(eligible),
+        "controller_skipped_reason": reason,
+    }
+
+
+def _set_router_observability(
+    message: Message | None,
+    *,
+    eligible: bool,
+    reason: str,
+) -> dict[str, Any]:
+    updates = _router_observability_meta(eligible=eligible, reason=reason)
+    if message:
+        _update_message_decision_metadata(message, updates)
+    return updates
+
+
 def _update_message_decision_metadata(message: Message, updates: dict[str, Any]) -> None:
     metadata = dict(message.message_metadata or {})
     decision_meta = dict(metadata.get("decision_meta") or {})
@@ -328,9 +349,9 @@ def _record_message_decision_meta(
 
 
 def _record_decision_trace(conversation: Conversation, trace: dict[str, Any]) -> None:
-    from . import _legacy as legacy
+    from .context_manager import _get_conversation_context, _set_conversation_context
 
-    context = legacy._get_conversation_context(conversation)
+    context = _get_conversation_context(conversation)
     payload = dict(trace)
     payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
     try:
@@ -357,7 +378,7 @@ def _record_decision_trace(conversation: Conversation, trace: dict[str, Any]) ->
     trace_list.append(payload)
     trace_list = _retain_decision_trace(trace_list)
     context[DECISION_TRACE_KEY] = trace_list
-    legacy._set_conversation_context(conversation, context)
+    _set_conversation_context(conversation, context)
 
 
 def _attach_llm_cache_flag(trace: dict[str, Any], timing_context: dict | None) -> dict[str, Any]:

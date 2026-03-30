@@ -20,6 +20,8 @@ from app.models import (
 from app.schemas.telegram import TelegramMessage, TelegramUpdate, TelegramWebhookResponse
 from app.services.agent_link_service import consume_link_token, hash_link_token
 from app.services.audit_service import record_audit_event
+from app.services.handover_owner_service import manager_resolve as state_manager_resolve
+from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.learned_response_service import (
     approve_learned_response,
     evaluate_learned_response_eligibility,
@@ -32,8 +34,6 @@ from app.services.manager_message_service import (
     process_manager_message,
     resolve_linked_agent,
 )
-from app.services.handover_owner_service import manager_resolve as state_manager_resolve
-from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("telegram_webhook")

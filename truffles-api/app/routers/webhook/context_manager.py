@@ -8,8 +8,46 @@ from typing import Any
 from app.core import DialogStateService
 from app.models import Conversation, Message
 from app.routers.webhook.booking import _get_booking_context
-from app.routers.webhook.runtime_primitives import SERVICE_CARRYOVER_TTL_MESSAGES
+from app.routers.webhook.class_router_runtime import _normalize_class_name
+from app.routers.webhook.context_runtime import (
+    ASR_CONFIRM_KEY,
+    ASR_CONFIRM_WINDOW_MINUTES,
+    ASR_INFLIGHT_KEY,
+    CLASS_CARRYOVER_CLASSES,
+    CLASS_CARRYOVER_KEY,
+    CLASS_CARRYOVER_TTL_MESSAGES,
+    CONSULT_CONTEXT_KEY,
+    CONTEXT_MANAGER_KEY,
+    EXPECTED_REPLY_REASON_KEY,
+    EXPECTED_REPLY_TYPE_KEY,
+    HANDOVER_CONFIRM_WINDOW_MINUTES,
+    MEMORY_PENDING_KEY,
+    MEMORY_PROFILE_KEY,
+    MEMORY_PROFILE_TTL_DAYS,
+    REENGAGE_CONFIRM_KEY,
+    REENGAGE_CONFIRM_WINDOW_MINUTES,
+    RE_ENTRY_REQUIRED_KEY,
+    SERVICE_CARRYOVER_KEY,
+    SERVICE_CARRYOVER_SKIP_INTENTS,
+    SERVICE_HINT_KEY,
+    SERVICE_HINT_WINDOW_MINUTES,
+    STYLE_REFERENCE_PENDING_KEY,
+    _ensure_question_mark,
+    _is_refusal_flag_active,
+)
+from app.routers.webhook.knowledge_runtime import _resolve_backlog_language
+from app.routers.webhook.runtime_primitives import (
+    CONSULT_CONTEXT_TTL_MESSAGES,
+    EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
+    INFO_INTENTS,
+    SERVICE_CARRYOVER_TTL_MESSAGES,
+    _append_followup,
+)
 from app.routers.webhook.session_memory import (
+    SESSION_MEMORY_KEY,
+    SESSION_MEMORY_TTL_HOURS,
     _record_session_memory_update,
 )
 from app.routers.webhook.trace import (
@@ -23,6 +61,7 @@ CANONICAL_DIALOG_STATE_KEY = "canonical_dialog_state"
 CANONICAL_DIALOG_STATE_OWNER = "context_manager.dialog_state.v1"
 CANONICAL_DIALOG_STATE_VERSION = "v1"
 _DIALOG_STATE_SERVICE = DialogStateService()
+
 
 
 def _canonical_text(value: Any) -> str | None:
@@ -136,7 +175,6 @@ def _sync_canonical_dialog_state(
     interaction_owner: str | None = None,
     degrade_reason: str | None = None,
 ) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.sync_context_manager_expected_reply_state(
         manager,
@@ -145,14 +183,14 @@ def _sync_canonical_dialog_state(
         expected_reply_reason=expected_reply_reason,
         message_count=message_count,
         service_carryover=(
-            manager.get(legacy.SERVICE_CARRYOVER_KEY)
-            if isinstance(manager, dict) and isinstance(manager.get(legacy.SERVICE_CARRYOVER_KEY), dict)
+            manager.get(SERVICE_CARRYOVER_KEY)
+            if isinstance(manager, dict) and isinstance(manager.get(SERVICE_CARRYOVER_KEY), dict)
             else None
         ),
         consult_context=consult_context,
         legacy_consult_context=(
-            manager.get(legacy.CONSULT_CONTEXT_KEY)
-            if isinstance(manager, dict) and isinstance(manager.get(legacy.CONSULT_CONTEXT_KEY), dict)
+            manager.get(CONSULT_CONTEXT_KEY)
+            if isinstance(manager, dict) and isinstance(manager.get(CONSULT_CONTEXT_KEY), dict)
             else None
         ),
         branch_id=branch_id,
@@ -162,7 +200,7 @@ def _sync_canonical_dialog_state(
         degrade_reason=degrade_reason,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
-        consult_default_ttl=legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        consult_default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
     )
 
 
@@ -173,57 +211,21 @@ def _get_conversation_context(conversation: Conversation) -> dict:
     return {}
 
 
-def _trace_list(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, dict)]
-    if isinstance(value, dict):
-        return [value]
-    return []
-
-
-def _trace_key(item: dict[str, Any]) -> tuple[Any, Any, Any]:
-    return (item.get("stage"), item.get("decision"), item.get("recorded_at"))
-
-
-def _merge_decision_trace(existing: Any, incoming: Any) -> list[dict[str, Any]] | None:
-    existing_list = _trace_list(existing)
-    incoming_list = _trace_list(incoming)
-    if not existing_list and not incoming_list:
-        return None
-    if not existing_list:
-        return _retain_decision_trace(incoming_list)
-    if not incoming_list:
-        return _retain_decision_trace(existing_list)
-
-    merged = list(existing_list)
-    seen = {_trace_key(item) for item in existing_list}
-    for item in incoming_list:
-        key = _trace_key(item)
-        if key != (None, None, None) and key in seen:
-            continue
-        merged.append(item)
-        seen.add(key)
-    return _retain_decision_trace(merged)
-
-
 def _set_conversation_context(conversation: Conversation, context: dict) -> None:
-    if not isinstance(context, dict):
-        conversation.context = context
-        return
     existing_context = conversation.context if isinstance(conversation.context, dict) else {}
-    if existing_context:
-        for key in ("simulation", "simulation_mode", "simulation_id", "simulation_llm", "simulation_time"):
-            if key not in context and key in existing_context:
-                context = dict(context)
-                context[key] = existing_context.get(key)
-    merged_trace = _merge_decision_trace(
-        existing_context.get(DECISION_TRACE_KEY),
-        context.get(DECISION_TRACE_KEY),
+    conversation.context = _DIALOG_STATE_SERVICE.prepare_conversation_context_write(
+        existing_context,
+        context,
+        decision_trace_key=DECISION_TRACE_KEY,
+        preserve_keys=(
+            "simulation",
+            "simulation_mode",
+            "simulation_id",
+            "simulation_llm",
+            "simulation_time",
+        ),
+        retain_trace=_retain_decision_trace,
     )
-    if merged_trace is not None:
-        context = dict(context)
-        context[DECISION_TRACE_KEY] = merged_trace
-    conversation.context = context
 
 
 def _get_expected_reply_type(context: dict) -> str | None:
@@ -234,10 +236,9 @@ def _get_expected_reply_type(context: dict) -> str | None:
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         if isinstance(expected_reply_type, str) and expected_reply_type.strip():
             return expected_reply_type.strip()
-    from . import _legacy as legacy
 
     projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
-        expected_reply_type=context.get(legacy.EXPECTED_REPLY_TYPE_KEY),
+        expected_reply_type=context.get(EXPECTED_REPLY_TYPE_KEY),
     )
     return projections.expected_reply_type
 
@@ -250,10 +251,9 @@ def _get_expected_reply_reason(context: dict) -> str | None:
         reason = pending_question_contract.get("reason")
         if isinstance(reason, str) and reason.strip():
             return reason.strip()
-    from . import _legacy as legacy
 
     projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
-        expected_reply_reason=context.get(legacy.EXPECTED_REPLY_REASON_KEY),
+        expected_reply_reason=context.get(EXPECTED_REPLY_REASON_KEY),
     )
     return projections.expected_reply_reason
 
@@ -261,31 +261,13 @@ def _get_expected_reply_reason(context: dict) -> str | None:
 def _get_pending_question_contract(context: dict) -> dict[str, Any] | None:
     if not isinstance(context, dict):
         return None
-    from . import _legacy as legacy
-
-    canonical_state = _get_canonical_dialog_state(_get_context_manager(context))
-    pending_question_contract = (
-        canonical_state.get("pending_question_contract")
-        if isinstance(canonical_state, dict)
-        else None
-    )
-    projected = _DIALOG_STATE_SERVICE.project_pending_question_contract(pending_question_contract)
-    if projected:
-        if "expected_reply_type" not in projected:
-            projected = _DIALOG_STATE_SERVICE.project_pending_question_contract(
-                projected,
-                expected_reply_type=context.get(legacy.EXPECTED_REPLY_TYPE_KEY),
-            )
-        if "reason" not in projected:
-            projected = _DIALOG_STATE_SERVICE.project_pending_question_contract(
-                projected,
-                expected_reply_reason=context.get(legacy.EXPECTED_REPLY_REASON_KEY),
-            )
-        return projected
-    return _DIALOG_STATE_SERVICE.project_pending_question_contract(
-        None,
-        expected_reply_type=context.get(legacy.EXPECTED_REPLY_TYPE_KEY),
-        expected_reply_reason=context.get(legacy.EXPECTED_REPLY_REASON_KEY),
+    return _DIALOG_STATE_SERVICE.project_context_pending_question_contract(
+        context,
+        context_manager_key=CONTEXT_MANAGER_KEY,
+        canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+        session_memory_key=SESSION_MEMORY_KEY,
+        expected_reply_type_key=EXPECTED_REPLY_TYPE_KEY,
+        expected_reply_reason_key=EXPECTED_REPLY_REASON_KEY,
     )
 
 
@@ -311,9 +293,8 @@ def _set_expected_reply_type(context: dict, expected_reply_type: str | None) -> 
 
 
 def _get_re_entry_required(context: dict) -> dict | None:
-    from . import _legacy as legacy
 
-    payload = context.get(legacy.RE_ENTRY_REQUIRED_KEY) if isinstance(context, dict) else None
+    payload = context.get(RE_ENTRY_REQUIRED_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.normalize_re_entry_required(payload)
 
 
@@ -322,24 +303,22 @@ def _is_re_entry_required(context: dict) -> bool:
 
 
 def _set_re_entry_required(context: dict, *, reason: str, now: datetime) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_re_entry_required(
         context,
         reason=reason,
         now=now,
-        key=legacy.RE_ENTRY_REQUIRED_KEY,
+        key=RE_ENTRY_REQUIRED_KEY,
     )
 
 
 def _clear_re_entry_required(context: dict, *, reason: str, now: datetime) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.clear_context_re_entry_required(
         context,
         reason=reason,
         now=now,
-        key=legacy.RE_ENTRY_REQUIRED_KEY,
+        key=RE_ENTRY_REQUIRED_KEY,
     )
 
 
@@ -352,23 +331,22 @@ def _set_expected_reply_context(
     reason: str,
     now: datetime,
 ) -> dict:
-    from . import _legacy as legacy
 
     result = _DIALOG_STATE_SERVICE.build_expected_reply_context_sync_result(
         context,
         expected_reply_type=expected_reply_type,
         reason=reason,
         now=now,
-        context_manager_key=legacy.CONTEXT_MANAGER_KEY,
+        context_manager_key=CONTEXT_MANAGER_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         booking_key="booking",
-        session_memory_key=legacy.SESSION_MEMORY_KEY,
-        re_entry_required_key=legacy.RE_ENTRY_REQUIRED_KEY,
-        service_carryover_key=legacy.SERVICE_CARRYOVER_KEY,
-        consult_context_key=legacy.CONSULT_CONTEXT_KEY,
-        session_memory_ttl_hours=legacy.SESSION_MEMORY_TTL_HOURS,
+        session_memory_key=SESSION_MEMORY_KEY,
+        re_entry_required_key=RE_ENTRY_REQUIRED_KEY,
+        service_carryover_key=SERVICE_CARRYOVER_KEY,
+        consult_context_key=CONSULT_CONTEXT_KEY,
+        session_memory_ttl_hours=SESSION_MEMORY_TTL_HOURS,
         service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
-        consult_default_ttl=legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        consult_default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
     )
     context = result.context
     normalized_expected_reply_type = result.expected_reply_type
@@ -412,21 +390,19 @@ def _set_expected_reply_context(
 
 
 def _get_context_manager(context: dict) -> dict:
-    from . import _legacy as legacy
 
-    manager = context.get(legacy.CONTEXT_MANAGER_KEY) if isinstance(context, dict) else None
+    manager = context.get(CONTEXT_MANAGER_KEY) if isinstance(context, dict) else None
     if isinstance(manager, dict):
         return dict(manager)
     return {}
 
 
 def _set_context_manager(context: dict, manager: dict) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_manager_payload(
         context,
         manager,
-        key=legacy.CONTEXT_MANAGER_KEY,
+        key=CONTEXT_MANAGER_KEY,
     )
 
 
@@ -438,19 +414,17 @@ def _increment_context_message_count(manager: dict) -> int:
 
 
 def _prune_class_carryover(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.prune_context_manager_class_carryover(
         manager,
-        manager_key=legacy.CLASS_CARRYOVER_KEY,
+        manager_key=CLASS_CARRYOVER_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         message_count=message_count,
-        default_ttl=legacy.CLASS_CARRYOVER_TTL_MESSAGES,
+        default_ttl=CLASS_CARRYOVER_TTL_MESSAGES,
     )
 
 
 def _get_class_carryover(manager: dict, *, message_count: int) -> dict | None:
-    from . import _legacy as legacy
 
     canonical_state = manager.get(CANONICAL_DIALOG_STATE_KEY) if isinstance(manager, dict) else None
     if isinstance(canonical_state, dict):
@@ -461,7 +435,7 @@ def _get_class_carryover(manager: dict, *, message_count: int) -> dict | None:
         if isinstance(canonical_projection, dict):
             return canonical_projection
 
-    payload = manager.get(legacy.CLASS_CARRYOVER_KEY) if isinstance(manager, dict) else None
+    payload = manager.get(CLASS_CARRYOVER_KEY) if isinstance(manager, dict) else None
     return _DIALOG_STATE_SERVICE.get_class_carryover(payload, message_count=message_count)
 
 
@@ -473,19 +447,18 @@ def _set_class_carryover(
     info_sections: list[str] | None,
     message_count: int,
 ) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_manager_class_carryover(
         manager,
-        manager_key=legacy.CLASS_CARRYOVER_KEY,
+        manager_key=CLASS_CARRYOVER_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         class_name=class_name,
         intents=intents,
         info_sections=info_sections,
         message_count=message_count,
-        default_ttl=legacy.CLASS_CARRYOVER_TTL_MESSAGES,
-        allowed_intents=legacy.INFO_INTENTS,
-        normalize_class_name=legacy._normalize_class_name,
+        default_ttl=CLASS_CARRYOVER_TTL_MESSAGES,
+        allowed_intents=INFO_INTENTS,
+        normalize_class_name=_normalize_class_name,
     )
 
 
@@ -498,10 +471,9 @@ def _maybe_store_class_carryover(
     message_count: int,
     reason: str,
 ) -> None:
-    from . import _legacy as legacy
 
-    normalized_class = legacy._normalize_class_name(class_name)
-    if normalized_class not in legacy.CLASS_CARRYOVER_CLASSES:
+    normalized_class = _normalize_class_name(class_name)
+    if normalized_class not in CLASS_CARRYOVER_CLASSES:
         return
     intent_list = intents or []
     info_sections = []
@@ -517,7 +489,7 @@ def _maybe_store_class_carryover(
         message_count=message_count,
     )
     stored_payload = (
-        context_manager.get(legacy.CLASS_CARRYOVER_KEY)
+        context_manager.get(CLASS_CARRYOVER_KEY)
         if isinstance(context_manager, dict)
         else None
     )
@@ -539,28 +511,26 @@ def _maybe_store_class_carryover(
                 if isinstance(stored_payload, dict)
                 else info_sections
             ),
-            "ttl": legacy.CLASS_CARRYOVER_TTL_MESSAGES,
+            "ttl": CLASS_CARRYOVER_TTL_MESSAGES,
             "reason": reason,
         },
     )
 
 
 def _prune_service_carryover(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.prune_context_manager_service_carryover(
         manager,
-        manager_key=legacy.SERVICE_CARRYOVER_KEY,
+        manager_key=SERVICE_CARRYOVER_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         referent_key="service",
         message_count=message_count,
-        default_ttl=legacy.SERVICE_CARRYOVER_TTL_MESSAGES,
+        default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
         projection_source=CANONICAL_DIALOG_STATE_KEY,
     )
 
 
 def _get_service_carryover(manager: dict, *, message_count: int) -> dict | None:
-    from . import _legacy as legacy
 
     canonical_projection = _project_canonical_referent(
         manager,
@@ -579,11 +549,11 @@ def _get_service_carryover(manager: dict, *, message_count: int) -> dict | None:
             "canonical_state_owner": canonical_projection.get("canonical_state_owner"),
         }
 
-    payload = manager.get(legacy.SERVICE_CARRYOVER_KEY)
+    payload = manager.get(SERVICE_CARRYOVER_KEY)
     return _DIALOG_STATE_SERVICE.get_service_carryover(
         payload,
         message_count=message_count,
-        default_ttl=legacy.SERVICE_CARRYOVER_TTL_MESSAGES,
+        default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
     )
 
 
@@ -595,18 +565,17 @@ def _set_service_carryover(
     score: float | None,
     message_count: int,
 ) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_manager_service_carryover(
         manager,
-        manager_key=legacy.SERVICE_CARRYOVER_KEY,
+        manager_key=SERVICE_CARRYOVER_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         referent_key="service",
         service_query=service_query,
         source=source,
         score=score,
         message_count=message_count,
-        default_ttl=legacy.SERVICE_CARRYOVER_TTL_MESSAGES,
+        default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
         projection_source=CANONICAL_DIALOG_STATE_KEY,
         canonical_state_owner=CANONICAL_DIALOG_STATE_OWNER,
     )
@@ -620,14 +589,13 @@ def _maybe_store_service_carryover(
     message_count: int,
     reason: str,
 ) -> None:
-    from . import _legacy as legacy
 
     if not isinstance(service_meta, dict):
         return
     service_query = service_meta.get("service_query")
     if not isinstance(service_query, str) or not service_query.strip():
         return
-    if intent and intent in legacy.SERVICE_CARRYOVER_SKIP_INTENTS:
+    if intent and intent in SERVICE_CARRYOVER_SKIP_INTENTS:
         return
     source = service_meta.get("service_query_source")
     score = service_meta.get("service_query_score")
@@ -650,7 +618,7 @@ def _maybe_store_service_carryover(
             "service_query": service_query.strip(),
             "service_query_source": source,
             "service_query_score": score,
-            "ttl": legacy.SERVICE_CARRYOVER_TTL_MESSAGES,
+            "ttl": SERVICE_CARRYOVER_TTL_MESSAGES,
             "projection_source": CANONICAL_DIALOG_STATE_KEY,
             "canonical_state_owner": CANONICAL_DIALOG_STATE_OWNER,
             "reason": reason,
@@ -659,19 +627,17 @@ def _maybe_store_service_carryover(
 
 
 def _prune_consult_context(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.prune_context_manager_consult_context(
         manager,
-        manager_key=legacy.CONSULT_CONTEXT_KEY,
+        manager_key=CONSULT_CONTEXT_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         message_count=message_count,
-        default_ttl=legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
     )
 
 
 def _get_consult_context(manager: dict, *, message_count: int) -> dict | None:
-    from . import _legacy as legacy
 
     canonical_projection = _project_canonical_consult_state(
         manager,
@@ -680,11 +646,11 @@ def _get_consult_context(manager: dict, *, message_count: int) -> dict | None:
     if isinstance(canonical_projection, dict):
         return canonical_projection
 
-    payload = manager.get(legacy.CONSULT_CONTEXT_KEY)
+    payload = manager.get(CONSULT_CONTEXT_KEY)
     return _DIALOG_STATE_SERVICE.get_consult_context(
         payload,
         message_count=message_count,
-        default_ttl=legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
     )
 
 
@@ -694,12 +660,11 @@ def _set_consult_context(
     consult_meta: dict,
     message_count: int,
 ) -> dict:
-    from . import _legacy as legacy
 
     questions_raw = consult_meta.get("consult_questions") if isinstance(consult_meta, dict) else None
     questions = _DIALOG_STATE_SERVICE.normalize_consult_questions(
         questions_raw,
-        transform=legacy._ensure_question_mark,
+        transform=_ensure_question_mark,
     )
     topic = consult_meta.get("consult_topic") if isinstance(consult_meta, dict) else None
     topic_value = topic.strip() if isinstance(topic, str) and topic.strip() else None
@@ -707,13 +672,13 @@ def _set_consult_context(
     question_value = question.strip() if isinstance(question, str) and question.strip() else None
     return _DIALOG_STATE_SERVICE.set_context_manager_consult_context(
         manager,
-        manager_key=legacy.CONSULT_CONTEXT_KEY,
+        manager_key=CONSULT_CONTEXT_KEY,
         canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
         topic=topic_value,
         question=question_value,
         questions=questions,
         message_count=message_count,
-        default_ttl=legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+        default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
         projection_source=CANONICAL_DIALOG_STATE_KEY,
         canonical_state_owner=CANONICAL_DIALOG_STATE_OWNER,
     )
@@ -729,9 +694,7 @@ def _build_consult_return_prompt(consult_context: dict | None) -> str | None:
             return f"Если вернуться к вашему вопросу: {' '.join(cleaned)}"
     question = consult_context.get("question")
     if isinstance(question, str) and question.strip():
-        from . import _legacy as legacy
-
-        return f"Если вернуться к вашему вопросу: {legacy._ensure_question_mark(question)}"
+        return f"Если вернуться к вашему вопросу: {_ensure_question_mark(question)}"
     return "Если хотите, продолжим консультацию."
 
 
@@ -779,9 +742,7 @@ def _apply_consult_return(
             if canonical_state_owner:
                 updates["canonical_state_owner"] = canonical_state_owner
         _update_message_decision_metadata(saved_message, updates)
-    from . import _legacy as legacy
-
-    return legacy._append_followup(bot_response, consult_return_prompt)
+    return _append_followup(bot_response, consult_return_prompt)
 
 
 def _resolve_current_goal(
@@ -790,21 +751,20 @@ def _resolve_current_goal(
     expected_reply_type: str | None = None,
     expected_reply_reason: str | None = None,
 ) -> str | None:
-    from . import _legacy as legacy
 
     if consult_intent:
         return "consult"
     if expected_reply_type in {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-        legacy.EXPECTED_REPLY_NAME,
+        EXPECTED_REPLY_SERVICE,
+        EXPECTED_REPLY_TIME,
+        EXPECTED_REPLY_NAME,
     }:
         if expected_reply_reason and expected_reply_reason != "booking_prompt":
             return None
         return "booking"
     if "booking" in intent_set:
         return "booking"
-    if intent_set & legacy.INFO_INTENTS:
+    if intent_set & INFO_INTENTS:
         return "info"
     return None
 
@@ -815,13 +775,12 @@ def _build_compact_summary_text(
     refusal_flags: dict,
     language: str | None,
 ) -> str:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.build_compact_summary_text(
         booking=booking,
         refusal_flags=refusal_flags,
         language=language,
-        is_refusal_flag_active=legacy._is_refusal_flag_active,
+        is_refusal_flag_active=_is_refusal_flag_active,
     )
 
 
@@ -837,9 +796,8 @@ def _update_compact_summary(
     refusal_flags = manager.get("refusal_flags")
     refusal_flags = dict(refusal_flags) if isinstance(refusal_flags, dict) else {}
     booking = _get_booking_context(context)
-    from . import _legacy as legacy
 
-    language = legacy._resolve_backlog_language(saved_message) if saved_message else "unknown"
+    language = _resolve_backlog_language(saved_message) if saved_message else "unknown"
     summary_text = _build_compact_summary_text(
         booking=booking,
         refusal_flags=refusal_flags,
@@ -906,148 +864,132 @@ def _set_handover_confirmation(context: dict, confirmation: dict | None) -> dict
 
 
 def _is_handover_confirmation_active(confirmation: dict, now: datetime) -> bool:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.is_confirmation_active(
         confirmation,
         now=now,
-        ttl_minutes=legacy.HANDOVER_CONFIRM_WINDOW_MINUTES,
+        ttl_minutes=HANDOVER_CONFIRM_WINDOW_MINUTES,
     )
 
 
 def _get_reengage_confirmation(context: dict) -> dict | None:
-    from . import _legacy as legacy
 
-    confirmation = context.get(legacy.REENGAGE_CONFIRM_KEY) if isinstance(context, dict) else None
+    confirmation = context.get(REENGAGE_CONFIRM_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.normalize_reengage_confirmation(confirmation)
 
 
 def _set_reengage_confirmation(context: dict, confirmation: dict | None) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_reengage_confirmation(
         context,
         confirmation,
-        key=legacy.REENGAGE_CONFIRM_KEY,
+        key=REENGAGE_CONFIRM_KEY,
     )
 
 
 def _is_reengage_confirmation_active(confirmation: dict, now: datetime) -> bool:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.is_confirmation_active(
         confirmation,
         now=now,
-        ttl_minutes=legacy.REENGAGE_CONFIRM_WINDOW_MINUTES,
+        ttl_minutes=REENGAGE_CONFIRM_WINDOW_MINUTES,
     )
 
 
 def _get_asr_confirmation(context: dict) -> dict | None:
-    from . import _legacy as legacy
 
-    confirmation = context.get(legacy.ASR_CONFIRM_KEY) if isinstance(context, dict) else None
+    confirmation = context.get(ASR_CONFIRM_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.normalize_asr_confirmation(confirmation)
 
 
 def _set_asr_confirmation(context: dict, confirmation: dict | None) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_asr_confirmation(
         context,
         confirmation,
-        key=legacy.ASR_CONFIRM_KEY,
+        key=ASR_CONFIRM_KEY,
     )
 
 
 def _is_asr_confirmation_active(confirmation: dict, now: datetime) -> bool:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.is_confirmation_active(
         confirmation,
         now=now,
-        ttl_minutes=legacy.ASR_CONFIRM_WINDOW_MINUTES,
+        ttl_minutes=ASR_CONFIRM_WINDOW_MINUTES,
     )
 
 
 def _get_asr_inflight(context: dict, *, now: datetime) -> tuple[dict | None, bool]:
-    from . import _legacy as legacy
 
-    payload = context.get(legacy.ASR_INFLIGHT_KEY) if isinstance(context, dict) else None
+    payload = context.get(ASR_INFLIGHT_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.get_asr_inflight(payload, now=now)
 
 
 def _set_asr_inflight(context: dict, payload: dict | None) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_asr_inflight(
         context,
         payload,
-        key=legacy.ASR_INFLIGHT_KEY,
+        key=ASR_INFLIGHT_KEY,
     )
 
 
 def _get_style_reference_pending(context: dict, *, now: datetime) -> tuple[dict | None, bool]:
-    from . import _legacy as legacy
 
-    payload = context.get(legacy.STYLE_REFERENCE_PENDING_KEY) if isinstance(context, dict) else None
+    payload = context.get(STYLE_REFERENCE_PENDING_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.get_style_reference_pending(payload, now=now)
 
 
 def _set_style_reference_pending(context: dict, payload: dict | None) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_style_reference_pending(
         context,
         payload,
-        key=legacy.STYLE_REFERENCE_PENDING_KEY,
+        key=STYLE_REFERENCE_PENDING_KEY,
     )
 
 
 def _normalize_memory_profile(profile: dict | None, *, now: datetime) -> tuple[dict, bool]:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.normalize_memory_profile(
         profile,
         now=now,
-        default_ttl_days=legacy.MEMORY_PROFILE_TTL_DAYS,
+        default_ttl_days=MEMORY_PROFILE_TTL_DAYS,
     )
 
 
 def _get_memory_profile(context: dict, *, now: datetime) -> tuple[dict, bool]:
-    from . import _legacy as legacy
 
-    payload = context.get(legacy.MEMORY_PROFILE_KEY) if isinstance(context, dict) else None
+    payload = context.get(MEMORY_PROFILE_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.get_memory_profile(
         payload,
         now=now,
-        default_ttl_days=legacy.MEMORY_PROFILE_TTL_DAYS,
+        default_ttl_days=MEMORY_PROFILE_TTL_DAYS,
     )
 
 
 def _set_memory_profile(context: dict, profile: dict | None) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_memory_profile(
         context,
         profile,
-        key=legacy.MEMORY_PROFILE_KEY,
+        key=MEMORY_PROFILE_KEY,
     )
 
 
 def _get_memory_pending(context: dict, *, now: datetime) -> tuple[dict | None, bool]:
-    from . import _legacy as legacy
 
-    pending = context.get(legacy.MEMORY_PENDING_KEY) if isinstance(context, dict) else None
+    pending = context.get(MEMORY_PENDING_KEY) if isinstance(context, dict) else None
     return _DIALOG_STATE_SERVICE.get_memory_pending(pending, now=now)
 
 
 def _set_memory_pending(context: dict, pending: dict | None) -> dict:
-    from . import _legacy as legacy
 
     return _DIALOG_STATE_SERVICE.set_context_memory_pending(
         context,
         pending,
-        key=legacy.MEMORY_PENDING_KEY,
+        key=MEMORY_PENDING_KEY,
     )
 
 

@@ -20,7 +20,6 @@ from pydantic import ValidationError
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
-from app.core import DialogStateService, TurnExecutor, TurnPlanner
 from app.contracts.decision import (
     DECISION_GRAPH_STAGES,
     DecisionOutcome,
@@ -37,6 +36,7 @@ from app.contracts.decision import (
     build_intent_contract,
     build_response_contract,
 )
+from app.core import DialogStateService, TurnExecutor, TurnPlanner
 from app.logging_config import (
     get_logger,
     get_trace_id,
@@ -91,6 +91,36 @@ from app.routers.webhook.booking import (
     _validate_datetime_slot,
     _validate_name_slot,
     _validate_service_slot,
+)
+from app.routers.webhook.booking_runtime import (
+    MSG_BOOKING_ASK_ALL,
+    MSG_BOOKING_CANCELLED,
+    MSG_BOOKING_REENGAGE,
+    MSG_BOOKING_SLOT_LOCK_STUB,
+    NAME_NOISE_TOKENS,
+    NAME_PATTERN,
+    _is_booking_cancel,
+    _matches_guest_policy_lexicon,
+)
+from app.routers.webhook.booking_signal_runtime import (
+    BOOKING_INFO_QUESTION_TYPES,
+    DATE_MONTH_PATTERN,
+    DATE_NUMERIC_PATTERN,
+    DATE_PATTERN,
+    TIME_HOUR_PATTERN,
+    TIME_ONLY_ALLOWED_PREFIXES,
+    TIME_ONLY_ALLOWED_TOKENS,
+    TIME_ONLY_AMPM_PATTERN,
+    TIME_PATTERN,
+    _collect_booking_request_lexicon,
+    _evaluate_booking_signal,
+    _extract_datetime,
+    _extract_service_hint,
+    _has_booking_signal,
+    _has_explicit_service_signal,
+    _is_booking_request,
+    _looks_like_time_only_request,
+    _matches_booking_request_lexicon,
 )
 from app.routers.webhook.branch_selection import (
     BRANCH_CONTEXT_KEY,
@@ -160,6 +190,34 @@ from app.routers.webhook.context_manager import (
     _sync_canonical_dialog_state,
     _update_compact_summary,
 )
+from app.routers.webhook.context_runtime import (
+    ASR_CONFIRM_KEY,
+    ASR_CONFIRM_WINDOW_MINUTES,
+    ASR_INFLIGHT_KEY,
+    ASR_INFLIGHT_TTL_SECONDS,
+    CLASS_CARRYOVER_CLASSES,
+    CLASS_CARRYOVER_KEY,
+    CLASS_CARRYOVER_TTL_MESSAGES,
+    CONSULT_CONTEXT_KEY,
+    CONTEXT_MANAGER_KEY,
+    EXPECTED_REPLY_REASON_KEY,
+    EXPECTED_REPLY_TYPE_KEY,
+    HANDOVER_CONFIRM_WINDOW_MINUTES,
+    MEMORY_PENDING_KEY,
+    MEMORY_PROFILE_KEY,
+    MEMORY_PROFILE_TTL_DAYS,
+    REENGAGE_CONFIRM_KEY,
+    REENGAGE_CONFIRM_WINDOW_MINUTES,
+    RE_ENTRY_REQUIRED_KEY,
+    SERVICE_CARRYOVER_KEY,
+    SERVICE_CARRYOVER_SKIP_INTENTS,
+    SERVICE_HINT_AT_KEY,
+    SERVICE_HINT_KEY,
+    SERVICE_HINT_WINDOW_MINUTES,
+    STYLE_REFERENCE_PENDING_KEY,
+    _ensure_question_mark,
+    _is_refusal_flag_active,
+)
 from app.routers.webhook.dedup import (
     _buffer_user_message,
     _drain_buffered_messages,
@@ -199,9 +257,31 @@ from app.routers.webhook.info import (
     _looks_like_services_overview_message,
     _tokenize_for_matching,
 )
+from app.routers.webhook.knowledge_runtime import (
+    _DEFAULT_RAG_SCORES,
+    _derive_rag_status,
+    _merge_rag_scores,
+    _record_knowledge_backlog,
+    _resolve_backlog_language,
+)
 from app.routers.webhook.media import (
+    ASR_LOW_CONFIDENCE_MIN_CHARS,
+    ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS,
+    ASR_LOW_CONFIDENCE_MIN_WORDS,
+    ASR_LOW_CONFIDENCE_NON_LETTER_RATIO,
+    AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB,
+    MEDIA_MAX_DEFAULT_MB,
+    MEDIA_RATE_LIMIT_DEFAULTS,
+    MEDIA_STORAGE_DEFAULT_DIR,
+    MEDIA_STORAGE_MAX_BYTES,
+    MEDIA_TYPE_ALIASES,
     MediaDecision,
     MediaInfo,
+    MSG_MEDIA_RATE_LIMIT,
+    MSG_MEDIA_TOO_LARGE,
+    MSG_MEDIA_UNSUPPORTED,
+    STYLE_REFERENCE_HINT_TOKENS,
+    STYLE_REFERENCE_PATTERNS,
     _build_media_caption,
     _deserialize_media_decision,
     _evaluate_media_decision,
@@ -220,7 +300,13 @@ from app.routers.webhook.media import (
     _update_message_asr_metadata,
     _update_message_media_metadata,
 )
-from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
+from app.services.outbox_runtime_service import (
+    _ensure_rag_meta_defaults,
+    _find_message_by_conversation_created_at,
+    _find_message_by_message_id,
+    _handle_enqueue_only_accept,
+    _prepare_skip_persist,
+)
 from app.routers.webhook.pending import (
     _forward_pending_to_telegram,
     _handle_handover_confirmation_gate,
@@ -228,6 +314,7 @@ from app.routers.webhook.pending import (
     _handle_pending_gate,
 )
 from app.routers.webhook.policy import (
+    _POLICY_HANDLERS,
     _detect_booking_cancel,
     _detect_llm_guard_topics,
     _format_discounts_policy_reply,
@@ -238,6 +325,7 @@ from app.routers.webhook.policy import (
     _handle_hard_law_gate,
     _handle_policy_escalation_gate,
     _has_discount_policy_rules,
+    _is_hygiene_context_text,
     _looks_like_policy_topic,
     _looks_like_promotions_request,
     _pack_escalation_gate,
@@ -269,13 +357,62 @@ from app.routers.webhook.response import (
     _send_response as _send_response_helper,
 )
 from app.routers.webhook.router_sla import _update_router_sla
+from app.routers.webhook.class_router_runtime import (
+    CONSULT_INTERRUPT_INTENTS,
+    CONTROLLER_CONFIDENCE_THRESHOLD,
+    _build_controller_meta_output,
+    _controller_meta_updates_from_class_router,
+    _ensure_controller_output_meta,
+    _normalize_class_name,
+    _normalize_controller_fallback_reason,
+    _resolve_class_router_result,
+    _resolve_controller_signal_class,
+    _router_observability_updates_from_class_router,
+)
+from app.routers.webhook.guard_runtime import (
+    MSG_FACT_GUARD_CLARIFY,
+    MSG_MUTED_LONG,
+    MSG_MUTED_TEMP,
+    MSG_REENGAGE_CONFIRM,
+    MSG_REENGAGE_DECLINED,
+    MULTI_INTENT_LABELS,
+    SESSION_TIMEOUT_HOURS,
+    _coerce_batch_messages,
+    get_mute_settings,
+)
+from app.routers.webhook.info_followup_runtime import (
+    _looks_like_carryover_followup,
+    _looks_like_hours_followup,
+)
+from app.routers.webhook.pending_runtime import (
+    MSG_HANDOVER_DECLINED,
+    MSG_PENDING_ACK,
+    MSG_PENDING_ESCALATION,
+    MSG_PENDING_SLA_PING,
+    MSG_PENDING_STATUS,
+    MSG_PENDING_WAIT,
+    PENDING_SLA_PING_MINUTES,
+    PENDING_SLA_PING_SENT_KEY,
+    is_handover_status_question,
+)
 from app.routers.webhook.runtime_primitives import (
+    CLARIFY_MAX_ATTEMPTS,
+    CONSULT_CONTEXT_TTL_MESSAGES,
+    EVENING_GREETING_KEY,
+    EVENING_GREETING_TTL_HOURS,
+    EXPECTED_REPLY_INTENT_CHOICE,
+    EXPECTED_REPLY_NAME,
+    EXPECTED_REPLY_PHONE,
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
     INFO_ANCHOR_GROUPS,
     INFO_INTENT_PRIORITY_GENERIC,
     INFO_INTENT_PRIORITY_SERVICE,
     INFO_INTENTS,
     INFO_NON_SERVICE_INTENTS,
     INFO_SERVICE_DEPENDENT_INTENTS,
+    LOW_CONFIDENCE_MAX_RETRIES,
+    LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
     MSG_AI_ERROR,
     MSG_BOOKING_ASK_DATETIME,
     MSG_BOOKING_ASK_NAME,
@@ -284,27 +421,32 @@ from app.routers.webhook.runtime_primitives import (
     MSG_BOOKING_SPECIALIST_AVAILABILITY_FOLLOWUP,
     MSG_BOOKING_TIMEOUT_PENDING_QUESTION_TIME,
     MSG_DELIVERY_FAILED,
+    MSG_ESCALATED,
     MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    MSG_HANDOVER_CONFIRM,
+    MSG_LOW_CONFIDENCE_RETRY,
+    MSG_PENDING_LOW_CONFIDENCE,
+    MSG_STYLE_REFERENCE_NEED_MEDIA,
     QUESTION_WORD_PREFIXES,
+    QUIET_HOURS_NOTICE_KEY,
+    QUIET_HOURS_NOTICE_TTL_MINUTES,
+    ROUTING_MATRIX,
     SERVICE_CARRYOVER_TTL_MESSAGES,
     SESSION_MEMORY_SHORT_TOKENS,
+    _append_followup,
+    _combine_sidecar,
+    _contains_any,
+    should_offer_low_confidence_retry,
 )
 from app.routers.webhook.session_memory import (
+    SESSION_MEMORY_KEY,
+    SESSION_MEMORY_TTL_HOURS,
     _clear_session_memory_expected_reply,
     _get_session_memory,
     _is_session_memory_expired,
-    _is_session_reset_only_message,
-    _normalize_session_memory,
-    _parse_session_memory_time,
     _record_session_memory_update,
-    _reset_session_memory,
-    _session_memory_snapshot,
-    _set_session_memory,
-    _should_reset_session_memory,
-    _sync_session_memory_interaction_state,
     _update_session_memory_goal,
     _update_session_memory_on_answer,
-    _update_session_memory_on_question,
 )
 from app.routers.webhook.shield import _handle_shield_gate
 from app.routers.webhook.trace import (
@@ -376,6 +518,23 @@ from app.services.expected_reply_contract import (
     resolve_services_overview_contract_update,
     resolve_tool_expected_reply_contract,
 )
+from app.services.handover_owner_service import (
+    ActiveHandoverReuseRuntimeHooks,
+    PendingEscalationNotificationRuntimeHooks,
+    escalate_to_pending,
+    manager_resolve,
+    resolve_active_handover_rejection,
+    send_telegram_notification,
+)
+from app.services.handover_owner_service import (
+    _create_pending_escalation_with_notification as _handover_owner_create_pending_escalation_with_notification,
+)
+from app.services.handover_owner_service import (
+    _reuse_active_handover as _handover_owner_reuse_active_handover,
+)
+from app.services.handover_owner_service import (
+    get_active_handover as _handover_owner_get_active_handover,
+)
 from app.services.integration_guardrails_service import (
     REASON_INBOUND_WITHOUT_OUTBOUND,
     report_integration_incident,
@@ -425,43 +584,6 @@ from app.services.owner_resolver import (
     should_preserve_specialist_availability_followup_owner,
     should_preserve_specialist_followup_owner,
 )
-from app.services.timeout_owner_boundary_service import (
-    TimeoutOwnerBoundaryApplyOverrides,
-    TimeoutOwnerBoundaryInput,
-    TimeoutOwnerBoundaryRuntimeHooks,
-    TimeoutOwnerBoundaryRuntimeInput,
-    resolve_and_apply_timeout_owner_boundary,
-)
-from app.services.policy_validation_boundary_service import (
-    PolicyValidationBoundaryRuntimeHooks,
-    PolicyValidationBoundaryRuntimeInput,
-    handle_policy_validation_boundary,
-)
-from app.services.policy_timeout_degrade_boundary_service import (
-    PolicyTimeoutDegradeBoundaryRuntimeHooks,
-    PolicyTimeoutDegradeBoundaryRuntimeInput,
-    handle_policy_timeout_degrade_boundary,
-)
-from app.services.policy_timeout_recovery_boundary_service import (
-    PolicyTimeoutRecoveryBoundaryRuntimeHooks,
-    PolicyTimeoutRecoveryBoundaryRuntimeInput,
-    handle_policy_timeout_recovery_boundary,
-)
-from app.services.policy_timeout_booking_specialist_boundary_service import (
-    PolicyTimeoutBookingSpecialistBoundaryRuntimeHooks,
-    PolicyTimeoutBookingSpecialistBoundaryRuntimeInput,
-    handle_policy_timeout_booking_specialist_boundary,
-)
-from app.services.policy_timeout_booking_time_followup_boundary_service import (
-    PolicyTimeoutBookingTimeFollowupBoundaryRuntimeHooks,
-    PolicyTimeoutBookingTimeFollowupBoundaryRuntimeInput,
-    handle_policy_timeout_booking_time_followup_boundary,
-)
-from app.services.policy_core_guard_orchestration_service import (
-    PolicyCoreGuardOrchestrationRuntimeHooks,
-    PolicyCoreGuardOrchestrationRuntimeInput,
-    handle_policy_core_guard_orchestration,
-)
 from app.services.pack_runtime_service import (
     PackDecision,
     _detect_promotion_intent,
@@ -493,27 +615,60 @@ from app.services.pack_runtime_service import (
 from app.services.pack_runtime_service import (
     _normalize_text as _normalize_service_text,
 )
-from app.services.signal_manifest_service import get_booking_text_tokens
-from app.services.handover_owner_service import (
-    ActiveHandoverReuseRuntimeHooks,
-    PendingEscalationNotificationRuntimeHooks,
-    _create_pending_escalation_with_notification as _handover_owner_create_pending_escalation_with_notification,
-    _reuse_active_handover as _handover_owner_reuse_active_handover,
-    escalate_to_pending,
-    get_active_handover as _handover_owner_get_active_handover,
-    manager_resolve,
-    resolve_active_handover_rejection,
-    send_telegram_notification,
+from app.services.policy_core_guard_orchestration_service import (
+    PolicyCoreGuardOrchestrationRuntimeHooks,
+    PolicyCoreGuardOrchestrationRuntimeInput,
+    handle_policy_core_guard_orchestration,
 )
+from app.services.policy_timeout_booking_specialist_boundary_service import (
+    PolicyTimeoutBookingSpecialistBoundaryRuntimeHooks,
+    PolicyTimeoutBookingSpecialistBoundaryRuntimeInput,
+    handle_policy_timeout_booking_specialist_boundary,
+)
+from app.services.policy_timeout_booking_time_followup_boundary_service import (
+    PolicyTimeoutBookingTimeFollowupBoundaryRuntimeHooks,
+    PolicyTimeoutBookingTimeFollowupBoundaryRuntimeInput,
+    handle_policy_timeout_booking_time_followup_boundary,
+)
+from app.services.policy_timeout_degrade_boundary_service import (
+    PolicyTimeoutDegradeBoundaryRuntimeHooks,
+    PolicyTimeoutDegradeBoundaryRuntimeInput,
+    handle_policy_timeout_degrade_boundary,
+)
+from app.services.policy_timeout_recovery_boundary_service import (
+    PolicyTimeoutRecoveryBoundaryRuntimeHooks,
+    PolicyTimeoutRecoveryBoundaryRuntimeInput,
+    handle_policy_timeout_recovery_boundary,
+)
+from app.services.policy_validation_boundary_service import (
+    PolicyValidationBoundaryRuntimeHooks,
+    PolicyValidationBoundaryRuntimeInput,
+    handle_policy_validation_boundary,
+)
+from app.services.signal_manifest_service import get_booking_text_tokens
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
     PendingResumeBoundaryRuntimeHooks as ResumeBoundaryRuntimeHooks,
+)
+from app.services.state_service import (
     _derive_pending_booking_resume_boundary_payload as _state_service_derive_pending_booking_resume_boundary_payload,
+)
+from app.services.state_service import (
     _derive_pending_resume_reason as _state_service_derive_pending_resume_reason,
+)
+from app.services.state_service import (
     _resolve_pending_resume_boundary_activation as _resolve_resume_boundary_activation,
-    _resolve_resolved_handoff_resume_boundary_restore as _resolve_resolved_resume_boundary_restore,
+)
+from app.services.state_service import (
     _resolve_pending_resume_session_memory_policy as _resolve_resume_session_memory_policy,
+)
+from app.services.state_service import (
     _resolve_pending_timeout_resume_boundary_payload as _resolve_resume_timeout_boundary_payload,
+)
+from app.services.state_service import (
+    _resolve_resolved_handoff_resume_boundary_restore as _resolve_resolved_resume_boundary_restore,
+)
+from app.services.state_service import (
     apply_simulation_context,
     build_simulation_context,
     get_simulation_time,
@@ -521,6 +676,13 @@ from app.services.state_service import (
     transition_state,
 )
 from app.services.telegram_service import TelegramService
+from app.services.timeout_owner_boundary_service import (
+    TimeoutOwnerBoundaryApplyOverrides,
+    TimeoutOwnerBoundaryInput,
+    TimeoutOwnerBoundaryRuntimeHooks,
+    TimeoutOwnerBoundaryRuntimeInput,
+    resolve_and_apply_timeout_owner_boundary,
+)
 from app.services.transport_adapter import TransportSendRequest, resolve_transport_adapter
 
 # Backward-compatible exports for tests and legacy imports.
@@ -606,20 +768,20 @@ def _detect_fast_intent(
     if not message_text or booking_wants_flow or bypass_domain_flows:
         return None
 
-    from . import _legacy as legacy
-
-    if legacy.is_greeting_message(message_text):
-        return PackDecision(action="smalltalk", response=legacy.GREETING_RESPONSE, intent="greeting")
-    if legacy.is_thanks_message(message_text):
-        return PackDecision(action="smalltalk", response=legacy.THANKS_RESPONSE, intent="thanks")
-    if legacy.is_acknowledgement_message(message_text):
-        return PackDecision(action="smalltalk", response=legacy.ACKNOWLEDGEMENT_RESPONSE, intent="ack")
+    if is_greeting_message(message_text):
+        return PackDecision(action="smalltalk", response=GREETING_RESPONSE, intent="greeting")
+    if is_thanks_message(message_text):
+        return PackDecision(action="smalltalk", response=THANKS_RESPONSE, intent="thanks")
+    if is_acknowledgement_message(message_text):
+        return PackDecision(
+            action="smalltalk",
+            response=ACKNOWLEDGEMENT_RESPONSE,
+            intent="ack",
+        )
     return None
 
 
 def _detect_intent_signals(message_text: str, *, timing_context: dict | None = None) -> DecisionSignals:
-    from . import _legacy as legacy
-
     intent_hint = None
     if isinstance(timing_context, dict):
         hinted = timing_context.get("short_intent_hint")
@@ -629,37 +791,37 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
             except ValueError:
                 intent_hint = None
 
-    is_greeting = legacy.is_greeting_message(message_text)
-    is_thanks = legacy.is_thanks_message(message_text)
-    is_ack = legacy.is_acknowledgement_message(message_text)
-    is_low_signal = legacy.is_low_signal_message(message_text)
-    is_status_question = legacy.is_bot_status_question(message_text)
+    is_greeting = is_greeting_message(message_text)
+    is_thanks = is_thanks_message(message_text)
+    is_ack = is_acknowledgement_message(message_text)
+    is_low_signal = is_low_signal_message(message_text)
+    is_status_question = is_bot_status_question(message_text)
     is_human_request = is_human_request_message(message_text)
 
     if is_human_request:
         intent = Intent.HUMAN_REQUEST
-        legacy.logger.info("Intent shortcut: human_request (lexicon)")
+        logger.info("Intent shortcut: human_request (lexicon)")
     elif intent_hint == Intent.GREETING:
         intent = Intent.GREETING
-        legacy.logger.info("Intent shortcut: greeting (llm hint)")
+        logger.info("Intent shortcut: greeting (llm hint)")
     elif intent_hint == Intent.THANKS:
         intent = Intent.THANKS
-        legacy.logger.info("Intent shortcut: thanks (llm hint)")
+        logger.info("Intent shortcut: thanks (llm hint)")
     elif intent_hint == Intent.QUESTION:
         intent = Intent.QUESTION
-        legacy.logger.info("Intent shortcut: question (llm hint)")
+        logger.info("Intent shortcut: question (llm hint)")
     elif is_greeting:
         intent = Intent.GREETING
-        legacy.logger.info("Intent shortcut: greeting")
+        logger.info("Intent shortcut: greeting")
     elif is_thanks:
         intent = Intent.THANKS
-        legacy.logger.info("Intent shortcut: thanks")
+        logger.info("Intent shortcut: thanks")
     elif is_ack or is_low_signal:
         intent = Intent.OTHER
-        legacy.logger.info("Intent shortcut: acknowledgement/low-signal -> other")
+        logger.info("Intent shortcut: acknowledgement/low-signal -> other")
     else:
-        intent = legacy.classify_intent(message_text, timing_context=timing_context)
-        legacy.logger.info(f"Intent classified: {intent.value}")
+        intent = classify_intent(message_text, timing_context=timing_context)
+        logger.info(f"Intent classified: {intent.value}")
 
     if intent_hint in {Intent.GREETING, Intent.THANKS, Intent.QUESTION} and intent != Intent.HUMAN_REQUEST:
         is_greeting = intent_hint == Intent.GREETING
@@ -690,11 +852,9 @@ def _resolve_action(
     rag_confident: bool = False,
     llm_first_firebreak: bool = False,
 ) -> DecisionOutcome:
-    from . import _legacy as legacy
-
     if routing["allow_bot_reply"] and (signals.is_greeting or signals.is_thanks):
         return DecisionOutcome("smalltalk")
-    if routing["allow_bot_reply"] and state == legacy.ConversationState.PENDING.value and is_pending_status_question:
+    if routing["allow_bot_reply"] and state == ConversationState.PENDING.value and is_pending_status_question:
         return DecisionOutcome("pending_status")
     if routing["allow_bot_reply"] and signals.is_status_question:
         return DecisionOutcome("bot_status")
@@ -713,11 +873,11 @@ def _resolve_action(
         return DecisionOutcome("ai_response")
     if routing["allow_bot_reply"] and (out_of_domain_signal or signals.is_low_signal) and not rag_confident:
         return DecisionOutcome("out_of_domain")
-    if legacy._should_escalate_to_pending(routing, signals.intent):
+    if _should_escalate_to_pending(routing, signals.intent):
         return DecisionOutcome("escalate")
-    if legacy.should_escalate(signals.intent) and not routing["allow_handover_create"]:
+    if should_escalate(signals.intent) and not routing["allow_handover_create"]:
         return DecisionOutcome("pending_escalation")
-    if legacy.is_rejection(signals.intent):
+    if is_rejection(signals.intent):
         return DecisionOutcome("rejection")
     if routing["allow_bot_reply"]:
         return DecisionOutcome("ai_response")
@@ -732,33 +892,19 @@ def _llm_first_firebreak_semantic_reasons(
     rag_confident: bool,
     llm_first_firebreak: bool,
 ) -> list[str]:
-    from . import _legacy as legacy
-
     if not llm_first_firebreak or not routing.get("allow_bot_reply", False):
         return []
 
     reasons: list[str] = []
     if (out_of_domain_signal or signals.is_low_signal) and not rag_confident:
         reasons.append("out_of_domain_signal" if out_of_domain_signal else "low_signal")
-    if legacy._should_escalate_to_pending(routing, signals.intent):
+    if _should_escalate_to_pending(routing, signals.intent):
         reasons.append("escalate_to_pending_intent")
-    if legacy.should_escalate(signals.intent) and not routing.get("allow_handover_create", False):
+    if should_escalate(signals.intent) and not routing.get("allow_handover_create", False):
         reasons.append("pending_without_handover_create")
-    if legacy.is_rejection(signals.intent):
+    if is_rejection(signals.intent):
         reasons.append("rejection_intent")
     return reasons
-
-
-def is_handover_status_question(text: str) -> bool:
-    """Detect 'did you forward / when manager replies' questions in pending state."""
-    if not text:
-        return False
-
-    normalized = text.strip().casefold()
-    keywords = get_system_lexicon_list("handover_status_keywords")
-    return bool(keywords) and any(k in normalized for k in keywords)
-
-
 def _project_pending_question_evidence(
     dialog_state_service: DialogStateService,
     *,
@@ -789,20 +935,18 @@ def _should_block_expected_reply_by_info(
     message_text: str | None,
     client_slug: str | None,
 ) -> bool:
-    from . import _legacy as legacy
-
     if expected_reply_type not in {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-        legacy.EXPECTED_REPLY_NAME,
+        EXPECTED_REPLY_SERVICE,
+        EXPECTED_REPLY_TIME,
+        EXPECTED_REPLY_NAME,
     }:
         return False
     if not message_text:
         return False
-    normalized_message = legacy._normalize_service_text(message_text)
-    info_query = legacy._looks_like_info_query(message_text, client_slug=client_slug)
-    price_signal = legacy._has_price_signal(normalized_message, message_text)
-    duration_signal = legacy._has_duration_signal(normalized_message, message_text)
+    normalized_message = _normalize_service_text(message_text)
+    info_query = _looks_like_info_query(message_text, client_slug=client_slug)
+    price_signal = _has_price_signal(normalized_message, message_text)
+    duration_signal = _has_duration_signal(normalized_message, message_text)
     style_reference_signal = _is_style_reference_request(message_text, has_media=False)
     tokens = normalized_message.split()
     question_like = "?" in message_text
@@ -842,14 +986,14 @@ def _should_block_expected_reply_by_info(
         or media_offer_signal
     )
     expected_reply_candidate = None
-    if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
+    if expected_reply_type == EXPECTED_REPLY_TIME:
         expected_reply_candidate = _validate_expected_reply_value(
             expected_reply_type=expected_reply_type,
             value=message_text,
             client_slug=client_slug,
         )
     question_like_time_slot_constraint = bool(
-        expected_reply_type == legacy.EXPECTED_REPLY_TIME
+        expected_reply_type == EXPECTED_REPLY_TIME
         and _is_question_like_time_slot_constraint_candidate(
             message_text=message_text,
             candidate_value=expected_reply_candidate,
@@ -859,16 +1003,10 @@ def _should_block_expected_reply_by_info(
         info_query
         or explicit_info_interrupt
     )
-    if not blocked and expected_reply_type in {
-        legacy.EXPECTED_REPLY_TIME,
-        legacy.EXPECTED_REPLY_NAME,
-    }:
+    if not blocked and expected_reply_type in {EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
         if question_like:
             blocked = True
-    if (
-        blocked
-        and expected_reply_type == legacy.EXPECTED_REPLY_TIME
-    ):
+    if blocked and expected_reply_type == EXPECTED_REPLY_TIME:
         booking_signal = _is_booking_request(message_text, client_slug=client_slug)
         has_clock_time_signal = bool(
             re.search(r"\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
@@ -876,17 +1014,15 @@ def _should_block_expected_reply_by_info(
             or _match_booking_hour_fallback(message_text)
         )
         try:
-            has_datetime_signal = bool(
-                legacy._extract_datetime(message_text, client_slug=client_slug)
-            )
+            has_datetime_signal = bool(_extract_datetime(message_text, client_slug=client_slug))
         except TypeError:
             # Some tests patch _extract_datetime with a positional-only stub.
-            has_datetime_signal = bool(legacy._extract_datetime(message_text))
+            has_datetime_signal = bool(_extract_datetime(message_text))
         has_daypart_candidate = bool(
             isinstance(expected_reply_candidate, str)
             and expected_reply_candidate.strip()
             and _has_daypart_stem(
-                legacy.normalize_for_matching(expected_reply_candidate)
+                normalize_for_matching(expected_reply_candidate)
             )
         )
         if (
@@ -934,13 +1070,11 @@ def _is_question_like_time_slot_constraint_candidate(
     message_text: str | None,
     candidate_value: str | None,
 ) -> bool:
-    from . import _legacy as legacy
-
     if not isinstance(message_text, str) or not message_text.strip():
         return False
     if not isinstance(candidate_value, str) or not candidate_value.strip():
         return False
-    normalized_message = legacy._normalize_service_text(message_text)
+    normalized_message = _normalize_service_text(message_text)
     tokens = normalized_message.split()
     question_like = "?" in message_text
     if not question_like and tokens:
@@ -948,11 +1082,11 @@ def _is_question_like_time_slot_constraint_candidate(
     if not question_like:
         return False
     has_clock_time_signal = bool(
-        legacy.TIME_PATTERN.search(message_text)
-        or legacy.TIME_HOUR_PATTERN.search(message_text)
+        TIME_PATTERN.search(message_text)
+        or TIME_HOUR_PATTERN.search(message_text)
         or _match_booking_hour_fallback(message_text)
-        or legacy.TIME_PATTERN.search(candidate_value)
-        or legacy.TIME_HOUR_PATTERN.search(candidate_value)
+        or TIME_PATTERN.search(candidate_value)
+        or TIME_HOUR_PATTERN.search(candidate_value)
         or _match_booking_hour_fallback(candidate_value)
     )
     if has_clock_time_signal:
@@ -965,8 +1099,6 @@ def _is_daypart_only_time_slot_constraint_candidate(
     message_text: str | None,
     candidate_value: str | None,
 ) -> bool:
-    from . import _legacy as legacy
-
     if not isinstance(message_text, str) or not message_text.strip():
         return False
     if not isinstance(candidate_value, str) or not candidate_value.strip():
@@ -974,16 +1106,16 @@ def _is_daypart_only_time_slot_constraint_candidate(
     candidate_token = _pick_daypart_token(candidate_value)
     if not isinstance(candidate_token, str) or not candidate_token.strip():
         return False
-    normalized_candidate = legacy.normalize_for_matching(candidate_value)
-    normalized_token = legacy.normalize_for_matching(candidate_token)
+    normalized_candidate = normalize_for_matching(candidate_value)
+    normalized_token = normalize_for_matching(candidate_token)
     if not normalized_candidate or normalized_candidate != normalized_token:
         return False
     has_clock_time_signal = bool(
-        legacy.TIME_PATTERN.search(message_text)
-        or legacy.TIME_HOUR_PATTERN.search(message_text)
+        TIME_PATTERN.search(message_text)
+        or TIME_HOUR_PATTERN.search(message_text)
         or _match_booking_hour_fallback(message_text)
-        or legacy.TIME_PATTERN.search(candidate_value)
-        or legacy.TIME_HOUR_PATTERN.search(candidate_value)
+        or TIME_PATTERN.search(candidate_value)
+        or TIME_HOUR_PATTERN.search(candidate_value)
         or _match_booking_hour_fallback(candidate_value)
     )
     if has_clock_time_signal:
@@ -1127,13 +1259,11 @@ def _derive_timeout_active_name_time_availability_followup_slots(
 
 
 def _is_question_like_message(message_text: str | None) -> bool:
-    from . import _legacy as legacy
-
     if not isinstance(message_text, str) or not message_text.strip():
         return False
     if "?" in message_text:
         return True
-    normalized_message = legacy._normalize_service_text(message_text)
+    normalized_message = _normalize_service_text(message_text)
     tokens = normalized_message.split()
     return bool(tokens) and any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
 
@@ -1262,8 +1392,6 @@ def _apply_expected_reply_contract(
     policy_pack: dict | None,
     client_slug: str | None,
 ) -> ExpectedReplyState:
-    from . import _legacy as legacy
-
     dialog_state_service = DialogStateService()
     context_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
         context,
@@ -1272,12 +1400,12 @@ def _apply_expected_reply_contract(
     expected_reply_type = (
         context_pending_question_contract.get("expected_reply_type")
         if isinstance(context_pending_question_contract, dict)
-        else legacy._get_expected_reply_type(context)
+        else _get_expected_reply_type(context)
     )
     expected_reply_reason = (
         context_pending_question_contract.get("reason")
         if isinstance(context_pending_question_contract, dict)
-        else legacy._get_expected_reply_reason(context)
+        else _get_expected_reply_reason(context)
     )
     active_pending_question_contract = _project_pending_question_evidence(
         dialog_state_service,
@@ -1289,9 +1417,9 @@ def _apply_expected_reply_contract(
         expected_reply_type=expected_reply_type,
         expected_reply_reason=expected_reply_reason,
     )
-    intent_queue = legacy._get_intent_queue(context)
-    session_memory = legacy._get_session_memory(context)
-    re_entry_required = legacy._is_re_entry_required(context)
+    intent_queue = _get_intent_queue(context)
+    session_memory = _get_session_memory(context)
+    re_entry_required = _is_re_entry_required(context)
     memory_expected_reply_type = None
     memory_pending_question_contract = dialog_state_service.project_session_memory_pending_question_contract(
         session_memory
@@ -1305,7 +1433,7 @@ def _apply_expected_reply_contract(
         not expected_reply_type
         and session_memory
         and not re_entry_required
-        and not legacy._is_session_memory_expired(session_memory, now)
+        and not _is_session_memory_expired(session_memory, now)
     ):
         memory_active_goal = session_memory.get("active_goal")
         last_question_type = (
@@ -1313,24 +1441,24 @@ def _apply_expected_reply_contract(
             if isinstance(memory_pending_question_contract, dict)
             else None
         )
-        is_short_reply = legacy._is_short_reply(message_text)
+        is_short_reply = _is_short_reply(message_text)
         if (
             not is_short_reply
-            and last_question_type == legacy.EXPECTED_REPLY_TIME
-            and legacy._extract_datetime(message_text)
+            and last_question_type == EXPECTED_REPLY_TIME
+            and _extract_datetime(message_text)
         ):
             is_short_reply = True
         if (
             (not memory_active_goal or not current_goal or memory_active_goal == current_goal)
             and last_question_type
             in {
-                legacy.EXPECTED_REPLY_SERVICE,
-                legacy.EXPECTED_REPLY_TIME,
-                legacy.EXPECTED_REPLY_NAME,
+                EXPECTED_REPLY_SERVICE,
+                EXPECTED_REPLY_TIME,
+                EXPECTED_REPLY_NAME,
             }
             and is_short_reply
-            and not legacy._looks_like_info_query(message_text, client_slug=client_slug)
-            and not legacy._looks_like_policy_topic(
+            and not _looks_like_info_query(message_text, client_slug=client_slug)
+            and not _looks_like_policy_topic(
                 message_text,
                 policy_type=policy_type,
                 policy_pack=policy_pack,
@@ -1358,7 +1486,7 @@ def _apply_expected_reply_contract(
             }
             if active_pending_question_contract:
                 fallback_trace["pending_question_contract"] = active_pending_question_contract
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 fallback_trace,
             )
@@ -1368,7 +1496,7 @@ def _apply_expected_reply_contract(
                     updates["session_memory_expected_reply_reason"] = memory_expected_reply_reason
                 if active_pending_question_contract:
                     updates["session_memory_pending_question_contract"] = active_pending_question_contract
-                legacy._update_message_decision_metadata(saved_message, updates)
+                _update_message_decision_metadata(saved_message, updates)
 
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False
@@ -1379,7 +1507,7 @@ def _apply_expected_reply_contract(
     matched_booking_followup_expected: str | None = None
     matched_booking_filled_slots: tuple[str, ...] = ()
     expected_reply_text = (
-        legacy._select_expected_reply_message(
+        _select_expected_reply_message(
             batch_messages,
             expected_reply_type=expected_reply_type,
             client_slug=client_slug,
@@ -1389,20 +1517,20 @@ def _apply_expected_reply_contract(
     if (
         expected_reply_type
         in {
-            legacy.EXPECTED_REPLY_SERVICE,
-            legacy.EXPECTED_REPLY_TIME,
-            legacy.EXPECTED_REPLY_NAME,
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
         }
         and message_text
         and is_human_request_message(message_text)
     ):
-        context = legacy._set_expected_reply_type(context, None)
-        context, memory_payload, memory_cleared = legacy._clear_session_memory_expected_reply(
+        context = _set_expected_reply_type(context, None)
+        context, memory_payload, memory_cleared = _clear_session_memory_expected_reply(
             context,
             expected_reply_type=expected_reply_type,
             now=now,
         )
-        legacy._set_conversation_context(conversation, context)
+        _set_conversation_context(conversation, context)
         bypass_trace = {
             "stage": "question_contract",
             "decision": "bypass",
@@ -1411,9 +1539,9 @@ def _apply_expected_reply_contract(
         }
         if active_pending_question_contract:
             bypass_trace["pending_question_contract"] = active_pending_question_contract
-        legacy._record_decision_trace(conversation, bypass_trace)
+        _record_decision_trace(conversation, bypass_trace)
         if memory_cleared:
-            legacy._record_session_memory_update(
+            _record_session_memory_update(
                 conversation,
                 saved_message,
                 memory=memory_payload,
@@ -1428,14 +1556,14 @@ def _apply_expected_reply_contract(
             }
             if active_pending_question_contract:
                 bypass_updates["pending_question_contract"] = active_pending_question_contract
-            legacy._update_message_decision_metadata(saved_message, bypass_updates)
-        context = legacy._get_conversation_context(conversation)
-        context_manager = legacy._get_context_manager(context)
+            _update_message_decision_metadata(saved_message, bypass_updates)
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
         return ExpectedReplyState(
             context=context,
             context_manager=context_manager,
             expected_reply_type=None,
-            intent_queue=legacy._get_intent_queue(context),
+            intent_queue=_get_intent_queue(context),
             expected_reply_matched=False,
             expected_reply_shortcircuit=False,
             expected_reply_blocked_by_info=False,
@@ -1445,21 +1573,21 @@ def _apply_expected_reply_contract(
     booking_verification_bypass = bool(
         expected_reply_type
         in {
-            legacy.EXPECTED_REPLY_SERVICE,
-            legacy.EXPECTED_REPLY_TIME,
-            legacy.EXPECTED_REPLY_NAME,
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
         }
         and message_text
         and _looks_like_booking_verification_request(message_text)
     )
     if booking_verification_bypass:
-        context = legacy._set_expected_reply_type(context, None)
-        context, memory_payload, memory_cleared = legacy._clear_session_memory_expected_reply(
+        context = _set_expected_reply_type(context, None)
+        context, memory_payload, memory_cleared = _clear_session_memory_expected_reply(
             context,
             expected_reply_type=expected_reply_type,
             now=now,
         )
-        legacy._set_conversation_context(conversation, context)
+        _set_conversation_context(conversation, context)
         bypass_trace = {
             "stage": "question_contract",
             "decision": "bypass",
@@ -1468,9 +1596,9 @@ def _apply_expected_reply_contract(
         }
         if active_pending_question_contract:
             bypass_trace["pending_question_contract"] = active_pending_question_contract
-        legacy._record_decision_trace(conversation, bypass_trace)
+        _record_decision_trace(conversation, bypass_trace)
         if memory_cleared:
-            legacy._record_session_memory_update(
+            _record_session_memory_update(
                 conversation,
                 saved_message,
                 memory=memory_payload,
@@ -1485,14 +1613,14 @@ def _apply_expected_reply_contract(
             }
             if active_pending_question_contract:
                 bypass_updates["pending_question_contract"] = active_pending_question_contract
-            legacy._update_message_decision_metadata(saved_message, bypass_updates)
-        context = legacy._get_conversation_context(conversation)
-        context_manager = legacy._get_context_manager(context)
+            _update_message_decision_metadata(saved_message, bypass_updates)
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
         return ExpectedReplyState(
             context=context,
             context_manager=context_manager,
             expected_reply_type=None,
-            intent_queue=legacy._get_intent_queue(context),
+            intent_queue=_get_intent_queue(context),
             expected_reply_matched=False,
             expected_reply_shortcircuit=False,
             expected_reply_blocked_by_info=False,
@@ -1500,11 +1628,11 @@ def _apply_expected_reply_contract(
             current_goal=current_goal,
         )
     if expected_reply_type in {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-        legacy.EXPECTED_REPLY_NAME,
+        EXPECTED_REPLY_SERVICE,
+        EXPECTED_REPLY_TIME,
+        EXPECTED_REPLY_NAME,
     }:
-        booking_context = legacy._get_booking_context(context)
+        booking_context = _get_booking_context(context)
         deterministic_available = False
         deterministic_value = None
         normalization_flags: list[str] = []
@@ -1547,18 +1675,18 @@ def _apply_expected_reply_contract(
             answer_error = "invalid_result"
             prompt_hint = None
             last_question = booking_context.get("last_question")
-            if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+            if expected_reply_type == EXPECTED_REPLY_SERVICE:
                 prompt_hint = (
                     MSG_BOOKING_ASK_SERVICE
                     if last_question == "service"
                     else MSG_EXPECTED_SERVICE_OFF_TOPIC
                 )
-            elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
+            elif expected_reply_type == EXPECTED_REPLY_TIME:
                 prompt_hint = MSG_BOOKING_ASK_DATETIME
-            elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
+            elif expected_reply_type == EXPECTED_REPLY_NAME:
                 prompt_hint = MSG_BOOKING_ASK_NAME
-            elif expected_reply_type == legacy.EXPECTED_REPLY_PHONE:
-                prompt_hint = legacy.MSG_BOOKING_ASK_PHONE
+            elif expected_reply_type == EXPECTED_REPLY_PHONE:
+                prompt_hint = MSG_BOOKING_ASK_PHONE
 
             confirmation_pending = _get_booking_confirmation(booking_context)
             if confirmation_pending:
@@ -1576,11 +1704,11 @@ def _apply_expected_reply_contract(
                     "prompt_hint": prompt_hint,
                     "booking": booking_context,
                     "current_goal": current_goal,
-                    "service_carryover": legacy._get_service_carryover(
+                    "service_carryover": _get_service_carryover(
                         context_manager, message_count=message_count
                     ),
                 }
-                answer_result = legacy.interpret_expected_reply(
+                answer_result = interpret_expected_reply(
                     expected_reply_text,
                     expected_reply_type=expected_reply_type,
                     carryover=class_carryover,
@@ -1623,7 +1751,7 @@ def _apply_expected_reply_contract(
             )
         blocked_question_like = False
         if expected_reply_blocked_by_info and message_text:
-            normalized_message = legacy._normalize_service_text(message_text)
+            normalized_message = _normalize_service_text(message_text)
             tokens = normalized_message.split()
             blocked_question_like = "?" in message_text
             if not blocked_question_like and tokens:
@@ -1652,12 +1780,12 @@ def _apply_expected_reply_contract(
                 or not answer_result_ok
             )
             if (
-                expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                expected_reply_type == EXPECTED_REPLY_TIME
                 and isinstance(deterministic_value, str)
             ):
                 deterministic_has_time = bool(
-                    legacy.TIME_PATTERN.search(deterministic_value)
-                    or legacy.TIME_HOUR_PATTERN.search(deterministic_value)
+                    TIME_PATTERN.search(deterministic_value)
+                    or TIME_HOUR_PATTERN.search(deterministic_value)
                 )
                 if not deterministic_has_time:
                     should_use_deterministic = True
@@ -1698,7 +1826,7 @@ def _apply_expected_reply_contract(
                 # Guard against fabricated time slots: for datetime replies we only
                 # accept LLM slot values when the user text had a deterministic
                 # datetime signal in this turn.
-                if expected_reply_type == legacy.EXPECTED_REPLY_TIME and not deterministic_available:
+                if expected_reply_type == EXPECTED_REPLY_TIME and not deterministic_available:
                     answer_value_validated = False
                     slot_validation_error = "time_not_grounded"
                     answer_error = "time_not_grounded"
@@ -1742,21 +1870,21 @@ def _apply_expected_reply_contract(
                         "active": True,
                         "started_at": now.isoformat(),
                     }
-                    context = legacy._set_booking_context(context, booking_context)
-                context = legacy._apply_expected_reply_slot(
+                    context = _set_booking_context(context, booking_context)
+                context = _apply_expected_reply_slot(
                     context,
                     expected_reply_type=alternate_reply_type,
                     value=alternate_slot_value,
                 )
-                legacy._set_conversation_context(conversation, context)
-                context, memory = legacy._update_session_memory_on_answer(
+                _set_conversation_context(conversation, context)
+                context, memory = _update_session_memory_on_answer(
                     context,
                     expected_reply_type=alternate_reply_type,
                     value=alternate_slot_value,
                     now=now,
                 )
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_session_memory_update(
+                _set_conversation_context(conversation, context)
+                _record_session_memory_update(
                     conversation,
                     saved_message,
                     memory=memory,
@@ -1817,10 +1945,10 @@ def _apply_expected_reply_contract(
             matched_expected_reply_type = expected_reply_type
             if expected_slot_key:
                 matched_booking_filled_slots = (expected_slot_key,)
-        if matched and not slot_confirmation_required and isinstance(value, str) and expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
-            context = legacy._set_service_hint(context, value, now)
-            legacy._set_conversation_context(conversation, context)
-            legacy._maybe_store_service_carryover(
+        if matched and not slot_confirmation_required and isinstance(value, str) and expected_reply_type == EXPECTED_REPLY_SERVICE:
+            context = _set_service_hint(context, value, now)
+            _set_conversation_context(conversation, context)
+            _maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta={
                     "service_query": value,
@@ -1831,33 +1959,33 @@ def _apply_expected_reply_contract(
                 message_count=message_count,
                 reason="expected_reply",
             )
-            context = legacy._get_conversation_context(conversation)
+            context = _get_conversation_context(conversation)
         if matched and not slot_confirmation_required and isinstance(value, str):
-            context = legacy._apply_expected_reply_slot(
+            context = _apply_expected_reply_slot(
                 context,
                 expected_reply_type=expected_reply_type,
                 value=value,
             )
-            legacy._set_conversation_context(conversation, context)
+            _set_conversation_context(conversation, context)
             if expected_slot_key:
                 confirmation_state = _get_booking_confirmation(
-                    legacy._get_booking_context(context)
+                    _get_booking_context(context)
                 )
                 if (
                     confirmation_state
                     and confirmation_state.get("slot") == expected_slot_key
                 ):
                     booking_state = _set_booking_confirmation(
-                        legacy._get_booking_context(context), None
+                        _get_booking_context(context), None
                     )
-                    context = legacy._set_booking_context(context, booking_state)
-                    legacy._set_conversation_context(conversation, context)
+                    context = _set_booking_context(context, booking_state)
+                    _set_conversation_context(conversation, context)
         if matched and not slot_confirmation_required:
             next_expected = None
             if intent_queue:
                 context = _set_intent_queue(context, None)
                 intent_queue = None
-                legacy._record_decision_trace(
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "intent_queue",
@@ -1866,30 +1994,30 @@ def _apply_expected_reply_contract(
                     },
                 )
                 if saved_message:
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {"intent_queue_cleared": "booking_expected_reply"},
                     )
-            context = legacy._set_expected_reply_type(context, next_expected)
-            legacy._set_conversation_context(conversation, context)
+            context = _set_expected_reply_type(context, next_expected)
+            _set_conversation_context(conversation, context)
         if matched and not slot_confirmation_required and isinstance(value, str) and isinstance(expected_reply_type, str):
-            context = legacy._get_conversation_context(conversation)
-            context, memory = legacy._update_session_memory_on_answer(
+            context = _get_conversation_context(conversation)
+            context, memory = _update_session_memory_on_answer(
                 context,
                 expected_reply_type=expected_reply_type,
                 value=value,
                 now=now,
             )
-            legacy._set_conversation_context(conversation, context)
-            legacy._record_session_memory_update(
+            _set_conversation_context(conversation, context)
+            _record_session_memory_update(
                 conversation,
                 saved_message,
                 memory=memory,
                 reason="answer_matched",
             )
         if matched and slot_confirmation_required and isinstance(value, str) and expected_slot_key:
-            context = legacy._get_conversation_context(conversation)
-            booking_state = legacy._get_booking_context(context)
+            context = _get_conversation_context(conversation)
+            booking_state = _get_booking_context(context)
             if not _get_booking_confirmation(booking_state):
                 confirmation = {
                     "slot": expected_slot_key,
@@ -1898,26 +2026,26 @@ def _apply_expected_reply_contract(
                     "source": slot_source,
                 }
                 booking_state = _set_booking_confirmation(booking_state, confirmation)
-                context = legacy._set_booking_context(context, booking_state)
-                legacy._set_conversation_context(conversation, context)
+                context = _set_booking_context(context, booking_state)
+                _set_conversation_context(conversation, context)
         if expected_reply_shortcircuit:
             if not expected_reply_reason or expected_reply_reason == "booking_prompt":
-                context_manager = legacy._get_context_manager(context)
+                context_manager = _get_context_manager(context)
                 if context_manager.get("current_goal") != "booking":
                     context_manager["current_goal"] = "booking"
-                    context = legacy._set_context_manager(context, context_manager)
-                    legacy._set_conversation_context(conversation, context)
-                    legacy._record_context_manager_decision(
+                    context = _set_context_manager(context, context_manager)
+                    _set_conversation_context(conversation, context)
+                    _record_context_manager_decision(
                         conversation,
                         saved_message,
                         decision="current_goal",
                         updates={"current_goal": "booking"},
                     )
-                    context, memory = legacy._update_session_memory_goal(
+                    context, memory = _update_session_memory_goal(
                         context, active_goal="booking", now=now
                     )
-                    legacy._set_conversation_context(conversation, context)
-                    legacy._record_session_memory_update(
+                    _set_conversation_context(conversation, context)
+                    _record_session_memory_update(
                         conversation,
                         saved_message,
                         memory=memory,
@@ -1933,7 +2061,7 @@ def _apply_expected_reply_contract(
                 answer_meta["answer_error"] = "none"
         pending_question_slot_constraint = bool(
             matched
-            and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+            and expected_reply_type == EXPECTED_REPLY_TIME
             and _is_time_slot_constraint_candidate(
                 message_text=message_text,
                 candidate_value=value if isinstance(value, str) and value.strip() else answer_value,
@@ -1942,13 +2070,13 @@ def _apply_expected_reply_contract(
         )
         if pending_question_slot_constraint:
             current_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
-                legacy._get_conversation_context(conversation),
+                _get_conversation_context(conversation),
                 session_memory_key="__disabled_session_memory__",
             )
             current_expected_reply = (
                 current_pending_question_contract.get("expected_reply_type")
                 if isinstance(current_pending_question_contract, dict)
-                else legacy._get_expected_reply_type(legacy._get_conversation_context(conversation))
+                else _get_expected_reply_type(_get_conversation_context(conversation))
             )
             interaction_pending_question_contract = _project_pending_question_evidence(
                 dialog_state_service,
@@ -1985,7 +2113,7 @@ def _apply_expected_reply_contract(
                 }
                 if interaction_pending_question_contract:
                     interaction_updates["pending_question_contract"] = interaction_pending_question_contract
-                legacy._update_message_decision_metadata(saved_message, interaction_updates)
+                _update_message_decision_metadata(saved_message, interaction_updates)
         trace_payload = {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
@@ -1999,7 +2127,7 @@ def _apply_expected_reply_contract(
         if expected_reply_blocked_by_info:
             trace_payload["expected_reply_blocked_by_info"] = True
             trace_payload.update(
-                legacy._set_router_observability(
+                _set_router_observability(
                     saved_message,
                     eligible=True,
                     reason="none",
@@ -2008,7 +2136,7 @@ def _apply_expected_reply_contract(
         trace_payload.update(answer_meta)
         if not answer_value_validated:
             trace_payload["expected_reply_value_validated"] = False
-        legacy._record_decision_trace(conversation, trace_payload)
+        _record_decision_trace(conversation, trace_payload)
         if saved_message:
             updates = {
                 "expected_reply_type": expected_reply_type,
@@ -2024,10 +2152,10 @@ def _apply_expected_reply_contract(
             updates.update(answer_meta)
             if not answer_value_validated:
                 updates["expected_reply_value_validated"] = False
-            legacy._update_message_decision_metadata(saved_message, updates)
+            _update_message_decision_metadata(saved_message, updates)
         if matched_expected_reply_type:
-            followup_context = legacy._get_conversation_context(conversation)
-            followup_booking_state = legacy._get_booking_context(followup_context)
+            followup_context = _get_conversation_context(conversation)
+            followup_booking_state = _get_booking_context(followup_context)
             (
                 matched_booking_followup_state,
                 matched_booking_followup_expected,
@@ -2038,12 +2166,12 @@ def _apply_expected_reply_contract(
                 merged_slots=None,
                 client_slug=client_slug,
             )
-        context = legacy._get_conversation_context(conversation)
-        expected_reply_type = legacy._get_expected_reply_type(context)
-        intent_queue = legacy._get_intent_queue(context)
+        context = _get_conversation_context(conversation)
+        expected_reply_type = _get_expected_reply_type(context)
+        intent_queue = _get_intent_queue(context)
 
-    context = legacy._get_conversation_context(conversation)
-    context_manager = legacy._get_context_manager(context)
+    context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
     return ExpectedReplyState(
         context=context,
         context_manager=context_manager,
@@ -2090,8 +2218,6 @@ def _run_intent_decomposition(
     client_slug: str | None,
     timing_context: dict | None = None,
 ) -> IntentDecompositionState:
-    from . import _legacy as legacy
-
     intent_decomp_payload = None
     intent_decomp_intents: list[str] = []
     intent_decomp_primary = None
@@ -2118,9 +2244,9 @@ def _run_intent_decomposition(
     booking_expected_reply_turn = bool(
         expected_reply_type
         in {
-            legacy.EXPECTED_REPLY_SERVICE,
-            legacy.EXPECTED_REPLY_TIME,
-            legacy.EXPECTED_REPLY_NAME,
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
         }
         and (booking_signal or booking_slot_signal or expected_reply_shortcircuit)
         and not expected_reply_blocked_by_info
@@ -2157,9 +2283,9 @@ def _run_intent_decomposition(
         controller_reserve_ms = max(float(CONTROLLER_TIMEOUT_SECONDS) * 1000, 0.0)
         controller_reserve_ms += max(float(POLICY_CORE_TIMEOUT_SECONDS) * 1000, 0.0)
         if expected_reply_type in {
-            legacy.EXPECTED_REPLY_SERVICE,
-            legacy.EXPECTED_REPLY_TIME,
-            legacy.EXPECTED_REPLY_NAME,
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
         }:
             controller_reserve_ms += max(float(ANSWER_INTERPRETER_TIMEOUT_SECONDS) * 1000, 0.0)
     if critical_booking_turn and _current_openai_api_key():
@@ -2200,8 +2326,8 @@ def _run_intent_decomposition(
             )
             trace_payload["pending_question_contract"] = intent_decomp_pending_question_contract
         if saved_message:
-            legacy._update_message_decision_metadata(saved_message, meta_updates)
-        legacy._record_decision_trace(conversation, trace_payload)
+            _update_message_decision_metadata(saved_message, meta_updates)
+        _record_decision_trace(conversation, trace_payload)
 
     if (
         allow_intent_decomp
@@ -2212,7 +2338,7 @@ def _run_intent_decomposition(
         allow_intent_decomp = False
         intent_decomp_skipped_reason = "booking_critical_path_budget_reserved"
         if saved_message:
-            legacy._update_message_decision_metadata(
+            _update_message_decision_metadata(
                 saved_message,
                 {
                     "intent_decomp_skipped_reason": intent_decomp_skipped_reason,
@@ -2220,7 +2346,7 @@ def _run_intent_decomposition(
                     "intent_decomp_budget_required_ms": round(intent_decomp_budget_required_ms, 2),
                 },
             )
-        legacy._record_decision_trace(
+        _record_decision_trace(
             conversation,
             {
                 "stage": "intent_decomposition",
@@ -2232,7 +2358,7 @@ def _run_intent_decomposition(
         )
 
     if allow_intent_decomp:
-        intent_decomp_payload = legacy.detect_multi_intent(
+        intent_decomp_payload = detect_multi_intent(
             message_text,
             client_slug=client_slug,
             timing_context=timing_context,
@@ -2290,7 +2416,7 @@ def _run_intent_decomposition(
             if consult_question:
                 consult_meta["consult_question"] = consult_question
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "intent_decomp_used": True,
@@ -2301,7 +2427,7 @@ def _run_intent_decomposition(
                         **consult_meta,
                     },
                 )
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "intent_decomposition",
@@ -2316,8 +2442,8 @@ def _run_intent_decomposition(
                 },
             )
 
-    if expected_reply_type == legacy.EXPECTED_REPLY_INTENT_CHOICE and intent_queue and message_text:
-        intent_queue_choice = legacy._select_intent_from_queue(
+    if expected_reply_type == EXPECTED_REPLY_INTENT_CHOICE and intent_queue and message_text:
+        intent_queue_choice = _select_intent_from_queue(
             intent_queue,
             intent_decomp_intents if intent_decomp_used else [],
             message_text=message_text,
@@ -2332,7 +2458,7 @@ def _run_intent_decomposition(
                     intent for intent in intent_queue if intent != intent_queue_choice
                 ]
                 pending_expected_reply_type = (
-                    legacy.EXPECTED_REPLY_INTENT_CHOICE if pending_intent_queue else None
+                    EXPECTED_REPLY_INTENT_CHOICE if pending_intent_queue else None
                 )
                 intent_queue_expected_next = pending_expected_reply_type
             intent_queue_event = {
@@ -2386,7 +2512,7 @@ def _run_intent_decomposition(
             intent_decomp_set=intent_decomp_set,
             client_slug=client_slug,
         )
-        if legacy._matches_guest_policy_lexicon(message_text, client_slug=client_slug):
+        if _matches_guest_policy_lexicon(message_text, client_slug=client_slug):
             if not isinstance(info_class_meta, dict):
                 info_class_meta = {}
             info_signals = info_class_meta.get("info_signals")
@@ -2399,7 +2525,7 @@ def _run_intent_decomposition(
         use_carryover_intents = bool(
             expected_reply_shortcircuit and current_goal != "booking"
         )
-        if not use_carryover_intents and legacy._looks_like_carryover_followup(message_text):
+        if not use_carryover_intents and _looks_like_carryover_followup(message_text):
             use_carryover_intents = True
         if use_carryover_intents:
             carryover_intents = class_carryover.get("intents")
@@ -2424,8 +2550,8 @@ def _run_intent_decomposition(
     guest_policy_signal = bool(
         isinstance(info_signals, dict) and info_signals.get("guest")
     )
-    carryover_followup = legacy._looks_like_carryover_followup(message_text)
-    hours_followup = legacy._looks_like_hours_followup(message_text)
+    carryover_followup = _looks_like_carryover_followup(message_text)
+    hours_followup = _looks_like_hours_followup(message_text)
     expected_reply_followup = bool(
         expected_reply_shortcircuit and current_goal != "booking"
     )
@@ -2517,7 +2643,7 @@ def _run_intent_decomposition(
                         "carryover_ignored_reason": carryover_reason,
                     },
                 )
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "carryover_guard",
@@ -2528,7 +2654,7 @@ def _run_intent_decomposition(
         if not preserve_info_carryover and not force_keep_info_carryover:
             class_carryover = None
     consult_interrupt_intents = (
-        intent_decomp_set & legacy.CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
+        intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
     )
     consult_context_active = bool(
         isinstance(consult_context, dict)
@@ -2553,9 +2679,9 @@ def _run_intent_decomposition(
         consult_return_reason = (
             "intent_interrupt" if consult_interrupt_intents else "booking_signal"
         )
-        consult_return_prompt = legacy._build_consult_return_prompt(consult_context)
+        consult_return_prompt = _build_consult_return_prompt(consult_context)
     if intent_decomp_used:
-        new_goal = legacy._resolve_current_goal(
+        new_goal = _resolve_current_goal(
             intent_decomp_set,
             consult_intent,
             expected_reply_type,
@@ -2565,49 +2691,49 @@ def _run_intent_decomposition(
             current_goal == "consult" and consult_return_pending
         ):
             if new_goal and new_goal != current_goal:
-                context = legacy._get_conversation_context(conversation)
-                context_manager = legacy._get_context_manager(context)
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
                 context_manager["current_goal"] = new_goal
-                context = legacy._set_context_manager(context, context_manager)
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_context_manager_decision(
+                context = _set_context_manager(context, context_manager)
+                _set_conversation_context(conversation, context)
+                _record_context_manager_decision(
                     conversation,
                     saved_message,
                     decision="current_goal",
                     updates={"current_goal": new_goal},
                 )
-                context, memory = legacy._update_session_memory_goal(
+                context, memory = _update_session_memory_goal(
                     context, active_goal=new_goal, now=now
                 )
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_session_memory_update(
+                _set_conversation_context(conversation, context)
+                _record_session_memory_update(
                     conversation,
                     saved_message,
                     memory=memory,
                     reason="active_goal",
                 )
-                legacy._update_compact_summary(
+                _update_compact_summary(
                     conversation=conversation,
                     saved_message=saved_message,
                     reason="intent_change",
                     now=now,
                 )
-                context = legacy._get_conversation_context(conversation)
+                context = _get_conversation_context(conversation)
                 current_goal = new_goal
     if booking_context is not None:
-        booking_context = legacy._get_conversation_context(conversation)
-        booking = legacy._get_booking_context(booking_context)
+        booking_context = _get_conversation_context(conversation)
+        booking = _get_booking_context(booking_context)
         booking_active = bool(booking.get("active"))
 
     if (
         intent_decomp_used
         and not consult_intent
         and not intent_decomp_service_query
-        and intent_decomp_set & legacy.SERVICE_CARRYOVER_INTENTS
+        and intent_decomp_set & SERVICE_CARRYOVER_INTENTS
         and allow_service_carryover
     ):
         skip_service_carryover = False
-        if isinstance(class_carryover, dict) and legacy._looks_like_hours_followup(message_text):
+        if isinstance(class_carryover, dict) and _looks_like_hours_followup(message_text):
             raw_sections = class_carryover.get("info_sections")
             if isinstance(raw_sections, list):
                 for section in raw_sections:
@@ -2615,9 +2741,9 @@ def _run_intent_decomposition(
                         skip_service_carryover = True
                         break
         if not skip_service_carryover:
-            context = legacy._get_conversation_context(conversation)
-            context_manager = legacy._get_context_manager(context)
-            carryover = legacy._get_service_carryover(context_manager, message_count=message_count)
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            carryover = _get_service_carryover(context_manager, message_count=message_count)
             if carryover and isinstance(intent_decomp_payload, dict):
                 intent_decomp_payload = dict(intent_decomp_payload)
                 intent_decomp_payload["service_query"] = carryover["service_query"]
@@ -2632,7 +2758,7 @@ def _run_intent_decomposition(
                     else 1.0
                 )
                 if saved_message:
-                    legacy._update_message_decision_metadata(
+                    _update_message_decision_metadata(
                         saved_message,
                         {
                             "service_query": carryover["service_query"],
@@ -2644,7 +2770,7 @@ def _run_intent_decomposition(
                             "projection_source": carryover.get("projection_source"),
                         },
                     )
-                legacy._record_decision_trace(
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "service_carryover",
@@ -2659,7 +2785,7 @@ def _run_intent_decomposition(
                     },
                 )
     intent_decomp_has_booking = "booking" in intent_decomp_set
-    intent_decomp_info = intent_decomp_set & legacy.BOOKING_INFO_QUESTION_TYPES
+    intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
     booking_slot_override = booking_slot_signal and (
         not intent_decomp_used or not intent_decomp_set or intent_decomp_set <= {"other"}
     )
@@ -2694,7 +2820,7 @@ def _run_intent_decomposition(
                 }
             elif not intent_decomp_used and not booking_slot_override:
                 if preserve_booking_signal_on_expected_service_turn:
-                    legacy._record_decision_trace(
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "booking_gate",
@@ -2704,7 +2830,7 @@ def _run_intent_decomposition(
                         },
                     )
                     if saved_message:
-                        legacy._update_message_decision_metadata(
+                        _update_message_decision_metadata(
                             saved_message,
                             {"booking_expected_reply_turn_preserved": True},
                         )
@@ -2716,7 +2842,7 @@ def _run_intent_decomposition(
             booking_signal = False
 
     booking_wants_flow = (
-        legacy._should_run_booking_flow(
+        _should_run_booking_flow(
             routing,
             booking_active=booking_active,
             booking_signal=booking_signal,
@@ -2728,7 +2854,7 @@ def _run_intent_decomposition(
         if booking_signal or booking_wants_flow:
             booking_signal = False
             booking_wants_flow = False
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "booking_gate",
@@ -2737,7 +2863,7 @@ def _run_intent_decomposition(
                 },
             )
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {"booking_bypassed_reason": "human_request"},
                 )
@@ -2745,7 +2871,7 @@ def _run_intent_decomposition(
         booking_signal = False
         booking_wants_flow = False
     if booking_block_meta:
-        legacy._record_decision_trace(
+        _record_decision_trace(
             conversation,
             {
                 "stage": "booking_gate",
@@ -2760,21 +2886,21 @@ def _run_intent_decomposition(
                 else None
             )
             if not isinstance(existing_meta, dict) or "booking_blocked_reason" not in existing_meta:
-                legacy._update_message_decision_metadata(saved_message, booking_block_meta)
+                _update_message_decision_metadata(saved_message, booking_block_meta)
         if booking_active:
             context = (
                 booking_context
                 if isinstance(booking_context, dict)
-                else legacy._get_conversation_context(conversation)
+                else _get_conversation_context(conversation)
             )
             booking_state = (
-                booking if isinstance(booking, dict) else legacy._get_booking_context(context)
+                booking if isinstance(booking, dict) else _get_booking_context(context)
             )
             booking_state = dict(booking_state)
             booking_state["active"] = False
             booking_state["last_question"] = None
-            context = legacy._set_booking_context(context, booking_state)
-            legacy._set_conversation_context(conversation, context)
+            context = _set_booking_context(context, booking_state)
+            _set_conversation_context(conversation, context)
             booking_active = False
             booking = booking_state
         booking_signal = False
@@ -2831,8 +2957,8 @@ def _run_intent_decomposition(
             ),
         )
 
-    context = legacy._get_conversation_context(conversation)
-    context_manager = legacy._get_context_manager(context)
+    context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
     return IntentDecompositionState(
         intent_decomp_payload=intent_decomp_payload,
         intent_decomp_intents=intent_decomp_intents,
@@ -2888,16 +3014,14 @@ def _build_router_state(
     booking_signal: bool,
     record_llm_budget_trace: Callable[[], None],
 ) -> dict[str, Any]:
-    from . import _legacy as legacy
-
-    controller_signal_class = legacy._resolve_controller_signal_class(
+    controller_signal_class = _resolve_controller_signal_class(
         intent_decomp_set=intent_decomp_set,
         booking_signal=booking_signal,
     )
     controller_state: dict[str, Any] | None = {
         "used": False,
         "confidence": 0.0,
-        "output": legacy._build_controller_meta_output(error="skipped"),
+        "output": _build_controller_meta_output(error="skipped"),
         "error": "skipped",
         "fallback_reason": "skipped",
         "signal_class": controller_signal_class,
@@ -2929,14 +3053,12 @@ def _build_router_state(
         controller_state["used_reason"] = "budget_guard"
         controller_state["budget_remaining_ms"] = round(controller_budget_remaining_ms, 2)
         controller_state["budget_required_ms"] = round(WEBHOOK_CONTROLLER_MIN_BUDGET_MS, 2)
-        controller_state["output"] = legacy._build_controller_meta_output(
-            error="budget_exceeded"
-        )
+        controller_state["output"] = _build_controller_meta_output(error="budget_exceeded")
     if controller_should_attempt:
         controller_state["attempted"] = True
         controller_state["error"] = None
         controller_state["fallback_reason"] = "skipped"
-        controller_result = legacy.route_dialogue_controller(
+        controller_result = route_dialogue_controller(
             message_text,
             carryover=class_carryover,
             expected_reply_type=expected_reply_type,
@@ -2947,15 +3069,16 @@ def _build_router_state(
         if isinstance(controller_result, dict) and controller_result.get("ok") is True:
             controller_output = controller_result.get("payload")
             if isinstance(controller_output, dict):
-                controller_state["output"] = legacy._ensure_controller_output_meta(
-                    controller_output, error=None
+                controller_state["output"] = _ensure_controller_output_meta(
+                    controller_output,
+                    error=None,
                 )
                 confidence = controller_output.get("confidence")
                 if isinstance(confidence, (int, float)):
                     controller_state["confidence"] = float(confidence)
             controller_class = controller_output.get("class")
             normalized_class = (
-                legacy._normalize_class_name(controller_class)
+                _normalize_class_name(controller_class)
                 if isinstance(controller_class, str) and controller_class.strip()
                 else None
             )
@@ -2967,7 +3090,7 @@ def _build_router_state(
                 controller_state["fallback_reason"] = None
             else:
                 controller_state["used"] = False
-                controller_state["fallback_reason"] = legacy._normalize_controller_fallback_reason(
+                controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
                     error="invalid_class"
                 )
         else:
@@ -2976,17 +3099,17 @@ def _build_router_state(
                 if isinstance(controller_result, dict)
                 else "controller_failed"
             )
-            controller_state["fallback_reason"] = legacy._normalize_controller_fallback_reason(
+            controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
                 error=controller_state["error"]
             )
             controller_state["confidence"] = 0.0
             controller_output = controller_result.get("payload") if isinstance(controller_result, dict) else None
             if isinstance(controller_output, dict):
-                controller_state["output"] = legacy._ensure_controller_output_meta(
+                controller_state["output"] = _ensure_controller_output_meta(
                     controller_output, error=controller_state["error"]
                 )
             else:
-                controller_state["output"] = legacy._build_controller_meta_output(
+                controller_state["output"] = _build_controller_meta_output(
                     error=controller_state["error"]
                 )
 
@@ -2994,13 +3117,13 @@ def _build_router_state(
     if isinstance(controller_state, dict):
         controller_output = controller_state.get("output")
         if isinstance(controller_output, dict):
-            controller_output = legacy._ensure_controller_output_meta(
+            controller_output = _ensure_controller_output_meta(
                 controller_output, error=controller_state.get("error")
             )
             controller_state["output"] = controller_output
             controller_error_value = controller_output.get("controller_error")
         else:
-            controller_state["output"] = legacy._build_controller_meta_output(
+            controller_state["output"] = _build_controller_meta_output(
                 error=str(controller_state.get("error") or "controller_failed")
             )
             controller_error_value = controller_state["output"].get("controller_error")
@@ -3017,7 +3140,7 @@ def _build_router_state(
         controller_fallback = controller_fallback_reason not in (None, "skipped")
         controller_state["timeout"] = controller_timeout
         controller_state["fallback"] = controller_fallback
-        controller_state["sla"] = legacy._update_router_sla(  # reuse SLA tracker
+        controller_state["sla"] = _update_router_sla(  # reuse SLA tracker
             attempted=bool(controller_state.get("attempted")),
             fallback=bool(controller_fallback),
             timeout=bool(controller_timeout),
@@ -3043,14 +3166,12 @@ def _run_class_router_stage(
     expected_reply_shortcircuit: bool,
     log_timing: Callable[[str, float, dict | None], None],
 ) -> IntentRoutingState:
-    from . import _legacy as legacy
-
     intent_t0 = time.monotonic()
     decision_text = _normalize_message_text(message_text)
     signals = _detect_intent_signals(decision_text, timing_context=timing_context)
     intent = signals.intent
     intent_contract, intent_error = build_intent_contract(signals, intent_decomp_payload)
-    legacy._record_decision_trace(
+    _record_decision_trace(
         conversation,
         {
             "stage": "contract",
@@ -3061,23 +3182,23 @@ def _run_class_router_stage(
         },
     )
 
-    domain_intent = legacy.DomainIntent.UNKNOWN
+    domain_intent = DomainIntent.UNKNOWN
     domain_in_score = 0.0
     domain_out_score = 0.0
     domain_meta: dict = {}
     if (
-        conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        conversation.state == ConversationState.BOT_ACTIVE.value
         and not (signals.is_greeting or signals.is_thanks or signals.is_ack or signals.is_low_signal)
         and not signals.is_status_question
     ):
-        domain_intent, domain_in_score, domain_out_score, domain_meta = legacy.classify_domain_with_scores(
+        domain_intent, domain_in_score, domain_out_score, domain_meta = classify_domain_with_scores(
             message_text, client_config
         )
-        log_scores = legacy._is_env_enabled(
+        log_scores = _is_env_enabled(
             os.environ.get("DOMAIN_ROUTER_LOG_SCORES"), default=False
         )
-        if log_scores and (domain_intent != legacy.DomainIntent.UNKNOWN or max(domain_in_score, domain_out_score) >= 0.45):
-            legacy.logger.info(
+        if log_scores and (domain_intent != DomainIntent.UNKNOWN or max(domain_in_score, domain_out_score) >= 0.45):
+            logger.info(
                 "Domain scores",
                 extra={
                     "context": {
@@ -3111,7 +3232,7 @@ def _run_class_router_stage(
         client_slug=client_slug,
         intent_decomp_payload=intent_decomp_payload,
     )
-    class_router_result = legacy._resolve_class_router_result(
+    class_router_result = _resolve_class_router_result(
         info_intents=info_class_intents,
         info_meta=info_class_meta,
         booking_signal=booking_signal,
@@ -3130,7 +3251,7 @@ def _run_class_router_stage(
             client_slug=client_slug,
         )
         if fallback_info_intents:
-            class_router_result = legacy._resolve_class_router_result(
+            class_router_result = _resolve_class_router_result(
                 info_intents=fallback_info_intents,
                 info_meta=fallback_info_meta,
                 booking_signal=booking_signal,
@@ -3158,7 +3279,7 @@ def _run_class_router_stage(
             and controller_class_hint.strip().casefold() == "booking"
         )
     if (
-        conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        conversation.state == ConversationState.BOT_ACTIVE.value
         and intent == Intent.OTHER
         and not expected_reply_shortcircuit
         and not in_signals
@@ -3188,7 +3309,7 @@ def _run_class_router_stage(
         },
     )
 
-    router_meta = legacy._set_router_observability(
+    router_meta = _set_router_observability(
         saved_message,
         eligible=not expected_reply_shortcircuit,
         reason="expected_reply_shortcircuit" if expected_reply_shortcircuit else "none",
@@ -3235,9 +3356,9 @@ def _run_class_router_stage(
         "controller_goal": controller_goal,
     }
     trace_payload.update(router_meta)
-    legacy._record_decision_trace(conversation, trace_payload)
+    _record_decision_trace(conversation, trace_payload)
     if saved_message:
-        legacy._update_message_decision_metadata(
+        _update_message_decision_metadata(
             saved_message,
             {
                 "class_router": class_router_result,
@@ -3321,7 +3442,7 @@ def _run_class_router_stage(
         )
         _update_message_signal_snapshot(saved_message, signal_snapshot)
 
-    legacy._record_decision_trace(
+    _record_decision_trace(
         conversation,
         {
             "stage": "intent",
@@ -3345,15 +3466,13 @@ def _run_class_router_stage(
         out_of_domain_signal=out_of_domain_signal,
     )
 
-# Legacy webhook orchestrator + helpers moved from _legacy.py.
+# Legacy webhook orchestrator + helpers moved from _py.
 
 logger = get_logger("webhook")
 BOOK_SLOT_TOOL_ACTION = "calendar.book_slot"
 DEFAULT_MANAGER_REQUEST_MESSAGE = "Клиент запросил менеджера."
 DEFAULT_BOOKING_CLARIFY_MESSAGE = "Клиент ожидает уточнение по записи."
 WEEKEND_RELATIVE_DAY_TOKEN = "в субботу"
-_CARRYOVER_CAPACITY_LEAD_PREFIX = "скольк"
-_CARRYOVER_CAPACITY_TOKENS = ("мест",)
 _KAZAKH_LANGUAGE_HINT_TOKENS = ("қазақша", "казах", "қазақ", "қазак")
 _RUSSIAN_LANGUAGE_HINT_TOKENS = ("по-русски", "русск")
 _MEMORY_CONSENT_REPLY_TOKENS = ("ответьте", "да", "нет")
@@ -3381,9 +3500,6 @@ _DEDUP_EXPORTS = (
 )
 ROUTER_SIGNAL_CONFIDENCE_BONUS = 0.1
 ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
-CONTROLLER_CONFIDENCE_THRESHOLD = float(
-    os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
-)
 WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 18000
 WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_DEFAULT_MS = 4500.0
 WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS = 2200.0
@@ -3484,102 +3600,6 @@ def _llm_first_firebreak_enabled() -> bool:
     )
 
 
-MEDIA_TYPE_ALIASES = {
-    "image": "photo",
-    "photo": "photo",
-    "jpg": "photo",
-    "jpeg": "photo",
-    "png": "photo",
-    "audio": "audio",
-    "voice": "audio",
-    "ptt": "audio",
-    "document": "document",
-    "pdf": "document",
-    "doc": "document",
-    "docx": "document",
-    "xlsx": "document",
-    "xls": "document",
-    "video": "video",
-}
-MEDIA_MAX_DEFAULT_MB = {"photo": 8, "audio": 8, "document": 10}
-MEDIA_RATE_LIMIT_DEFAULTS = {
-    "count": 5,
-    "window_seconds": 600,
-    "daily_count": 20,
-    "bytes_mb": 30,
-    "block_seconds": 900,
-}
-MEDIA_STORAGE_DEFAULT_DIR = os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media")
-MEDIA_STORAGE_MAX_BYTES = 25 * 1024 * 1024
-AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB = 2.0
-
-STYLE_REFERENCE_PATTERNS = (
-    re.compile(r"\bкак на (фото|картин\w+|примере)\b"),
-    re.compile(r"\bпо (фото|картин\w+|референс\w*)\b"),
-    re.compile(r"\bреференс\w*\b"),
-    re.compile(r"\bреф\b"),
-    re.compile(r"\bв стиле\b"),
-    re.compile(r"\bпохоже на\b"),
-    re.compile(r"\b(прислать|отправить|скинуть)\s+(фото|картин\w+|референс\w*)\b"),
-    re.compile(r"\b(send|share|upload)\s+(a\s+)?(photo|picture|reference)\b"),
-)
-STYLE_REFERENCE_HINT_TOKENS = ("фото", "картин", "референс", "реф", "пример")
-
-
-def _find_message_by_message_id(db: Session, client_id: UUID, message_id: str) -> Message | None:
-    if not message_id:
-        return None
-    return (
-        db.query(Message)
-        .filter(
-            Message.client_id == client_id,
-            or_(
-                Message.message_metadata["message_id"].astext == message_id,
-                Message.message_metadata["messageId"].astext == message_id,
-            ),
-        )
-        .order_by(Message.created_at.desc())
-        .first()
-    )
-
-
-def _find_message_by_conversation_created_at(
-    db: Session,
-    conversation_id: UUID,
-    created_at: datetime | None,
-    *,
-    message_text: str | None = None,
-    lookback_seconds: int = 120,
-) -> Message | None:
-    if not conversation_id or not created_at:
-        return None
-    window_start = created_at - timedelta(seconds=lookback_seconds)
-    window_end = created_at + timedelta(seconds=lookback_seconds)
-    rows = (
-        db.query(Message)
-        .filter(
-            Message.conversation_id == conversation_id,
-            Message.role == "user",
-            Message.created_at >= window_start,
-            Message.created_at <= window_end,
-        )
-        .order_by(Message.created_at.desc())
-        .limit(5)
-        .all()
-    )
-    if not rows:
-        return None
-    normalized_target = normalize_for_matching(message_text) if message_text else ""
-    if normalized_target:
-        for msg in rows:
-            if normalize_for_matching(msg.content or "") == normalized_target:
-                return msg
-    return min(
-        rows,
-        key=lambda msg: abs((msg.created_at - created_at).total_seconds()) if msg.created_at else float("inf"),
-    )
-
-
 def _router_observability_meta(*, eligible: bool, reason: str) -> dict:
     return {
         "router_eligible": bool(eligible),
@@ -3604,12 +3624,6 @@ _OBSERVABILITY_REASONS_PROTECTED = {
     "expected_reply_deferred",
     "none",
 }
-
-
-def _contains_any_text_token(text: str | None, tokens: tuple[str, ...]) -> bool:
-    if not isinstance(text, str) or not text:
-        return False
-    return any(token in text for token in tokens)
 
 
 def _contains_all_text_tokens(text: str | None, tokens: tuple[str, ...]) -> bool:
@@ -3657,54 +3671,6 @@ def _set_policy_core_tool_observability(message: Message | None) -> None:
         updates["controller_skipped_reason"] = "policy_core_tool"
     if updates:
         _update_message_decision_metadata(message, updates)
-
-
-_DEFAULT_RAG_SCORES = {"bm25_max": 0.0, "vector_max": 0.0, "hybrid_max": 0.0}
-
-
-def _merge_rag_scores(rag_scores: dict | None) -> dict:
-    merged = dict(rag_scores) if isinstance(rag_scores, dict) else {}
-    for key, value in _DEFAULT_RAG_SCORES.items():
-        if not isinstance(merged.get(key), (int, float)):
-            merged[key] = value
-    return merged if merged else dict(_DEFAULT_RAG_SCORES)
-
-
-def _derive_rag_status(
-    *,
-    rag_scores: dict,
-    rag_best_score: float | None,
-    rag_attempted: bool,
-) -> tuple[bool, str | None]:
-    if not rag_attempted:
-        return False, "overridden_by_gate"
-    best_score = float(rag_best_score or 0.0)
-    if best_score >= MID_CONFIDENCE_THRESHOLD:
-        return True, None
-    vector_count = int(rag_scores.get("vector_count") or 0)
-    bm25_count = int(rag_scores.get("bm25_count") or 0)
-    if vector_count <= 0 and bm25_count <= 0:
-        return False, "empty"
-    return False, "low_score"
-
-
-def _ensure_rag_meta_defaults(message: Message | None) -> None:
-    if not message:
-        return
-    metadata = dict(message.message_metadata or {})
-    decision_meta = dict(metadata.get("decision_meta") or {})
-    rag_scores = _merge_rag_scores(decision_meta.get("rag_scores"))
-    updates = {"rag_scores": rag_scores}
-    if "rag_confident" not in decision_meta:
-        updates["rag_confident"] = False
-    if "rag_reason" not in decision_meta:
-        updates["rag_reason"] = "overridden_by_gate"
-    if "router_eligible" not in decision_meta:
-        updates["router_eligible"] = False
-    if "router_skipped_reason" not in decision_meta:
-        updates["router_skipped_reason"] = "not_run"
-    _update_message_decision_metadata(message, updates)
-
 
 MARKETING_REPLY_CONTEXT_LOOKBACK_HOURS = 72
 MARKETING_REPLY_CONTEXT_AMBIGUITY_WINDOW_HOURS = 6
@@ -3862,126 +3828,10 @@ def _maybe_attach_marketing_reply_context(
     _set_conversation_context(conversation, context)
     return marketing_context
 
-
-def _resolve_backlog_language(message: Message | None) -> str:
-    if not message or not isinstance(message.message_metadata, dict):
-        return "unknown"
-    metadata = message.message_metadata
-    for key in ("language", "lang", "locale"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip().lower()
-    media_meta = metadata.get("media")
-    if isinstance(media_meta, dict):
-        transcript_language = media_meta.get("transcript_language")
-        if isinstance(transcript_language, str) and transcript_language.strip():
-            return transcript_language.strip().lower()
-    return "unknown"
-
-
-def _record_knowledge_backlog(
-    db: Session,
-    *,
-    client_id: UUID,
-    conversation_id: UUID,
-    message: Message | None,
-    user_text: str,
-    miss_type: str,
-) -> None:
-    text_value = (user_text or "").strip()
-    if not text_value:
-        return
-    language = _resolve_backlog_language(message)
-    miss_value = (miss_type or "unknown").strip().lower()
-    try:
-        db.execute(
-            text(
-                """
-                INSERT INTO knowledge_backlog (
-                  id,
-                  client_id,
-                  conversation_id,
-                  message_id,
-                  user_text,
-                  language,
-                  miss_type,
-                  repeat_count,
-                  first_seen_at,
-                  last_seen_at
-                )
-                VALUES (
-                  gen_random_uuid(),
-                  :client_id,
-                  :conversation_id,
-                  :message_id,
-                  :user_text,
-                  :language,
-                  :miss_type,
-                  1,
-                  NOW(),
-                  NOW()
-                )
-                ON CONFLICT (client_id, language, miss_type, user_text)
-                DO UPDATE SET
-                  repeat_count = knowledge_backlog.repeat_count + 1,
-                  last_seen_at = EXCLUDED.last_seen_at,
-                  conversation_id = EXCLUDED.conversation_id,
-                  message_id = EXCLUDED.message_id
-                """
-            ),
-            {
-                "client_id": client_id,
-                "conversation_id": conversation_id,
-                "message_id": message.id if message else None,
-                "user_text": text_value,
-                "language": language,
-                "miss_type": miss_value,
-            },
-        )
-    except Exception:
-        logger.warning(
-            "Knowledge backlog upsert failed",
-            extra={
-                "context": {
-                    "client_id": str(client_id),
-                    "conversation_id": str(conversation_id),
-                    "message_id": str(message.id) if message else None,
-                    "miss_type": miss_type,
-                }
-            },
-            exc_info=True,
-        )
-
-
-# Default values (can be overridden in client_settings)
-DEFAULT_MUTE_DURATION_FIRST_MINUTES = 30
-DEFAULT_MUTE_DURATION_SECOND_HOURS = 24
-SESSION_TIMEOUT_HOURS = 24
-LOW_CONFIDENCE_RETRY_WINDOW_MINUTES = 10
-LOW_CONFIDENCE_MAX_RETRIES = 2
-HANDOVER_CONFIRM_WINDOW_MINUTES = 15
-REENGAGE_CONFIRM_WINDOW_MINUTES = 15
-ASR_CONFIRM_WINDOW_MINUTES = 10
-ASR_INFLIGHT_TTL_SECONDS = 90
-SERVICE_HINT_WINDOW_MINUTES = 120
-ASR_LOW_CONFIDENCE_MIN_CHARS = 6
-ASR_LOW_CONFIDENCE_MIN_WORDS = 3
-ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS = 6.0
-ASR_LOW_CONFIDENCE_NON_LETTER_RATIO = 0.4
 MULTI_INTENT_MIN_CHARS = 350
 STYLE_REFERENCE_PENDING_TTL_MINUTES = 10
-QUIET_HOURS_NOTICE_TTL_MINUTES = 10
-EVENING_GREETING_TTL_HOURS = 12
-MSG_ESCALATED = (
-    "Передал менеджеру — сообщения уходят администратору. Пока ждём ответ, могу помочь с услугами, ценами и записью. "
-    "Если есть детали (услуга/время/имя), напишите — я передам."
-)
-MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
-MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
+
 MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег и вернусь с ответом."
-MSG_HANDOVER_CONFIRM = "Не уверен, что понял. Подключить менеджера? Ответьте 'да' или 'нет'."
-MSG_REENGAGE_CONFIRM = "Вы просили не писать. Хотите снова общаться? Ответьте 'да' или 'нет'."
-MSG_REENGAGE_DECLINED = "Хорошо, не буду писать. Если передумаете — напишите снова."
 MSG_MEMORY_CONSENT = (
     "Могу запомнить ваши предпочтения (имя/услуга/время), чтобы не задавать одно и то же. "
     "Ответьте 'да' или 'нет'.\n\n"
@@ -3990,22 +3840,6 @@ MSG_MEMORY_CONSENT = (
 )
 MSG_MEMORY_CONSENT_ACCEPTED = "Спасибо! Запомнил ваши предпочтения."
 MSG_MEMORY_CONSENT_DECLINED = "Хорошо, не буду запоминать."
-MSG_HANDOVER_DECLINED = (
-    "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
-)
-MSG_LOW_CONFIDENCE_RETRY = "Уточните, пожалуйста: интересуют услуги/цены или запись/адрес?"
-MSG_PENDING_LOW_CONFIDENCE = (
-    "Я уже передал менеджеру — он скоро подключится. "
-    "Пока ждём, уточните: услуги/цены или запись/адрес."
-)
-MSG_PENDING_ESCALATION = (
-    "Я уже передал менеджеру — сообщения уходят администратору. "
-    "Пока ждём ответ, могу помочь с услугами, ценами и записью."
-)
-MSG_PENDING_STATUS = (
-    "Да, передал. Сейчас менеджер ещё не взял заявку. "
-    "Пока ждём ответ, могу помочь с услугами, ценами и записью."
-)
 MSG_PENDING_RESCHEDULE = (
     "Перенос записи подтверждает администратор. Передам ваш запрос. "
     "Пока ждём ответ, могу помочь с услугами, ценами и записью."
@@ -4014,18 +3848,7 @@ MSG_PENDING_COMPLAINT = (
     "Жаль, что так вышло. Передам администратору, разберутся. "
     "Пока ждём ответ, могу помочь с услугами, ценами и записью."
 )
-MSG_PENDING_WAIT = "Менеджер подключится. Пока ждём ответ, могу помочь с услугами, ценами и записью."
-MSG_PENDING_SLA_PING = (
-    "Напоминаю: менеджер ещё не подключился. "
-    "Если всё актуально — напишите детали, я передам администратору."
-)
 MSG_PENDING_AUTO_CLOSE = "Закрываю ожидание. Если всё ещё актуально — напишите, я помогу."
-MSG_PENDING_ACK = "Хорошо. Напишите, что именно нужно: цена/запись/адрес/мастер."
-MSG_MEDIA_UNSUPPORTED = (
-    "Сейчас принимаем только фото, аудио и документы. Видео не поддерживаются. Опишите вопрос текстом."
-)
-MSG_MEDIA_TOO_LARGE = "Файл слишком большой. Пришлите, пожалуйста, фото/аудио поменьше или опишите текстом."
-MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за короткое время. Давайте продолжим позже или опишите текстом."
 MSG_MEDIA_RECEIVED = (
     "Файл получил. Напишите, пожалуйста, что именно нужно: цена/запись/адрес/мастер/жалоба. "
     "Если это референс, напишите: «как на фото»."
@@ -4043,24 +3866,15 @@ MSG_MEDIA_STYLE_REFERENCE = (
     "Пока ждём ответ, могу помочь с услугами, ценами и записью. "
     "Чтобы ускорить, напишите услугу, дату/время и имя."
 )
-MSG_STYLE_REFERENCE_NEED_MEDIA = (
-    "Да, конечно. Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
-    "я передам администратору для подтверждения."
-)
 MSG_STYLE_REFERENCE_NEED_MEDIA_BOOKING = (
     "Да, конечно. Можем ориентироваться на фото/референс. "
     "Пришлите фото и кратко опишите пожелание."
 )
 
-PENDING_SLA_PING_MINUTES = 15
 PENDING_AUTO_CLOSE_HOURS = 4
 PENDING_SLA_CONTEXT_KEY = "pending_sla"
-PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
 PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
 PENDING_RESUME_KEY = "pending_resume"
-MEMORY_PROFILE_KEY = "memory_profile"
-MEMORY_PENDING_KEY = "memory_pending"
-MEMORY_PROFILE_TTL_DAYS = 180
 MEMORY_PENDING_TTL_HOURS = 168
 MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lower() in {
     "1",
@@ -4085,33 +3899,9 @@ MSG_BOOKING_ASK_PHONE = "Подскажите, пожалуйста, номер 
 MSG_BOOKING_ASK_REFERENCE = (
     "Чтобы проверить, перенести или отменить запись, подскажите номер телефона и примерную дату/время записи."
 )
-MSG_BOOKING_ASK_ALL = "Чтобы записать, пожалуйста, напишите: услуга, точная дата, точное время, имя, контактный номер."
-MSG_BOOKING_SLOT_LOCK_STUB = "Я помогаю только по вопросам салона и записи."
-MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
-MSG_BOOKING_REENGAGE = "Хотите продолжить запись? Если да — напишите услугу."
-
-SERVICE_HINT_KEY = "last_service_hint"
-SERVICE_HINT_AT_KEY = "last_service_hint_at"
-RE_ENTRY_REQUIRED_KEY = "re_entry_required"
-REENGAGE_CONFIRM_KEY = "reengage_confirmation"
-ASR_CONFIRM_KEY = "asr_confirm_pending"
-ASR_INFLIGHT_KEY = "asr_inflight"
-STYLE_REFERENCE_PENDING_KEY = "style_reference_pending"
-QUIET_HOURS_NOTICE_KEY = "quiet_hours_notice"
-EVENING_GREETING_KEY = "evening_greeting"
 DECISION_TRACE_KEY = "decision_trace"
-CONTEXT_MANAGER_KEY = "context_manager"
 INTENT_QUEUE_KEY = "intent_queue"
-EXPECTED_REPLY_TYPE_KEY = "expected_reply_type"
-EXPECTED_REPLY_REASON_KEY = "expected_reply_reason"
 
-EXPECTED_REPLY_SERVICE = "service_choice"
-EXPECTED_REPLY_TIME = "time"
-EXPECTED_REPLY_NAME = "name"
-EXPECTED_REPLY_PHONE = "phone"
-EXPECTED_REPLY_INTENT_CHOICE = "intent_choice"
-
-CLARIFY_MAX_ATTEMPTS = 2
 REFUSAL_TTL_MESSAGES = 10
 SUMMARY_MESSAGE_THRESHOLD = 12
 FACT_GUARD_ENABLED = True
@@ -4128,29 +3918,6 @@ FACT_GUARD_BLOCKED_TOOL_DECISIONS = {
     "verifier_blocked",
     "service_not_found",
 }
-MSG_FACT_GUARD_CLARIFY = "Подскажите, пожалуйста, что именно вас интересует?"
-
-ROUTING_MATRIX = {
-    ConversationState.BOT_ACTIVE.value: {
-        "allow_booking_flow": True,
-        "allow_truth_gate_reply": True,
-        "allow_handover_create": True,
-        "allow_bot_reply": True,
-    },
-    ConversationState.PENDING.value: {
-        "allow_booking_flow": True,
-        "allow_truth_gate_reply": True,
-        "allow_handover_create": False,
-        "allow_bot_reply": True,
-    },
-    ConversationState.MANAGER_ACTIVE.value: {
-        "allow_booking_flow": False,
-        "allow_truth_gate_reply": False,
-        "allow_handover_create": False,
-        "allow_bot_reply": False,
-    },
-}
-
 
 SHIELD_CONTEXT_KEY = "shield"
 SHIELD_RECENT_KEY = "recent_messages"
@@ -4163,18 +3930,7 @@ SHIELD_TOXIC_PATTERNS = [
     re.compile(r"\b(хуй|пизд|пидор|еба|сука|нахуй|убью|иди\s+на\s+хуй|бля[тд])", re.IGNORECASE),
 ]
 SHIELD_MEANINGFUL_PATTERN = re.compile(r"[A-Za-zА-Яа-я0-9]{2,}")
-HYGIENE_KEYWORDS = [
-    "стерилиз",
-    "дезраств",
-    "дезинф",
-    "ультразвук",
-    "уз-ванн",
-    "сухожар",
-    "крафт",
-    "однораз",
-    "инструмент",
-    "обрабатыва",
-]
+
 
 DATE_KEYWORDS = [
     "сегодня",
@@ -4193,36 +3949,7 @@ DATE_KEYWORDS = [
     "вечером",
 ]
 
-TIME_PATTERN = re.compile(r"(?<!\d)(?:[01]?\d|2[0-3])[:.][0-5]\d(?!\d)")
-TIME_HOUR_PATTERN = re.compile(r"\b(?:в|к)\s*(?:[01]?\d|2[0-3])\b", re.IGNORECASE)
-TIME_ONLY_AMPM_PATTERN = re.compile(r"^\d{1,2}(?:am|pm)$", re.IGNORECASE)
-TIME_ONLY_ALLOWED_TOKENS = {
-    "в",
-    "во",
-    "к",
-    "ко",
-    "на",
-    "около",
-    "примерно",
-    "после",
-    "до",
-    "ну",
-    "э",
-    "м",
-}
-TIME_ONLY_ALLOWED_PREFIXES = ("час", "мин", "вечер", "утр", "дн", "ноч")
-DATE_PATTERN = re.compile(
-    r"\b(?:сегодня|сегодняш\w*|завтра|завтраш\w*|послезавтра|послезавтраш\w*|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|выходн\w*|утром|днем|днём|вечером)\b",
-    re.IGNORECASE,
-)
-DATE_NUMERIC_PATTERN = re.compile(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b")
-DATE_MONTH_PATTERN = re.compile(
-    r"\b\d{1,2}\s*(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\b",
-    re.IGNORECASE,
-)
-NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
-NAME_NOISE_TOKENS = {"меня", "зовут", "это", "я", "имя"}
 LATIN_PATTERN = re.compile(r"[a-z]")
 CYRILLIC_PATTERN = re.compile(r"[а-яё]")
 
@@ -4610,328 +4337,6 @@ def _resolve_alternate_booking_slot_capture(
             return normalized_detected_slot, validated_value
     return None, None
 
-
-def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
-    raw_messages = batch_messages if batch_messages else ([message_text] if message_text else [])
-    cleaned: list[str] = []
-    for msg in raw_messages:
-        if not msg:
-            continue
-        text = msg.strip()
-        if text:
-            cleaned.append(text)
-    if not cleaned and message_text:
-        fallback = message_text.strip()
-        if fallback:
-            cleaned.append(fallback)
-    return cleaned
-
-
-def _contains_any(normalized: str, keywords: list[str]) -> bool:
-    return any(keyword in normalized for keyword in keywords)
-
-
-def _merge_lang_phrase_maps(*maps: dict[str, Any] | None) -> dict[str, list[str]]:
-    merged: dict[str, list[str]] = {}
-    for mapping in maps:
-        if not isinstance(mapping, dict):
-            continue
-        for lang_key, phrases in mapping.items():
-            if not isinstance(phrases, list):
-                continue
-            bucket = merged.setdefault(lang_key, [])
-            for phrase in phrases:
-                if not isinstance(phrase, str):
-                    continue
-                cleaned = phrase.strip()
-                if cleaned and cleaned not in bucket:
-                    bucket.append(cleaned)
-    return merged
-
-
-def _collect_booking_request_lexicon(client_slug: str | None) -> dict[str, list[str]]:
-    system_lexicons = load_system_lexicons()
-    system_booking = (
-        system_lexicons.get("booking_request") if isinstance(system_lexicons, dict) else None
-    )
-    truth = load_yaml_truth(client_slug)
-    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
-    synonyms = domain_pack.get("synonyms") if isinstance(domain_pack, dict) else None
-    domain_booking = (
-        synonyms.get("booking") if isinstance(synonyms, dict) else None
-    )
-    return _merge_lang_phrase_maps(system_booking, domain_booking)
-
-
-def _matches_booking_request_lexicon(
-    message_text: str | None,
-    *,
-    client_slug: str | None,
-) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    lexicon = _collect_booking_request_lexicon(client_slug)
-    if not lexicon:
-        return False
-    for lang_key in ("ru", "kk", "en"):
-        phrases = lexicon.get(lang_key)
-        if not isinstance(phrases, list):
-            continue
-        for phrase in phrases:
-            if not isinstance(phrase, str):
-                continue
-            candidate = normalize_for_matching(phrase)
-            if candidate and candidate in normalized:
-                return True
-    return False
-
-
-def _matches_guest_policy_lexicon(
-    message_text: str | None,
-    *,
-    client_slug: str | None,
-) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    truth = load_yaml_truth(client_slug)
-    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
-    lexicon = domain_pack.get("guest_policy_lexicon") if isinstance(domain_pack, dict) else None
-    if not isinstance(lexicon, dict):
-        return False
-    for lang_key in ("ru", "kk"):
-        phrases = lexicon.get(lang_key)
-        if not isinstance(phrases, list):
-            continue
-        for phrase in phrases:
-            if not isinstance(phrase, str):
-                continue
-            candidate = normalize_for_matching(phrase)
-            if candidate and candidate in normalized:
-                return True
-    return False
-
-
-def _has_explicit_service_signal(
-    message_text: str | None,
-    *,
-    client_slug: str | None,
-    intent_decomp_payload: dict[str, Any] | None,
-) -> bool:
-    from . import _legacy as legacy
-
-    if not message_text:
-        return False
-    cleaned_text = re.sub(r"\[[^\]]+\]", " ", message_text)
-    normalized = _normalize_service_text(cleaned_text)
-    if not normalized:
-        return False
-    if isinstance(intent_decomp_payload, dict):
-        raw_query = intent_decomp_payload.get("service_query")
-        raw_source = intent_decomp_payload.get("service_query_source")
-        if (
-            isinstance(raw_query, str)
-            and raw_query.strip()
-            and raw_source != "context"
-        ):
-            return True
-    if client_slug:
-        if _match_service(normalized, client_slug):
-            return True
-        if _matches_service_request_lexicon(normalized, client_slug):
-            return True
-        # Guard location/hours/parking info questions from false service-semantic hits.
-        info_intents, _ = _detect_info_class_intents(
-            cleaned_text,
-            intent_decomp_set=set(),
-            client_slug=client_slug,
-        )
-        if {"location", "hours", "parking"} & info_intents:
-            return False
-        if legacy._extract_service_hint(cleaned_text, client_slug):
-            return True
-    return False
-
-
-def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
-    if _matches_booking_request_lexicon(text, client_slug=client_slug):
-        return True
-    normalized = normalize_for_matching(text)
-    if not normalized:
-        return False
-    booking_keywords = get_system_lexicon_list("booking_keywords")
-    if booking_keywords and _contains_any(normalized, booking_keywords):
-        return True
-    desire_keywords = get_system_lexicon_list("booking_desire_keywords")
-    need_or_desire_signal = bool(desire_keywords and _contains_any(normalized, desire_keywords))
-    if not need_or_desire_signal or not client_slug:
-        return False
-    cleaned_text = re.sub(r"\[[^\]]+\]", " ", text)
-    normalized_service = _normalize_service_text(cleaned_text)
-    if not normalized_service:
-        return False
-    if not (
-        _match_service(normalized_service, client_slug)
-        or _matches_service_request_lexicon(normalized_service, client_slug)
-    ):
-        return False
-    try:
-        has_datetime_signal = bool(
-            _extract_datetime(
-                cleaned_text,
-                client_slug=client_slug,
-            )
-        )
-    except TypeError:
-        # Some tests patch _extract_datetime with a positional-only stub.
-        has_datetime_signal = bool(_extract_datetime(cleaned_text))
-    if not has_datetime_signal:
-        return False
-    info_intents, _ = _detect_info_class_intents(
-        cleaned_text,
-        intent_decomp_set=set(),
-        client_slug=client_slug,
-    )
-    return not bool({"location", "hours", "parking"} & info_intents)
-
-
-def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
-    return _detect_booking_cancel(text, policy_pack=policy_pack)
-
-
-def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
-    if not text:
-        return None
-    if not isinstance(client_slug, str):
-        return None
-    slug = client_slug.strip()
-    if not slug:
-        return None
-    cleaned_text = re.sub(r"\[[^\]]+\]", " ", text).strip()
-    if not cleaned_text:
-        return None
-    normalized_text = _normalize_text(cleaned_text)
-    booking_like = _is_booking_request(cleaned_text, client_slug=slug)
-    if not booking_like:
-        booking_like = bool(
-            TIME_PATTERN.search(cleaned_text)
-            or TIME_HOUR_PATTERN.search(cleaned_text)
-            or DATE_PATTERN.search(cleaned_text)
-            or DATE_NUMERIC_PATTERN.search(cleaned_text)
-            or DATE_MONTH_PATTERN.search(cleaned_text)
-        )
-    domain_intent, _, _, domain_meta = classify_domain_with_scores(cleaned_text, None)
-    strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
-    if (
-        domain_intent == DomainIntent.OUT_OF_DOMAIN
-        and strict_in_hits <= 0
-        and not booking_like
-    ):
-        return None
-    match = semantic_service_match(cleaned_text, slug)
-    if not match or match.action != "match":
-        fallback = get_pack_service_hint(cleaned_text, client_slug=slug)
-        if fallback:
-            return fallback
-        return None
-    canonical_name = match.canonical_name
-    if isinstance(canonical_name, str) and canonical_name.strip():
-        if booking_like and normalized_text:
-            canonical_tokens = _normalize_text(canonical_name).split()
-            message_tokens = normalized_text.split()
-            if canonical_tokens and message_tokens:
-                if not any(token in message_tokens for token in canonical_tokens):
-                    return None
-        return canonical_name.strip()
-    return None
-
-
-def _extract_datetime(
-    text: str,
-    *,
-    client_slug: str | None = None,
-    relative_base: datetime | None = None,
-) -> str | None:
-    if not text:
-        return None
-    resolved = _resolve_datetime_offline(
-        text,
-        client_slug=client_slug,
-        relative_base=relative_base,
-    )
-    if isinstance(resolved, dict):
-        value = resolved.get("value")
-        if isinstance(value, str) and value.strip():
-            return value
-    iso_date_match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", text)
-    explicit_date_match = (
-        iso_date_match
-        or DATE_NUMERIC_PATTERN.search(text)
-        or DATE_MONTH_PATTERN.search(text)
-    )
-    time_match = TIME_PATTERN.search(text) or TIME_HOUR_PATTERN.search(text)
-    if explicit_date_match and time_match and explicit_date_match.start() <= time_match.start():
-        combined_value = text[explicit_date_match.start() : time_match.end()].strip(" ,.")
-        if combined_value:
-            return combined_value
-    time_match = TIME_PATTERN.search(text)
-    if time_match:
-        return time_match.group(0)
-    hour_match = TIME_HOUR_PATTERN.search(text)
-    if hour_match:
-        return hour_match.group(0)
-    numeric_date_match = DATE_NUMERIC_PATTERN.search(text)
-    if numeric_date_match:
-        return numeric_date_match.group(0)
-    month_date_match = DATE_MONTH_PATTERN.search(text)
-    if month_date_match:
-        return month_date_match.group(0)
-    date_match = DATE_PATTERN.search(text)
-    if date_match:
-        return date_match.group(0)
-    return None
-
-
-def _looks_like_time_only_request(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    time_only_phrases = get_system_lexicon_list("time_only_request_phrases")
-    if time_only_phrases and _contains_any(normalized, time_only_phrases):
-        return True
-    tokens = _tokenize_for_matching(normalized)
-    if not tokens:
-        return False
-    has_time_token = False
-    has_time_marker = bool(TIME_PATTERN.search(message_text) or TIME_HOUR_PATTERN.search(message_text))
-    for token in tokens:
-        if token.isdigit():
-            if len(token) <= 2:
-                has_time_token = True
-                continue
-            if has_time_marker and len(token) in (3, 4):
-                has_time_token = True
-                continue
-            return False
-        if TIME_ONLY_AMPM_PATTERN.fullmatch(token):
-            has_time_token = True
-            continue
-        if token in TIME_ONLY_ALLOWED_TOKENS:
-            continue
-        if any(token.startswith(prefix) for prefix in TIME_ONLY_ALLOWED_PREFIXES):
-            has_time_marker = True
-            continue
-        return False
-    return has_time_token
-
-
 def _count_pending_time_question_markers(normalized_message: str | None) -> int:
     if not isinstance(normalized_message, str) or not normalized_message.strip():
         return 0
@@ -5114,7 +4519,6 @@ def _is_timeout_active_time_specialist_interrupt_candidate(
     return bool(master_resolution.explicit)
 
 
-BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "parking", "master"}
 TOOL_INFO_SECTION_MAP = {
     "catalog.location": ["location"],
     "catalog.portfolio": ["portfolio"],
@@ -5189,21 +4593,7 @@ POLICY_CORE_RESCUE_ERROR_CODES = {
     "service_unavailable",
     "rate_limit",
 }
-CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
-CLASS_CARRYOVER_KEY = "class_carryover"
-CLASS_CARRYOVER_TTL_MESSAGES = 4
-CLASS_CARRYOVER_CLASSES = {"info_bundle"}
-SERVICE_CARRYOVER_KEY = "service_carryover"
-CONSULT_CONTEXT_KEY = "consult_context"
-CONSULT_CONTEXT_TTL_MESSAGES = 6
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
-SERVICE_CARRYOVER_SKIP_INTENTS = {
-    "service_clarify",
-    "duration_or_price_clarify",
-    "service_not_found",
-}
-SESSION_MEMORY_KEY = "session_memory"
-SESSION_MEMORY_TTL_HOURS = 24
 SESSION_MEMORY_RESET_PHRASES = (
     "новый вопрос",
     "другая тема",
@@ -6963,11 +6353,6 @@ def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str 
     return refs, None
 
 
-def _normalize_class_name(class_name: str) -> str:
-    normalized = class_name.strip()
-    if normalized.casefold() in {"info", "info_bundle"}:
-        return "info_bundle"
-    return normalized
 
 
 def _preflight_booking_block(
@@ -7033,87 +6418,6 @@ def _should_suppress_booking_slot_signal(
     ):
         return False
     return True
-
-
-def _evaluate_booking_signal(
-    messages: list[str],
-    *,
-    client_slug: str | None,
-    message_text: str | None,
-    relative_base: datetime | None = None,
-) -> tuple[bool, dict | None]:
-    if not messages:
-        return False, None
-    if any(_is_booking_request(message, client_slug=client_slug) for message in messages):
-        return True, None
-    has_service = any(_extract_service_hint(message, client_slug) for message in messages)
-    has_datetime = any(
-        _extract_datetime(
-            message,
-            client_slug=client_slug,
-            relative_base=relative_base,
-        )
-        for message in messages
-    )
-    booking_signal = has_service and has_datetime
-    if booking_signal and message_text:
-        if _looks_like_info_query(message_text, client_slug=client_slug):
-            return False, {"booking_blocked_reason": "info_question"}
-        normalized = normalize_for_matching(message_text)
-        procedure_combo_any = get_signal_lexicon_list(client_slug, "procedure_combo_require_any")
-        procedure_combo_all = get_signal_lexicon_list(client_slug, "procedure_combo_require_all")
-        if (
-            normalized
-            and procedure_combo_any
-            and procedure_combo_all
-            and _contains_any(normalized, procedure_combo_any)
-            and _contains_any(normalized, procedure_combo_all)
-        ):
-            return False, {"booking_blocked_reason": "procedure_combo"}
-        segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", message_text) if segment.strip()]
-        if not segments:
-            segments = [message_text.strip()]
-        for segment in segments:
-            question_type = semantic_question_type(
-                segment,
-                include_kinds=BOOKING_INFO_QUESTION_TYPES,
-                client_slug=client_slug,
-            )
-            if question_type and question_type.kind in BOOKING_INFO_QUESTION_TYPES:
-                return (
-                    False,
-                    {
-                        "booking_blocked_reason": "info_question",
-                        "question_type": question_type.kind,
-                        "question_type_score": question_type.score,
-                    },
-                )
-    return booking_signal, None
-
-
-def _has_booking_signal(
-    messages: list[str],
-    *,
-    client_slug: str | None = None,
-    message_text: str | None = None,
-) -> bool:
-    booking_signal, _ = _evaluate_booking_signal(
-        messages,
-        client_slug=client_slug,
-        message_text=message_text,
-    )
-    return booking_signal
-
-def _looks_like_hours_followup(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    phrases = get_system_lexicon_list("hours_followup_phrases")
-    return bool(phrases) and _contains_any(normalized, phrases)
-
-
 def _has_explicit_location_or_hours_request(
     message_text: str | None,
     *,
@@ -7152,107 +6456,6 @@ def _has_explicit_location_or_hours_request(
     return False
 
 
-def _looks_like_carryover_followup(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    tokens = _tokenize_for_matching(normalized)
-    if not tokens:
-        return False
-    followup_phrases = get_system_lexicon_list("carryover_followup_phrases")
-    if followup_phrases and _contains_any(normalized, followup_phrases):
-        return True
-    if (
-        tokens[0].startswith(_CARRYOVER_CAPACITY_LEAD_PREFIX)
-        and _contains_any_text_token(normalized, _CARRYOVER_CAPACITY_TOKENS)
-    ):
-        return True
-    if len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
-        pricing_groups = INFO_ANCHOR_GROUPS.get("pricing", [])
-        if pricing_groups and _count_anchor_hits(tokens, pricing_groups) > 0:
-            return True
-    lead_tokens = set(get_system_lexicon_list("carryover_followup_lead_tokens"))
-    question_phrases = get_system_lexicon_list("carryover_followup_question_phrases")
-    if lead_tokens and question_phrases and tokens[0] in lead_tokens:
-        if _contains_any(normalized, question_phrases):
-            return True
-    return False
-
-
-def _build_controller_meta_output(*, error: str, retry: bool = False, elapsed_ms: float = 0.0) -> dict:
-    return {
-        "class": None,
-        "goal": None,
-        "intents": [],
-        "slots": {},
-        "followups": [],
-        "safety_flags": [],
-        "confidence": 0.0,
-        "reason": "",
-        "carryover": {},
-        "controller_llm_ms": round(elapsed_ms, 2),
-        "controller_error": error,
-        "controller_retry": bool(retry),
-    }
-
-
-def _ensure_controller_output_meta(controller_output: dict, *, error: str | None) -> dict:
-    if not isinstance(controller_output.get("controller_llm_ms"), (int, float)):
-        controller_output["controller_llm_ms"] = 0.0
-    if not isinstance(controller_output.get("controller_error"), str) or not controller_output.get("controller_error"):
-        controller_output["controller_error"] = error or "none"
-    if not isinstance(controller_output.get("controller_retry"), bool):
-        controller_output["controller_retry"] = False
-    if "controller_goal" in controller_output and not controller_output.get("goal"):
-        controller_output["goal"] = controller_output.get("controller_goal")
-    return controller_output
-
-
-CONTROLLER_FALLBACK_IGNORE_VALUES = {"none", "skipped", "ok", "low_confidence"}
-CONTROLLER_FALLBACK_REASON_MAP = {
-    "timeout": "timeout",
-    "invalid_json": "invalid_json",
-    "budget_exceeded": "budget_exceeded",
-    "budget_reserved": "budget_reserved",
-    "no_api_key": "no_api_key",
-    "prompt_missing": "prompt_missing",
-    "empty_message": "empty_message",
-    "empty_response": "empty_response",
-    "invalid_class": "invalid_class",
-    "unsupported_temperature": "unsupported_temperature",
-}
-CONTROLLER_FALLBACK_ERROR_VALUES = {"controller_failed", "error"}
-CONTROLLER_FALLBACK_REASONS = set(CONTROLLER_FALLBACK_REASON_MAP.values()) | {"error"}
-POLICY_CORE_INFO_RESCUE_REASON_PREFIXES = (
-    "policy_error:",
-    "policy_validation:",
-    "llm_degraded:",
-)
-POLICY_CORE_RETRYABLE_ERROR_CODES = {
-    "timeout",
-    "connection_error",
-    "service_unavailable",
-    "rate_limit",
-    "deadline_exceeded",
-    "budget_exceeded",
-}
-POLICY_STYLE_REFERENCE_HINT_INTENTS = {"style_reference", "ask_photo", "send_photo"}
-
-
-def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
-    if not error:
-        return None
-    normalized = error.strip().casefold()
-    if not normalized or normalized in CONTROLLER_FALLBACK_IGNORE_VALUES:
-        return None
-    mapped = CONTROLLER_FALLBACK_REASON_MAP.get(normalized)
-    if mapped:
-        return mapped
-    if normalized in CONTROLLER_FALLBACK_ERROR_VALUES:
-        return "error"
-    return "error"
 
 
 def _policy_core_reason_supports_info_rescue(reason: str | None) -> bool:
@@ -7590,6 +6793,9 @@ def _classify_policy_core_degrade_reason(reason: str | None) -> dict[str, Any]:
     return result
 
 
+POLICY_STYLE_REFERENCE_HINT_INTENTS = {"style_reference", "ask_photo", "send_photo"}
+
+
 def _policy_has_style_reference_hint(
     *,
     policy_intent: str | None,
@@ -7610,257 +6816,8 @@ def _policy_has_style_reference_hint(
     return False
 
 
-def _resolve_controller_signal_class(*, intent_decomp_set: set[str], booking_signal: bool) -> str | None:
-    if booking_signal:
-        return "booking"
-    if "consult" in intent_decomp_set:
-        return "consult"
-    if "booking" in intent_decomp_set:
-        return "booking"
-    if intent_decomp_set & INFO_INTENTS:
-        return "info_bundle"
-    if "greeting" in intent_decomp_set:
-        return "greeting"
-    if "out_of_domain" in intent_decomp_set:
-        return "out_of_domain"
-    return None
 
 
-def _build_class_controller_result(
-    *,
-    info_intents: set[str],
-    info_meta: dict[str, Any] | None,
-    booking_signal: bool,
-    class_carryover: dict | None,
-    domain_intent: DomainIntent,
-    domain_meta: dict | None,
-    explicit_service_signal: bool,
-) -> dict[str, Any]:
-    anchors_out_hits = int(domain_meta.get("out_hits") or 0) if isinstance(domain_meta, dict) else 0
-    anchors_in_hits = int(domain_meta.get("strict_in_hits") or 0) if isinstance(domain_meta, dict) else 0
-    in_signals: list[str] = []
-    out_signals: list[str] = []
-    classes: list[str] = []
-
-    if info_intents:
-        in_signals.append("info_intents")
-        classes.append("info_bundle")
-    if isinstance(info_meta, dict):
-        raw_anchor_intents = info_meta.get("anchor_intents")
-        if isinstance(raw_anchor_intents, list):
-            for item in raw_anchor_intents:
-                if isinstance(item, str) and item.strip():
-                    in_signals.append(f"info_anchor_{item.strip().casefold()}")
-        info_signals = info_meta.get("info_signals")
-        if isinstance(info_signals, dict) and info_signals.get("guest"):
-            in_signals.append("info_guest")
-            classes.append("info_bundle")
-    if booking_signal:
-        in_signals.append("booking_signal")
-        classes.append("booking")
-    if explicit_service_signal:
-        in_signals.append("explicit_service")
-    if anchors_in_hits > 0:
-        in_signals.append("anchor_in")
-    if anchors_out_hits > 0:
-        out_signals.append("anchor_out")
-
-    carryover_class = None
-    carryover_info_sections: list[str] = []
-    carryover_intents: list[str] = []
-    if isinstance(class_carryover, dict):
-        carryover_class = class_carryover.get("class")
-        if isinstance(carryover_class, str) and carryover_class.strip():
-            carryover_class = _normalize_class_name(carryover_class)
-            in_signals.append("carryover")
-            classes.append(carryover_class)
-        raw_sections = class_carryover.get("info_sections")
-        if isinstance(raw_sections, list):
-            carryover_info_sections = [item for item in raw_sections if isinstance(item, str)]
-        raw_intents = class_carryover.get("intents")
-        if isinstance(raw_intents, list):
-            carryover_intents = [item for item in raw_intents if isinstance(item, str)]
-
-    if domain_intent == DomainIntent.OUT_OF_DOMAIN and not out_signals:
-        out_signals.append("domain_out")
-
-    out_of_domain_signal = bool(out_signals and not in_signals)
-    if out_of_domain_signal:
-        classes.append("out_of_domain")
-    classes = list(dict.fromkeys(classes))
-    in_signals = list(dict.fromkeys(in_signals))
-    out_signals = list(dict.fromkeys(out_signals))
-    carryover_intents = list(dict.fromkeys(carryover_intents))
-    carryover_info_sections = list(dict.fromkeys(carryover_info_sections))
-    return {
-        "classes": classes,
-        "intents": sorted(info_intents),
-        "in_signals": in_signals,
-        "out_signals": out_signals,
-        "anchors_in_hits": anchors_in_hits,
-        "anchors_out_hits": anchors_out_hits,
-        "out_of_domain_signal": out_of_domain_signal,
-        "carryover_class": carryover_class,
-        "carryover_info_sections": carryover_info_sections,
-        "carryover_intents": carryover_intents,
-    }
-
-
-def _resolve_class_router_result(
-    *,
-    info_intents: set[str],
-    info_meta: dict[str, Any] | None,
-    booking_signal: bool,
-    class_carryover: dict | None,
-    domain_intent: DomainIntent,
-    domain_meta: dict | None,
-    router_state: dict | None,
-    explicit_service_signal: bool,
-) -> dict[str, Any]:
-    result = _build_class_controller_result(
-        info_intents=info_intents,
-        info_meta=info_meta,
-        booking_signal=booking_signal,
-        class_carryover=class_carryover,
-        domain_intent=domain_intent,
-        domain_meta=domain_meta,
-        explicit_service_signal=explicit_service_signal,
-    )
-    out_of_domain_signal = bool(result.get("out_of_domain_signal"))
-
-    controller_output = router_state.get("output") if isinstance(router_state, dict) else None
-    controller_used = router_state.get("used") if isinstance(router_state, dict) else False
-    controller_error = router_state.get("error") if isinstance(router_state, dict) else None
-    controller_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
-    controller_attempted = bool(router_state.get("attempted")) if isinstance(router_state, dict) else False
-    controller_fallback_flag = bool(router_state.get("fallback")) if isinstance(router_state, dict) else False
-    controller_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
-    controller_sla = router_state.get("sla") if isinstance(router_state, dict) else None
-    controller_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
-    controller_signal_match = router_state.get("signal_match") if isinstance(router_state, dict) else None
-    controller_used_reason = router_state.get("used_reason") if isinstance(router_state, dict) else None
-
-    controller_class = None
-    controller_reason = None
-    controller_intents: list[str] = []
-    controller_goal = None
-    if isinstance(controller_output, dict):
-        raw_class = controller_output.get("class")
-        if isinstance(raw_class, str):
-            controller_class = _normalize_class_name(raw_class)
-        raw_reason = controller_output.get("reason")
-        if isinstance(raw_reason, str):
-            controller_reason = raw_reason
-        raw_intents = controller_output.get("intents")
-        if isinstance(raw_intents, list):
-            controller_intents = [item for item in raw_intents if isinstance(item, str)]
-        raw_goal = controller_output.get("goal")
-        if isinstance(raw_goal, str):
-            controller_goal = raw_goal.strip()
-
-    controller_confidence_value = controller_confidence
-    controller_low_confidence = bool(
-        controller_used
-        and isinstance(controller_confidence_value, (int, float))
-        and controller_confidence_value < CONTROLLER_CONFIDENCE_THRESHOLD
-    )
-
-    controller_fallback_reason = None
-    controller_error_normalized = controller_error if isinstance(controller_error, str) else None
-    controller_error_normalized = controller_error_normalized.strip() if controller_error_normalized else None
-    if controller_error_normalized:
-        controller_fallback_reason = _normalize_controller_fallback_reason(error=controller_error_normalized)
-
-    if controller_used and controller_class and not controller_low_confidence:
-        result["classes"] = [controller_class]
-        info_controller_intents = [intent for intent in controller_intents if intent in INFO_INTENTS]
-        if controller_class == "info_bundle":
-            if info_controller_intents:
-                result["intents"] = sorted(info_controller_intents)
-        else:
-            result["intents"] = sorted(info_controller_intents)
-        controller_fallback_reason = None
-    elif controller_used and controller_class and controller_low_confidence:
-        # Low confidence: keep deterministic class_router result, but track low confidence explicitly.
-        controller_used_reason = "low_confidence"
-        controller_used = True
-        controller_fallback_reason = None
-        controller_fallback_flag = False
-    elif not controller_used and isinstance(controller_fallback, str):
-        normalized_fallback = _normalize_controller_fallback_reason(error=controller_fallback)
-        if normalized_fallback:
-            controller_fallback_reason = controller_fallback_reason or normalized_fallback
-
-    if (
-        not controller_used
-        and not controller_attempted
-        and controller_error_normalized in {"skipped", "no_api_key"}
-    ):
-        fallback_goal = None
-        fallback_class = None
-        if out_of_domain_signal or "out_of_domain" in result.get("classes", []):
-            fallback_goal = "out_of_domain"
-            fallback_class = "out_of_domain"
-        elif "booking" in result.get("classes", []):
-            fallback_goal = "booking"
-            fallback_class = "booking"
-        elif "consult" in result.get("classes", []):
-            fallback_goal = "consult"
-            fallback_class = "consult"
-        elif "info_bundle" in result.get("classes", []) or "guest_policy" in result.get("classes", []):
-            fallback_goal = "info"
-            fallback_class = "info_bundle"
-        if fallback_goal:
-            controller_used = True
-            controller_used_reason = "deterministic"
-            controller_goal = fallback_goal
-            controller_class = fallback_class
-            if not isinstance(controller_output, dict):
-                controller_output = {}
-            controller_output = {**controller_output, "class": controller_class, "goal": controller_goal}
-            controller_fallback_reason = None
-            controller_fallback_flag = False
-
-    result["controller"] = {
-        "used": bool(controller_used),
-        "attempted": controller_attempted,
-        "fallback": controller_fallback_flag,
-        "confidence": controller_confidence,
-        "reason": controller_reason,
-        "fallback_reason": controller_fallback_reason if not controller_used else None,
-        "error": controller_error,
-        "output": controller_output,
-        "signal_class": controller_signal_class,
-        "signal_match": controller_signal_match,
-        "used_reason": controller_used_reason,
-        "sla": controller_sla,
-        "goal": controller_goal,
-        "low_confidence": controller_low_confidence,
-    }
-    result["controller_fallback_reason"] = controller_fallback_reason
-    # Backward-compat for downstream callers still keyed on router
-    result["router"] = result["controller"]
-    result["router_fallback_reason"] = controller_fallback_reason
-    return result
-
-
-def _controller_meta_updates_from_class_router(class_router_result: dict | None) -> dict[str, Any]:
-    if not isinstance(class_router_result, dict):
-        return {}
-    controller_meta = class_router_result.get("controller")
-    if not isinstance(controller_meta, dict):
-        return {}
-    return {
-        "controller_used": bool(controller_meta.get("used")),
-        "controller_attempted": bool(controller_meta.get("attempted")),
-        "controller_fallback": bool(controller_meta.get("fallback")),
-        "controller_low_confidence": bool(controller_meta.get("low_confidence")),
-        "controller_used_reason": controller_meta.get("used_reason"),
-        "controller_confidence": controller_meta.get("confidence"),
-        "controller_error": controller_meta.get("error"),
-        "controller_goal": controller_meta.get("goal"),
-        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
-    }
 
 
 def _controller_meta_updates_from_router_state(router_state: dict | None) -> dict[str, Any]:
@@ -7895,26 +6852,7 @@ def _controller_meta_updates_from_router_state(router_state: dict | None) -> dic
     }
 
 
-def _router_observability_updates_from_class_router(class_router_result: dict | None) -> dict[str, Any]:
-    if not isinstance(class_router_result, dict):
-        return {}
-    controller_meta = class_router_result.get("controller")
-    if not isinstance(controller_meta, dict):
-        return {}
-    attempted = bool(controller_meta.get("attempted"))
-    reason = "none" if attempted else "not_run"
-    return _router_observability_meta(eligible=attempted, reason=reason)
 
-
-def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
-    if not isinstance(refusal_flags, dict):
-        return False
-    payload = refusal_flags.get(field)
-    if isinstance(payload, dict):
-        return payload.get("value") is True
-    if isinstance(payload, bool):
-        return payload
-    return False
 
 
 def _detect_name_provided(message_text: str, *, client_slug: str | None) -> bool:
@@ -7993,25 +6931,7 @@ def _update_refusal_flags(
     return manager, updated_flags, events
 
 
-def _combine_sidecar(primary: str, sidecar: str | None) -> str:
-    if not sidecar:
-        return primary
-    return f"{sidecar}\n\n{primary}"
 
-
-def _ensure_question_mark(text: str) -> str:
-    cleaned = text.strip()
-    if not cleaned:
-        return ""
-    if cleaned.endswith("?"):
-        return cleaned
-    return f"{cleaned}?"
-
-
-def _append_followup(primary: str, followup: str | None) -> str:
-    if not followup:
-        return primary
-    return f"{primary}\n\n{followup}"
 
 
 def _should_append_followup_prompt(primary: str | None, followup: str | None) -> bool:
@@ -8023,36 +6943,6 @@ def _should_append_followup_prompt(primary: str | None, followup: str | None) ->
     primary_normalized = normalize_for_matching(primary or "")
     return followup_normalized not in primary_normalized
 
-
-MULTI_INTENT_LABELS = {
-    "booking": "записи",
-    "pricing": "цене",
-    "duration": "длительности",
-    "location": "адресу",
-    "hours": "времени",
-    "other": "другому вопросу",
-}
-
-
-_DEFAULT_POLICY_HANDLER = {
-    "escalation_gate": _pack_escalation_gate,
-    "service_matcher": get_pack_service_decision,
-    "truth_gate": get_pack_decision,
-    "price_item": get_pack_price_item,
-    "price_sidecar": _pack_price_sidecar,
-}
-
-
-_POLICY_HANDLERS = {
-    "default": _DEFAULT_POLICY_HANDLER,
-}
-
-
-def _is_hygiene_context_text(text: str) -> bool:
-    normalized = normalize_for_matching(text)
-    if not normalized:
-        return False
-    return any(keyword in normalized for keyword in HYGIENE_KEYWORDS)
 
 
 def find_active_conversation_by_channel_ref(
@@ -8081,19 +6971,6 @@ def find_active_conversation_by_channel_ref(
         return db.query(Conversation).filter(Conversation.id == handover.conversation_id).first()
     return None
 
-
-def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
-    """Get mute durations from client_settings or use defaults."""
-    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client_id).first()
-
-    if settings:
-        mute_first = settings.mute_duration_first_minutes or DEFAULT_MUTE_DURATION_FIRST_MINUTES
-        mute_second = settings.mute_duration_second_hours or DEFAULT_MUTE_DURATION_SECOND_HOURS
-    else:
-        mute_first = DEFAULT_MUTE_DURATION_FIRST_MINUTES
-        mute_second = DEFAULT_MUTE_DURATION_SECOND_HOURS
-
-    return mute_first, mute_second
 
 
 get_active_handover = _handover_owner_get_active_handover
@@ -8349,14 +7226,17 @@ def _handle_minimum_data_safe_mode_gate(
             bot_response=bot_response,
         )
 
-    logger.error("Minimum data safe-mode escalation failed: %s", result.error)
+    logger.error(
+        "Minimum data safe-mode escalation failed: %s",
+        escalation_notification_result.error,
+    )
     _record_decision_trace(
         conversation,
         {
             "stage": "minimum_data_safe_mode",
             "decision": "failed",
             "state": conversation.state,
-            "error": result.error,
+            "error": escalation_notification_result.error,
             "reason": "minimum_data_contract",
             "missing_fields": missing_fields,
         },
@@ -8519,14 +7399,17 @@ def _handle_knowledge_safe_mode_gate(
             bot_response=bot_response,
         )
 
-    logger.error("Safe-mode escalation failed: %s", result.error)
+    logger.error(
+        "Safe-mode escalation failed: %s",
+        escalation_notification_result.error,
+    )
     _record_decision_trace(
         conversation,
         {
             "stage": "knowledge_safe_mode",
             "decision": "failed",
             "state": conversation.state,
-            "error": result.error,
+            "error": escalation_notification_result.error,
             "reason": safe_mode_reason,
         },
     )
@@ -8550,37 +7433,6 @@ def _handle_knowledge_safe_mode_gate(
         conversation_id=conversation.id,
         bot_response=bot_response,
     )
-
-
-def should_offer_low_confidence_retry(conversation: Conversation, now: datetime) -> bool:
-    """One clarifying question before creating a handover on low confidence."""
-    offered_at = conversation.retry_offered_at
-    if not offered_at:
-        return True
-
-    if offered_at.tzinfo is None:
-        offered_at = offered_at.replace(tzinfo=timezone.utc)
-
-    return (now - offered_at) > timedelta(minutes=LOW_CONFIDENCE_RETRY_WINDOW_MINUTES)
-
-
-async def _process_outbox_rows(
-    db: Session,
-    rows: list[dict],
-    *,
-    max_attempts: int,
-    retry_backoff_seconds: float,
-) -> dict[str, int]:
-    from app.routers.webhook import outbox as outbox_helpers
-
-    return await outbox_helpers._process_outbox_rows(
-        db,
-        rows,
-        max_attempts=max_attempts,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
-
-
 async def _handle_webhook_payload(
     payload: WebhookRequest,
     db: Session,
