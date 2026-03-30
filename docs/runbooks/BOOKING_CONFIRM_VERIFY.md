@@ -17,14 +17,15 @@ Prerequisites
 
 LLM-quality start here (mandatory for new agents)
 1. Entry points
-   - `acceptance`: only `scripts/llm_quality_guarded.sh` (it injects chain token and enforces order). This lane is for closure evidence, not discovery.
-   - `dev/forensic`: prefer `scripts/llm_quality_guarded.sh --forensic-override-reason "..."` when you need to continue discovery after a non-canonical/pending artifact; direct `python3 ops/diagnose.py llm-quality` is allowed only for low-level forensic/dev lane probes and never as acceptance evidence.
+   - `acceptance`: only `scripts/llm_quality_guarded.sh` (it injects chain token and enforces order).
+   - `dev`: prefer `scripts/llm_quality_guarded.sh`; direct `python3 ops/diagnose.py llm-quality` is allowed only for forensic/dev lane and never as acceptance evidence.
 2. Source of process truth
    - Lane model and gates: section `Quality Operating Model v2 (mandatory for all future runs)` in this file.
    - Acceptance chain operations: section `Guarded llm-quality quickstart (single entrypoint)` in this file.
 3. Minimal acceptance workflow
    - Run `lock` using guarded wrapper in `quality-lane acceptance`.
    - Complete mandatory manual audit for the run dir.
+     This means full turn-by-turn human semantic review, not only artifact integrity / oracle-conflict bookkeeping.
    - Read chain `next_command` and run exactly that command.
    - Never start replay/full manually if `next_command` is empty or chain is blocked/aborted.
 4. Mandatory artifacts per run
@@ -53,31 +54,46 @@ Tool map (quick reference)
 | `scripts/llm_quality_guarded.sh` | Canonical runner entrypoint (dev/acceptance) | Bypassing chain/order/gates |
 | `scripts/quality_chain_controller.sh` | Step orchestration (`prepare/finalize/status/abort/rollback/close`) | Running quality itself |
 | `python3 ops/diagnose.py llm-quality` | Low-level engine (invoked by wrapper) | Manual acceptance launch without chain token |
-| `python3 ops/diagnose.py llm-quality-audit` | Mandatory post-run manual audit artifact | Replacing contract evidence with judge text |
+| `python3 ops/diagnose.py llm-quality-audit` | Mandatory post-run audit artifact; must be extended with explicit turn-by-turn human semantic verdicts before any product-quality claim | Replacing contract evidence with judge text |
 
-Work modes (residual debugging)
-- `forensic`: map one failure family, continue on audited non-canonical artifacts only with explicit reason, never update baseline.
-- `implementation`: land the bounded family fix and close deterministic regressions first.
-- `closure`: run guarded acceptance replay/full only after the family fix is in place.
-- One surfaced turn does not automatically mean a new Task Package; first decide whether it is still the same family.
+Closure interpretation (mandatory)
+- `semantic_valid=true` means contract-green only.
+- Product-quality `green` requires both `practical_behavior_complete` and `human_semantic_complete`.
+- A workstream/program can therefore be structurally closed while product behavior remains open.
+- No report may call a run generally `green` without saying which closure layer is green.
 
-Forensic guarded example
-```bash
-scripts/llm_quality_guarded.sh \
-  --mode replay \
-  --run-id booking-replay-forensic-<id> \
-  --forensic-override-reason "map adjacent failures inside the same family after audited non-canonical replay" \
-  -- \
-  --base-url http://127.0.0.1:18186 \
-  --client-slug demo_salon \
-  --scenarios-file /tmp/booking_quality/<lock>/scenarios.json \
-  --baseline-summary /tmp/booking_quality/<lock>/summary.json \
-  --count 10 \
-  --tool-hooks auto \
-  --reset-before-dialog \
-  --jid-mode unique \
-  --quality-lane dev
-```
+Full-path debug SOP (mandatory before behavioral fix)
+1. Start from one failure family, not from one surfaced dialog/turn.
+2. Read `summary.json` and `manual_audit.md/json` to name the dominant family and affected turns.
+3. Translate that family into:
+   - one broken invariant
+   - one shared mechanism
+   - one open-world envelope expected to improve after the fix
+   Family labels like `check-booking` or `parking` are evidence labels only; they are not final implementation units.
+4. Reconstruct the exact path from artifacts:
+   - `responses.jsonl` for user text, bot reply, expectation mismatch, and per-turn evaluation.
+   - `trace_bundle.jsonl` for owner output, guard/fallback branch, `reason_code`, and runtime causality.
+   - `python3 ops/diagnose.py dialog-report ...` for live incidents outside replay artifacts.
+5. Produce one layer classification before code:
+   - `owner_error`
+   - `boundary_fallback_error`
+   - `fact_composition_error`
+   - `oracle_or_evaluator_error`
+   - `infra_or_runtime_failure`
+6. Only after that add/adjust deterministic checks and implement one bounded mechanism fix.
+7. After the fix, rerun replay and repeat the full human semantic audit before updating truth.
+
+Easy debug bundle (required in every handoff)
+- `summary.json`
+- `responses.jsonl`
+- `trace_bundle.jsonl`
+- `manual_audit.md`
+- `manual_audit.json`
+- exact run command
+- family name
+- broken invariant
+- shared mechanism
+- layer classification
 
 Quickstart (script)
 ```bash
@@ -204,7 +220,6 @@ Purpose
 Important
 - Commands in this section can be used for forensic/dev workflows.
 - For acceptance evidence, use only `scripts/llm_quality_guarded.sh` flow from section `Guarded llm-quality quickstart (single entrypoint)`.
-- If you use `--forensic-override-reason`, the resulting run stays discovery-only and cannot count as baseline or closure evidence.
 
 When to use
 - After any booking-related changes (packs, routing, booking slots, expected_reply_type).
@@ -643,7 +658,6 @@ Guarded llm-quality quickstart (single entrypoint)
    - `scripts/llm_quality_guarded.sh --mode <lock|replay|canary|full> --run-id <same-run-id> -- --base-url <url> --client-slug demo_salon --resume --output-dir /tmp/booking_quality/<run-id> ...`
 9. Why a run can be blocked by guard
    - Previous run in same mode is `incomplete/invalid/failed`.
-   - Exception: a fresh `lock` may continue to `ops/diagnose.py` when the latest prior `lock` is still non-canonical but already has `manual_audit=done` and valid artifacts; the run-economy gate then arbitrates whether the new lock is admissible.
    - Previous run has `manual_audit != done`.
    - Forensic SLA invalid (`manual_audit` missing analyst/timestamp/root-cause/next-step/oracle arbitration contract).
    - Oracle conflict unresolved (judge-vs-contract conflict without `winner=contract` and resolution).
@@ -785,6 +799,7 @@ Continuity / no-drift rules
 - Attach `brief.md` from the latest run into session handoff so the next agent starts from concrete top failures.
 - For gates, add `--fail-on-thresholds` and `--fail-on-regression --regression-tolerance 0.02`.
 - Use `--append-history` to track failure trends in `ops/results/booking_quality.json`.
+- Use `python3 ops/diagnose.py llm-quality-trends --run-dir <prev> --run-dir <current>` to compare mechanism/backlog drift across audited runs before opening the next RCA block.
 - Always record the run in `STATE.md` with the `summary.json` path and keep `ops/results/booking_quality.json` in git.
 - Use `--seed` for reproducible deltas when debugging the same issue.
 
@@ -810,9 +825,22 @@ Quality Operating Model v2 (mandatory for all future runs)
    - Primary: `decision_meta/decision_trace/outcome` contract.
    - Secondary: judge verdict as corroboration.
    - Tertiary: text checks as debug hints only.
+   - Completed audits must export judge disagreements into `judge_conflicts.jsonl`; calibration drift is tracked separately from product debt.
+5. No scenario patching
+   - Individual `dialog/turn` labels are evidence, not fix units.
+   - The only valid implementation unit is one repeatable failure family translated into one broken shared mechanism with one root cause and one layer owner.
+   - Domain labels like `check-booking`, `parking`, or concrete service names are admissible only as evidence surfaces; core logic must stay mechanism-first.
+6. Workflow artifacts first
+   - Every completed `llm-quality-audit` must emit:
+     - `manual_audit_workspace.md`
+     - `manual_audit_workspace.json`
+     - `family_registry.json`
+     - `judge_conflicts.jsonl`
+   - Before the next product RCA, compare the current and previous audited runs with:
+     - `python3 ops/diagnose.py llm-quality-trends --run-dir <runA> --run-dir <runB> ...`
 
 Go-to-Full checklist (must pass before any L3 run)
-1. `PG0`: root-cause statement linked to artifacts (`summary/responses/trace/manual_audit`).
+1. `PG0`: root-cause statement linked to artifacts (`summary/responses/trace/manual_audit/manual_audit_workspace/family_registry`).
 2. `PG1`: target contract test exists and is green after fix.
 3. `PG2`: deterministic subset green.
 4. `PG3`: micro fail-fast run shows improvement on target blocker class.
