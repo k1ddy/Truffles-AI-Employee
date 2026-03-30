@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-03-30-consultant-core-consolidation-a922 | active | feat/2026-03-30-consultant-core-consolidation-a922 | /home/zhan/worktrees/2026-03-30-consultant-core-consolidation-a922 | docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md | 2026-03-30T09:05:00+05:00 |
 | 2026-03-15-owner-knowledge-stabilization-reset-a4 | done | feat/2026-03-15-owner-knowledge-stabilization-reset-a4 | /home/zhan/worktrees/2026-03-15-owner-knowledge-stabilization-reset-a4 | docs/TASK_PACKAGES/TP-2026-03-15-owner-knowledge-stabilization-reset-a4.md | 2026-03-15T10:10:00+05:00 |
 | 2026-03-15-consultant-verification-branch-publish-flow-a3 | done | feat/2026-03-15-consultant-verification-branch-publish-flow-a3 | /home/zhan/worktrees/2026-03-15-consultant-verification-branch-publish-flow-a3 | docs/TASK_PACKAGES/TP-2026-03-15-consultant-verification-branch-publish-flow-a3.md | 2026-03-15T10:10:00+05:00 |
 | 2026-03-15-consultant-core-governance-lock-a922 | active | feat/2026-03-15-consultant-core-governance-lock-a922 | /home/zhan/worktrees/2026-03-15-consultant-core-governance-lock-a922 | docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md | 2026-03-24T07:39:55+05:00 |

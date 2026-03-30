@@ -675,6 +675,7 @@
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md` | Report: three-checkout freeze manifests + inventory + consolidation base selection | Brain/Architect |
 | `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
 | `docs/REPORTS/2026-02-20-tenants-a11y-evidence-a201.md` | Отчёт: live e2e+axe evidence для Tenants (platform_admin) | Brain/Architect |
 | `docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md` | Отчёт: Tenants V3 redesign baseline + Wave3 backfill verification + Wave4/5 progress | Brain/Architect |
