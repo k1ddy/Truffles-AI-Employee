@@ -72,9 +72,8 @@ from app.models import (
     User,
 )
 from app.services.outbox_runtime_service import (
-    claim_scoped_outbox_rows,
     load_outbox_process_settings,
-    process_claimed_outbox_rows,
+    run_scoped_outbox_process,
 )
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
@@ -10583,48 +10582,24 @@ async def _run_outbox_process_job(
             archive_preview=archive_preview,
         )
 
-    archive_result = None
-    if archive_pending_older_than_hours > 0:
-        archive_reason = f"archived_pending:older_than_{archive_pending_older_than_hours}h"
-        archive_result = archive_pending_outbox(
-            db,
-            client_id=context.client.id,
-            older_than_seconds=archive_pending_older_than_hours * 3600,
-            limit=archive_pending_limit,
-            reason=archive_reason,
-            branch_ids=_resolve_branch_scope(context),
-            only_without_conversation=archive_pending_without_conversation_only,
-        )
-
-    claimed_rows = claim_scoped_outbox_rows(
-        db,
-        client_id=context.client.id,
-        allowed_branch_ids=_resolve_branch_scope(context),
-        limit=limit,
-        idle_seconds=idle_seconds,
-        max_wait_seconds=max_wait_seconds,
-        include_without_conversation=include_without_conversation,
-    )
-    if not claimed_rows:
-        response = {
-            "mode": "execute",
-            "scope": {"client_id": str(context.client.id)},
-            "processed": 0,
-            "results": {"processed": 0, "failed": 0},
-        }
-        if archive_result is not None:
-            response["archive"] = archive_result
-        return response
-
-    results = await process_claimed_outbox_rows(db, claimed_rows, settings=process_settings)
     response = {
         "mode": "execute",
         "scope": {"client_id": str(context.client.id)},
-        "processed": len(claimed_rows),
-        "results": results,
     }
-    if archive_result is not None:
-        response["archive"] = archive_result
+    response.update(
+        await run_scoped_outbox_process(
+            db,
+            client_id=context.client.id,
+            allowed_branch_ids=_resolve_branch_scope(context),
+            limit=limit,
+            idle_seconds=idle_seconds,
+            max_wait_seconds=max_wait_seconds,
+            include_without_conversation=include_without_conversation,
+            archive_pending_older_than_hours=archive_pending_older_than_hours,
+            archive_pending_limit=archive_pending_limit,
+            archive_pending_without_conversation_only=archive_pending_without_conversation_only,
+        )
+    )
     return response
 
 

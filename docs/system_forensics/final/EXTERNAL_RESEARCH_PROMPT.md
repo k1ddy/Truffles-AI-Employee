@@ -1,6 +1,8 @@
 # Consultant Core External Research Prompt
 
-Use this prompt together with the attached/internal source pack.
+Archive-layer note: do not send this archived prompt as the current outside packet. Current outside-send readiness is still blocked by `docs/system_forensics/EXTERNAL_PACKET_READINESS_REVIEW.md`.
+
+Use this prompt together with the attached/internal source pack only as archive material.
 
 ## Role
 You are acting as an external principal architect and research analyst.

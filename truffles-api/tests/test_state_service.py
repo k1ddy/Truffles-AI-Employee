@@ -892,11 +892,17 @@ class TestManagerResolve:
         )
 
         assert did_restore is True
-        assert restored["expected_reply_type"] == "name"
-        assert restored["expected_reply_reason"] == "booking_prompt"
+        assert (
+            restored["context_manager"]["canonical_dialog_state"]["pending_question_contract"]
+            == {"expected_reply_type": "name", "reason": "booking_prompt"}
+        )
         assert restored["intent_queue"] == ["booking", "check_booking"]
         assert restored["booking"]["service"] == "Маникюр"
         assert restored["session_memory"]["interaction_state"]["resume_slot"] == "name"
+        assert restored["session_memory"]["pending_question_contract"] == {
+            "expected_reply_type": "name",
+            "reason": "booking_prompt",
+        }
         assert restored["session_memory"]["last_updated_at"] == now.isoformat()
         assert restored["last_service_hint"] == "Маникюр"
         assert restored["last_service_hint_at"] == "2026-03-15T10:00:00+00:00"
@@ -1010,8 +1016,15 @@ class TestManagerResolve:
             .get("interaction_target")
             == "time"
         )
-        assert ctx.get("expected_reply_type") == "time"
-        assert ctx.get("expected_reply_reason") == "booking_time_availability_followup"
+        assert (
+            ctx.get("context_manager", {})
+            .get("canonical_dialog_state", {})
+            .get("pending_question_contract")
+            == {
+                "expected_reply_type": "time",
+                "reason": "booking_time_availability_followup",
+            }
+        )
         assert ctx.get("intent_queue") == ["booking"]
         assert ctx.get("booking", {}).get("datetime") == "послезавтра"
         assert ctx.get("session_memory", {}).get("active_goal") == "booking"
@@ -1021,6 +1034,10 @@ class TestManagerResolve:
             .get("interaction_owner")
             == "llm_policy_core:ask_about_requested_slot"
         )
+        assert ctx.get("session_memory", {}).get("pending_question_contract") == {
+            "expected_reply_type": "time",
+            "reason": "booking_time_availability_followup",
+        }
         assert isinstance(ctx.get("session_memory", {}).get("last_updated_at"), str)
         assert ctx.get("last_service_hint") == "Педикюр"
         assert ctx.get("last_service_hint_at") == "2026-02-18T00:00:00+00:00"
@@ -1185,8 +1202,16 @@ class TestManagerResolve:
         assert conversation.state == ConversationState.BOT_ACTIVE.value
         assert conversation.bot_status == "active"
         assert conversation.context.get("pending_resume") is None
-        assert conversation.context.get("expected_reply_type") == "time"
-        assert conversation.context.get("expected_reply_reason") == "booking_prompt"
+        assert (
+            conversation.context.get("context_manager", {})
+            .get("canonical_dialog_state", {})
+            .get("pending_question_contract")
+            == {"expected_reply_type": "time", "reason": "booking_prompt"}
+        )
+        assert conversation.context.get("session_memory", {}).get("pending_question_contract") == {
+            "expected_reply_type": "time",
+            "reason": "booking_prompt",
+        }
         assert conversation.context.get("re_entry_required", {}).get("reason") == "pending_resume"
         assert trace_calls == [
             {
@@ -1501,8 +1526,14 @@ def test_restore_pending_resume_payload_restores_owner_contract() -> None:
             "handover_confirmation": {"required": True},
         },
         pending_resume={
-            "expected_reply_type": "  name  ",
-            "expected_reply_reason": "  booking_prompt  ",
+            "context_manager": {
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": "  name  ",
+                        "reason": "  booking_prompt  ",
+                    }
+                }
+            },
             "intent_queue": ["booking", "check_booking"],
             "booking": {"active": True, "service": "Маникюр"},
             "session_memory": {
@@ -1529,6 +1560,27 @@ def test_restore_pending_resume_payload_restores_owner_contract() -> None:
     assert restored["re_entry_required"]["reason"] == "pending_resume"
     assert "pending_sla" not in restored
     assert "handover_confirmation" not in restored
+
+
+def test_restore_pending_resume_payload_ignores_noncanonical_expected_reply_surface() -> None:
+    now = datetime(2026, 3, 15, 18, 45, tzinfo=timezone.utc)
+
+    restored = _restore_pending_resume_payload(
+        context={},
+        pending_resume={
+            "expected_reply_type": "  name  ",
+            "expected_reply_reason": "  booking_prompt  ",
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": " time ",
+            },
+        },
+        now=now,
+    )
+
+    assert "expected_reply_type" not in restored
+    assert "expected_reply_reason" not in restored
+    assert restored["session_memory"]["active_goal"] == "booking"
 
 
 def test_restore_pending_resume_payload_roundtrip_preserves_projection_derived_snapshot() -> None:
@@ -1612,8 +1664,17 @@ def test_prepare_pending_handoff_resume_boundary_restore_uses_owner_surface() ->
     restore = _prepare_pending_handoff_resume_boundary_restore(
         {
             "pending_resume": {
-                "context_manager": {"current_goal": "booking"},
-                "expected_reply_reason": " booking_interrupt ",
+                "context_manager": {
+                    "current_goal": "booking",
+                    "canonical_dialog_state": {
+                        "pending_question_contract": {
+                            "expected_reply_type": " time ",
+                            "reason": " booking_interrupt ",
+                            "next_question": " datetime ",
+                            "open_questions": [" datetime "],
+                        }
+                    },
+                },
                 "booking": {
                     "active": True,
                     "service": "Маникюр",
@@ -1636,7 +1697,7 @@ def test_prepare_pending_handoff_resume_boundary_restore_uses_owner_surface() ->
     assert restore.restored is True
     assert restore.pending_reason == "booking_interrupt"
     assert restore.expected_reply_type == "time"
-    assert restore.apply_boundary_booking_state is True
+    assert restore.apply_boundary_booking_state is False
     assert restore.boundary_payload == {
         "booking_state": {
             "active": True,
@@ -1707,8 +1768,17 @@ def test_prepare_resolved_handoff_resume_boundary_restore_uses_owner_surface() -
 
     restore = _prepare_resolved_handoff_resume_boundary_restore(
         {
-            "context_manager": {"current_goal": "booking"},
-            "expected_reply_reason": " booking_interrupt ",
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                },
+            },
             "booking": {
                 "active": True,
                 "service": "Маникюр",
@@ -1870,8 +1940,17 @@ def test_resolve_resolved_handoff_resume_boundary_restore_uses_owner_surface() -
         conversation=conversation,
         saved_message=saved_message,
         context={
-            "context_manager": {"current_goal": "booking"},
-            "expected_reply_reason": " booking_interrupt ",
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": " time ",
+                        "reason": " booking_interrupt ",
+                        "next_question": " datetime ",
+                        "open_questions": [" datetime "],
+                    }
+                },
+            },
             "booking": {
                 "active": True,
                 "service": "Маникюр",
@@ -1999,8 +2078,17 @@ def test_resolve_pending_resume_boundary_activation_restores_pending_handoff_bou
         saved_message=saved_message,
         context={
             "pending_resume": {
-                "context_manager": {"current_goal": "booking"},
-                "expected_reply_reason": " booking_interrupt ",
+                "context_manager": {
+                    "current_goal": "booking",
+                    "canonical_dialog_state": {
+                        "pending_question_contract": {
+                            "expected_reply_type": " time ",
+                            "reason": " booking_interrupt ",
+                            "next_question": " datetime ",
+                            "open_questions": [" datetime "],
+                        }
+                    },
+                },
                 "booking": {
                     "active": True,
                     "service": "Маникюр",
@@ -2242,10 +2330,18 @@ class TestManagerReturn:
         assert result.ok is True
         ctx = conversation.context
         assert ctx.get("pending_resume") is None
-        assert ctx.get("expected_reply_type") == "name"
-        assert ctx.get("expected_reply_reason") == "booking_prompt"
+        assert (
+            ctx.get("context_manager", {})
+            .get("canonical_dialog_state", {})
+            .get("pending_question_contract")
+            == {"expected_reply_type": "name", "reason": "booking_prompt"}
+        )
         assert ctx.get("intent_queue") == ["booking", "check_booking"]
         assert ctx.get("booking", {}).get("service") == "Маникюр"
+        assert ctx.get("session_memory", {}).get("pending_question_contract") == {
+            "expected_reply_type": "name",
+            "reason": "booking_prompt",
+        }
         assert ctx.get("last_service_hint") == "Маникюр"
         assert ctx.get("last_service_hint_at") == "2026-02-18T01:00:00+00:00"
         assert ctx.get("re_entry_required", {}).get("required") is True
@@ -2408,7 +2504,7 @@ class TestLowConfidenceRetryGate:
             retry_offered_at=None,
         )
 
-        with patch("app.routers.webhook._legacy._resolve_backlog_language", return_value="ru"):
+        with patch("app.routers.webhook.context_manager._resolve_backlog_language", return_value="ru"):
             legacy._update_compact_summary(
                 conversation=conversation,
                 saved_message=saved_message,

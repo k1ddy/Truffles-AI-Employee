@@ -1,0 +1,131 @@
+version: 2026-03-31.v1
+active_block: Consultant Core Operational Entrypoint Dedupe
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md
+next_move: complete_whole_system_governance_closure_before_replay_or_human_audit
+hotspots:
+- path: truffles-api/app/services/outbox_runtime_service.py
+  required_function_defs:
+  - run_canonical_outbox_process
+  - run_default_outbox_process
+  - run_scoped_outbox_process
+  - run_outbox_worker_cycle
+- path: truffles-api/app/routers/outbox_service.py
+  required_import_names:
+  - run_default_outbox_process
+  forbidden_call_names:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+- path: truffles-api/app/routers/admin.py
+  required_import_names:
+  - run_default_outbox_process
+  forbidden_call_names:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+- path: truffles-api/app/routers/console.py
+  required_import_names:
+  - load_outbox_process_settings
+  - run_scoped_outbox_process
+- path: truffles-api/app/outbox_service_app.py
+  forbidden_import_modules:
+  - app.services.outbox_runtime_service
+- path: truffles-api/app/workers/outbox.py
+  required_import_names:
+  - run_outbox_worker_cycle
+  forbidden_call_names:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+function_call_contracts:
+- path: truffles-api/app/services/outbox_runtime_service.py
+  function_name: run_default_outbox_process
+  required_calls:
+  - run_canonical_outbox_process
+- path: truffles-api/app/services/outbox_runtime_service.py
+  function_name: run_scoped_outbox_process
+  required_calls:
+  - run_canonical_outbox_process
+- path: truffles-api/app/services/outbox_runtime_service.py
+  function_name: run_outbox_worker_cycle
+  required_calls:
+  - run_canonical_outbox_process
+- path: truffles-api/app/routers/outbox_service.py
+  function_name: process_outbox
+  required_calls:
+  - run_default_outbox_process
+  forbidden_calls:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+- path: truffles-api/app/routers/admin.py
+  function_name: process_outbox
+  required_calls:
+  - run_default_outbox_process
+  forbidden_calls:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+- path: truffles-api/app/routers/console.py
+  function_name: _run_outbox_process_job
+  required_calls:
+  - load_outbox_process_settings
+  - run_scoped_outbox_process
+  forbidden_calls:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+- path: truffles-api/app/workers/outbox.py
+  function_name: run_worker
+  required_calls:
+  - run_outbox_worker_cycle
+  forbidden_calls:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+repo_callsite_contracts:
+- search_roots:
+  - truffles-api/app
+  call_names:
+  - run_canonical_outbox_process
+  exact_allowlist:
+  - truffles-api/app/services/outbox_runtime_service.py
+- search_roots:
+  - truffles-api/app
+  call_names:
+  - run_default_outbox_process
+  exact_allowlist:
+  - truffles-api/app/routers/admin.py
+  - truffles-api/app/routers/outbox_service.py
+- search_roots:
+  - truffles-api/app
+  call_names:
+  - run_scoped_outbox_process
+  exact_allowlist:
+  - truffles-api/app/routers/console.py
+- search_roots:
+  - truffles-api/app
+  call_names:
+  - run_outbox_worker_cycle
+  exact_allowlist:
+  - truffles-api/app/workers/outbox.py
+- search_roots:
+  - truffles-api/app
+  call_names:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - archive_pending_outbox
+  exact_allowlist:
+  - truffles-api/app/services/outbox_runtime_service.py
+required_checks:
+- python3 scripts/recovery_execution_guard.py
+- python3 scripts/operational_entrypoint_dedupe_guard.py
+- python3 scripts/arch_guard.py
+- PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_service_app.py
+- PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_worker_settings.py
+  -k "run_scoped_outbox_process_uses_shared_runtime_helpers"
+- PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_admin_legacy_auth.py -k
+  "admin_outbox_process"
+- PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_console_ops_jobs.py -k
+  "run_outbox_process_job_execute"
+- PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py

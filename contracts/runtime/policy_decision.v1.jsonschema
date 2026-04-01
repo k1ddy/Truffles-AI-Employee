@@ -42,7 +42,7 @@
     },
     "source": {
       "type": "string",
-      "const": "policy_core"
+      "minLength": 1
     },
     "tool_action": {
       "type": "string",

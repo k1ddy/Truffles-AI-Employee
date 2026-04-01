@@ -1,7 +1,9 @@
 # Consultant Core Implementation Program
 
 Status: `open`
-Purpose: convert the accepted target decision into a finite, authority-based execution program.
+Purpose: record the archive-only implementation hypothesis that was derived from the older target decision. It is no longer allowed to restart runtime work by itself.
+
+Archive-layer note: this is an archive-only implementation hypothesis. Current implementation remains blocked until the outside-readiness blockers named in `docs/system_forensics/EXTERNAL_PACKET_READINESS_REVIEW.md` are closed.
 
 ## Program Rule
 Every workstream must reduce old authority, not merely move code.

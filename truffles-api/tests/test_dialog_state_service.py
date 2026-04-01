@@ -941,8 +941,14 @@ def test_dialog_state_service_restores_pending_resume_payload() -> None:
 
     restored = service.restore_pending_resume_payload(
         {
-            "expected_reply_type": "  name  ",
-            "expected_reply_reason": "  booking_prompt  ",
+            "context_manager": {
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": "  name  ",
+                        "reason": "  booking_prompt  ",
+                    }
+                }
+            },
             "intent_queue": ["booking", "check_booking"],
             "booking": {"active": True, "service": "Маникюр"},
             "session_memory": {
@@ -969,6 +975,27 @@ def test_dialog_state_service_restores_pending_resume_payload() -> None:
     assert restored["last_service_hint"] == "Маникюр"
     assert restored["last_service_hint_at"] == "2026-03-15T10:00:00+00:00"
     assert restored["re_entry_required"]["reason"] == "pending_resume"
+
+
+def test_dialog_state_service_restore_pending_resume_payload_ignores_noncanonical_expected_reply() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 15, 18, 40, tzinfo=timezone.utc)
+
+    restored = service.restore_pending_resume_payload(
+        {
+            "expected_reply_type": "  name  ",
+            "expected_reply_reason": "  booking_prompt  ",
+            "session_memory": {
+                "active_goal": "booking",
+                "last_question_type": " time ",
+            },
+        },
+        now=now,
+    )
+
+    assert "expected_reply_type" not in restored
+    assert "expected_reply_reason" not in restored
+    assert restored["session_memory"]["active_goal"] == "booking"
 
 
 def test_dialog_state_service_restores_pending_resume_payload_from_canonical_question_contract() -> None:
@@ -1708,6 +1735,148 @@ def test_dialog_state_service_sets_and_clears_canonical_class_carryover() -> Non
         "remaining": 4,
     }
     assert "class_carryover" not in (cleared.get("meta") or {})
+
+
+def test_dialog_state_service_write_runtime_payload_materializes_touched_slice_class_carryover() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 30, 14, 0, tzinfo=timezone.utc)
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "fact_refs": ["hours"],
+            "reason": "hours_lookup",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, _ = service.write_runtime_payload(
+        {
+            "context_manager": {
+                "message_count": 7,
+                "canonical_dialog_state": {
+                    "owner_id": "context_manager.dialog_state.v1",
+                    "version": "v1",
+                },
+            }
+        },
+        decision=decision,
+        execution_meta={
+            "fact_family_cutover": "location_hours_parking",
+            "info_sections": ["address", "hours"],
+            "fact_emitted_refs": ["location", "hours"],
+        },
+        now=now,
+    )
+
+    expected = {
+        "class": "info_bundle",
+        "intents": ["location", "hours"],
+        "info_sections": ["address", "hours"],
+        "message_count": 7,
+        "ttl": 4,
+    }
+
+    assert dialog_state.meta["class_carryover"] == expected
+    assert updated["context_manager"]["class_carryover"] == expected
+    assert updated["context_manager"]["canonical_dialog_state"]["meta"]["class_carryover"] == expected
+
+
+def test_dialog_state_service_write_runtime_payload_preserves_existing_touched_slice_class_carryover() -> None:
+    service = DialogStateService()
+    now = datetime(2026, 3, 30, 14, 5, tzinfo=timezone.utc)
+    touched_slice_decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "fact_refs": ["hours"],
+            "reason": "hours_lookup",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+    context = {
+        "context_manager": {
+            "message_count": 7,
+            "canonical_dialog_state": {
+                "owner_id": "context_manager.dialog_state.v1",
+                "version": "v1",
+            },
+        }
+    }
+    updated, _dialog_state, _ = service.write_runtime_payload(
+        context,
+        decision=touched_slice_decision,
+        execution_meta={
+            "fact_family_cutover": "location_hours_parking",
+            "info_sections": ["address", "hours"],
+            "fact_emitted_refs": ["location", "hours"],
+        },
+        now=now,
+    )
+    updated["context_manager"]["message_count"] = 8
+
+    followup_decision = build_test_policy_override_decision(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "fact_refs": ["promotions"],
+            "reason": "promo_lookup",
+            "goal": "info",
+            "capability": "promotions",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    next_updated, next_dialog_state, _ = service.write_runtime_payload(
+        updated,
+        decision=followup_decision,
+        execution_meta={"info_sections": ["promotions"]},
+        now=now + timedelta(minutes=1),
+    )
+
+    expected = {
+        "class": "info_bundle",
+        "intents": ["location", "hours"],
+        "info_sections": ["address", "hours"],
+        "message_count": 7,
+        "ttl": 4,
+    }
+
+    assert next_dialog_state.meta["class_carryover"] == expected
+    assert next_updated["context_manager"]["class_carryover"] == expected
+    assert (
+        service.get_canonical_class_carryover(
+            next_updated["context_manager"]["canonical_dialog_state"],
+            message_count=8,
+        )
+        == {
+            "class": "info_bundle",
+            "intents": ["location", "hours"],
+            "info_sections": ["address", "hours"],
+            "age": 1,
+            "ttl": 4,
+            "remaining": 4,
+        }
+    )
 
 
 def test_dialog_state_service_builds_and_reads_service_carryover_payload() -> None:
@@ -3498,6 +3667,96 @@ def test_dialog_state_service_semantic_decision_state_write_reads_executor_enric
     }
 
 
+def test_dialog_state_service_owner_backed_state_write_ignores_conflicting_booking_semantics() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 3, 27, 12, 10, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "meta": {
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "capability": "stale_meta",
+                        "referents": {
+                            "service": {
+                                "value": "Педикюр",
+                                "entity_id": "svc:pedicure",
+                                "entity_type": "service",
+                                "source_ref": "stale_meta",
+                            }
+                        },
+                    }
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": "Педикюр",
+                "last_question": "datetime",
+            },
+        }
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "booking_manage",
+            "tool_action": "calendar.book_slot",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "resolution_mode": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                }
+            },
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                    "value": "Маникюр",
+                }
+            ],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    _, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"slot_values": {"service": "Педикюр"}, "next_slot": "datetime"},
+        now=now,
+    )
+
+    assert booking_payload["service"] == "Педикюр"
+    assert dialog_state.current_referents.service == "Маникюр"
+    assert dialog_state.meta["semantic_contract"]["capability"] == "booking_manage"
+    assert dialog_state.meta["semantic_contract"]["referents"]["service"] == {
+        "value": "Маникюр",
+        "entity_id": "svc:manicure",
+        "entity_type": "service",
+        "source_ref": "message",
+    }
+
+
 def test_dialog_state_service_omits_empty_pending_question_contract_in_runtime_payload() -> None:
     service = DialogStateService()
     decision = build_test_policy_override_decision(
@@ -4183,6 +4442,234 @@ def test_dialog_state_service_load_runtime_payload_prefers_conversation_projecti
     assert payload["dialog_state"].meta["current_goal"] == "booking"
 
 
+def test_dialog_state_service_load_runtime_payload_builds_projection_without_synthetic_policy_decision() -> None:
+    service = DialogStateService()
+    context = {
+        "consultant_runtime": {
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "semantic_state": {
+                    "schema_version": "canonical_semantic_state.v1",
+                    "materialized_frame": {
+                        "schema_version": "semantic_frame.v2",
+                        "user_goal": "booking",
+                        "requested_effect": "collect_missing_input",
+                        "subject": {"kind": "service", "value": "Маникюр"},
+                        "referents": {
+                            "service": {
+                                "value": "Маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            }
+                        },
+                        "constraints": {},
+                        "preferences": {},
+                        "continuation": {
+                            "expected_reply_type": "time",
+                            "next_question": "datetime",
+                            "open_questions": ["datetime"],
+                            "slot_values": {"service": "Маникюр"},
+                        },
+                        "capability_selection": {"capability": "bookability"},
+                        "needs_human": False,
+                        "reason": "collect_datetime",
+                    },
+                    "event_log": [],
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "current_referents": {},
+                "interaction_state": {"interaction_owner": "dialog_state_service"},
+                "projections": {"expected_reply_type": "time", "expected_reply_reason": "collect:datetime"},
+                "meta": {
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "capability": "bookability",
+                    },
+                },
+            },
+            "booking": {"active": True, "service": "Маникюр", "last_question": "datetime"},
+        },
+    }
+
+    payload = service.load_runtime_payload(context)
+
+    projection = payload["conversation_projection"]
+    assert isinstance(projection, ConversationProjectionV1)
+    assert projection.current_semantic_decision_ref is None
+    assert projection.last_turn_id is None
+    assert projection.active_workflow_ref is None
+    assert projection.pending_handoff_state == {}
+    assert projection.current_goal == "booking"
+    assert projection.semantic_contract["capability"] == "bookability"
+    assert projection.pending_question_contract["expected_reply_type"] == "time"
+
+
+def test_dialog_state_service_write_runtime_payload_reprojects_compatibility_continuity_from_canonical_runtime_state() -> None:
+    service = DialogStateService()
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "goal": "booking",
+            "reason": "collect_datetime",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="ask_about_requested_slot",
+        source="llm_policy_core",
+    )
+    context = {
+        "context_manager": {
+            "message_count": 4,
+            "current_goal": "handoff",
+            "canonical_dialog_state": {
+                "owner_id": "context_manager.dialog_state.v1",
+                "version": "v1",
+                "pending_question_contract": {
+                    "expected_reply_type": "name",
+                    "reason": "stale_projection",
+                    "next_question": "name",
+                    "open_questions": ["name"],
+                },
+            },
+        },
+        "expected_reply_type": "name",
+        "expected_reply_reason": "stale_projection",
+        "current_goal": "handoff",
+        "session_memory": {
+            "active_goal": "handoff",
+            "pending_question_contract": {
+                "expected_reply_type": "name",
+                "reason": "stale_projection",
+                "next_question": "name",
+                "open_questions": ["name"],
+            },
+        },
+    }
+
+    updated, dialog_state, _ = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={},
+        now=datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc),
+    )
+
+    expected_pending_question = {
+        "expected_reply_type": "time",
+        "reason": "collect_datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+    assert "expected_reply_type" not in updated
+    assert "expected_reply_reason" not in updated
+    assert "current_goal" not in updated
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == expected_pending_question
+    assert dialog_state.meta["current_goal"] == "booking"
+    assert updated["context_manager"]["current_goal"] == "booking"
+    assert updated["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == expected_pending_question
+    assert updated["session_memory"]["active_goal"] == "booking"
+    assert updated["session_memory"]["pending_question_contract"] == expected_pending_question
+    assert updated["session_memory"]["interaction_state"]["resume_slot"] == "datetime"
+
+
+def test_dialog_state_service_write_runtime_payload_captures_pending_resume_from_canonical_runtime_state() -> None:
+    service = DialogStateService()
+    collect = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "goal": "booking",
+            "reason": "collect_datetime",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="ask_about_requested_slot",
+        source="llm_policy_core",
+    )
+    handoff = build_test_policy_override_decision(
+        {
+            "intent": "handoff",
+            "action": "handoff",
+            "tool_action": "handoff",
+            "goal": "booking",
+            "reason": "user_requests_human",
+            "subject_kind": "conversation",
+            "capability": "handoff",
+            "resolution_mode": "policy_handoff",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="manager_handoff",
+        source="llm_policy_core",
+    )
+
+    updated, _dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=collect,
+        execution_meta={},
+        now=datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc),
+    )
+    handoff_updated, _handoff_state, _ = service.write_runtime_payload(
+        updated,
+        decision=handoff,
+        execution_meta={},
+        now=datetime(2026, 3, 31, 8, 1, tzinfo=timezone.utc),
+    )
+
+    expected_pending_question = {
+        "expected_reply_type": "time",
+        "reason": "collect_datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    pending_resume = handoff_updated["pending_resume"]
+
+    assert pending_resume["context_manager"]["current_goal"] == "booking"
+    assert pending_resume["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == expected_pending_question
+    assert pending_resume["expected_reply_type"] == "time"
+    assert pending_resume["expected_reply_reason"] == "collect_datetime"
+    assert pending_resume["booking"]["service"] == "Маникюр"
+    assert "current_goal" not in handoff_updated
+
+
 
 def test_dialog_state_service_write_runtime_payload_emits_turn_journal_and_conversation_projection() -> None:
     service = DialogStateService()
@@ -4242,4 +4729,62 @@ def test_dialog_state_service_write_runtime_payload_emits_turn_journal_and_conve
     assert projection.pending_question_contract["expected_reply_type"] == "time"
     assert projection.booking_state["service"] == "Маникюр"
     assert runtime_payload["dialog_state"]["semantic_state"]["materialized_frame"]["user_goal"] == "booking"
+    assert dialog_state.meta["current_goal"] == "booking"
+
+
+def test_dialog_state_service_owner_backed_projection_sets_semantic_decision_ref() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_action_hint": "collect",
+            "goal": "booking",
+            "reason": "collect_datetime",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta={"slot_values": {"service": "Маникюр"}, "next_slot": "datetime"},
+        now=datetime(2026, 3, 27, 12, 0, tzinfo=timezone.utc),
+        conversation_id="conv-owner",
+        trace_id="trace-owner",
+    )
+
+    projection = ConversationProjectionV1.model_validate(
+        updated["consultant_runtime"]["conversation_projection"]
+    )
+
+    assert projection.current_semantic_decision_ref == semantic_decision.decision_id
+    assert projection.semantic_slots == {"service": "Маникюр"}
+    assert projection.current_goal == "booking"
+    assert projection.missing_information == {
+        "expected_reply_type": "time",
+        "reason": "collect_datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
     assert dialog_state.meta["current_goal"] == "booking"

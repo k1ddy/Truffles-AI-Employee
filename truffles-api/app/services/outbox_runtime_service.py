@@ -6,7 +6,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 from uuid import UUID
 
 from sqlalchemy import func, or_
@@ -54,6 +54,7 @@ from app.services.knowledge_registry_service import (
 )
 from app.services.appointment_reminder_service import process_reminder_jobs
 from app.services.outbox_service import (
+    archive_pending_outbox,
     build_inbound_message_id,
     claim_pending_outbox_batches,
     enqueue_outbox_message,
@@ -116,6 +117,19 @@ async def process_claimed_outbox_rows(
     )
 
 
+async def run_canonical_outbox_process(
+    db: Session,
+    *,
+    settings: OutboxProcessSettings,
+    claim_rows: Callable[[], list[dict[str, object]]],
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    rows = claim_rows()
+    if not rows:
+        return rows, {"claimed": 0, "sent": 0, "failed": 0, "retry_scheduled": 0}
+    results = await process_claimed_outbox_rows(db, rows, settings=settings)
+    return rows, results
+
+
 async def run_outbox_worker_cycle(
     db: Session,
     *,
@@ -159,17 +173,20 @@ async def run_outbox_worker_cycle(
     started_at = loop_started_at if loop_started_at is not None else time.monotonic()
     processed_batches = 0
     while True:
-        rows = claim_pending_outbox_batches(
+        rows, results = await run_canonical_outbox_process(
             db,
-            limit=settings.limit,
-            idle_seconds=settings.idle_seconds,
-            max_wait_seconds=settings.max_wait_seconds,
-            include_without_conversation=True,
+            settings=settings,
+            claim_rows=lambda: claim_pending_outbox_batches(
+                db,
+                limit=settings.limit,
+                idle_seconds=settings.idle_seconds,
+                max_wait_seconds=settings.max_wait_seconds,
+                include_without_conversation=True,
+            ),
         )
         if not rows:
             break
 
-        results = await process_claimed_outbox_rows(db, rows, settings=settings)
         processed_batches += 1
         logger.info(
             "Outbox worker processed",
@@ -203,14 +220,17 @@ async def run_default_outbox_process(
         retry_backoff_seconds=settings.retry_backoff_seconds,
     )
     inbound_results = schedule_inbound_syncs(db)
-    rows = claim_pending_outbox_batches(
+    _rows, results = await run_canonical_outbox_process(
         db,
-        limit=settings.limit,
-        idle_seconds=settings.idle_seconds,
-        max_wait_seconds=settings.max_wait_seconds,
-        include_without_conversation=True,
+        settings=settings,
+        claim_rows=lambda: claim_pending_outbox_batches(
+            db,
+            limit=settings.limit,
+            idle_seconds=settings.idle_seconds,
+            max_wait_seconds=settings.max_wait_seconds,
+            include_without_conversation=True,
+        ),
     )
-    results = await process_claimed_outbox_rows(db, rows, settings=settings)
     if inbound_results.get("scheduled") or inbound_results.get("errors"):
         results["calendar_inbound"] = inbound_results
     if include_reminders:
@@ -221,6 +241,69 @@ async def run_default_outbox_process(
         results["released_stale"] = released["released"]
         results["failed_stale"] = released["failed"]
     return results
+
+
+async def run_scoped_outbox_process(
+    db: Session,
+    *,
+    client_id: UUID,
+    allowed_branch_ids: list[UUID] | None,
+    limit: int | None = None,
+    idle_seconds: int | None = None,
+    max_wait_seconds: int | None = None,
+    include_without_conversation: bool = True,
+    archive_pending_older_than_hours: int = 0,
+    archive_pending_limit: int | None = None,
+    archive_pending_without_conversation_only: bool = True,
+) -> dict[str, int | dict[str, int] | dict[str, object]]:
+    settings = load_outbox_process_settings()
+    effective_limit = settings.limit if limit is None else limit
+    effective_idle_seconds = settings.idle_seconds if idle_seconds is None else idle_seconds
+    effective_max_wait_seconds = settings.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
+    effective_archive_limit = archive_pending_limit if archive_pending_limit is not None else effective_limit
+
+    archive_result = None
+    if archive_pending_older_than_hours > 0:
+        archive_reason = f"archived_pending:older_than_{archive_pending_older_than_hours}h"
+        archive_result = archive_pending_outbox(
+            db,
+            client_id=client_id,
+            older_than_seconds=archive_pending_older_than_hours * 3600,
+            limit=effective_archive_limit,
+            reason=archive_reason,
+            branch_ids=allowed_branch_ids,
+            only_without_conversation=archive_pending_without_conversation_only,
+        )
+
+    claimed_rows, results = await run_canonical_outbox_process(
+        db,
+        settings=settings,
+        claim_rows=lambda: claim_scoped_outbox_rows(
+            db,
+            client_id=client_id,
+            allowed_branch_ids=allowed_branch_ids,
+            limit=effective_limit,
+            idle_seconds=effective_idle_seconds,
+            max_wait_seconds=effective_max_wait_seconds,
+            include_without_conversation=include_without_conversation,
+        ),
+    )
+    if not claimed_rows:
+        response: dict[str, int | dict[str, int] | dict[str, object]] = {
+            "processed": 0,
+            "results": {"processed": 0, "failed": 0},
+        }
+        if archive_result is not None:
+            response["archive"] = archive_result
+        return response
+
+    response: dict[str, int | dict[str, int] | dict[str, object]] = {
+        "processed": len(claimed_rows),
+        "results": results,
+    }
+    if archive_result is not None:
+        response["archive"] = archive_result
+    return response
 
 
 def claim_scoped_outbox_rows(
@@ -2017,4 +2100,11 @@ __all__ = [
     "_prepare_skip_persist",
     "_process_outbox_rows",
     "_split_outbox_batches",
+    "claim_scoped_outbox_rows",
+    "load_outbox_process_settings",
+    "process_claimed_outbox_rows",
+    "run_canonical_outbox_process",
+    "run_default_outbox_process",
+    "run_outbox_worker_cycle",
+    "run_scoped_outbox_process",
 ]

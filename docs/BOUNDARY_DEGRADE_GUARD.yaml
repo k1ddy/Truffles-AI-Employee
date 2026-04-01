@@ -1,0 +1,94 @@
+version: 2026-03-30.v1
+hotspots:
+  - path: truffles-api/app/core/boundary_validator.py
+    active_waiver: null
+    tracked_function_names:
+      name_patterns:
+        - '^_sanitize_.*$'
+        - '^_normalize_override$'
+        - '^_build_.*$'
+        - '^_resolve_.*$'
+        - '^validate$'
+        - '^build_.*override$'
+        - '^build_.*turn_outcome$'
+      exact_allowlist:
+        - _build_override
+        - _build_turn_outcome_meta
+        - _normalize_override
+        - _resolve_reason_code
+        - _sanitize_meta
+        - _sanitize_preserve_fields
+        - build_block_override
+        - build_block_turn_outcome
+        - build_degrade_override
+        - build_degrade_turn_outcome
+        - validate
+    tracked_literal_members:
+      - symbol: _BOUNDARY_OVERRIDE_PRESERVE_FIELDS
+        exact_allowlist:
+          - outcome
+          - interaction_owner
+          - interaction_target
+          - interaction_relation
+          - pending_question_contract
+      - symbol: _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS
+        exact_allowlist:
+          - semantic_contract
+          - semantic_frame
+          - semantic_state
+          - pending_question_contract
+          - tool_args
+          - tool_execution_projection
+          - entity_refs
+          - referents
+          - slots
+          - fact_refs
+  - path: truffles-api/app/core/consultant_runtime.py
+    active_waiver: null
+    tracked_call_parent_functions:
+      - call_names:
+          - build_degrade_override
+        exact_allowlist:
+          - _apply_execution_boundary_override
+          - _plan_turn
+  - path: truffles-api/app/core/response_realizer.py
+    active_waiver: null
+    tracked_function_names:
+      name_patterns:
+        - '^realize$'
+      exact_allowlist:
+        - realize
+    tracked_override_meta_get_keys:
+      exact_allowlist:
+        - reply_kind
+  - path: truffles-api/app/core/turn_executor.py
+    active_waiver: null
+    tracked_function_names:
+      name_patterns:
+        - '^_validate_boundary_override$'
+        - '^_build_boundary_turn_result$'
+        - '^build_.*boundary.*$'
+      exact_allowlist:
+        - _build_boundary_turn_result
+        - _validate_boundary_override
+        - build_block_boundary_artifact
+        - build_block_boundary_artifact_from_request
+        - build_block_boundary_turn_result
+        - build_degrade_boundary_artifact
+        - build_degrade_boundary_artifact_from_request
+        - build_degrade_boundary_turn_result
+repo_callsite_contracts:
+  - search_roots:
+      - truffles-api/app
+    call_names:
+      - build_degrade_override
+      - build_block_override
+    exact_allowlist:
+      - truffles-api/app/core/consultant_runtime.py
+      - truffles-api/app/core/turn_executor.py
+  - search_roots:
+      - truffles-api/app
+    call_names:
+      - build_block_boundary_artifact_from_request
+      - build_degrade_boundary_artifact_from_request
+    exact_allowlist: []

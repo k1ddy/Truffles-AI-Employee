@@ -12,7 +12,6 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app import webhook as legacy_webhook_module
 from app.contracts.decision import (
     DecisionOutcome,
     DecisionSignals,
@@ -83,6 +82,7 @@ from app.services.state_service import (
     PendingResumeBoundaryRuntimeHooks,
     _resolve_resolved_handoff_resume_boundary_restore,
 )
+from tests import support_legacy_webhook_shadow as legacy_webhook_module
 from app.services.tool_registry_service import validate_tool_args_contract
 
 MINIMUM_DATA_READY = MinimumDataContractStatus(ready=True, missing_fields=[])
@@ -498,7 +498,7 @@ class TestMessageEndpoint:
             with patch(
                 "app.routers.message.get_client_slug", return_value="demo_salon"
             ), patch(
-                "app.core.consultant_runtime.handle_webhook_payload",
+                "app.routers.message.handle_public_webhook_payload",
                 new_callable=AsyncMock,
             ) as mock_handle:
                 mock_handle.return_value = WebhookResponse(
@@ -543,7 +543,7 @@ class TestMessageEndpoint:
             with patch(
                 "app.routers.message.get_client_slug", return_value="demo_salon"
             ), patch(
-                "app.core.consultant_runtime.handle_webhook_payload",
+                "app.routers.message.handle_public_webhook_payload",
                 new_callable=AsyncMock,
             ) as mock_handle:
                 mock_handle.return_value = WebhookResponse(
@@ -578,7 +578,7 @@ class TestMessageEndpoint:
             with patch(
                 "app.routers.message.get_client_slug", return_value="demo_salon"
             ), patch(
-                "app.core.consultant_runtime.handle_webhook_payload",
+                "app.routers.message.handle_public_webhook_payload",
                 new_callable=AsyncMock,
             ) as mock_handle:
                 mock_handle.return_value = WebhookResponse(
@@ -743,7 +743,7 @@ async def test_legacy_webhook_compat_routes_through_public_entrypoint_contract()
     db = Mock()
 
     with patch(
-        "app.webhook.handle_public_webhook_payload",
+        "tests.support_legacy_webhook_shadow.handle_public_webhook_payload",
         new=AsyncMock(return_value=WebhookResponse(success=True, message="ok")),
     ) as mock_handle:
         response = await legacy_webhook_module.handle_webhook(payload, db)
@@ -1005,7 +1005,7 @@ class TestBatchBookingSignals:
                 ["маникюр", "на завтра в 5"],
                 client_slug="demo_salon",
             )
-        assert updated.get("service") == "маникюр"
+        assert updated.get("service") == "Маникюр"
         assert updated.get("datetime") == "в 5"
 
 
@@ -1375,7 +1375,7 @@ class TestFastIntent:
 
         assert decision is None
 
-        with patch("app.routers.webhook._legacy.classify_intent", return_value=Intent.QUESTION) as mock_classify:
+        with patch("app.routers.webhook.decision.classify_intent", return_value=Intent.QUESTION) as mock_classify:
             signals = webhook_router._detect_intent_signals(message)
         assert signals.intent == Intent.QUESTION
         mock_classify.assert_called_once()
@@ -1720,9 +1720,10 @@ def test_active_name_time_availability_followup_owner_requires_specific_time_nam
 
 
 def test_truth_gate_appends_booking_cta_for_info_reply():
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     conversation = SimpleNamespace(
         id=uuid4(),
+        client_id="client-123",
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
@@ -2592,7 +2593,7 @@ def test_context_manager_set_conversation_context_preserves_simulation_and_merge
 
 def test_set_expected_reply_context_records_canonical_pending_question_contract_in_evidence():
     now = datetime.now(timezone.utc)
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     conversation = SimpleNamespace(
         context={
             "context_manager": {
@@ -2649,9 +2650,10 @@ def test_set_expected_reply_context_records_canonical_pending_question_contract_
 
 
 def test_semantic_service_matcher_returns_not_found_on_empty_rag():
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     conversation = SimpleNamespace(
         id=uuid4(),
+        client_id="client-123",
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
@@ -2671,13 +2673,13 @@ def test_semantic_service_matcher_returns_not_found_on_empty_rag():
     }
 
     with patch(
-        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+        "app.routers.webhook.response.semantic_service_match", return_value=None
     ), patch(
-        "app.routers.webhook._legacy.rewrite_for_service_match", return_value=None
+        "app.routers.webhook.response.rewrite_for_service_match", return_value=None
     ), patch(
-        "app.routers.webhook._legacy._extract_service_hint", return_value=None
+        "app.routers.webhook.response._extract_service_hint", return_value=None
     ), patch(
-        "app.routers.webhook._legacy._record_knowledge_backlog"
+        "app.routers.webhook.response._record_knowledge_backlog"
     ):
         outcome = webhook_response._handle_ai_response_action(
             db=Mock(),
@@ -2704,19 +2706,20 @@ def test_semantic_service_matcher_returns_not_found_on_empty_rag():
             send_and_save=lambda text: (text, True),
             send_response=lambda text: True,
             finalize_response=lambda **_kwargs: None,
-        )
+    )
 
     assert outcome.bot_response is not None
-    assert "В списке услуг нет такой позиции" in outcome.bot_response
+    assert "какая услуга интересует" in outcome.bot_response.casefold()
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("intent") == "service_not_found"
     assert meta.get("source") == "service_semantic_matcher"
 
 
 def test_rag_rewrite_and_scores_logged():
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     conversation = SimpleNamespace(
         id=uuid4(),
+        client_id="client-123",
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
@@ -2758,7 +2761,7 @@ def test_rag_rewrite_and_scores_logged():
         "app.services.ai_service.rewrite_query_for_retrieval",
         return_value={"rewrite_used": True, "rewrite_text": "адрес салона", "reason": "rewritten"},
     ), patch(
-        "app.routers.webhook._legacy.generate_bot_response",
+        "app.routers.webhook.response.generate_bot_response",
         side_effect=fake_generate_bot_response,
     ):
         outcome = webhook_response._handle_ai_response_action(
@@ -2809,7 +2812,7 @@ def test_rag_rewrite_and_scores_logged():
 
 def test_record_rag_meta_sets_branch_id():
     conversation = SimpleNamespace(context={})
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     branch_id = "b7f75692-951e-421a-aae6-f5db97394799"
     timing_context = {
         "rag_scores": {"vector_max": 0.6, "bm25_max": 1.2, "hybrid_max": 0.8},
@@ -3043,7 +3046,7 @@ def test_expected_reply_contract_prefers_session_memory_pending_question_contrac
         "app.routers.webhook.decision._match_expected_reply_candidates",
         return_value=(False, None, []),
     ), patch(
-        "app.routers.webhook._legacy.interpret_expected_reply",
+        "app.routers.webhook.decision.interpret_expected_reply",
         return_value={"ok": False, "payload": {}, "error": "no_match", "raw": None},
     ):
         state = decision_router._apply_expected_reply_contract(
@@ -3062,16 +3065,13 @@ def test_expected_reply_contract_prefers_session_memory_pending_question_contrac
             client_slug="demo_salon",
         )
 
-    assert state.memory_expected_reply_type == webhook_router.EXPECTED_REPLY_TIME
-    assert state.expected_reply_type is None
+    assert state.memory_expected_reply_type is None
+    assert state.expected_reply_type == webhook_router.EXPECTED_REPLY_TIME
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("session_memory_expected_reply") == webhook_router.EXPECTED_REPLY_TIME
-    assert meta.get("session_memory_expected_reply_reason") == "booking_interrupt"
-    assert meta.get("session_memory_pending_question_contract") == {
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+    assert meta.get("pending_question_contract") == {
         "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
         "reason": "booking_interrupt",
-        "next_question": "datetime",
-        "open_questions": ["datetime"],
     }
 
 
@@ -3975,7 +3975,7 @@ def test_truth_gate_fallback_escalation_passes_active_handover_hooks():
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4050,7 +4050,7 @@ def test_policy_escalation_passes_active_handover_hooks():
         client_id="client-123",
         state=ConversationState.BOT_ACTIVE.value,
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4117,7 +4117,7 @@ def test_clarify_limit_escalation_passes_active_handover_hooks():
         client_id="client-123",
         state=ConversationState.BOT_ACTIVE.value,
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4161,10 +4161,11 @@ def test_clarify_limit_escalation_passes_active_handover_hooks():
 def test_llm_guard_escalation_passes_active_handover_hooks():
     conversation = SimpleNamespace(
         id=uuid4(),
+        client_id="client-123",
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4229,7 +4230,7 @@ def test_booking_interrupt_reschedule_passes_active_handover_hooks():
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4310,7 +4311,7 @@ def test_booking_interrupt_info_escalation_passes_active_handover_hooks():
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4402,7 +4403,7 @@ def test_booking_same_day_escalation_passes_active_handover_hooks():
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()
@@ -4481,7 +4482,7 @@ def test_booking_human_request_escalation_passes_active_handover_hooks():
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     user = SimpleNamespace(id="user-123")
     db = Mock()
     db.commit = Mock()

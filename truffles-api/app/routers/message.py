@@ -52,6 +52,14 @@ async def handle_message(request: MessageRequest, db: Session = Depends(get_db))
         provided_secret=None,
         enforce_secret=False,
     )
+    if not response.conversation_id:
+        detail = (response.message or "").strip() or "Message pipeline returned no conversation_id"
+        if not response.success:
+            raise HTTPException(status_code=422, detail=detail)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Message pipeline returned no conversation_id: {detail}",
+        )
 
     conversation = (
         db.query(Conversation)

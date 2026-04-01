@@ -164,27 +164,12 @@ def test_webhook_legacy_adapter_uses_explicit_export_allowlist() -> None:
     assert "globals().update(_SHARED_EXPORTS)" in text
 
 
-def test_legacy_root_webhook_is_thin_delegate_only() -> None:
-    webhook_path = ROOT / "truffles-api" / "app" / "webhook.py"
-    text = webhook_path.read_text(encoding="utf-8")
+def test_legacy_root_webhook_removed_from_app_runtime() -> None:
+    removed_path = ROOT / "truffles-api" / "app" / "webhook.py"
+    shadow_path = ROOT / "truffles-api" / "tests" / "support_legacy_webhook_shadow.py"
 
-    assert "handle_public_webhook_payload(" in text
-    assert "webhook_http.debug_webhook(request)" in text
-    for removed_helper in (
-        "_get_debounce_settings",
-        "_get_message_buffer_settings",
-        "should_process_debounced_message",
-        "_buffer_user_message",
-        "_drain_buffered_messages",
-        "is_duplicate_message_id",
-        "_is_booking_request",
-        "_update_booking_from_messages",
-        "find_active_conversation_by_channel_ref",
-        "get_mute_settings",
-        "get_active_handover",
-        "should_offer_low_confidence_retry",
-    ):
-        assert f"def {removed_helper}" not in text
+    assert not removed_path.exists()
+    assert shadow_path.exists()
 
 
 def test_booking_prompt_owner_removed_from_app_core() -> None:
@@ -197,11 +182,12 @@ def test_booking_prompt_owner_removed_from_app_core() -> None:
 
 def test_reasoning_core_has_no_app_runtime_importers() -> None:
     app_root = ROOT / "truffles-api" / "app"
+    removed_path = app_root / "services" / "reasoning_core.py"
     importers: list[str] = []
 
+    assert not removed_path.exists()
+
     for path in app_root.rglob("*.py"):
-        if path == app_root / "services" / "reasoning_core.py":
-            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -219,8 +205,8 @@ def test_reasoning_core_has_no_app_runtime_importers() -> None:
     assert importers == []
 
 
-def test_reasoning_core_has_no_direct_decision_router_import() -> None:
-    reasoning_core_path = ROOT / "truffles-api" / "app" / "services" / "reasoning_core.py"
+def test_reasoning_core_shadow_support_has_no_direct_decision_router_import() -> None:
+    reasoning_core_path = ROOT / "truffles-api" / "tests" / "support_reasoning_core_shadow.py"
     tree = ast.parse(reasoning_core_path.read_text(encoding="utf-8"), filename=str(reasoning_core_path))
 
     violations: list[str] = []
@@ -281,7 +267,7 @@ def test_policy_runtime_snapshot_owner() -> None:
 
 def test_reasoning_core_routing_reads_compiled_policy_snapshot() -> None:
     reasoning_core_text = (
-        ROOT / "truffles-api" / "app" / "services" / "reasoning_core.py"
+        ROOT / "truffles-api" / "tests" / "support_reasoning_core_shadow.py"
     ).read_text(encoding="utf-8")
 
     assert "from app.routers.webhook.policy import _get_routing_policy" not in reasoning_core_text
@@ -857,10 +843,7 @@ def test_webhook_package_init_has_no_outbox_export() -> None:
 
 def test_app_runtime_has_no_eager_decision_importers() -> None:
     app_root = ROOT / "truffles-api" / "app"
-    allowed_importers = {
-        "truffles-api/app/routers/webhook/__init__.py",
-        "truffles-api/app/routers/webhook/_legacy.py",
-    }
+    allowed_importers = {"truffles-api/app/routers/webhook/_legacy.py"}
     importers: set[str] = set()
 
     for path in app_root.rglob("*.py"):
@@ -998,7 +981,7 @@ def test_outbox_worker_and_console_use_shared_runtime_settings() -> None:
     worker_text = (ROOT / "truffles-api" / "app" / "workers" / "outbox.py").read_text(encoding="utf-8")
 
     assert "load_outbox_process_settings" in console_text
-    assert "process_claimed_outbox_rows(" in console_text
+    assert "run_scoped_outbox_process(" in console_text
     assert "load_outbox_process_settings" in worker_text
     assert "run_outbox_worker_cycle(" in worker_text
 
@@ -1028,7 +1011,8 @@ def test_console_router_has_no_local_outbox_claim_helper() -> None:
     console_text = (ROOT / "truffles-api" / "app" / "routers" / "console.py").read_text(encoding="utf-8")
 
     assert "def _claim_scoped_outbox_rows(" not in console_text
-    assert "claim_scoped_outbox_rows(" in console_text
+    assert "claim_scoped_outbox_rows(" not in console_text
+    assert "run_scoped_outbox_process(" in console_text
 
 
 def test_secondary_helper_mesh_has_no_legacy_adapter_imports() -> None:
@@ -1204,22 +1188,28 @@ def test_turn_planner_synthetic_boundary_builders_have_fixed_shape() -> None:
     planner = TurnPlanner()
     preflight = planner.build_preflight_reject(
         reason_code="missing_remote_jid",
-        intent="missing_remote_jid",
+        control_label="missing_remote_jid",
         interaction_owner="reasoning_core_missing_remote_jid",
     )
     degrade = planner.build_controlled_degrade(
         reason_code="runtime_exception",
-        intent="runtime_error",
+        control_label="runtime_error",
         interaction_owner="reasoning_core_exception_degrade",
     )
 
     assert preflight.action == "preflight_reject"
+    assert preflight.intent == "system_control"
+    assert preflight.source == "planner_control"
+    assert preflight.meta["control_label"] == "missing_remote_jid"
     assert preflight.outcome == "FACT"
     assert preflight.tool_action == "noop"
     assert preflight.binding_plan is not None
     assert preflight.binding_plan.binding_outcome_type == "deny"
 
     assert degrade.action == "handoff"
+    assert degrade.intent == "system_control"
+    assert degrade.source == "planner_control"
+    assert degrade.meta["control_label"] == "runtime_error"
     assert degrade.outcome == "HANDOFF"
     assert degrade.tool_action == "handoff"
     assert degrade.binding_plan is not None

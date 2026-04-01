@@ -17,13 +17,83 @@
 | `docs/SESSIONS/SESSION_TEMPLATE.md` | Шаблон сессионного лога | Архитектор/Brain/Hands |
 | `docs/BLOCK_GRAPH.yaml` | Граф блоков (BLOCK_ID/DEPENDS_ON/UNLOCKS/status) для zero-context исполнения | Архитектор/Brain/Hands |
 | `docs/DECISIONS/` | Архитектурные DEC и управляющие решения | Архитектор/Brain |
-| `docs/ACTIVE_CANON.md` | Короткий operational canon для consultant controlled demolition | Архитектор/Brain/Hands |
-| `docs/SOURCE_OF_TRUTH.yaml` | Machine-readable source-of-truth map для semantic/continuity/proof governance | Архитектор/Brain/Hands |
-| `docs/LEGACY_SUNSET.yaml` | Sunset/freeze карта legacy consultant core + guard config | Архитектор/Brain/Hands |
-| `docs/ACTIVE_PROGRAM.md` | Активная program summary для consultant controlled demolition | Архитектор/Brain/Hands |
+| `docs/DECISIONS/DEC-2026-03-30-consultant-core-architecture-recovery-governing-decision.md` | Governing DEC: consultant-core architecture recovery, full authority topology rules, and anti-partial-closure law | Архитектор/Brain/Hands |
+| `docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md` | Governing DEC: whole-system closure after canary completion, accelerated wave order, no-replay-before-architecture-close, and block-closeout reporting discipline | Архитектор/Brain/Hands |
+| `docs/ACTIVE_CANON.md` | Активный canon для consultant-core architecture closure; сейчас отражает closeout block `Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof` и следующий acceptance lane | Архитектор/Brain/Hands |
+| `docs/SOURCE_OF_TRUTH.yaml` | Machine-readable source-of-truth map для architecture-recovery sequencing, allowed touch, and freeze enforcement | Архитектор/Brain/Hands |
+| `docs/LEGACY_SUNSET.yaml` | Sunset/freeze карта mixed-authority legacy consultant surfaces under the architecture-recovery program | Архитектор/Brain/Hands |
+| `docs/ACTIVE_PROGRAM.md` | Активная phased program summary для live-code reproof closeout и следующего acceptance lane | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md` | Whole-system accelerated master program: waves, truth-correction/reopen phases, merge order, and final closure criteria | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-closure-program-reset-a922.md` | Active reset block that switches the repo from canary replay-next to whole-system closure and blocks canon/state sync after micro-fixes | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-whole-system-closure-program-reset-a922.md` | Closeout report for the whole-system program reset block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md` | Active whole-system Authority Freeze block: writer/caller inventories, frozen legacy caller surfaces, and governance delta before fact-contract runtime work | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md` | Closeout report for the whole-system Authority Freeze block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-fact-contract-schema-a922.md` | Active whole-system Fact Contract Schema block: materialize `FactManifestV1`, extend request/plan/result contracts, and rebase `fact_scope` truth before family cutover | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-fact-contract-schema-a922.md` | Closeout report for the whole-system Fact Contract Schema block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-narrow-fact-family-cutover-a922.md` | Active whole-system `location / hours / parking` fact-family cutover block on top of the explicit fact contract | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-narrow-fact-family-cutover-a922.md` | Closeout report for the whole-system narrow fact-family cutover block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-state-normalization-a922.md` | Closeout Task Package for the whole-system Continuity / State Normalization block: canonical runtime writes reproject active-slice compatibility continuity carriers and demote stale continuity shadows | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md` | Closeout report for the whole-system Continuity / State Normalization block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-post-owner-semantic-constriction-a922.md` | Closeout Task Package for the whole-system Post-Owner Semantic Constriction block: owner-backed executor/runtime/state seams preserve owner-authored meaning downstream | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-post-owner-semantic-constriction-a922.md` | Closeout report for the whole-system Post-Owner Semantic Constriction block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-boundary-constriction-a922.md` | Closeout Task Package for the whole-system Boundary Constriction block: typed boundary/degrade paths stay handoff-safe and machine-readably frozen | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-boundary-constriction-a922.md` | Closeout report for the whole-system Boundary Constriction block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-pack-runtime-separation-completion-a922.md` | Closeout Task Package for the whole-system Pack / Runtime Separation Completion block: active fact/service runtime callers use the public pack facade instead of adapter-private behavior | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-pack-runtime-separation-completion-a922.md` | Closeout report for the whole-system Pack / Runtime Separation Completion block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-legacy-mesh-drain-a922.md` | Active whole-system Legacy Mesh Drain block: mounted webhook package and app runtime must no longer depend on `decision.py`, leaving router legacy surfaces as shadow/test residue only | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-legacy-mesh-drain-a922.md` | Closeout report for the whole-system Legacy Mesh Drain block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-shadow-lane-elimination-a922.md` | Active whole-system Shadow Lane Elimination block: remove runtime wrapper lanes `reasoning_core.py` and `app/webhook.py` while preserving only test-only shadow support | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md` | Closeout report for the whole-system Shadow Lane Elimination block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md` | Active whole-system Operational Entrypoint Dedupe block: converge outbox service/admin/console/worker callers on shared runtime owners while keeping `outbox_service_app.py` thin | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md` | Closeout report for the whole-system Operational Entrypoint Dedupe block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-governance-closure-a922.md` | Historical final-closure claim block; retained for audit history after live-code truth correction invalidated its active closeout claim | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-closure-claim-truth-correction-and-semantic-owner-reopen-a922.md` | Active truth-correction block: retract unsupported closure claims and reopen semantic-owner/post-owner invariants against live code | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md` | Closeout Task Package for the hot-path semantic-owner reopen block: demote synthetic control envelopes and remove downstream semantic reconstruction | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md` | Closeout report for the hot-path semantic-owner reopen block | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md` | Closeout Task Package for the live-code reproof block covering continuity, boundary, pack/runtime, legacy, and operational claims after semantic-owner reopen | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md` | Closeout report for the live-code reproof block covering continuity, boundary, pack/runtime, legacy, and operational claims | Архитектор/Brain/Hands |
+| `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-replay-and-full-human-semantic-audit-acceptance-a922.md` | Next acceptance-lane Task Package: fresh replay plus full human semantic audit from the current reproof base | Архитектор/Brain/Hands |
+| `docs/REPORTS/2026-03-31-consultant-core-whole-system-governance-closure-a922.md` | Historical closeout report for the invalidated final whole-system governance-closure claim block | Архитектор/Brain/Hands |
+| `docs/SHADOW_LANE_ELIMINATION_GUARD.yaml` | Machine-readable topology guard for the whole-system Shadow Lane Elimination block: removed runtime wrappers, test-only shadow support, and no repo imports for the deleted modules | Архитектор/Brain/Hands |
+| `docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml` | Machine-readable topology guard for whole-system Operational Entrypoint Dedupe: outbox service/admin/console/worker callers must stay thin over shared runtime owners | Архитектор/Brain/Hands |
+| `docs/WHOLE_SYSTEM_GOVERNANCE_CLOSURE_GUARD.yaml` | Historical final-closure guard retained for audit history after truth correction reopened the invariant | Архитектор/Brain/Hands |
+| `docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml` | Machine-readable guard config for the whole-system Continuity / State Normalization block: canonical runtime write projection, pending-resume capture, and active-slice continuity compatibility expectations | Архитектор/Brain/Hands |
+| `docs/FACT_CONTRACT_SCHEMA_GUARD.yaml` | Machine-readable guard config for the whole-system Fact Contract Schema block: required schemas, exports, meta keys, and next phase | Архитектор/Brain/Hands |
+| `docs/LEGACY_MESH_DRAIN_GUARD.yaml` | Machine-readable topology guard for the whole-system Legacy Mesh Drain block: no mounted package dependency on `decision.py`, shadow-only router residuals, and drained package-root imports | Архитектор/Brain/Hands |
+| `docs/PACK_RUNTIME_SEPARATION_GUARD.yaml` | Machine-readable hotspot freeze for the active pack/runtime seam: public pack facade only, no adapter-private hot-path helpers, and no active `get_pack_adapter(...)` callers | Архитектор/Brain/Hands |
+| `docs/RECOVERY_EXECUTION_LOCK.yaml` | Machine-readable higher-precedence execution lock for consultant-core recovery: active truth, active block, pause law, phase order, and drift-resolution rule | Архитектор/Brain/Hands |
+| `docs/RECOVERY_PHASE_WAIVER.yaml` | Explicit owner/architect waiver state for any phase advance, practical-truth relabel, or runtime-resume exception | Архитектор/Brain/Hands |
+| `docs/system_forensics/authority_registry.json` | Machine-readable live-code reproof authority registry: active writer topology, evidence, and acceptance-lane next-phase map | Архитектор/Brain/Hands |
+| `docs/system_forensics/compatibility_carrier_inventory.json` | Machine-readable live-code reproof base for compatibility carriers: canonical projection rules, guarded tokens, allowed writers, expiry triggers, and acceptance-lane sequencing | Архитектор/Brain/Hands |
+| `docs/system_forensics/dead_surface_registry.json` | Machine-readable live-code reproof surface topology: mounted/unmounted/shadow/removed consultant surfaces plus caller-proof law on the active base | Архитектор/Brain/Hands |
+| `docs/system_forensics/legacy_caller_surface.json` | Dedicated live-code reproof caller-surface inventory for frozen legacy modules and remaining shadow/router residues on the active base | Архитектор/Brain/Hands |
+| `docs/system_forensics/governance_delta.json` | Machine-readable authority delta for the active block: locked mechanisms, frozen modules, new artifacts, and deferred next blocks | Архитектор/Brain/Hands |
 | `docs/_generated/` | Generated zero-context agent packet и сопутствующие артефакты | Архитектор/Brain/Hands |
 | `docs/_generated/AGENT_PACKET.md` | Минимальный zero-context briefing для нового агента | Архитектор/Brain/Hands |
 | `docs/_generated/AGENT_PACKET.json` | Machine-readable agent packet для governance/tooling | Архитектор/Brain/Hands |
+| `scripts/recovery_execution_guard.py` | Guard that blocks work when derived active docs drift away from the recovery execution lock and governing base | Архитектор/Brain/Hands |
+| `scripts/whole_system_program_guard.py` | Guard that freezes the whole-system reset block, no-replay-before-closure law, and block-closeout reporting discipline | Архитектор/Brain/Hands |
+| `scripts/authority_freeze_guard.py` | Guard that freezes the whole-system Authority Freeze block, legacy caller-surface artifact, governance delta, and frozen module set before fact-contract runtime work | Архитектор/Brain/Hands |
+| `scripts/fact_contract_schema_guard.py` | Guard that freezes the whole-system Fact Contract Schema block: required schemas, exports, meta keys, and honest `fact_scope` registry progression | Архитектор/Brain/Hands |
+| `scripts/legacy_mesh_drain_guard.py` | Guard that freezes the whole-system Legacy Mesh Drain block: mounted package import drain, shadow-only router residuals, and app-runtime importer proof | Архитектор/Brain/Hands |
+| `scripts/whole_system_governance_closure_guard.py` | Historical closure guard kept for audit history; no longer the active proof layer after truth correction reopened the invariant | Архитектор/Brain/Hands |
+| `scripts/closure_claim_truth_guard.py` | Active guard that blocks closure claims while known live semantic-owner and post-owner reconstruction evidence remains in code | Архитектор/Brain/Hands |
+| `scripts/semantic_owner_reopen_guard.py` | Active guard for the semantic-owner reopen block: system-control synthetic decisions must stay non-semantic and downstream reconstruction suppression must remain in code | Архитектор/Brain/Hands |
+| `scripts/system_reproof_guard.py` | Active guard for the live-code reproof block: canonical pending-resume restore plus canonical outbox runner convergence must remain in code | Архитектор/Brain/Hands |
+| `scripts/authority_registry_block_guard.py` | Block-2-specific guard that freezes registry honesty, owner-status wording, and required guard wiring while authority-registry work remains active | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_recovery_execution_guard.py` | Architecture test for recovery execution lock alignment across canon, packet, and source-of-truth | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_whole_system_program_guard.py` | Architecture test for the active whole-system program reset guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_authority_freeze_guard.py` | Architecture test for the active whole-system Authority Freeze guard and caller-surface artifacts | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_fact_contract_schema_guard.py` | Architecture test for the active whole-system Fact Contract Schema guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_continuity_state_normalization_guard.py` | Architecture test for the active whole-system Continuity / State Normalization guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_legacy_mesh_drain_guard.py` | Architecture test for the active whole-system Legacy Mesh Drain topology guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py` | Architecture test for the active whole-system Shadow Lane Elimination topology guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py` | Architecture test for the active whole-system Operational Entrypoint Dedupe topology guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py` | Historical architecture test for the invalidated final-closure guard | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_closure_claim_truth_guard.py` | Architecture test for the active truth-correction guard that keeps closure claims aligned to live code | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py` | Architecture test for the semantic-owner reopen guard and its live-code markers | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_system_reproof_guard.py` | Architecture test for the live-code reproof guard covering continuity restore and canonical outbox runner convergence | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_authority_registry_block_guard.py` | Architecture test for the block-2-only authority-registry honesty guard | Архитектор/Brain/Hands |
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
@@ -37,6 +107,11 @@
 | `contracts/runtime/dialog_state.v1.jsonschema` | Канон writable continuity state (`DialogState`) | Architect/Backend |
 | `contracts/runtime/boundary_override.v1.jsonschema` | Канон explicit deterministic boundary override | Architect/Backend |
 | `contracts/runtime/turn_result.v1.jsonschema` | Канон assembled runtime turn result (`planner -> boundary -> executor -> reply`) | Architect/Backend |
+| `contracts/runtime/fact_request.v1.jsonschema` | Канон typed owner-authored fact request scope contract (`FactRequestV1`) | Architect/Backend |
+| `contracts/runtime/fact_plan.v1.jsonschema` | Канон typed binding-authored allowed emitted fact scope contract (`FactPlanV1`) | Architect/Backend |
+| `contracts/runtime/fact_result.v1.jsonschema` | Канон typed resolver-emitted fact scope verdict contract (`FactResultV1`) | Architect/Backend |
+| `contracts/runtime/fact_manifest.v1.jsonschema` | Канон declarative fact manifest (`FactManifestV1`): canonical refs, aliases, companion rules, renderer ids, and provenance | Architect/Backend |
+| `contracts/runtime/fact_contract.v1.jsonschema` | Канон top-level fact contract envelope (`FactContractV1`) embedded in runtime meta and traces | Architect/Backend |
 | `contracts/llm/` | Контракты LLM outputs (router + answer_interpreter) | Архитектор/Backend |
 | `contracts/llm/dialogue_controller_output.v1.jsonschema` | Контракт LLM‑контроллера (router) | Архитектор/Backend |
 | `contracts/llm/answer_interpreter_output.v1.jsonschema` | Контракт LLM answer_interpreter | Архитектор/Backend |
@@ -75,9 +150,18 @@
 | `scripts/session_index_rebuild.sh` | Пересобрать `docs/SESSION_INDEX.md` из `docs/SESSIONS/*` | Brain/Architect |
 | `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
-| `scripts/build_agent_packet.py` | Генератор/validator для `docs/_generated/AGENT_PACKET.*` | Architect/Brain/Hands |
+| `scripts/build_agent_packet.py` | Генератор/validator для `docs/_generated/AGENT_PACKET.*`, включая machine-readable governance registry snapshots | Architect/Brain/Hands |
 | `scripts/legacy_freeze_guard.py` | Diff-based guard: freeze новых executable additions в sunset legacy router files | Architect/Backend |
-| `scripts/continuity_writer_guard.py` | Diff-based guard: блокирует новые continuity writes вне текущего canonical writer set | Architect/Backend |
+| `scripts/continuity_writer_guard.py` | Diff-based guard: resolves the active freeze contract from `SOURCE_OF_TRUTH` and blocks new continuity writes outside the canonical writer set | Architect/Backend |
+| `scripts/legacy_mesh_caller_guard.py` | Deterministic guard: compares machine-readable legacy surface caller proof against the current repo import graph | Architect/Backend |
+| `scripts/legacy_drain_closure_guard.py` | Deterministic guard: freezes the final touched-envelope legacy drain seam, package-root lazy-export drain, and the exact adapter-only legacy import residue on the governed path | Architect/Backend |
+| `scripts/legacy_mesh_drain_guard.py` | Deterministic guard: freezes the mounted webhook package drain so `decision.py` and `_legacy.py` remain shadow/test residue outside live app runtime | Architect/Backend |
+| `scripts/boundary_degrade_guard.py` | Deterministic guard: freezes the live boundary/degrade seam set, override-meta reads, and boundary-author callsites against the current root-first snapshot | Architect/Backend |
+| `scripts/pack_runtime_separation_guard.py` | Deterministic guard: freezes the live pack/runtime seam so active callers use only the public pack facade and cannot reintroduce adapter-private helpers or `get_pack_adapter(...)` on the hot path | Architect/Backend |
+| `scripts/fact_plane_guard.py` | Deterministic guard: freezes the live fact-plane contract builders/callsites and forbids manual emitted-scope widening on the hot path | Architect/Backend |
+| `scripts/fact_family_cutover_guard.py` | Deterministic guard: proves the `location / hours / parking` family reroutes through `catalog.location`, blocks sibling bypass, and forbids parking reinference outside binding scope | Architect/Backend |
+| `scripts/touched_slice_continuity_guard.py` | Deterministic guard: proves the first fact-family continuity artifact is written in canonical runtime state and mirrored into `class_carryover` compatibility surfaces only as a derived projection | Architect/Backend |
+| `scripts/continuity_state_normalization_guard.py` | Deterministic guard: proves canonical runtime writes reproject `context_manager`, `session_memory`, and `pending_resume` continuity from `DialogState` on the active slice | Architect/Backend |
 | `scripts/proof_path_guard.py` | Diff-based guard: блокирует proof-path drift и proof-only imports | Architect/Backend |
 | `scripts/arch_guard.py` | Единый architecture gate (`source_of_truth` consistency + governance guards) | Architect/Backend/QA |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
@@ -115,7 +199,6 @@
 | `truffles-api/app/services/console_knowledge_preflight.py` | Knowledge publish preflight helpers (`draft_hash`, recent validate gate) | Backend |
 | `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
 | `truffles-api/app/services/knowledge_runtime.py` | Runtime published pack truth (knowledge_versions → demo_salon resolver) | Backend |
-| `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace); now also owns bounded direct owner-replacement cuts for safe info, catalog, service-query, master-query, and booking-verification fact slices | Backend/Architect |
 | `truffles-api/app/services/pack_compiler_service.py` | Pack compiler (compiled artifacts, hashing, schema validation) | Backend/Architect |
 | `truffles-api/app/core/` | Typed target consultant runtime core scaffolding (`planner/boundary/executor/dialog_state/realizer`) | Backend/Architect |
 | `truffles-api/app/core/booking_prompt_owner.py` | Canonical non-frozen booking-prompt candidate owner for initial booking prompt resolution and timeout-recovery shaping | Backend/Architect |
@@ -124,6 +207,7 @@
 | `truffles-api/app/core/semantic_decision.py` | Typed `SemanticDecisionV1` owner artifact and normalization contract for canaried hot-path meaning | Backend/Architect |
 | `truffles-api/app/core/boundary_validator.py` | Typed `BoundaryOverride` seam for deterministic boundary validation | Backend/Architect |
 | `truffles-api/app/core/dialog_state_service.py` | Typed `DialogState` seam for future single continuity writer; now also owns expected-reply/question-contract plus session-memory question-writer, session-memory normalization, canonical referent shaping, session-memory freshness, ancillary context-carrier writer bridges, and carryover manager-writer bridges | Backend/Architect |
+| `truffles-api/app/core/fact_plane.py` | Typed fact-plane contracts and normalization helpers (`FactRequestV1 -> FactPlanV1 -> FactResultV1`) for owner-requested, binding-authorized, and resolver-emitted fact scope | Backend/Architect |
 | `truffles-api/app/services/llm_quality_contracts.py` | Shared proof-path expectation/scenario-contract owner extracted from proof-only `ops/diagnose.py` and `scripts/booking_dialog_scenarios.py`, including booking-scenario merge, post-coverage repair, and llm-turn sanitize orchestration | Backend/QA/Architect |
 | `truffles-api/app/core/response_realizer.py` | Typed reply envelope seam for future response realization | Backend/Architect |
 | `truffles-api/app/core/turn_executor.py` | Typed `TurnResult`/owner-cutover/bounded-boundary execution seam for future core execution pipeline; now also owns planner-owner artifact assembly and bounded runtime-exception plus preflight/ignore boundary request carriers | Backend/Architect |
@@ -222,9 +306,48 @@
 | `docs/CONSOLE_AUDIT/pages/insights.md` | Audit page: Insights/Analytics | Frontend/Architect |
 | `docs/CONSOLE_AUDIT/pages/marketing.md` | Audit page: Marketing lifecycle + audience/preflight | Frontend/Architect |
 | `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | UX backlog (bugs/UX debt) по реализованной Console | Frontend/Backend/Architect |
-| `docs/system_forensics/` | Repo-backed forensic memory for consultant-core architecture/state/control-path analysis | Architect/Brain/Hands |
-| `docs/system_forensics/INDEX.md` | Index of hotspot analyses, ledgers, and final synthesis | Architect/Brain/Hands |
-| `docs/system_forensics/WORK_METHOD.md` | Forensic method: FACT/INFERENCE/UNKNOWN discipline and update protocol | Architect/Brain/Hands |
+| `docs/system_forensics/` | Three-layer consultant-core forensic corpus: fresh primary deep-audit layer, executive packet scaffold + machine-readable companion, and detailed archive (`files/`, `ledgers/`, `final/`) | Architect/Brain/Hands |
+| `docs/system_forensics/INDEX.md` | External-reader-first entrypoint and reading order that separates executive packet from archive evidence | Architect/Brain/Hands |
+| `docs/system_forensics/WORK_METHOD.md` | Forensic method plus the executive-packet/archive layering rule for consultant-core system forensics | Architect/Brain/Hands |
+| `docs/system_forensics/GLOSSARY.md` | Shared vocabulary for external researchers reading the consultant-core forensic corpus | Architect/Brain/Hands |
+| `docs/system_forensics/PRODUCT_CONTRACT.md` | Self-contained explanation of the consultant product contract (`FACT` / `COLLECT` / `HANDOFF`) | Architect/Brain/Hands |
+| `docs/system_forensics/SYSTEM_VERDICT.md` | Executive architectural verdict for consultant-core with current truth, blockers, and why earlier external analysis was insufficient | Architect/Brain/Hands |
+| `docs/system_forensics/RUNTIME_ARCHITECTURE.md` | External-facing explanation of the live runtime spine and remaining legacy authority mesh | Architect/Brain/Hands |
+| `docs/system_forensics/SEMANTIC_DECISION_CONTRACT.md` | Self-contained root-level summary of the `SemanticDecisionV1` owner artifact for outside researchers | Architect/Brain/Hands |
+| `docs/system_forensics/BINDING_PLAN_CONTRACT.md` | Self-contained root-level summary of the `BindingPlanV1` deterministic binding boundary | Architect/Brain/Hands |
+| `docs/system_forensics/TURN_JOURNAL_CONTRACT.md` | Self-contained root-level summary of the `TurnJournalV1` append-only canonical event journal | Architect/Brain/Hands |
+| `docs/system_forensics/CONVERSATION_PROJECTION_CONTRACT.md` | Self-contained root-level summary of the `ConversationProjectionV1` primary conversation read model | Architect/Brain/Hands |
+| `docs/system_forensics/END_TO_END_TURN_WALKTHROUGH.md` | Worked end-to-end runtime scenario for outside researchers using a real current-truth turn | Architect/Brain/Hands |
+| `docs/system_forensics/SEMANTIC_OWNERSHIP_AUDIT.md` | Executive audit of current single-owner progress, residual semantic leakage, and practical-vs-architectural truth | Architect/Brain/Hands |
+| `docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md` | Executive audit of typed interaction-side contracts and remaining continuity/runtime gaps | Architect/Brain/Hands |
+| `docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md` | Executive audit of the missing fact-side executable contract and the open fact-composition gap | Architect/Brain/Hands |
+| `docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md` | Executive audit of deterministic boundary/degrade authority and remaining semantic overreach | Architect/Brain/Hands |
+| `docs/system_forensics/PACK_RUNTIME_SEPARATION_AUDIT.md` | Executive audit of pack/data versus runtime/mechanism separation | Architect/Brain/Hands |
+| `docs/system_forensics/CODE_TOPOLOGY_AUDIT.md` | Executive audit of hotspot topology and why large mixed-authority files still invite patch-loop behavior | Architect/Brain/Hands |
+| `docs/system_forensics/FAILURE_FAMILY_ATLAS.md` | Mechanism-level atlas of consultant-core product and architecture failure families | Architect/Brain/Hands |
+| `docs/system_forensics/ANTI_PATTERN_CATALOG.md` | Catalog of proven anti-patterns that future consultant-core work must not repeat | Architect/Brain/Hands |
+| `docs/system_forensics/TARGET_ARCHITECTURE.md` | Self-contained statement of the intended consultant-core target architecture for outside researchers | Architect/Brain/Hands |
+| `docs/system_forensics/MIGRATION_PROGRAM.md` | Ordered migration phases from current consultant-core state to target architecture | Architect/Brain/Hands |
+| `docs/system_forensics/EVIDENCE_MAP.md` | Map from executive packet claims back to the deeper forensic archive and practical proof artifacts | Architect/Brain/Hands |
+| `docs/system_forensics/QUALITY_GOVERNANCE_AUDIT.md` | Executive audit of why truthful forensics still allowed poor implementations and what anti-repeat governance is now required | Architect/Brain/Hands |
+| `docs/system_forensics/PRIMARY_DEEP_AUDIT_PROGRAM.md` | Governing program that marks the current packet as scaffold and tracks the fresh primary deep-audit backlog | Architect/Brain/Hands |
+| `docs/system_forensics/SYSTEM_CONTEXT_DEEP_AUDIT.md` | Fresh deep audit of live system entry surfaces, runtime/control paths, and duplicated operational seams | Architect/Brain/Hands |
+| `docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md` | Fresh deep audit of semantic/state truth carriers, projections, and continuity surfaces | Architect/Brain/Hands |
+| `docs/system_forensics/FACT_RUNTIME_DEEP_AUDIT.md` | Fresh deep audit of fact selection/composition/rendering and pack/runtime behavior mixing | Architect/Brain/Hands |
+| `docs/system_forensics/BOUNDARY_DEGRADE_DEEP_AUDIT.md` | Fresh deep audit of typed boundary overrides, synthetic degrade artifact minting, and continuity-heavy boundary recovery services | Architect/Brain/Hands |
+| `docs/system_forensics/PACK_RUNTIME_SEPARATION_DEEP_AUDIT.md` | Fresh deep audit of pack/runtime separation, adapter authority, and demo-pack behavior leakage | Architect/Brain/Hands |
+| `docs/system_forensics/CODE_TOPOLOGY_DEEP_AUDIT.md` | Fresh deep audit of authority concentration, hotspot topology, and salvage vs split/delete classification | Architect/Brain/Hands |
+| `docs/system_forensics/QUALITY_EVALUATOR_DEEP_AUDIT.md` | Fresh deep audit of llm-quality workflow, evaluator heuristics, artifact governance, and workflow concentration | Architect/Brain/Hands |
+| `docs/system_forensics/PRIMARY_DEEP_AUDIT_CONTRADICTION_REVIEW.md` | Explicit resolution of contradictions between the fresh primary deep audit and the older archive synthesis/program layer | Architect/Brain/Hands |
+| `docs/system_forensics/EXTERNAL_PACKET_READINESS_REVIEW.md` | Explicit outside-handoff readiness verdict and remaining self-contained packet blockers | Architect/Brain/Hands |
+| `docs/system_forensics/EXTERNAL_RESEARCH_PACKET.md` | External-research handoff packet describing what outside researchers should read, challenge, and return | Architect/Brain/Hands |
+| `docs/system_forensics/artifact_index.json` | Machine-readable manifest for the external-research packet layers, entrypoints, and archive map | Architect/Brain/Hands |
+| `docs/system_forensics/module_inventory.json` | Machine-readable executive inventory of current consultant-core modules, roles, and target roles | Architect/Brain/Hands |
+| `docs/system_forensics/failure_family_registry.json` | Machine-readable registry of product-practical and architecture-level failure families | Architect/Brain/Hands |
+| `docs/system_forensics/runtime_path_registry.json` | Machine-readable registry of current runtime, compatibility, product, and operational paths | Architect/Brain/Hands |
+| `docs/system_forensics/glossary.json` | Machine-readable vocabulary companion for the consultant-core forensic corpus | Architect/Brain/Hands |
+| `docs/system_forensics/EXTERNAL_REVIEW_QUESTIONNAIRE.md` | Human-readable response contract for outside consultant-core architecture reviewers | Architect/Brain/Hands |
+| `docs/system_forensics/external_review_questionnaire.json` | Machine-readable response contract for outside consultant-core architecture reviewers | Architect/Brain/Hands |
 | `docs/system_forensics/TEMPLATE_FILE_ANALYSIS.md` | Template for per-file forensic hotspot analysis | Architect/Brain/Hands |
 | `docs/system_forensics/files/` | Deep per-file forensic analyses for consultant-core hotspots | Architect/Brain/Hands |
 | `docs/system_forensics/files/app_core_consultant_runtime.md` | First deep hotspot analysis: active runtime orchestration owner | Architect/Brain/Hands |
@@ -264,18 +387,18 @@
 | `docs/system_forensics/files/app_routers_console.md` | Thirty-fifth deep hotspot analysis: mounted console ops-job outbox execute caller | Architect/Brain/Hands |
 | `docs/system_forensics/ledgers/` | Cross-cut ledgers for control paths, semantic ownership, truth carriers, and cutover blockers | Architect/Brain/Hands |
 | `docs/system_forensics/final/` | Final synthesized system analysis built from file analyses and ledgers | Architect/Brain/Hands |
-| `docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md` | Accumulating whole-system synthesis and guide for future exact work | Architect/Brain/Hands |
-| `docs/system_forensics/final/RESEARCH_BRIEF.md` | External research contract for scalable target architecture and migration thinking | Architect/Brain/Hands |
+| `docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md` | Archive-layer whole-system synthesis and evidence depth behind the current packet; no longer the direct implementation go-signal | Architect/Brain/Hands |
+| `docs/system_forensics/final/RESEARCH_BRIEF.md` | Archive-layer external research contract that remains useful challenge material behind the current packet | Architect/Brain/Hands |
 | `docs/system_forensics/final/RESEARCH_SOURCE_PACK.md` | Prioritized research reading pack across forensic corpus and external framing sources | Architect/Brain/Hands |
 | `docs/system_forensics/final/RESEARCH_OUTPUT_SCHEMA.md` | Required schema for external research deliverables and decision-ready recommendations | Architect/Brain/Hands |
-| `docs/system_forensics/final/EXTERNAL_RESEARCH_PROMPT.md` | Ready-to-send prompt for external architecture research based on the forensic corpus | Architect/Brain/Hands |
-| `docs/system_forensics/final/TARGET_DECISION.md` | Canonical accepted target-architecture decision for consultant-core execution | Architect/Brain/Hands |
-| `docs/system_forensics/final/IMPLEMENTATION_PROGRAM.md` | Ordered finite workstream program derived from forensic and external research | Architect/Brain/Hands |
+| `docs/system_forensics/final/EXTERNAL_RESEARCH_PROMPT.md` | Archive-layer external prompt kept as historical material; not the current outside-send packet | Architect/Brain/Hands |
+| `docs/system_forensics/final/TARGET_DECISION.md` | Archived target-architecture hypothesis from the earlier forensic program | Architect/Brain/Hands |
+| `docs/system_forensics/final/IMPLEMENTATION_PROGRAM.md` | Archive-only implementation hypothesis derived from the earlier target decision | Architect/Brain/Hands |
 | `docs/system_forensics/final/SEMANTIC_DECISION_V1.md` | Contract for the single hot-path semantic owner artifact | Architect/Brain/Hands |
 | `docs/system_forensics/final/BINDING_PLAN_V1.md` | Contract for deterministic binding between semantic decision and execution | Architect/Brain/Hands |
 | `docs/system_forensics/final/TURN_JOURNAL_V1.md` | Contract for append-only canonical turn journal | Architect/Brain/Hands |
 | `docs/system_forensics/final/CONVERSATION_PROJECTION_V1.md` | Contract for the single primary canonical conversation projection | Architect/Brain/Hands |
-| `docs/system_forensics/final/NEXT_AGENT_FULL_PROMPT.md` | Full zero-context execution prompt for the next implementation agent | Architect/Brain/Hands |
+| `docs/system_forensics/final/NEXT_AGENT_FULL_PROMPT.md` | Obsolete implementation prompt from an earlier worktree phase; archive evidence only | Architect/Brain/Hands |
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
@@ -419,7 +542,12 @@
 | `docs/TASK_PACKAGES/TP-2026-03-16-consultant-core-semantic-bridge-growth-guard-a922.md` | Corrective Task Package for freezing further semantic bridge growth in generic ingress hotspots via an AST-based architecture guard and machine-readable hotspot snapshot | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-16-consultant-core-execution-strategy-lock-a922.md` | Corrective Task Package for locking the approved execution strategy into source-of-truth, generated agent packet, and session-start bootstrap | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-16-consultant-core-turn-planner-safe-info-owner-cutover-a922.md` | Bounded Task Package for the first real owner-replacement cutover: `turn_planner` + `reasoning_core` directly own safe info-fact replies for `contact`, `hours`, `promotions`, and `promotions_rules` before frozen delegate | Brain/Architect |
-| `docs/SEMANTIC_BRIDGE_GUARD.yaml` | Machine-readable hotspot snapshot for guarded semantic bridge families in generic ingress files | Brain/Architect |
+| `docs/SEMANTIC_BRIDGE_GUARD.yaml` | Machine-readable hotspot freeze for the active post-owner reconstruction seam set across owner-output normalization, planner, executor, runtime shell, and dialog-state projection helpers | Brain/Architect |
+| `docs/BOUNDARY_DEGRADE_GUARD.yaml` | Machine-readable hotspot freeze for the active boundary/degrade seam set, override-meta reads, and boundary-author callsites on the live hot path | Brain/Architect |
+| `docs/FACT_PLANE_GUARD.yaml` | Machine-readable hotspot freeze for the active fact-plane contract builders, hot-path callsites, and emitted-scope widening bans | Brain/Architect |
+| `docs/FACT_FAMILY_CUTOVER_GUARD.yaml` | Machine-readable proof contract for the first fact-family cutover (`location / hours / parking`) on the governed hot path | Brain/Architect |
+| `docs/TOUCHED_SLICE_CONTINUITY_GUARD.yaml` | Machine-readable proof contract for touched-slice continuity normalization of the first fact family through canonical `DialogState.meta.class_carryover` plus derived compatibility projection | Brain/Architect |
+| `docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml` | Machine-readable proof contract for final legacy drain on the touched `location / hours / parking` envelope: lazy package-root exports, adapter-only residual seam, and unreachable sibling surfaces | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-16-consultant-core-portfolio-policy-override-bridge-a922.md` | Bounded Task Package for priming reset-safe explicit `portfolio` `route_llm_policy_core(...)` overrides from `reasoning_core` before the frozen delegate | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-16-consultant-core-proof-management-stateful-helper-slice-a922.md` | Bounded Task Package for finishing the last management/stateful proof helper extraction and collapsing `BookingScenarioPostCoverageRepairCallbacks` to config-only | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-16-consultant-core-proof-booking-progress-helper-slice-a922.md` | Bounded Task Package for moving booking-progress expectation helpers out of proof-only `booking_dialog_scenarios.py` into shared llm-quality contracts | Brain/Architect |
@@ -671,10 +799,48 @@
 | `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review15-a705.md` | Closure-review Task Package after wave19 merge to decide `Fixed` vs `Open + wave20` for `UX-11`/`UX-12` | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-wave20-a705.md` | Next bounded decomposition Task Package after closure-review15 failed criterion `C1` (`console.py` threshold) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-03-05-uvc-ux-tech-debt-decomposition-closure-review16-a705.md` | Closure-review Task Package after wave20 merge to decide `Fixed` vs `Open + wave21` for `UX-11`/`UX-12` | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-system-forensics-architecture-recovery-a922.md` | Task Package: publish the first consultant-core system-forensics architecture-recovery corpus and redirect future work from patch-loop to architecture-level governance | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-external-research-corpus-deepening-a922.md` | Task Package: deepen the external-research packet so outside researchers can read one self-contained consultant-core corpus without chat or runtime access | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-machine-readable-research-companion-a922.md` | Task Package: publish the machine-readable companion and reviewer questionnaire for the consultant-core external packet | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-primary-deep-system-audit-a922.md` | Task Package: restart consultant-core system forensics in the correct order by doing a fresh primary deep audit before any external handoff | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-primary-deep-system-audit-wave2-a922.md` | Task Package: complete the remaining first-pass primary deep-audit tracks before any outside handoff or architecture implementation resumes | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-primary-deep-audit-contradiction-resolution-a922.md` | Task Package: resolve archive-vs-deep-audit contradictions and judge whether the external packet is actually ready for outside researchers | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-external-packet-contracts-and-turn-walkthrough-a922.md` | Task Package: close the last self-containment blockers in the outside packet by adding root-level contract summaries and a worked runtime walkthrough | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-architecture-recovery-master-program-a922.md` | Master Task Package: establish the governing architecture-recovery operating base, freeze authority growth, and define the full phased migration program | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-authority-registry-and-writer-law-enforcement-a922.md` | First active root-first recovery Task Package: materialize the live authority map, compatibility-carrier inventory, dead-surface registry, and writer-law enforcement base | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-truth-carrier-inventory-and-freeze-a922.md` | Second root-first recovery Task Package: freeze continuity truth-carrier precedence, enumerate competing carriers fully, and wire deterministic freeze guards/tests | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-adapter-only-legacy-mesh-and-caller-proof-a922.md` | Third root-first recovery Task Package: prove exact live callers of the legacy mesh and lock adapter-only / shadow-only / unmounted classifications into the active governance base | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-post-owner-reconstruction-constriction-a922.md` | Fourth root-first recovery Task Package: freeze the post-owner reconstruction hotspot set, prove runtime mutation degrade on the owner-backed path, and align the active authority registry to the current carrier truth | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-boundary-degrade-constriction-a922.md` | Fifth root-first recovery Task Package: freeze the live boundary/degrade seam set, narrow hot-path reply override authority, and prove explicit typed boundary behavior on the constrained runtime path | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-fact-plane-materialization-a922.md` | Sixth root-first recovery Task Package: materialize the `FactRequestV1 -> FactPlanV1 -> FactResultV1` chain, constrain emitted fact scope to binding authority, and freeze the live fact-plane seam | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-fact-contract-location-hours-parking-first-slice-a922.md` | Seventh root-first recovery Task Package: cut over the first canary fact family `location / hours / parking` through `catalog.location` on the explicit fact plane with no sibling bypass on the governed hot path | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-touched-slice-continuity-normalization-a922.md` | Eighth root-first recovery Task Package: move the first fact-family carryover artifact into canonical runtime state and demote `class_carryover` to a derived compatibility mirror for the touched slice | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md` | Ninth root-first recovery Task Package: drain startup-loaded legacy helper imports from the mounted webhook package root and freeze adapter-only/unreachable proof for the touched canary envelope | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-consult-media-cue-continuity-a922.md` | Post-root-first RCA Task Package: freeze the exact path, broken invariant, and layer classification for the fresh `r36c` consult/media cue continuity blocker before any new runtime code | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-consult-media-cue-continuity-implementation-a922.md` | Post-RCA implementation Task Package: materialize the bounded consult/media follow-up contract on the governed owner path and preserve it through planner, executor, and canonical continuity before fresh replay | Brain/Architect |
+| `docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-booking-manage-temporal-clue-grounding-follow-up-continuity-a922.md` | Post-consult-media RCA Task Package: freeze the exact path, broken invariant, and layer classification for the fresh `r36g` booking-manage temporal clue continuity blocker before any new runtime code | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `SPECS/INBOX_HUMAN_LOCK.md` | ТЗ: manual messaging + human lock в «Заявках» | Архитектор/Backend/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-system-forensics-architecture-recovery-a922.md` | Report: first self-contained consultant-core system-forensics corpus and architecture-recovery governance publication | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-external-research-corpus-deepening-a922.md` | Report: doc-only deepening of the external-research corpus into a self-contained executive packet plus archive evidence | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-machine-readable-research-companion-a922.md` | Report: doc-only publication of the machine-readable external packet companion and reviewer questionnaire | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-primary-deep-system-audit-a922.md` | Report: first-wave reset of the order-of-work plus fresh primary deep-audit docs before any outside handoff | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-primary-deep-system-audit-wave2-a922.md` | Report: second-wave completion of the remaining first-pass primary deep-audit tracks while keeping packet readiness explicitly open | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-primary-deep-audit-contradiction-resolution-a922.md` | Report: contradiction-resolution plus explicit outside-readiness review over the fresh primary deep-audit corpus | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-authority-registry-and-writer-law-enforcement-a922.md` | Report: root-first governance correction, live authority registry publication, and machine-readable writer-law enforcement base | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-truth-carrier-inventory-and-freeze-a922.md` | Report: truth-carrier freeze materialization, continuity-writer guard alignment, and deterministic proof of the active continuity law | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-adapter-only-legacy-mesh-and-caller-proof-a922.md` | Report: machine-readable legacy caller proof, corrected legacy authority map, and deterministic guard coverage for the adapter-only legacy mesh block | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-post-owner-reconstruction-constriction-a922.md` | Report: post-owner reconstruction hotspot freeze, runtime mutation-guard proof, and current-canon authority-registry alignment for the owner-backed path | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-boundary-degrade-constriction-a922.md` | Report: boundary/degrade hotspot freeze, reply-authority narrowing, explicit invalid-outcome degrade proof, and current-canon authority-registry alignment for the constrained boundary path | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-fact-plane-materialization-a922.md` | Report: first-class fact-plane contract materialization, emitted-scope constriction on the live hot path, and deterministic guard coverage for the binding-authorized fact path | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-fact-contract-location-hours-parking-first-slice-a922.md` | Report: first canary fact-family cutover through `catalog.location`, direct-truth / pack-runtime bypass removal, and deterministic guard coverage for the governed family path | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-touched-slice-continuity-normalization-a922.md` | Report: touched-slice continuity normalization for the first fact family via canonical runtime `class_carryover` plus derived `context_manager` mirrors | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md` | Report: final touched-envelope legacy drain via lazy webhook package exports, machine-readable adapter-only/unreachable proof, and explicit practical-closure residuals | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-r36c-human-semantic-audit-a922.md` | Report: fresh current-head replay/audit truth `r36c`, surfaced mechanism backlog, and explicit rejection of any product-closure claim after the root-first canary sequence | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-r36g-human-semantic-audit-a922.md` | Report: fresh current-head replay/audit truth `r36g`, practical proof that consult/media improved, and explicit carry-forward of the booking-manage mechanism as the next live blocker | Brain/Architect |
+| `docs/REPORTS/2026-03-30-consultant-core-external-packet-contracts-and-turn-walkthrough-a922.md` | Report: packet self-containment closure, updated outside-readiness verdict, and next-step rule for external review intake | Brain/Architect |
 | `docs/REPORTS/2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md` | Report: three-checkout freeze manifests + inventory + consolidation base selection | Brain/Architect |
 | `docs/REPORTS/2026-03-30-consultant-core-consolidation-doc-conflict-resolution-a922.md` | Report: low-risk doc conflict source picks for consolidation worktree | Brain/Architect |
 | `docs/REPORTS/2026-03-30-consultant-core-consolidation-code-conflict-shortlist-a922.md` | Report: P0/P1/P2 shortlist for remaining consultant-core code/test conflicts | Brain/Architect |
@@ -1324,12 +1490,17 @@ truffles-api/
 | `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
 | `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |
 | `truffles-api/tests/test_reasoning_core.py` | Unit: Reasoning Core contract/wiring |
+| `truffles-api/tests/support_reasoning_core_shadow.py` | Test-only shadow support for the removed runtime `reasoning_core.py` wrapper contract |
+| `truffles-api/tests/support_legacy_webhook_shadow.py` | Test-only shadow support for the removed runtime `app/webhook.py` wrapper contract |
 | `truffles-api/tests/test_minimum_data_contract.py` | Unit: Minimum Data Contract validator |
 | `truffles-api/tests/test_safe_mode_gate.py` | Unit: Minimum Data safe-mode gate |
 | `truffles-api/tests/test_admin_health.py` | Unit: Admin health minimum-data readiness |
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
 | `truffles-api/tests/test_cross_domain_signal_contract_suite.py` | Unit: cross-domain info/booking/tool_registry contract on two non-salon runtime packs |
-| `truffles-api/tests/architecture/` | Deterministic architecture guard tests (legacy freeze, continuity writer, proof blackbox, packet consistency) | QA/Backend/Architect |
+| `truffles-api/tests/architecture/` | Deterministic architecture guard tests (legacy freeze, continuity writer, authority registry, proof blackbox, packet consistency) | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_authority_registry.py` | Deterministic contract for the machine-readable authority registry, compatibility carrier inventory, and dead-surface registry | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_truth_carrier_freeze.py` | Deterministic contract for the truth-carrier freeze law: precedence, guarded tokens, booking/queue/aux carriers, and expiry metadata | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_legacy_mesh_caller_proof.py` | Deterministic contract for the legacy caller-proof base and import-graph guard over mounted/unmounted/shadow-only legacy surfaces | QA/Backend/Architect |
 | `truffles-api/tests/test_interaction_owner_matrix_contract.py` | Unit: schema/artifact contract for machine-readable interaction owner matrix |
 | `truffles-api/tests/test_owner_resolver.py` | Unit: resolver-driven row matching for the executable interaction owner slice |
 | `truffles-api/tests/test_consultant_core_runtime_contracts.py` | Unit: runtime contract schemas + typed consultant core scaffolding |

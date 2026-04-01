@@ -30,7 +30,6 @@ from app.routers.webhook.session_memory import (
 )
 from app.routers.webhook.trace import (
     _record_decision_trace,
-    _record_message_decision_meta,
     _update_message_decision_metadata,
 )
 from app.schemas.webhook import WebhookRequest, WebhookResponse
@@ -55,6 +54,14 @@ logger = get_logger("consultant_runtime")
 
 _RUNTIME_ENTRYPOINT_NAME = "consultant_runtime"
 _RUNTIME_TRACE_KEY = "decision_trace"
+_TURN_TRACE_REFRESH_STAGES = frozenset(
+    {
+        "policy_core",
+        "pending_question_interaction",
+        "question_contract",
+        _RUNTIME_ENTRYPOINT_NAME,
+    }
+)
 _RUNTIME_ALLOWED_OUTCOMES = {"FACT", "COLLECT", "HANDOFF"}
 _NO_SEND_SOURCES = {"message_api", "console_simulation", "simulation"}
 
@@ -425,14 +432,6 @@ class ConsultantRuntime:
             text="Ок, давайте новую тему. Чем могу помочь?",
             meta={"outcome": "FACT", "control_action": "session_reset"},
         )
-        if prepared.user_message is not None:
-            _record_message_decision_meta(
-                prepared.user_message,
-                action="smalltalk",
-                intent="reset",
-                source="session_memory",
-                fast_intent=False,
-            )
         _record_decision_trace(
             prepared.conversation,
             {
@@ -451,11 +450,9 @@ class ConsultantRuntime:
         )
         decision_meta = {
             "source": _RUNTIME_ENTRYPOINT_NAME,
-            "action": "smalltalk",
-            "intent": "reset",
-            "outcome": "FACT",
-            "tool_action": "session_reset",
-            "interaction_owner": "session_memory",
+            "control_action": "session_reset",
+            "control_reason": "explicit_reset",
+            "control_source": "session_memory",
             "session_memory_reset": "explicit_reset",
         }
         if prepared.user_message is not None:
@@ -528,7 +525,7 @@ class ConsultantRuntime:
         if prepared.conversation.state == ConversationState.MANAGER_ACTIVE.value:
             decision = self.planner.build_controlled_degrade(
                 reason_code="manager_active",
-                intent="manager_active",
+                control_label="manager_active",
                 interaction_owner="pending_gate",
             )
             override = self.boundary.build_degrade_override(
@@ -552,7 +549,7 @@ class ConsultantRuntime:
         if missing_owner_guard:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:missing_semantic_owner",
-                intent="planner_missing_semantic_owner",
+                control_label="planner_missing_semantic_owner",
                 interaction_owner="semantic_owner_guard",
             )
             decision.meta["missing_semantic_owner_guard"] = missing_owner_guard
@@ -572,7 +569,7 @@ class ConsultantRuntime:
         if missing_binding_plan_guard:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:missing_binding_plan",
-                intent="planner_missing_binding_plan",
+                control_label="planner_missing_binding_plan",
                 interaction_owner="binding_plan_guard",
             )
             decision.meta["missing_binding_plan_guard"] = missing_binding_plan_guard
@@ -591,14 +588,25 @@ class ConsultantRuntime:
         if decision.outcome not in _RUNTIME_ALLOWED_OUTCOMES:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:invalid_outcome",
-                intent="planner_invalid_outcome",
+                control_label="planner_invalid_outcome",
                 interaction_owner="turn_planner",
             )
+            override = self.boundary.build_degrade_override(
+                reason_code="planner:invalid_outcome",
+                public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
+                trace_message="planner_invalid_outcome_guard_failed",
+                meta={
+                    "activate_handoff": True,
+                    "reply_kind": "handoff",
+                    "degrade_stage": "planner",
+                },
+            )
+            return decision, override
         mutation_guard = self.planner.detect_semantic_mutation(decision)
         if mutation_guard:
             decision = self.planner.build_controlled_degrade(
                 reason_code="planner:semantic_decision_post_owner_mutation",
-                intent="planner_semantic_decision_guard",
+                control_label="planner_semantic_decision_guard",
                 interaction_owner="semantic_decision_guard",
             )
             decision.meta["semantic_mutation_guard"] = mutation_guard
@@ -619,6 +627,11 @@ class ConsultantRuntime:
                 reason_code=str(decision.meta.get("reason_code") or "planner_degrade"),
                 public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
                 trace_message="planner_degrade",
+                meta={
+                    "activate_handoff": True,
+                    "reply_kind": "handoff",
+                    "degrade_stage": "planner",
+                },
             )
         return decision, override
 
@@ -689,6 +702,13 @@ class ConsultantRuntime:
         )
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
+            resume_pending_contract = self.dialog_state.project_interrupt_resume_pending_question_contract(
+                pending_contract,
+                current_goal=active_goal,
+                booking_payload=runtime_state.booking_state,
+            )
+            if resume_pending_contract:
+                profile["resume_pending_question_contract"] = resume_pending_contract
 
         slot_state: dict[str, str] = {}
         frame_continuation = semantic_frame.get("continuation") if isinstance(semantic_frame, dict) else None
@@ -758,6 +778,14 @@ class ConsultantRuntime:
         decision: PolicyDecision | None,
     ) -> bool:
         return isinstance(decision, PolicyDecision) and getattr(decision, "semantic_decision", None) is not None
+
+    @staticmethod
+    def _is_synthetic_control_decision(
+        decision: PolicyDecision | None,
+    ) -> bool:
+        return bool(
+            isinstance(decision, PolicyDecision) and decision.is_synthetic_control_decision()
+        )
 
     def _semantic_contract_enrichment(
         self,
@@ -852,6 +880,8 @@ class ConsultantRuntime:
         decision: PolicyDecision | None = None,
         execution: RuntimeExecutionResult | None = None,
     ) -> dict[str, Any]:
+        if self._is_synthetic_control_decision(decision):
+            return {}
         semantic_contract = self.dialog_state.project_runtime_semantic_contract(
             dialog_state,
             booking_payload=booking_state,
@@ -866,10 +896,6 @@ class ConsultantRuntime:
                 dict(owner_semantic_contract)
                 if isinstance(owner_semantic_contract, dict) and owner_semantic_contract
                 else {}
-            )
-            contract = self._merge_semantic_enrichment(
-                contract,
-                self._semantic_contract_enrichment(semantic_contract),
             )
             contract = self._merge_semantic_enrichment(
                 contract,
@@ -938,6 +964,8 @@ class ConsultantRuntime:
         booking_state: dict[str, Any] | None = None,
         decision: PolicyDecision | None = None,
     ) -> dict[str, Any]:
+        if self._is_synthetic_control_decision(decision):
+            return {}
         owner_contract = self.dialog_state.project_pending_question_contract(
             (
                 self.planner.canonical_pending_question_contract(decision)
@@ -966,6 +994,23 @@ class ConsultantRuntime:
             if "open_questions" not in contract and isinstance(owner_contract.get("open_questions"), list):
                 contract["open_questions"] = list(owner_contract["open_questions"])
         return contract
+
+    @staticmethod
+    def _fresh_turn_trace_seed(existing_trace: Any) -> list[dict[str, Any]]:
+        trace_items = []
+        if isinstance(existing_trace, list):
+            trace_items = [item for item in existing_trace if isinstance(item, dict)]
+        elif isinstance(existing_trace, dict):
+            trace_items = [existing_trace]
+        if not trace_items:
+            return []
+        # Keep non-core guard/boundary entries, but replace prior turn core stages
+        # with the current turn's canonical policy/question/runtime sequence.
+        return [
+            item
+            for item in trace_items
+            if str(item.get("stage") or "").strip() not in _TURN_TRACE_REFRESH_STAGES
+        ]
 
     def _execute_turn(
         self,
@@ -1269,6 +1314,11 @@ class ConsultantRuntime:
             trace_event["earliest_failed_stage"] = earliest_failed_stage.strip()
         if isinstance(root_reason_code, str) and root_reason_code.strip():
             trace_event["root_reason_code"] = root_reason_code.strip()
+        control_label = None
+        if isinstance(decision.meta, dict):
+            control_label = decision.meta.get("control_label")
+        if isinstance(control_label, str) and control_label.strip():
+            trace_event["control_label"] = control_label.strip()
         if expected_reply_type:
             trace_event["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:
@@ -1351,9 +1401,7 @@ class ConsultantRuntime:
         )
         trace_event["runtime_trace_contract"] = runtime_trace_contract_payload
         context = dict(conversation.context or {})
-        trace = context.get(_RUNTIME_TRACE_KEY)
-        if not isinstance(trace, list):
-            trace = []
+        trace = self._fresh_turn_trace_seed(context.get(_RUNTIME_TRACE_KEY))
         policy_core_trace = (
             dict(decision.meta.get("policy_core_trace"))
             if isinstance(decision.meta, dict)
@@ -1419,6 +1467,8 @@ class ConsultantRuntime:
             decision_meta["earliest_failed_stage"] = earliest_failed_stage.strip()
         if isinstance(root_reason_code, str) and root_reason_code.strip():
             decision_meta["root_reason_code"] = root_reason_code.strip()
+        if isinstance(control_label, str) and control_label.strip():
+            decision_meta["control_label"] = control_label.strip()
         if expected_reply_type:
             decision_meta["expected_reply_type"] = expected_reply_type
         if expected_reply_reason:

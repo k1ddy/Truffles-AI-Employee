@@ -1,0 +1,16 @@
+version: 2026-03-31.v1
+status: system_reproof_active
+active_block: Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md
+approved_by: owner_explicit_instruction_2026-03-31
+approved_on: '2026-03-31'
+approval_reason: phase_advance_from_semantic_owner_and_post_owner_reconstruction_reopen_to_continuity_boundary_pack_runtime_legacy_and_operational_reproof
+allows:
+  phase_advance: true
+  practical_truth_advance: false
+  runtime_resume: false
+notes:
+- Semantic-owner and post-owner reconstruction reopen is complete.
+- Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof is the active runtime block.
+- Practical truth remains r35f.
+- Replay and full human semantic audit are the only admissible next lane after this block closes honestly.

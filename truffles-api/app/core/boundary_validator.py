@@ -67,11 +67,16 @@ class BoundaryValidator:
     def _sanitize_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(meta, dict):
             return {}
-        return {
-            key: value
-            for key, value in meta.items()
-            if isinstance(key, str) and key not in _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS
-        }
+        sanitized: dict[str, Any] = {}
+        for key, value in meta.items():
+            if not isinstance(key, str) or key in _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS:
+                continue
+            if key == "reply_kind":
+                if value in {"handoff", "system"}:
+                    sanitized[key] = value
+                continue
+            sanitized[key] = value
+        return sanitized
 
     def _normalize_override(self, override: BoundaryOverride | None) -> BoundaryOverride | None:
         if override is None:
@@ -102,6 +107,11 @@ class BoundaryValidator:
             "interaction_owner": turn_result.policy_decision.interaction.owner,
             path_flag: True,
         }
+        decision_meta = getattr(turn_result.policy_decision, "meta", None)
+        if isinstance(decision_meta, dict):
+            control_label = decision_meta.get("control_label")
+            if isinstance(control_label, str) and control_label.strip():
+                payload["control_label"] = control_label.strip()
         if meta:
             payload.update(meta)
         return payload

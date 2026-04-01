@@ -1,0 +1,44 @@
+version: 2026-03-31.v1
+active_block: Consultant Core Closure-Claim Truth Correction And Semantic-Owner Reopen
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-closure-claim-truth-correction-and-semantic-owner-reopen-a922.md
+next_move: complete_semantic_owner_and_post_owner_reconstruction_reopen_before_any_replay_or_closure_claim
+required_registry_statuses:
+  authority_registry: machine_readable_closure_claim_truth_correction_base
+  compatibility_carrier_inventory: machine_readable_closure_claim_truth_correction_base
+  dead_surface_registry: machine_readable_closure_claim_truth_correction_base
+  legacy_caller_surface: machine_readable_closure_claim_truth_correction_base
+  governance_delta: machine_readable_closure_claim_truth_correction_delta
+required_authority_next_phase: semantic_owner_and_post_owner_reconstruction_reopen
+required_program_open_blockers:
+  - single_semantic_owner_is_not_proven_and_live_non_owner_control_paths_remain
+  - post_owner_semantic_reconstruction_is_not_proven_and_downstream_semantic_contract_merging_remains
+  - continuity_boundary_pack_runtime_legacy_and_operational_closure_claims_require_reproof_after_semantic_owner_reopen
+  - replay_and_human_audit_remain_forbidden_until_truth_correction_and_semantic_owner_reopen_complete
+forbidden_canon_phrases:
+  - only replay and full human semantic audit remain admissible next
+  - repo-side semantic, continuity, fact, boundary, legacy, shadow, and operational architecture recovery is closed
+required_semantic_competing_writer_paths:
+  - truffles-api/app/core/turn_planner.py
+  - truffles-api/app/core/consultant_runtime.py
+  - truffles-api/app/routers/webhook/session_memory.py
+required_post_owner_live_paths:
+  - truffles-api/app/core/turn_planner.py
+  - truffles-api/app/core/consultant_runtime.py
+  - truffles-api/app/core/dialog_state_service.py
+  - truffles-api/app/core/turn_executor.py
+required_code_markers:
+  - path: truffles-api/app/core/turn_planner.py
+    pattern: 'def build_controlled_degrade('
+  - path: truffles-api/app/core/turn_planner.py
+    pattern: 'def build_preflight_reject('
+  - path: truffles-api/app/core/consultant_runtime.py
+    pattern: 'def _project_runtime_semantic_contract('
+  - path: truffles-api/app/core/dialog_state_service.py
+    pattern: 'def _semantic_contract_from_frame('
+  - path: truffles-api/app/core/turn_executor.py
+    pattern: 'def _build_execution_semantic_contract('
+required_checks:
+  - python3 scripts/recovery_execution_guard.py
+  - python3 scripts/closure_claim_truth_guard.py
+  - python3 scripts/arch_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_closure_claim_truth_guard.py

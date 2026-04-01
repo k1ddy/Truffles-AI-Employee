@@ -51,8 +51,12 @@ def test_known_duplicate_top_level_core_defs_do_not_grow() -> None:
     )
 
 
-def test_reasoning_core_has_no_duplicate_top_level_defs() -> None:
-    actual = _top_level_duplicate_defs(ROOT / Path("truffles-api/app/services/reasoning_core.py"))
+def test_reasoning_core_removed_from_app_services() -> None:
+    assert not (ROOT / Path("truffles-api/app/services/reasoning_core.py")).exists()
+
+
+def test_reasoning_core_shadow_support_has_no_duplicate_top_level_defs() -> None:
+    actual = _top_level_duplicate_defs(ROOT / Path("truffles-api/tests/support_reasoning_core_shadow.py"))
 
     assert actual == {}
 

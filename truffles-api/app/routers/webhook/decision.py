@@ -190,6 +190,24 @@ from app.routers.webhook.context_manager import (
     _sync_canonical_dialog_state,
     _update_compact_summary,
 )
+from app.routers.webhook.expected_reply_interrupt_runtime import (
+    _has_explicit_location_or_hours_request as _interrupt_runtime_has_explicit_location_or_hours_request,
+)
+from app.routers.webhook.expected_reply_interrupt_runtime import (
+    _is_question_like_time_slot_constraint_candidate as _interrupt_runtime_is_question_like_time_slot_constraint_candidate,
+)
+from app.routers.webhook.expected_reply_interrupt_runtime import (
+    _is_time_slot_constraint_candidate as _interrupt_runtime_is_time_slot_constraint_candidate,
+)
+from app.routers.webhook.expected_reply_interrupt_runtime import (
+    _looks_like_booking_verification_request as _interrupt_runtime_looks_like_booking_verification_request,
+)
+from app.routers.webhook.expected_reply_interrupt_runtime import (
+    _should_block_expected_reply_by_info as _interrupt_runtime_should_block_expected_reply_by_info,
+)
+from app.routers.webhook.expected_reply_interrupt_runtime import (
+    _validate_expected_reply_value as _interrupt_runtime_validate_expected_reply_value,
+)
 from app.routers.webhook.context_runtime import (
     ASR_CONFIRM_KEY,
     ASR_CONFIRM_WINDOW_MINUTES,
@@ -935,134 +953,11 @@ def _should_block_expected_reply_by_info(
     message_text: str | None,
     client_slug: str | None,
 ) -> bool:
-    if expected_reply_type not in {
-        EXPECTED_REPLY_SERVICE,
-        EXPECTED_REPLY_TIME,
-        EXPECTED_REPLY_NAME,
-    }:
-        return False
-    if not message_text:
-        return False
-    normalized_message = _normalize_service_text(message_text)
-    info_query = _looks_like_info_query(message_text, client_slug=client_slug)
-    price_signal = _has_price_signal(normalized_message, message_text)
-    duration_signal = _has_duration_signal(normalized_message, message_text)
-    style_reference_signal = _is_style_reference_request(message_text, has_media=False)
-    tokens = normalized_message.split()
-    question_like = "?" in message_text
-    if not question_like and tokens:
-        question_like = any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
-    location_question_signal = bool(
-        question_like
-        and _has_explicit_location_or_hours_request(
-            message_text,
-            client_slug=client_slug,
-            strict=True,
-        )
-    )
-    verification_signal = _looks_like_booking_verification_request(message_text)
-    reschedule_signal = _looks_like_booking_reschedule_request(
-        message_text,
+    return _interrupt_runtime_should_block_expected_reply_by_info(
+        expected_reply_type=expected_reply_type,
+        message_text=message_text,
         client_slug=client_slug,
     )
-    media_offer_terms = get_system_lexicon_list("style_reference_media_terms")
-    media_offer_verbs = get_system_lexicon_list("style_reference_send_terms")
-    media_offer_signal = bool(
-        style_reference_signal
-        or (
-            media_offer_terms
-            and media_offer_verbs
-            and any(term in normalized_message for term in media_offer_terms)
-            and any(term in normalized_message for term in media_offer_verbs)
-        )
-    )
-    explicit_info_interrupt = bool(
-        price_signal
-        or duration_signal
-        or style_reference_signal
-        or location_question_signal
-        or verification_signal
-        or reschedule_signal
-        or media_offer_signal
-    )
-    expected_reply_candidate = None
-    if expected_reply_type == EXPECTED_REPLY_TIME:
-        expected_reply_candidate = _validate_expected_reply_value(
-            expected_reply_type=expected_reply_type,
-            value=message_text,
-            client_slug=client_slug,
-        )
-    question_like_time_slot_constraint = bool(
-        expected_reply_type == EXPECTED_REPLY_TIME
-        and _is_question_like_time_slot_constraint_candidate(
-            message_text=message_text,
-            candidate_value=expected_reply_candidate,
-        )
-    )
-    blocked = bool(
-        info_query
-        or explicit_info_interrupt
-    )
-    if not blocked and expected_reply_type in {EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
-        if question_like:
-            blocked = True
-    if blocked and expected_reply_type == EXPECTED_REPLY_TIME:
-        booking_signal = _is_booking_request(message_text, client_slug=client_slug)
-        has_clock_time_signal = bool(
-            re.search(r"\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
-            or TIME_HOUR_PATTERN.search(message_text)
-            or _match_booking_hour_fallback(message_text)
-        )
-        try:
-            has_datetime_signal = bool(_extract_datetime(message_text, client_slug=client_slug))
-        except TypeError:
-            # Some tests patch _extract_datetime with a positional-only stub.
-            has_datetime_signal = bool(_extract_datetime(message_text))
-        has_daypart_candidate = bool(
-            isinstance(expected_reply_candidate, str)
-            and expected_reply_candidate.strip()
-            and _has_daypart_stem(
-                normalize_for_matching(expected_reply_candidate)
-            )
-        )
-        if (
-            isinstance(expected_reply_candidate, str)
-            and expected_reply_candidate.strip()
-            and not explicit_info_interrupt
-            and (
-                has_datetime_signal
-                or booking_signal
-                or has_daypart_candidate
-                or question_like_time_slot_constraint
-            )
-            and (
-                not question_like
-                or booking_signal
-                or has_clock_time_signal
-                or has_daypart_candidate
-                or question_like_time_slot_constraint
-            )
-        ):
-            # Accept grounded booking-time replies like "на 3 часа" even when
-            # duration markers are present in wording.
-            return False
-        if not has_datetime_signal:
-            return blocked
-        if (
-            question_like
-            and has_datetime_signal
-            and not explicit_info_interrupt
-            and (booking_signal or has_clock_time_signal)
-        ):
-            # Accept explicit booking-time questions like "Можно на 18:30?"
-            # while still blocking info/price/duration interruptions.
-            return False
-        if question_like:
-            return True
-        # Keep info interrupts (address/hours/price/duration) in the info path
-        # even when the message also contains a time-like token.
-        return bool(info_query or price_signal or duration_signal)
-    return blocked
 
 
 def _is_question_like_time_slot_constraint_candidate(
@@ -1070,28 +965,10 @@ def _is_question_like_time_slot_constraint_candidate(
     message_text: str | None,
     candidate_value: str | None,
 ) -> bool:
-    if not isinstance(message_text, str) or not message_text.strip():
-        return False
-    if not isinstance(candidate_value, str) or not candidate_value.strip():
-        return False
-    normalized_message = _normalize_service_text(message_text)
-    tokens = normalized_message.split()
-    question_like = "?" in message_text
-    if not question_like and tokens:
-        question_like = any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
-    if not question_like:
-        return False
-    has_clock_time_signal = bool(
-        TIME_PATTERN.search(message_text)
-        or TIME_HOUR_PATTERN.search(message_text)
-        or _match_booking_hour_fallback(message_text)
-        or TIME_PATTERN.search(candidate_value)
-        or TIME_HOUR_PATTERN.search(candidate_value)
-        or _match_booking_hour_fallback(candidate_value)
+    return _interrupt_runtime_is_question_like_time_slot_constraint_candidate(
+        message_text=message_text,
+        candidate_value=candidate_value,
     )
-    if has_clock_time_signal:
-        return False
-    return True
 
 
 def _is_daypart_only_time_slot_constraint_candidate(
@@ -1193,13 +1070,7 @@ def _is_time_slot_constraint_candidate(
     candidate_value: str | None,
     client_slug: str | None,
 ) -> bool:
-    return _is_question_like_time_slot_constraint_candidate(
-        message_text=message_text,
-        candidate_value=candidate_value,
-    ) or _is_daypart_only_time_slot_constraint_candidate(
-        message_text=message_text,
-        candidate_value=candidate_value,
-    ) or _is_declarative_partial_date_slot_constraint_candidate(
+    return _interrupt_runtime_is_time_slot_constraint_candidate(
         message_text=message_text,
         candidate_value=candidate_value,
         client_slug=client_slug,
@@ -4286,18 +4157,11 @@ def _validate_expected_reply_value(
     value: str | None,
     client_slug: str | None,
 ) -> str | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    cleaned = value.strip()
-    if expected_reply_type == EXPECTED_REPLY_SERVICE:
-        return _validate_service_slot(cleaned, allow_freeform=True, client_slug=client_slug)
-    if expected_reply_type == EXPECTED_REPLY_TIME:
-        return _validate_datetime_slot(cleaned, allow_freeform=True, client_slug=client_slug)
-    if expected_reply_type == EXPECTED_REPLY_NAME:
-        return _validate_name_slot(cleaned, allow_freeform=True, client_slug=client_slug)
-    if expected_reply_type == EXPECTED_REPLY_PHONE:
-        return normalize_phone_digits(cleaned)
-    return None
+    return _interrupt_runtime_validate_expected_reply_value(
+        expected_reply_type=expected_reply_type,
+        value=value,
+        client_slug=client_slug,
+    )
 
 
 def _resolve_alternate_booking_slot_capture(
@@ -4593,6 +4457,7 @@ POLICY_CORE_RESCUE_ERROR_CODES = {
     "service_unavailable",
     "rate_limit",
 }
+POLICY_CORE_RETRYABLE_ERROR_CODES = set(POLICY_CORE_RESCUE_ERROR_CODES)
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
 SESSION_MEMORY_RESET_PHRASES = (
     "новый вопрос",
@@ -4684,12 +4549,7 @@ def _is_booking_verification_handoff_intent(policy_intent: str | None, policy_to
 
 
 def _looks_like_booking_verification_request(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    return any(pattern.search(normalized) for pattern in BOOKING_VERIFICATION_PATTERNS)
+    return _interrupt_runtime_looks_like_booking_verification_request(message_text)
 
 
 def _looks_like_promo_code_request(message_text: str | None, *, client_slug: str | None = None) -> bool:
@@ -4699,9 +4559,18 @@ def _looks_like_promo_code_request(message_text: str | None, *, client_slug: str
     if not normalized:
         return False
     promo_code_terms = get_signal_lexicon_list(client_slug, "promotion_promo_code_terms")
-    if not promo_code_terms:
-        return False
-    return any(token in normalized for token in promo_code_terms)
+    fallback_terms = (
+        "промокод",
+        "промо код",
+        "promo code",
+        "promo code",
+    )
+    terms = [
+        token.strip().casefold()
+        for token in [*(promo_code_terms or []), *fallback_terms]
+        if isinstance(token, str) and token.strip()
+    ]
+    return any(token in normalized for token in terms)
 
 
 def _format_discounts_reply_for_message(
@@ -6424,36 +6293,11 @@ def _has_explicit_location_or_hours_request(
     client_slug: str | None,
     strict: bool = False,
 ) -> bool:
-    if not message_text:
-        return False
-    _info_intents, info_meta = _detect_info_class_intents(
+    return _interrupt_runtime_has_explicit_location_or_hours_request(
         message_text,
-        intent_decomp_set=set(),
         client_slug=client_slug,
+        strict=strict,
     )
-    anchor_intents: set[str] = set()
-    if isinstance(info_meta, dict):
-        raw_anchor_intents = info_meta.get("anchor_intents")
-        if isinstance(raw_anchor_intents, list):
-            anchor_intents = {
-                intent.strip().casefold()
-                for intent in raw_anchor_intents
-                if isinstance(intent, str) and intent.strip()
-            }
-    info_signals = info_meta.get("info_signals") if isinstance(info_meta, dict) else None
-    master_signal = bool(isinstance(info_signals, dict) and info_signals.get("master"))
-    if isinstance(info_signals, dict):
-        if info_signals.get("location_address_hint"):
-            return True
-
-    if {"location", "hours", "parking"} & anchor_intents:
-        # strict mode must not treat weak anchor matches as explicit location/hours
-        # when the same message is primarily about specialists/masters.
-        if strict and master_signal:
-            return False
-        return True
-
-    return False
 
 
 

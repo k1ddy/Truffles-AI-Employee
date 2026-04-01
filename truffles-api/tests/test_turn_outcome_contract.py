@@ -40,3 +40,9 @@ def test_turn_outcome_accepts_phone_expected_reply_type():
     outcome = TurnOutcome(expected_reply_type=" phone ")
 
     assert outcome.expected_reply_type == "phone"
+
+
+def test_turn_outcome_accepts_media_expected_reply_type():
+    outcome = TurnOutcome(expected_reply_type=" media ")
+
+    assert outcome.expected_reply_type == "media"

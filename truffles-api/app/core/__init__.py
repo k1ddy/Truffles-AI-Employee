@@ -15,6 +15,15 @@ from app.core.dialog_state_service import (
     InteractionState,
     SemanticStateEvent,
 )
+from app.core.fact_plane import (
+    FactCompanionGroupV1,
+    FactContractV1,
+    FactManifestEntryV1,
+    FactManifestV1,
+    FactPlanV1,
+    FactRequestV1,
+    FactResultV1,
+)
 from app.core.response_realizer import ReplyEnvelope, ReplyKind, ResponseRealizer
 from app.core.runtime_trace_contract import (
     RuntimeTraceActionTransitionV1,
@@ -67,6 +76,13 @@ __all__ = [
     "DialogState",
     "DialogStateProjections",
     "DialogStateService",
+    "FactCompanionGroupV1",
+    "FactContractV1",
+    "FactManifestEntryV1",
+    "FactManifestV1",
+    "FactPlanV1",
+    "FactRequestV1",
+    "FactResultV1",
     "InteractionContract",
     "InteractionState",
     "InboundTurnInput",

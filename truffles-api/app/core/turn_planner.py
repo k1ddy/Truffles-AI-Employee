@@ -9,6 +9,7 @@ from app.core.binding_plan import BindingPlanV1
 from app.core.semantic_decision import SemanticDecisionV1
 
 DecisionOutcome = Literal["FACT", "COLLECT", "HANDOFF"]
+_SYSTEM_CONTROL_INTENT = "system_control"
 _PLANNER_SLOT_ALIASES = {
     "service_query": "service",
     "time": "datetime",
@@ -87,6 +88,19 @@ class PolicyDecision(BaseModel):
         if is_synthetic and self.binding_plan is None:
             raise ValueError("binding_plan_required_for_synthetic_decision")
         return self
+
+    def is_synthetic_control_decision(self) -> bool:
+        if not (isinstance(self.meta, dict) and self.meta.get("synthetic_policy_decision")):
+            return False
+        source = str(self.source or "").strip().casefold()
+        intent = str(self.intent or "").strip().casefold()
+        if source == "planner_control" or intent == "system_control":
+            return True
+        return bool(
+            self.meta.get("control_label")
+            or self.meta.get("degrade_path")
+            or self.meta.get("preflight_path")
+        )
 
 
 class InboundTurnInput(BaseModel):
@@ -170,7 +184,7 @@ class TurnPlanner:
         if not normalized_message:
             return self.build_preflight_reject(
                 reason_code="empty_message",
-                intent="empty_message",
+                control_label="empty_message",
                 interaction_owner="turn_planner_preflight",
             )
 
@@ -209,7 +223,7 @@ class TurnPlanner:
                 projection_error = self._normalize_token(str(exc)) or "invalid_projection"
                 decision = self.build_controlled_degrade(
                     reason_code="planner:invalid_projection",
-                    intent="planner_degrade",
+                    control_label="planner_degrade",
                     interaction_owner="turn_planner_degrade",
                 )
                 decision.meta["earliest_failed_stage"] = "policy_projection"
@@ -254,7 +268,7 @@ class TurnPlanner:
             )
         decision = self.build_controlled_degrade(
             reason_code=f"planner:{degrade_reason}",
-            intent="planner_degrade",
+            control_label="planner_degrade",
             interaction_owner="turn_planner_degrade",
         )
         decision.meta["earliest_failed_stage"] = earliest_failed_stage
@@ -691,7 +705,7 @@ class TurnPlanner:
         self,
         *,
         reason_code: str,
-        intent: str,
+        control_label: str,
         interaction_owner: str,
         interaction_target: str | None = None,
         interaction_relation: str | None = None,
@@ -704,7 +718,8 @@ class TurnPlanner:
         return PolicyDecision(
             outcome="HANDOFF",
             action="handoff",
-            intent=intent,
+            intent=_SYSTEM_CONTROL_INTENT,
+            source="planner_control",
             tool_action="handoff",
             interaction=InteractionContract(
                 owner=interaction_owner,
@@ -713,6 +728,7 @@ class TurnPlanner:
             ),
             meta={
                 "reason_code": reason_code,
+                "control_label": control_label,
                 "degrade_path": True,
                 "synthetic_policy_decision": True,
                 "binding_plan_id": binding_plan.binding_id,
@@ -725,7 +741,7 @@ class TurnPlanner:
         self,
         *,
         reason_code: str,
-        intent: str,
+        control_label: str,
         interaction_owner: str,
         interaction_target: str | None = None,
         interaction_relation: str | None = None,
@@ -738,7 +754,8 @@ class TurnPlanner:
         return PolicyDecision(
             outcome="FACT",
             action="preflight_reject",
-            intent=intent,
+            intent=_SYSTEM_CONTROL_INTENT,
+            source="planner_control",
             tool_action="noop",
             interaction=InteractionContract(
                 owner=interaction_owner,
@@ -747,6 +764,7 @@ class TurnPlanner:
             ),
             meta={
                 "reason_code": reason_code,
+                "control_label": control_label,
                 "preflight_path": True,
                 "synthetic_policy_decision": True,
                 "binding_plan_id": binding_plan.binding_id,
@@ -1095,11 +1113,12 @@ class TurnPlanner:
             fallback = self._normalize_token(expected_reply_type)
             if fallback == "time":
                 return "datetime"
-            if fallback in {"service_choice", "name", "phone"}:
+            if fallback in {"service_choice", "name", "phone", "media"}:
                 return {
                     "service_choice": "service",
                     "name": "name",
                     "phone": "phone",
+                    "media": "media",
                 }.get(fallback)
             if isinstance(booking_slots, dict) and booking_slots:
                 return self._select_missing_booking_slot(booking_slots)

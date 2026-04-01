@@ -1,5 +1,7 @@
 # PRACTICAL CLOSURE ADDENDUM
 
+Status override (2026-03-30): while `docs/RECOVERY_EXECUTION_LOCK.yaml` is active, this document is behavioral-history evidence only and is not the governing control layer for the active program. The governing base for active execution is `r35f + Consultant Core Legacy Drain And Proof Closure`. Any `r36*`, consult/media, or booking-manage runtime/RCA material below must be treated as drift residue unless and until a later explicit owner/architect waiver advances beyond the current block.
+
 ## Purpose
 This addendum corrects the closure model for the consultant-core program.
 
@@ -12,36 +14,32 @@ The prior `W1-W8` closeout can stand as a **structural/contract** claim where su
 4. Future closure claims must be made against explicit closure layers, not against one overloaded `done` label.
 
 ## Current Truth (2026-03-30)
-- Active practical truth is replay `a922-practical-proof-20260330-r35f` plus its full human semantic audit.
+- Active practical truth is replay `a922-practical-proof-20260330-r36g` plus its full human semantic audit.
 - `infra_valid=true`
 - `semantic_valid=false`
 - `human_semantic_valid=false`
 - Full human audit verdict:
-  - dialogs `8 pass / 2 weak / 0 fail`
-  - turns `13 pass / 2 weak / 0 fail`
+  - dialogs `8 pass / 1 weak / 1 fail`
+  - visible practical improvement: `dialog 7 / turn 1` is now green for `consult/media cue continuity`
+  - surfaced visible fail turns: `dialog 9 / turns 1-2`
+  - secondary weak residue: `dialog 2 / turns 4-5`
 - Surfaced fail blocker families on the visible human-semantic path:
-  - none
-- Surfaced weak residual families:
-  - fact over-composition on location/parking replies
-- Secondary contract/oracle residues:
-  - booking-verification confirm follow-up override residue (`dialog 9 / turn 2`)
-  - oracle/evaluator taxonomy drift on otherwise acceptable fact/handoff turns
+  - `booking-manage temporal clue grounding / follow-up continuity`
+- Secondary contract/oracle/evaluator residues:
+  - `oracle contract / taxonomy alignment` (`dialog 2 / turn 4`)
+  - `replay harness / evaluator isolation` (`dialog 2 / turn 5`)
+  - `judge_eval_conflict` (`2`)
 - Shared mechanisms behind the surfaced weak families:
-  - fact selection / fact composition
+  - `booking-manage temporal clue grounding / follow-up continuity`
+  - `oracle contract / taxonomy alignment`
+  - `replay harness / evaluator isolation`
 - Interpretation:
-  - these families do not disprove the single semantic owner invariant
-  - the previously open `owner-side booking service grounding regression` family remains closed on `r35f`
-  - the previously open `collect->commit transition when required booking slots are already complete` family remains closed on `r35f`
-  - the previously open `booking datetime continuity loss under policy-core degrade` family remains closed on `r35f`
-  - the previously open `live check-booking collect/fallback residue` family remains closed on `r35f`: `dialog 9 / turns 1-2` stay on the correct missing identity/reference slot and no longer re-ask temporal information
-  - the scoped `booking verification confirm recovery under degraded invalid_schema` family remains closed on `r35f`: `dialog 9 / turn 2` still preserves `booking_verification_mode=confirm` on the visible path and asks only for name/phone
-  - the re-opened `parking owner-grounding` family is now closed on `r35f`: `dialog 6 / turn 1` again surfaces the parking fact on the visible path because owner grounding now keeps `pack_refs=["parking"]`
-  - `dialog 5 / turn 1` and `dialog 6 / turn 1` still remain broader than needed because the fact reply over-composes adjacent branch facts
-  - `dialog 7 / turn 1` no longer re-surfaces as a weak/fail turn on the current truth, but this block does not claim a separate media-family closure
-  - a trace-visible residual still exists on `dialog 2 / turn 5` (`appointment_skip_reason=datetime_parse_failed` before transparent handoff), but it is not the current practical blocker because the visible response remains product-acceptable
-  - `dialog 9 / turn 2` still carries a secondary contract residue (`handoff_not_allowed` -> collect override), but the visible reply remains acceptable and confirm-aware
-  - practical blockers must now be understood and fixed at the shared-mechanism level, not as isolated domain scenarios
-  - practical/product closure still remains open because the run is human-semantic amber rather than green and the deterministic contract lane is still red
+  - root-first implementation sequence `1..10` remains materially complete repo-side on the touched canary envelope
+  - the bounded `consult/media` fix is now proven improved on the practical path
+  - `r36g` disproves any product-ready interpretation of that structural completion because the booking-manage family remains live
+  - practical blockers must still be understood and fixed at the shared-mechanism level, not as isolated turns
+  - cross-run trend evidence now proves `consult/media cue continuity` dropped out of the product bucket, but canonical regression claims remain blocked because baseline `r35f` is non-canonical for comparison
+  - practical/product closure remains open because both the deterministic contract lane and the full human semantic lane are still red
 
 ## Closure Layers (mandatory)
 ### 1. `structural_complete`
@@ -173,7 +171,13 @@ Rule:
 - these artifacts harden the workflow only; they do not change the current product truth by themselves
 
 ## System Forensics Gate
-Before any new product runtime implementation after `r35f`, the consultant-core lane must start from the self-contained corpus in `docs/system_forensics/`.
+Before any new product runtime implementation after `r36c`, the consultant-core lane must start from the self-contained corpus in `docs/system_forensics/` plus the full `r36c` artifact bundle.
+
+Status note: the doc-only external-research corpus deepening block completed the previously missing root-level executive packet in this consolidation worktree; the references below are now real files rather than forward declarations.
+
+Supporting note: the external packet now also has a machine-readable companion and a structured review questionnaire under `docs/system_forensics/`, but the packet is still only a scaffold until the fresh primary deep audit reaches usable coverage; this remains research-preparation evidence only and does not change product truth.
+
+Primary deep-audit note: the packet self-containment blockers are now also closed by `docs/system_forensics/{SEMANTIC_DECISION_CONTRACT.md,BINDING_PLAN_CONTRACT.md,TURN_JOURNAL_CONTRACT.md,CONVERSATION_PROJECTION_CONTRACT.md,END_TO_END_TURN_WALKTHROUGH.md}`. The current reviewed verdict is now `ready_for_external_handoff`: outside review may start, but runtime architecture implementation should still remain paused until that review is received or explicitly waived.
 
 Required governing references:
 - `docs/system_forensics/INDEX.md`
@@ -198,4 +202,14 @@ Rule:
 - When such a mismatch is discovered, the canon must be corrected explicitly rather than hidden.
 
 ## Next Operating Rule
-If product work continues after the system-forensics publication block, the next implementation block is no longer a direct weak-family patch. It starts with the first architecture-recovery implementation wave: `fact architecture contract materialization`, using `fact over-composition on location/parking replies` only as evidence for the missing shared mechanism `fact selection / fact composition`. The admissible starting bundle is therefore the full-path RCA contract above plus the workflow-hardening artifacts (`manual_audit_workspace.*`, `family_registry.json`, `judge_conflicts.jsonl`, `llm-quality-trends`) plus the new system-forensics corpus (`docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md`, `TARGET_ARCHITECTURE.md`, `MIGRATION_PROGRAM.md`, `EVIDENCE_MAP.md`, `QUALITY_GOVERNANCE_AUDIT.md`).
+Root-first implementation sequence `1..10` is no longer the active blocker. The bounded `consult/media cue continuity` fix is now proven improved on the practical path by `r36g`.
+
+Required follow-up order:
+1. freeze and accept the exact live path for `booking-manage temporal clue grounding / follow-up continuity` on `r36g`;
+2. only after that, open one bounded implementation block for that mechanism;
+3. keep `oracle contract / taxonomy alignment` and evaluator residue separate unless fresh evidence proves they are the same mechanism.
+
+Rule:
+- no new runtime implementation starts from `dialog 9` as a standalone scenario patch;
+- each follow-up must name the shared mechanism, broken invariant, open-world envelope, and exact live path before code;
+- no consult/media regression is admissible after `r36g` without new replay evidence.

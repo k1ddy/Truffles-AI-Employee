@@ -121,3 +121,19 @@ def test_semantic_bridge_growth_guard_blocks_new_policy_snapshot_reason(tmp_path
     assert violations
     assert "PolicyCoreRouteSnapshot reason set grew without waiver" in violations[0]
     assert "new_reason" in violations[0]
+
+
+def test_repo_post_owner_reconstruction_hotspots_match_current_snapshot() -> None:
+    module = load_module("semantic_bridge_growth_guard", SCRIPTS / "semantic_bridge_growth_guard.py")
+    config = yaml.safe_load((ROOT / "docs" / "SEMANTIC_BRIDGE_GUARD.yaml").read_text(encoding="utf-8"))
+
+    hotspots = {item["path"]: item for item in config["hotspots"]}
+    assert set(hotspots) == {
+        "truffles-api/app/services/intent_service.py",
+        "truffles-api/app/core/turn_planner.py",
+        "truffles-api/app/core/turn_executor.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+    }
+    assert module.evaluate(ROOT, config) == []

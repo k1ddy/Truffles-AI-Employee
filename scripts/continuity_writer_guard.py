@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,41 @@ def load_config(path: Path) -> dict:
     if not isinstance(data, dict):
         raise SystemExit(f"ERROR: invalid YAML mapping: {path}")
     return data
+
+
+def load_json(path: Path) -> dict:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SystemExit(f"ERROR: invalid JSON object: {path}")
+    return data
+
+
+def resolve_guard_config(repo_root: Path, config: dict) -> dict:
+    if isinstance(config.get("continuity_guard"), dict):
+        return config
+
+    legacy_rel = config.get("legacy_sunset")
+    inventory_rel = config.get("compatibility_carrier_inventory")
+    if not isinstance(legacy_rel, str) or not isinstance(inventory_rel, str):
+        return config
+
+    legacy = load_config(repo_root / legacy_rel)
+    inventory = load_json(repo_root / inventory_rel)
+    freeze_guard = inventory.get("freeze_guard") if isinstance(inventory.get("freeze_guard"), dict) else {}
+    legacy_guard = legacy.get("continuity_guard") if isinstance(legacy.get("continuity_guard"), dict) else {}
+
+    continuity_guard = {
+        "allowed_writer_paths": freeze_guard.get("allowed_new_writer_paths")
+        or legacy_guard.get("allowed_writer_paths")
+        or [],
+        "guarded_tokens": freeze_guard.get("guarded_context_tokens")
+        or legacy_guard.get("guarded_tokens")
+        or [],
+    }
+    return {
+        "sunset_files": legacy.get("sunset_files") or [],
+        "continuity_guard": continuity_guard,
+    }
 
 
 def changed_python_files(repo_root: Path, base_ref: str, head_ref: str | None) -> list[str]:
@@ -340,13 +376,13 @@ def evaluate(repo_root: Path, config: dict, base_ref: str, head_ref: str | None)
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", default=None)
-    parser.add_argument("--config", default="docs/LEGACY_SUNSET.yaml")
+    parser.add_argument("--config", default="docs/SOURCE_OF_TRUTH.yaml")
     parser.add_argument("--base-ref", default=None)
     parser.add_argument("--head-ref", default=None)
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root or Path(__file__).resolve().parents[1])
-    config = load_config(repo_root / args.config)
+    config = resolve_guard_config(repo_root, load_config(repo_root / args.config))
     base_ref = args.base_ref or default_base_ref(repo_root)
     violations = evaluate(repo_root, config, base_ref, args.head_ref)
     if violations:

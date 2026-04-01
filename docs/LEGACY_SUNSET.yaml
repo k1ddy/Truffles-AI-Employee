@@ -1,400 +1,3798 @@
-version: 2026-03-15.v1
+version: 2026-03-30.v1
 sunset_files:
-  - path: truffles-api/app/routers/webhook/decision.py
-    status: frozen_for_new_semantics
-    added_code_policy: waiver_required
-    allowed_changes:
-      - deletion
-      - narrowing
-      - compatibility_shim
-      - architect_approved_blocker_fix
-    active_waiver:
-      id: TP-2026-03-20-consultant-core-final-ingress-coordinator-broader-fact-guard-family-targeted-frozen-waiver-implementation-a922
-      scope: broader_fact_guard_family_targeted_frozen_waiver_owner_invocation_only
-      reason: targeted frozen-waiver implementation deletes the old mixed fact-guard authority body in frozen `decision.py` by reducing `_maybe_apply_fact_guard(...)` to a thin owner-surface invocation into the existing policy-validation boundary service while preserving the injected callable contract for direct and deferred consumers
-      opened_on: "2026-03-20"
-      expiry_trigger: remove once the post-waiver audit confirms no further frozen executable additions are required for the broader fact-guard family
-      allowed_executable_lines:
-        - from app.services.timeout_owner_boundary_service import (
-        - TimeoutOwnerBoundaryApplyOverrides,
-        - TimeoutOwnerBoundaryRuntimeHooks,
-        - apply_timeout_owner_boundary_resolution,
-        - )
-        - pending_timeout_boundary_result = apply_timeout_owner_boundary_resolution(
-        - timeout_owner_boundary_result = apply_timeout_owner_boundary_resolution(
-        - context=_get_conversation_context(conversation),
-        - resolution=pending_timeout_boundary_resolution,
-        - resolution=timeout_owner_boundary_resolution,
-        - policy_core_mode=policy_core_mode,
-        - policy_core_degrade_reason=policy_core_degrade_reason,
-        - pending_question_contract=None,
-        - pending_question_contract=timeout_pending_question_contract,
-        - boundary_state_source="pending_handoff",
-        - boundary_state_source="booking_interrupt",
-        - overrides=TimeoutOwnerBoundaryApplyOverrides(
-        - decision_meta_updates={
-        - result_message_sent="Policy core timeout pending resume-boundary collect response sent",
-        - result_message_failed="Policy core timeout pending resume-boundary collect response failed",
-        - ),
-        - hooks=TimeoutOwnerBoundaryRuntimeHooks(
-        - set_booking_context=_set_booking_context,
-        - set_expected_reply_context=_set_expected_reply_context,
-        - get_booking_context=_get_booking_context,
-        - get_expected_reply_type=_get_expected_reply_type,
-        - get_expected_reply_reason=_get_expected_reply_reason,
-        - get_context_manager=_get_context_manager,
-        - sync_canonical_dialog_state=_sync_canonical_dialog_state,
-        - set_context_manager=_set_context_manager,
-        - get_canonical_dialog_state=_get_canonical_dialog_state,
-        - sync_session_memory_interaction_state=_sync_session_memory_interaction_state,
-        - set_conversation_context=_set_conversation_context,
-        - apply_policy_guard_override=_apply_policy_guard_override,
-        - sync_policy_plan_audit=_sync_policy_plan_audit,
-        - record_decision_trace=_record_decision_trace,
-        - record_message_decision_meta=_record_message_decision_meta,
-        - update_message_decision_metadata=_update_message_decision_metadata,
-        - send_and_save=_send_and_save,
-        - message=pending_timeout_boundary_result.result_message,
-        - bot_response=pending_timeout_boundary_result.bot_response,
-        - message=timeout_owner_boundary_result.result_message,
-        - bot_response=timeout_owner_boundary_result.bot_response,
-        - PendingResumeBoundaryRuntimeHooks as ResumeBoundaryRuntimeHooks,
-        - ActiveHandoverReuseRuntimeHooks,
-        - PendingEscalationNotificationRuntimeHooks,
-        - _derive_pending_booking_resume_boundary_payload as _state_service_derive_pending_booking_resume_boundary_payload,
-        - _derive_pending_resume_reason as _state_service_derive_pending_resume_reason,
-        - _create_pending_escalation_with_notification as _state_service_create_pending_escalation_with_notification,
-        - _resolve_pending_resume_boundary_activation as _resolve_resume_boundary_activation,
-        - _resolve_pending_resume_session_memory_policy as _resolve_resume_session_memory_policy,
-        - _reuse_active_handover as _state_service_reuse_active_handover,
-        - _resolve_pending_timeout_resume_boundary_payload as _resolve_resume_timeout_boundary_payload,
-        - return _state_service_derive_pending_resume_reason(context)
-        - return _state_service_derive_pending_booking_resume_boundary_payload(
-        - context, now=now, prompt_builder=_booking_prompt_for_expected_reply_type
-        - return _state_service_reuse_active_handover(
-        - def _create_pending_escalation_with_notification(
-        - return _state_service_create_pending_escalation_with_notification(
-        - user_message=user_message,
-        - trigger_type=trigger_type,
-        - trigger_value=trigger_value,
-        - hooks=PendingEscalationNotificationRuntimeHooks(
-        - escalate_to_pending=escalate_to_pending,
-        - source=source,
-        - intent=intent,
-        - hooks=ActiveHandoverReuseRuntimeHooks(
-        - get_active_handover=get_active_handover,
-        - transition_state=transition_state,
-        - send_telegram_notification=send_telegram_notification,
-        - escalation_notification_result = _create_pending_escalation_with_notification(
-        - if escalation_notification_result.ok:
-        - handover = escalation_notification_result.handover
-        - handover_reopened = escalation_notification_result.handover_reopened
-        - telegram_sent = escalation_notification_result.telegram_sent
-        - resume_boundary_activation = _resolve_resume_boundary_activation(
-        - conversation=conversation,
-        - saved_message=saved_message,
-        - conversation_state=conversation.state,
-        - prompt_builder=_booking_prompt_for_expected_reply_type,
-        - is_handover_status_question=is_handover_status_question,
-        - is_opt_out_message=is_opt_out_message,
-        - hooks=ResumeBoundaryRuntimeHooks(
-        - set_conversation_context=_set_conversation_context,
-        - resume_boundary_active = resume_boundary_activation.boundary_active
-        - resume_boundary_restored = resume_boundary_activation.boundary_restored
-        - resume_session_memory_policy = _resolve_resume_session_memory_policy(
-        - boundary_restored=resume_boundary_restored,
-        - if resume_session_memory_policy.trace_payload is not None:
-        - resume_session_memory_policy.trace_payload,
-        - if saved_message and resume_session_memory_policy.decision_meta_updates is not None:
-        - resume_session_memory_policy.decision_meta_updates,
-        - session_memory_reset_reason = resume_session_memory_policy.reset_reason
-        - resume_timeout_boundary_payload = _resolve_resume_timeout_boundary_payload(
-        - required_expected_reply_type=EXPECTED_REPLY_TIME,
-        - _resolve_resolved_handoff_resume_boundary_restore as _resolve_resolved_resume_boundary_restore,
-        - resolved_resume_boundary_result = _resolve_resolved_resume_boundary_restore(
-        - context = resolved_resume_boundary_result.context
-        - resolved_handoff_resume_restored = resolved_resume_boundary_result.restored
-        - pending_resume_synced = _sync_resume_context_on_handover_reuse(conversation)
-        - from app.core import DialogStateService, TurnExecutor, TurnPlanner
-        - tool_reply_owner_cutover = "turn_executor.tool_reply_turn_outcome.v1"
-        - tool_reply_owner_execution = TurnExecutor().build_tool_reply_owner_execution(
-        - tool_reply_decision = tool_reply_owner_execution.decision
-        - tool_reply_payload = tool_reply_owner_execution.payload
-        - tool_reply_decision = TurnPlanner().build_tool_reply_owner_decision(
-        - payload=policy_payload,
-        - default_intent=turn_outcome_intent,
-        - reply_intent=reply_intent,
-        - tool_action=policy_tool_action,
-        - expected_reply_type=turn_outcome_expected_reply,
-        - pending_question_tool_followup=pending_question_tool_followup,
-        - pending_question_act=policy_pending_question_act,
-        - collect_service_info_interrupt_active=collect_service_info_interrupt_active,
-        - master_override_applied=master_override_applied,
-        - )
-        - tool_reply_dialog_state = DialogStateService().build_tool_reply_owner_state(
-        - decision=tool_reply_decision,
-        - expected_reply_type=turn_outcome_expected_reply,
-        - expected_reply_reason=turn_outcome_expected_reason,
-        - owner_cutover=tool_reply_owner_cutover,
-        - )
-        - tool_reply_payload = TurnExecutor().build_tool_reply_owner_cutover_payload(
-        - decision=tool_reply_decision,
-        - dialog_state=tool_reply_dialog_state,
-        - text=bot_response,
-        - owner_cutover=tool_reply_owner_cutover,
-        - reply_source=reply_source,
-        - reply_intent=reply_intent,
-        - intent=turn_outcome_intent,
-        - tool_action=policy_tool_action,
-        - raw_tool_decision=tool_decision,
-        - normalized_tool_decision=tool_decision_token,
-        - followup_type=turn_outcome_expected_reply,
-        - followup_reason=turn_outcome_expected_reason,
-        - followup_prompt=booking_interrupt_prompt,
-        - services_overview_followup=services_overview_followup,
-        - conversation_state=conversation.state,
-        - pending_question_tool_followup=pending_question_tool_followup,
-        - pending_question_act=policy_pending_question_act,
-        - pending_question_target=policy_pending_question_target,
-        - collect_service_info_interrupt_active=collect_service_info_interrupt_active,
-        - info_sections=list(info_sections) if isinstance(info_sections, list) else None,
-        - saved_message_present=bool(saved_message),
-        - master_override_meta=(
-        - dict(master_override_meta) if isinstance(master_override_meta, dict) else None
-        - )
-        - artifact=tool_reply_payload.artifact,
-        - trace_payload_override=tool_reply_payload.trace_payload_override,
-        - extra_trace_payloads=tool_reply_payload.extra_trace_payloads,
-        - extra_meta_updates=tool_reply_payload.extra_meta_updates,
-        - DialogStateService().normalize_booking_payload(booking) or {}
-        - collect_slot_values = (
-        - {"service": timeout_booking_service_query}
-        - DialogStateService().build_collect_owner_booking_payload(
-        - existing_booking=booking_state_for_collect,
-        - last_question=collect_slot,
-        - slot_values=collect_slot_values,
-        - context = DialogStateService().set_context_booking_payload(
-        - booking_state_for_collect,
-        - key="booking",
-        - tool_reply_guard_response = _maybe_apply_fact_guard(
-        - decision_meta=tool_reply_guard_meta,
-        - transport_status_token=last_transport_status,
-        - transport_reason_token=last_transport_reason,
-        - guard_response=tool_reply_guard_response,
-        - policy_validation_boundary_hooks = PolicyValidationBoundaryRuntimeHooks(
-        - get_clarify_attempt_state=_get_clarify_attempt_state,
-        - record_context_manager_decision=_record_context_manager_decision,
-        - handle_clarify_limit_escalation=_handle_clarify_limit_escalation,
-        - register_clarify_attempt=_register_clarify_attempt,
-        - return handle_policy_validation_boundary(
-        - runtime_input=PolicyValidationBoundaryRuntimeInput(
-        - mode="fact_guard",
-        - validation_error=guard_reason,
-        - guard_reason=guard_reason,
-        - trace_decision=f"clarify_{guard_reason}",
-        - trace_source=source,
-        - escalation_source="fact_guard",
-        - llm_policy_core_meta=None,
-        - message_text=message_text,
-        - db=db,
-        - user=user,
-        - allow_handover=allow_handover,
-        - clarify_intent=FACT_GUARD_INTENT,
-        - clarify_max_attempts=FACT_GUARD_MAX_ATTEMPTS,
-        - fact_source=fact_source or None,
-        - fact_evidence_refs=list(evidence_refs),
-        - send_response=_send_response,
-        - finalize_response=_finalize_bot_response,
-        - '**policy_validation_boundary_base,'
-        - hooks=policy_validation_boundary_hooks,
-
-        - return reasoning_core_service._finalize_tool_reply_owner_execution(
-        - conversation=conversation,
-        - saved_message=saved_message,
-        - owner_execution=tool_reply_owner_execution,
-        - reply_intent=reply_intent,
-        - maybe_apply_fact_guard=_maybe_apply_fact_guard,
-        - guard_decision_meta=tool_reply_guard_meta,
-        - allow_handover=routing.get("allow_handover_create", False),
-        - CANONICAL_DIALOG_STATE_KEY,
-        - SERVICE_CARRYOVER_TTL_MESSAGES,
-        - expected_reply_result = DialogStateService().build_expected_reply_context_sync_result(
-        - context,
-        - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
-        - session_memory_key=SESSION_MEMORY_KEY,
-        - re_entry_required_key=RE_ENTRY_REQUIRED_KEY,
-        - service_carryover_key=SERVICE_CARRYOVER_KEY,
-        - consult_context_key=CONSULT_CONTEXT_KEY,
-        - session_memory_ttl_hours=SESSION_MEMORY_TTL_HOURS,
-        - service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
-        - consult_default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
-        - context = expected_reply_result.context
-        - normalized_expected_reply_type = expected_reply_result.expected_reply_type
-        - normalized_expected_reply_reason = expected_reply_result.expected_reply_reason
-        - if expected_reply_result.re_entry_cleared:
-        - "reason": normalized_expected_reply_reason,
-        - "expected_reply_type": normalized_expected_reply_type,
-        - "expected_reply_reason": normalized_expected_reply_reason,
-        - memory=expected_reply_result.question_memory or {},
-  - path: truffles-api/app/routers/webhook/booking.py
-    status: frozen_for_new_semantics
-    added_code_policy: waiver_required
-    allowed_changes:
-      - deletion
-      - narrowing
-      - compatibility_shim
-      - architect_approved_blocker_fix
-    active_waiver:
-      id: TP-2026-03-19-consultant-core-acceptance-preflight-l2-frozen-booking-handover-reuse-targeted-frozen-waiver-implementation-a922
-      scope: booking_handover_reuse_exact_five_callsites_only
-      reason: targeted frozen-waiver implementation deletes the surviving `_reuse_active_handover(..., hooks)` caller drift in the exact five frozen booking contours while preserving the truthful owner contract and avoiding any wrapper/helper seam
-      opened_on: "2026-03-19"
-      expiry_trigger: remove once the post-waiver rerun/audit proves no further frozen executable additions are required for this booking handover-reuse family
-      allowed_executable_lines:
-        - from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
-        - hooks=ActiveHandoverReuseRuntimeHooks(
-        - get_active_handover=legacy.get_active_handover,
-        - transition_state=legacy.transition_state,
-        - send_telegram_notification=legacy.send_telegram_notification,
-        - record_decision_trace=legacy._record_decision_trace,
-        - ),
-  - path: truffles-api/app/routers/webhook/pending.py
-    status: frozen_for_new_semantics
-    added_code_policy: waiver_required
-    allowed_changes:
-      - deletion
-      - narrowing
-      - compatibility_shim
-      - architect_approved_blocker_fix
-    active_waiver:
-      id: TP-2026-03-18-consultant-core-continuity-broader-collapse-targeted-frozen-waiver-implementation-a922
-      scope: broader_pending_continuity_and_handover_confirmation_owner_invocations_only
-      reason: targeted frozen-waiver implementation reduced the old pending no-handover reset / pending-close / pending-ack restore / pending-SLA mutation / handover-confirmation family to bounded state-service and dialog-state owner invocations while preserving transport send/commit in the wrapper
-      opened_on: "2026-03-18"
-      expiry_trigger: remove once the broader continuity post-implementation audit confirms no further frozen executable additions are required for this family
-      allowed_executable_lines:
-        - from datetime import datetime
-        - from functools import partial
-        - from app.services.sla_runtime_service import resolve_pending_sla_violation
-        - from app.services.state_service import (
-        - ContinuityTransportDecision,
-        - HandoverConfirmationRuntimeHooks,
-        - PendingContinuityRuntimeHooks,
-        - _handle_handover_confirmation_runtime,
-        - _handle_pending_sla_runtime,
-        - _resolve_pending_ack,
-        - _resolve_pending_close,
-        - _resolve_pending_no_handover_reset,
-        - )
-        - def _build_transport_webhook_response(
-        - db: Session,
-        - conversation: Conversation,
-        - decision: ContinuityTransportDecision,
-        - send_and_save,
-        - ) -> WebhookResponse | None:
-        - if not decision.handled:
-        - return None
-        - bot_response = None
-        - result_message = decision.success_message or "Handled"
-        - if isinstance(decision.bot_response, str):
-        - bot_response, sent = send_and_save(decision.bot_response)
-        - result_message = decision.success_message if sent else decision.failure_message or result_message
-        - db.commit()
-        - return WebhookResponse(
-        - success=True,
-        - message=result_message,
-        - conversation_id=conversation.id,
-        - bot_response=bot_response,
-        - from . import _legacy as legacy
-        - decision = _handle_handover_confirmation_runtime(
-        - db=db,
-        - conversation=conversation,
-        - user=user,
-        - message_text=message_text,
-        - now=now,
-        - hooks=HandoverConfirmationRuntimeHooks(
-        - get_conversation_context=_get_conversation_context,
-        - get_handover_confirmation=_get_handover_confirmation,
-        - is_handover_confirmation_active=_is_handover_confirmation_active,
-        - set_handover_confirmation=_set_handover_confirmation,
-        - set_conversation_context=_set_conversation_context,
-        - reset_low_confidence_retry=_reset_low_confidence_retry,
-        - classify_confirmation=classify_confirmation,
-        - reuse_active_handover=legacy._reuse_active_handover,
-        - escalate_to_pending=legacy.escalate_to_pending,
-        - send_telegram_notification=legacy.send_telegram_notification,
-        - record_escalation_metric=record_escalation_metric,
-        - record_decision_trace=legacy._record_decision_trace,
-        - msg_escalated=legacy.MSG_ESCALATED,
-        - msg_ai_error=legacy.MSG_AI_ERROR,
-        - msg_handover_declined=legacy.MSG_HANDOVER_DECLINED,
-        - ),
-        - return _build_transport_webhook_response(
-        - decision=decision,
-        - send_and_save=send_and_save,
-        - continuity_hooks = PendingContinuityRuntimeHooks(
-        - get_conversation_context=legacy._get_conversation_context,
-        - set_conversation_context=legacy._set_conversation_context,
-        - transition_state=legacy.transition_state,
-        - manager_resolve=partial(legacy.manager_resolve, db),
-        - update_message_decision_metadata=legacy._update_message_decision_metadata,
-        - _resolve_pending_no_handover_reset(
-        - saved_message=saved_message,
-        - router_pending_meta=router_pending_meta,
-        - hooks=continuity_hooks,
-        - decision=_resolve_pending_close(
-        - handover=handover,
-        - decision=_resolve_pending_ack(
-        - msg_pending_ack=legacy.MSG_PENDING_ACK,
-        - sla_decision = _handle_pending_sla_runtime(
-        - guard_only_skip=guard_only_skip,
-        - pending_sla_ping_minutes=legacy.PENDING_SLA_PING_MINUTES,
-        - pending_sla_ping_sent_key=legacy.PENDING_SLA_PING_SENT_KEY,
-        - msg_pending_wait=legacy.MSG_PENDING_WAIT,
-        - msg_pending_sla_ping=legacy.MSG_PENDING_SLA_PING,
-        - resolve_pending_sla_violation_fn=resolve_pending_sla_violation,
-        - if sla_decision is not None:
-        - decision=sla_decision,
-legacy_authorities_to_remove:
-  - expected_reply_type
-  - expected_reply_reason
-  - session_memory.interaction_state
-  - pending_resume.semantic_fields
-  - demo_runtime_aliases
-  - scenario_semantic_repair
-  - evaluator_semantic_inference
-
+- path: truffles-api/app/routers/webhook/decision.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from app.core import DialogStateService, TurnExecutor, TurnPlanner
+    - from app.routers.webhook.booking_runtime import (
+    - MSG_BOOKING_ASK_ALL,
+    - MSG_BOOKING_CANCELLED,
+    - MSG_BOOKING_REENGAGE,
+    - MSG_BOOKING_SLOT_LOCK_STUB,
+    - NAME_NOISE_TOKENS,
+    - NAME_PATTERN,
+    - _is_booking_cancel,
+    - _matches_guest_policy_lexicon,
+    - )
+    - from app.routers.webhook.booking_signal_runtime import (
+    - BOOKING_INFO_QUESTION_TYPES,
+    - DATE_MONTH_PATTERN,
+    - DATE_NUMERIC_PATTERN,
+    - DATE_PATTERN,
+    - TIME_HOUR_PATTERN,
+    - TIME_ONLY_ALLOWED_PREFIXES,
+    - TIME_ONLY_ALLOWED_TOKENS,
+    - TIME_ONLY_AMPM_PATTERN,
+    - TIME_PATTERN,
+    - _collect_booking_request_lexicon,
+    - _evaluate_booking_signal,
+    - _extract_datetime,
+    - _extract_service_hint,
+    - _has_booking_signal,
+    - _has_explicit_service_signal,
+    - _is_booking_request,
+    - _looks_like_time_only_request,
+    - _matches_booking_request_lexicon,
+    - )
+    - CANONICAL_DIALOG_STATE_KEY,
+    - from app.routers.webhook.context_runtime import (
+    - ASR_CONFIRM_KEY,
+    - ASR_CONFIRM_WINDOW_MINUTES,
+    - ASR_INFLIGHT_KEY,
+    - ASR_INFLIGHT_TTL_SECONDS,
+    - CLASS_CARRYOVER_CLASSES,
+    - CLASS_CARRYOVER_KEY,
+    - CLASS_CARRYOVER_TTL_MESSAGES,
+    - CONSULT_CONTEXT_KEY,
+    - CONTEXT_MANAGER_KEY,
+    - EXPECTED_REPLY_REASON_KEY,
+    - EXPECTED_REPLY_TYPE_KEY,
+    - HANDOVER_CONFIRM_WINDOW_MINUTES,
+    - MEMORY_PENDING_KEY,
+    - MEMORY_PROFILE_KEY,
+    - MEMORY_PROFILE_TTL_DAYS,
+    - REENGAGE_CONFIRM_KEY,
+    - REENGAGE_CONFIRM_WINDOW_MINUTES,
+    - RE_ENTRY_REQUIRED_KEY,
+    - SERVICE_CARRYOVER_KEY,
+    - SERVICE_CARRYOVER_SKIP_INTENTS,
+    - SERVICE_HINT_AT_KEY,
+    - SERVICE_HINT_KEY,
+    - SERVICE_HINT_WINDOW_MINUTES,
+    - STYLE_REFERENCE_PENDING_KEY,
+    - _ensure_question_mark,
+    - _is_refusal_flag_active,
+    - )
+    - _looks_like_services_overview_message,
+    - from app.routers.webhook.knowledge_runtime import (
+    - _DEFAULT_RAG_SCORES,
+    - _derive_rag_status,
+    - _merge_rag_scores,
+    - _record_knowledge_backlog,
+    - _resolve_backlog_language,
+    - )
+    - ASR_LOW_CONFIDENCE_MIN_CHARS,
+    - ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS,
+    - ASR_LOW_CONFIDENCE_MIN_WORDS,
+    - ASR_LOW_CONFIDENCE_NON_LETTER_RATIO,
+    - AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB,
+    - MEDIA_MAX_DEFAULT_MB,
+    - MEDIA_RATE_LIMIT_DEFAULTS,
+    - MEDIA_STORAGE_DEFAULT_DIR,
+    - MEDIA_STORAGE_MAX_BYTES,
+    - MEDIA_TYPE_ALIASES,
+    - MSG_MEDIA_RATE_LIMIT,
+    - MSG_MEDIA_TOO_LARGE,
+    - MSG_MEDIA_UNSUPPORTED,
+    - STYLE_REFERENCE_HINT_TOKENS,
+    - STYLE_REFERENCE_PATTERNS,
+    - from app.services.outbox_runtime_service import (
+    - _ensure_rag_meta_defaults,
+    - _find_message_by_conversation_created_at,
+    - _find_message_by_message_id,
+    - _handle_enqueue_only_accept,
+    - _prepare_skip_persist,
+    - )
+    - _POLICY_HANDLERS,
+    - _is_hygiene_context_text,
+    - from app.routers.webhook.class_router_runtime import (
+    - CONSULT_INTERRUPT_INTENTS,
+    - CONTROLLER_CONFIDENCE_THRESHOLD,
+    - _build_controller_meta_output,
+    - _controller_meta_updates_from_class_router,
+    - _ensure_controller_output_meta,
+    - _normalize_class_name,
+    - _normalize_controller_fallback_reason,
+    - _resolve_class_router_result,
+    - _resolve_controller_signal_class,
+    - _router_observability_updates_from_class_router,
+    - )
+    - from app.routers.webhook.guard_runtime import (
+    - MSG_FACT_GUARD_CLARIFY,
+    - MSG_MUTED_LONG,
+    - MSG_MUTED_TEMP,
+    - MSG_REENGAGE_CONFIRM,
+    - MSG_REENGAGE_DECLINED,
+    - MULTI_INTENT_LABELS,
+    - SESSION_TIMEOUT_HOURS,
+    - _coerce_batch_messages,
+    - get_mute_settings,
+    - )
+    - from app.routers.webhook.info_followup_runtime import (
+    - _looks_like_carryover_followup,
+    - _looks_like_hours_followup,
+    - )
+    - from app.routers.webhook.pending_runtime import (
+    - MSG_HANDOVER_DECLINED,
+    - MSG_PENDING_ACK,
+    - MSG_PENDING_ESCALATION,
+    - MSG_PENDING_SLA_PING,
+    - MSG_PENDING_STATUS,
+    - MSG_PENDING_WAIT,
+    - PENDING_SLA_PING_MINUTES,
+    - PENDING_SLA_PING_SENT_KEY,
+    - is_handover_status_question,
+    - )
+    - CLARIFY_MAX_ATTEMPTS,
+    - CONSULT_CONTEXT_TTL_MESSAGES,
+    - EVENING_GREETING_KEY,
+    - EVENING_GREETING_TTL_HOURS,
+    - EXPECTED_REPLY_INTENT_CHOICE,
+    - EXPECTED_REPLY_NAME,
+    - EXPECTED_REPLY_PHONE,
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - LOW_CONFIDENCE_MAX_RETRIES,
+    - LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
+    - MSG_ESCALATED,
+    - MSG_HANDOVER_CONFIRM,
+    - MSG_LOW_CONFIDENCE_RETRY,
+    - MSG_PENDING_LOW_CONFIDENCE,
+    - MSG_STYLE_REFERENCE_NEED_MEDIA,
+    - QUIET_HOURS_NOTICE_KEY,
+    - QUIET_HOURS_NOTICE_TTL_MINUTES,
+    - ROUTING_MATRIX,
+    - SERVICE_CARRYOVER_TTL_MESSAGES,
+    - _append_followup,
+    - _combine_sidecar,
+    - _contains_any,
+    - should_offer_low_confidence_retry,
+    - SESSION_MEMORY_KEY,
+    - SESSION_MEMORY_TTL_HOURS,
+    - from app.services.escalation_service import get_telegram_credentials
+    - from app.services.handover_owner_service import (
+    - ActiveHandoverReuseRuntimeHooks,
+    - PendingEscalationNotificationRuntimeHooks,
+    - escalate_to_pending,
+    - manager_resolve,
+    - resolve_active_handover_rejection,
+    - send_telegram_notification,
+    - )
+    - from app.services.handover_owner_service import (
+    - _create_pending_escalation_with_notification as _handover_owner_create_pending_escalation_with_notification,
+    - )
+    - from app.services.handover_owner_service import (
+    - _reuse_active_handover as _handover_owner_reuse_active_handover,
+    - )
+    - from app.services.handover_owner_service import (
+    - get_active_handover as _handover_owner_get_active_handover,
+    - )
+    - build_semantic_contract_view,
+    - extract_specialist_preference,
+    - should_preserve_active_name_time_availability_followup_owner,
+    - should_preserve_service_choice_specialist_availability_followup_owner,
+    - should_preserve_specialist_availability_followup_owner,
+    - should_preserve_specialist_followup_owner,
+    - from app.services.policy_core_guard_orchestration_service import (
+    - PolicyCoreGuardOrchestrationRuntimeHooks,
+    - PolicyCoreGuardOrchestrationRuntimeInput,
+    - handle_policy_core_guard_orchestration,
+    - )
+    - from app.services.policy_timeout_booking_specialist_boundary_service import
+      (
+    - PolicyTimeoutBookingSpecialistBoundaryRuntimeHooks,
+    - PolicyTimeoutBookingSpecialistBoundaryRuntimeInput,
+    - handle_policy_timeout_booking_specialist_boundary,
+    - )
+    - from app.services.policy_timeout_booking_time_followup_boundary_service import
+      (
+    - PolicyTimeoutBookingTimeFollowupBoundaryRuntimeHooks,
+    - PolicyTimeoutBookingTimeFollowupBoundaryRuntimeInput,
+    - handle_policy_timeout_booking_time_followup_boundary,
+    - )
+    - from app.services.policy_timeout_degrade_boundary_service import (
+    - PolicyTimeoutDegradeBoundaryRuntimeHooks,
+    - PolicyTimeoutDegradeBoundaryRuntimeInput,
+    - handle_policy_timeout_degrade_boundary,
+    - )
+    - from app.services.policy_timeout_recovery_boundary_service import (
+    - PolicyTimeoutRecoveryBoundaryRuntimeHooks,
+    - PolicyTimeoutRecoveryBoundaryRuntimeInput,
+    - handle_policy_timeout_recovery_boundary,
+    - )
+    - from app.services.policy_validation_boundary_service import (
+    - PolicyValidationBoundaryRuntimeHooks,
+    - PolicyValidationBoundaryRuntimeInput,
+    - handle_policy_validation_boundary,
+    - )
+    - PendingResumeBoundaryRuntimeHooks as ResumeBoundaryRuntimeHooks,
+    - )
+    - from app.services.state_service import (
+    - _derive_pending_booking_resume_boundary_payload as _state_service_derive_pending_booking_resume_boundary_payload,
+    - )
+    - from app.services.state_service import (
+    - _derive_pending_resume_reason as _state_service_derive_pending_resume_reason,
+    - )
+    - from app.services.state_service import (
+    - _resolve_pending_resume_boundary_activation as _resolve_resume_boundary_activation,
+    - )
+    - from app.services.state_service import (
+    - _resolve_pending_resume_session_memory_policy as _resolve_resume_session_memory_policy,
+    - )
+    - from app.services.state_service import (
+    - _resolve_pending_timeout_resume_boundary_payload as _resolve_resume_timeout_boundary_payload,
+    - )
+    - from app.services.state_service import (
+    - _resolve_resolved_handoff_resume_boundary_restore as _resolve_resolved_resume_boundary_restore,
+    - )
+    - from app.services.state_service import (
+    - from app.services.timeout_owner_boundary_service import (
+    - TimeoutOwnerBoundaryApplyOverrides,
+    - TimeoutOwnerBoundaryInput,
+    - TimeoutOwnerBoundaryRuntimeHooks,
+    - TimeoutOwnerBoundaryRuntimeInput,
+    - resolve_and_apply_timeout_owner_boundary,
+    - )
+    - 'if is_greeting_message(message_text):'
+    - return PackDecision(action="smalltalk", response=GREETING_RESPONSE, intent="greeting")
+    - 'if is_thanks_message(message_text):'
+    - return PackDecision(action="smalltalk", response=THANKS_RESPONSE, intent="thanks")
+    - 'if is_acknowledgement_message(message_text):'
+    - return PackDecision(
+    - action="smalltalk",
+    - response=ACKNOWLEDGEMENT_RESPONSE,
+    - intent="ack",
+    - )
+    - is_greeting = is_greeting_message(message_text)
+    - is_thanks = is_thanks_message(message_text)
+    - is_ack = is_acknowledgement_message(message_text)
+    - is_low_signal = is_low_signal_message(message_text)
+    - is_status_question = is_bot_status_question(message_text)
+    - 'logger.info("Intent shortcut: human_request (lexicon)")'
+    - 'logger.info("Intent shortcut: greeting (llm hint)")'
+    - 'logger.info("Intent shortcut: thanks (llm hint)")'
+    - 'logger.info("Intent shortcut: question (llm hint)")'
+    - 'logger.info("Intent shortcut: greeting")'
+    - 'logger.info("Intent shortcut: thanks")'
+    - 'logger.info("Intent shortcut: acknowledgement/low-signal -> other")'
+    - intent = classify_intent(message_text, timing_context=timing_context)
+    - 'logger.info(f"Intent classified: {intent.value}")'
+    - 'if routing["allow_bot_reply"] and state == ConversationState.PENDING.value
+      and is_pending_status_question:'
+    - 'if _should_escalate_to_pending(routing, signals.intent):'
+    - 'if should_escalate(signals.intent) and not routing["allow_handover_create"]:'
+    - 'if is_rejection(signals.intent):'
+    - 'if _should_escalate_to_pending(routing, signals.intent):'
+    - 'if should_escalate(signals.intent) and not routing.get("allow_handover_create",
+      False):'
+    - 'if is_rejection(signals.intent):'
+    - def _project_pending_question_evidence(
+    - 'dialog_state_service: DialogStateService,'
+    - '*,'
+    - 'contract: dict[str, Any] | None,'
+    - 'expected_reply_type: str | None = None,'
+    - 'expected_reply_reason: str | None = None,'
+    - 'pending_question_act: str | None = None,'
+    - 'pending_question_target: str | None = None,'
+    - 'active_question_relation: str | None = None,'
+    - 'next_question: str | None = None,'
+    - 'open_questions: list[str] | tuple[str, ...] | None = None,'
+    - ') -> dict[str, Any] | None:'
+    - return dialog_state_service.project_pending_question_contract(
+    - contract,
+    - expected_reply_type=expected_reply_type,
+    - expected_reply_reason=expected_reply_reason,
+    - pending_question_act=pending_question_act,
+    - pending_question_target=pending_question_target,
+    - active_question_relation=active_question_relation,
+    - next_question=next_question,
+    - open_questions=open_questions,
+    - )
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - normalized_message = _normalize_service_text(message_text)
+    - info_query = _looks_like_info_query(message_text, client_slug=client_slug)
+    - price_signal = _has_price_signal(normalized_message, message_text)
+    - duration_signal = _has_duration_signal(normalized_message, message_text)
+    - 'if expected_reply_type == EXPECTED_REPLY_TIME:'
+    - expected_reply_type == EXPECTED_REPLY_TIME
+    - 'if not blocked and expected_reply_type in {EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:'
+    - 'if blocked and expected_reply_type == EXPECTED_REPLY_TIME:'
+    - has_datetime_signal = bool(_extract_datetime(message_text, client_slug=client_slug))
+    - has_datetime_signal = bool(_extract_datetime(message_text))
+    - normalize_for_matching(expected_reply_candidate)
+    - normalized_message = _normalize_service_text(message_text)
+    - TIME_PATTERN.search(message_text)
+    - or TIME_HOUR_PATTERN.search(message_text)
+    - or TIME_PATTERN.search(candidate_value)
+    - or TIME_HOUR_PATTERN.search(candidate_value)
+    - normalized_candidate = normalize_for_matching(candidate_value)
+    - normalized_token = normalize_for_matching(candidate_token)
+    - TIME_PATTERN.search(message_text)
+    - or TIME_HOUR_PATTERN.search(message_text)
+    - or TIME_PATTERN.search(candidate_value)
+    - or TIME_HOUR_PATTERN.search(candidate_value)
+    - normalized_message = _normalize_service_text(message_text)
+    - dialog_state_service = DialogStateService()
+    - context_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
+    - context,
+    - session_memory_key="__disabled_session_memory__",
+    - )
+    - expected_reply_type = (
+    - context_pending_question_contract.get("expected_reply_type")
+    - if isinstance(context_pending_question_contract, dict)
+    - else _get_expected_reply_type(context)
+    - )
+    - expected_reply_reason = (
+    - context_pending_question_contract.get("reason")
+    - if isinstance(context_pending_question_contract, dict)
+    - else _get_expected_reply_reason(context)
+    - )
+    - active_pending_question_contract = _project_pending_question_evidence(
+    - dialog_state_service,
+    - contract=(
+    - context_pending_question_contract
+    - if isinstance(context_pending_question_contract, dict)
+    - else None
+    - ),
+    - expected_reply_type=expected_reply_type,
+    - expected_reply_reason=expected_reply_reason,
+    - )
+    - intent_queue = _get_intent_queue(context)
+    - session_memory = _get_session_memory(context)
+    - re_entry_required = _is_re_entry_required(context)
+    - memory_pending_question_contract = dialog_state_service.project_session_memory_pending_question_contract(
+    - session_memory
+    - )
+    - memory_expected_reply_reason = (
+    - memory_pending_question_contract.get("reason")
+    - if isinstance(memory_pending_question_contract, dict)
+    - else None
+    - )
+    - and not _is_session_memory_expired(session_memory, now)
+    - last_question_type = (
+    - memory_pending_question_contract.get("expected_reply_type")
+    - if isinstance(memory_pending_question_contract, dict)
+    - else None
+    - )
+    - is_short_reply = _is_short_reply(message_text)
+    - and last_question_type == EXPECTED_REPLY_TIME
+    - and _extract_datetime(message_text)
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - and not _looks_like_info_query(message_text, client_slug=client_slug)
+    - and not _looks_like_policy_topic(
+    - 'if not expected_reply_reason and memory_expected_reply_reason:'
+    - expected_reply_reason = memory_expected_reply_reason
+    - active_pending_question_contract = _project_pending_question_evidence(
+    - dialog_state_service,
+    - contract=(
+    - memory_pending_question_contract
+    - if isinstance(memory_pending_question_contract, dict)
+    - else None
+    - ),
+    - expected_reply_type=last_question_type,
+    - expected_reply_reason=memory_expected_reply_reason,
+    - )
+    - fallback_trace = {
+    - '"stage": "session_memory",'
+    - '"decision": "expected_reply_fallback",'
+    - '"expected_reply_type": last_question_type,'
+    - '"expected_reply_reason": memory_expected_reply_reason,'
+    - '}'
+    - 'if active_pending_question_contract:'
+    - fallback_trace["pending_question_contract"] = active_pending_question_contract
+    - _record_decision_trace(
+    - fallback_trace,
+    - 'updates = {"session_memory_expected_reply": last_question_type}'
+    - 'if memory_expected_reply_reason:'
+    - updates["session_memory_expected_reply_reason"] = memory_expected_reply_reason
+    - 'if active_pending_question_contract:'
+    - updates["session_memory_pending_question_contract"] = active_pending_question_contract
+    - _update_message_decision_metadata(saved_message, updates)
+    - _select_expected_reply_message(
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - context = _set_expected_reply_type(context, None)
+    - context, memory_payload, memory_cleared = _clear_session_memory_expected_reply(
+    - _set_conversation_context(conversation, context)
+    - bypass_trace = {
+    - '"stage": "question_contract",'
+    - '"decision": "bypass",'
+    - '"expected_reply_type": expected_reply_type,'
+    - '"expected_reply_bypassed": "human_request",'
+    - '}'
+    - 'if active_pending_question_contract:'
+    - bypass_trace["pending_question_contract"] = active_pending_question_contract
+    - _record_decision_trace(conversation, bypass_trace)
+    - _record_session_memory_update(
+    - bypass_updates = {
+    - '"expected_reply_type": None,'
+    - '"expected_reply_matched": False,'
+    - '"expected_reply_bypassed": "human_request",'
+    - '"session_memory_expected_reply_cleared": memory_cleared,'
+    - '}'
+    - 'if active_pending_question_contract:'
+    - bypass_updates["pending_question_contract"] = active_pending_question_contract
+    - _update_message_decision_metadata(saved_message, bypass_updates)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - intent_queue=_get_intent_queue(context),
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - context = _set_expected_reply_type(context, None)
+    - context, memory_payload, memory_cleared = _clear_session_memory_expected_reply(
+    - _set_conversation_context(conversation, context)
+    - bypass_trace = {
+    - '"stage": "question_contract",'
+    - '"decision": "bypass",'
+    - '"expected_reply_type": expected_reply_type,'
+    - '"expected_reply_bypassed": "booking_verification",'
+    - '}'
+    - 'if active_pending_question_contract:'
+    - bypass_trace["pending_question_contract"] = active_pending_question_contract
+    - _record_decision_trace(conversation, bypass_trace)
+    - _record_session_memory_update(
+    - bypass_updates = {
+    - '"expected_reply_type": None,'
+    - '"expected_reply_matched": False,'
+    - '"expected_reply_bypassed": "booking_verification",'
+    - '"session_memory_expected_reply_cleared": memory_cleared,'
+    - '}'
+    - 'if active_pending_question_contract:'
+    - bypass_updates["pending_question_contract"] = active_pending_question_contract
+    - _update_message_decision_metadata(saved_message, bypass_updates)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - intent_queue=_get_intent_queue(context),
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - booking_context = _get_booking_context(context)
+    - 'if expected_reply_type == EXPECTED_REPLY_SERVICE:'
+    - 'elif expected_reply_type == EXPECTED_REPLY_TIME:'
+    - 'elif expected_reply_type == EXPECTED_REPLY_NAME:'
+    - 'elif expected_reply_type == EXPECTED_REPLY_PHONE:'
+    - prompt_hint = MSG_BOOKING_ASK_PHONE
+    - '"service_carryover": _get_service_carryover('
+    - answer_result = interpret_expected_reply(
+    - normalized_message = _normalize_service_text(message_text)
+    - expected_reply_type == EXPECTED_REPLY_TIME
+    - TIME_PATTERN.search(deterministic_value)
+    - or TIME_HOUR_PATTERN.search(deterministic_value)
+    - 'if expected_reply_type == EXPECTED_REPLY_TIME and not deterministic_available:'
+    - context = _set_booking_context(context, booking_context)
+    - context = _apply_expected_reply_slot(
+    - _set_conversation_context(conversation, context)
+    - context, memory = _update_session_memory_on_answer(
+    - _set_conversation_context(conversation, context)
+    - _record_session_memory_update(
+    - 'if matched and not slot_confirmation_required and isinstance(value, str) and
+      expected_reply_type == EXPECTED_REPLY_SERVICE:'
+    - context = _set_service_hint(context, value, now)
+    - _set_conversation_context(conversation, context)
+    - _maybe_store_service_carryover(
+    - context = _get_conversation_context(conversation)
+    - context = _apply_expected_reply_slot(
+    - _set_conversation_context(conversation, context)
+    - _get_booking_context(context)
+    - _get_booking_context(context), None
+    - context = _set_booking_context(context, booking_state)
+    - _set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - context = _set_expected_reply_type(context, next_expected)
+    - _set_conversation_context(conversation, context)
+    - context = _get_conversation_context(conversation)
+    - context, memory = _update_session_memory_on_answer(
+    - _set_conversation_context(conversation, context)
+    - _record_session_memory_update(
+    - context = _get_conversation_context(conversation)
+    - booking_state = _get_booking_context(context)
+    - context = _set_booking_context(context, booking_state)
+    - _set_conversation_context(conversation, context)
+    - context_manager = _get_context_manager(context)
+    - context = _set_context_manager(context, context_manager)
+    - _set_conversation_context(conversation, context)
+    - _record_context_manager_decision(
+    - context, memory = _update_session_memory_goal(
+    - _set_conversation_context(conversation, context)
+    - _record_session_memory_update(
+    - and expected_reply_type == EXPECTED_REPLY_TIME
+    - current_pending_question_contract = dialog_state_service.project_context_pending_question_contract(
+    - _get_conversation_context(conversation),
+    - session_memory_key="__disabled_session_memory__",
+    - )
+    - current_expected_reply = (
+    - current_pending_question_contract.get("expected_reply_type")
+    - if isinstance(current_pending_question_contract, dict)
+    - else _get_expected_reply_type(_get_conversation_context(conversation))
+    - )
+    - interaction_pending_question_contract = _project_pending_question_evidence(
+    - dialog_state_service,
+    - contract=(
+    - current_pending_question_contract
+    - if isinstance(current_pending_question_contract, dict)
+    - else active_pending_question_contract
+    - ),
+    - expected_reply_type=current_expected_reply or expected_reply_type,
+    - pending_question_act="slot_constraint",
+    - pending_question_target="time",
+    - interaction_trace = {
+    - '"stage": "pending_question_interaction",'
+    - '"decision": "slot_constraint",'
+    - '"state": conversation.state,'
+    - '"source": "question_contract",'
+    - '"pending_question_act": "slot_constraint",'
+    - '"pending_question_target": "time",'
+    - '"expected_reply_type": current_expected_reply or expected_reply_type,'
+    - '}'
+    - 'if interaction_pending_question_contract:'
+    - interaction_trace["pending_question_contract"] = interaction_pending_question_contract
+    - interaction_trace,
+    - interaction_updates = {
+    - '"pending_question_act": "slot_constraint",'
+    - '"pending_question_target": "time",'
+    - '"pending_question_interaction": "slot_constraint",'
+    - '"pending_question_owner": "question_contract",'
+    - '}'
+    - 'if interaction_pending_question_contract:'
+    - interaction_updates["pending_question_contract"] = interaction_pending_question_contract
+    - _update_message_decision_metadata(saved_message, interaction_updates)
+    - 'if active_pending_question_contract:'
+    - trace_payload["pending_question_contract"] = active_pending_question_contract
+    - _set_router_observability(
+    - _record_decision_trace(conversation, trace_payload)
+    - 'if active_pending_question_contract:'
+    - updates["pending_question_contract"] = active_pending_question_contract
+    - _update_message_decision_metadata(saved_message, updates)
+    - followup_context = _get_conversation_context(conversation)
+    - followup_booking_state = _get_booking_context(followup_context)
+    - context = _get_conversation_context(conversation)
+    - expected_reply_type = _get_expected_reply_type(context)
+    - intent_queue = _get_intent_queue(context)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - intent_decomp_pending_question_contract = _project_pending_question_evidence(
+    - DialogStateService(),
+    - contract=None,
+    - expected_reply_type=expected_reply_type,
+    - expected_reply_reason=expected_reply_reason,
+    - )
+    - 'if intent_decomp_pending_question_contract:'
+    - meta_updates["intent_decomp_pending_question_contract"] = (
+    - intent_decomp_pending_question_contract
+    - )
+    - trace_payload["pending_question_contract"] = intent_decomp_pending_question_contract
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - intent_decomp_payload = detect_multi_intent(
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - 'if expected_reply_type == EXPECTED_REPLY_INTENT_CHOICE and intent_queue and
+      message_text:'
+    - intent_queue_choice = _select_intent_from_queue(
+    - EXPECTED_REPLY_INTENT_CHOICE if pending_intent_queue else None
+    - 'if _matches_guest_policy_lexicon(message_text, client_slug=client_slug):'
+    - 'if not use_carryover_intents and _looks_like_carryover_followup(message_text):'
+    - carryover_followup = _looks_like_carryover_followup(message_text)
+    - hours_followup = _looks_like_hours_followup(message_text)
+    - _record_decision_trace(
+    - intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
+    - consult_return_prompt = _build_consult_return_prompt(consult_context)
+    - new_goal = _resolve_current_goal(
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - context = _set_context_manager(context, context_manager)
+    - _set_conversation_context(conversation, context)
+    - _record_context_manager_decision(
+    - context, memory = _update_session_memory_goal(
+    - _set_conversation_context(conversation, context)
+    - _record_session_memory_update(
+    - _update_compact_summary(
+    - context = _get_conversation_context(conversation)
+    - booking_context = _get_conversation_context(conversation)
+    - booking = _get_booking_context(booking_context)
+    - and intent_decomp_set & SERVICE_CARRYOVER_INTENTS
+    - 'if isinstance(class_carryover, dict) and _looks_like_hours_followup(message_text):'
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - carryover = _get_service_carryover(context_manager, message_count=message_count)
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - _should_run_booking_flow(
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - _update_message_decision_metadata(saved_message, booking_block_meta)
+    - else _get_conversation_context(conversation)
+    - booking if isinstance(booking, dict) else _get_booking_context(context)
+    - context = _set_booking_context(context, booking_state)
+    - _set_conversation_context(conversation, context)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - controller_signal_class = _resolve_controller_signal_class(
+    - '"output": _build_controller_meta_output(error="skipped"),'
+    - controller_state["output"] = _build_controller_meta_output(error="budget_exceeded")
+    - controller_result = route_dialogue_controller(
+    - controller_state["output"] = _ensure_controller_output_meta(
+    - controller_output,
+    - error=None,
+    - _normalize_class_name(controller_class)
+    - controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
+    - controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
+    - controller_state["output"] = _ensure_controller_output_meta(
+    - controller_state["output"] = _build_controller_meta_output(
+    - controller_output = _ensure_controller_output_meta(
+    - controller_state["output"] = _build_controller_meta_output(
+    - 'controller_state["sla"] = _update_router_sla(  # reuse SLA tracker'
+    - _record_decision_trace(
+    - domain_intent = DomainIntent.UNKNOWN
+    - conversation.state == ConversationState.BOT_ACTIVE.value
+    - domain_intent, domain_in_score, domain_out_score, domain_meta = classify_domain_with_scores(
+    - log_scores = _is_env_enabled(
+    - 'if log_scores and (domain_intent != DomainIntent.UNKNOWN or max(domain_in_score,
+      domain_out_score) >= 0.45):'
+    - logger.info(
+    - class_router_result = _resolve_class_router_result(
+    - class_router_result = _resolve_class_router_result(
+    - conversation.state == ConversationState.BOT_ACTIVE.value
+    - router_meta = _set_router_observability(
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - 'if not _looks_like_services_overview_message(message_text, client_slug=client_slug):'
+    - specialist_name, specialist_id = extract_specialist_preference(
+    - 'entity_refs=[{"entity_id": entity_id, "entity_type": "specialist"}],'
+    - )
+    - return specialist_name, specialist_id
+    - return extract_specialist_preference(
+    - tool_args=tool_args,
+    - entity_refs=entity_refs,
+    - )
+    - semantic_view = build_semantic_contract_view(
+    - entity_refs=[],
+    - subject_kind=policy_subject_kind,
+    - capability=policy_capability,
+    - resolution_mode=policy_resolution_mode,
+    - pending_question_target=policy_pending_question_target,
+    - active_question_relation=policy_active_question_relation,
+    - tool_args={
+    - '"specialist_name": specialist_name,'
+    - '"specialist_id": specialist_id,'
+    - '},'
+    - return should_preserve_specialist_followup_owner(
+    - semantic_view=semantic_view,
+    - policy_goal=policy_goal,
+    - policy_collect_slot=policy_collect_slot,
+    - expected_reply_type=expected_reply_type,
+    - def _should_preserve_specialist_availability_followup_owner(
+    - 'policy_temporal_scope: str | None,'
+    - semantic_view = build_semantic_contract_view(
+    - subject_kind=policy_subject_kind,
+    - capability=policy_capability,
+    - temporal_scope=policy_temporal_scope,
+    - pending_question_target=policy_pending_question_target,
+    - active_question_relation=policy_active_question_relation,
+    - )
+    - return should_preserve_specialist_availability_followup_owner(
+    - semantic_view=semantic_view,
+    - policy_goal=policy_goal,
+    - policy_collect_slot=policy_collect_slot,
+    - def _should_preserve_service_choice_specialist_availability_followup_owner(
+    - 'expected_reply_type: str | None,'
+    - 'policy_resolution_mode: str | None,'
+    - 'policy_pending_question_act: str | None,'
+    - 'policy_temporal_scope: str | None,'
+    - semantic_view = build_semantic_contract_view(
+    - subject_kind=policy_subject_kind,
+    - capability=policy_capability,
+    - temporal_scope=policy_temporal_scope,
+    - resolution_mode=policy_resolution_mode,
+    - pending_question_act=policy_pending_question_act,
+    - pending_question_target=policy_pending_question_target,
+    - active_question_relation=policy_active_question_relation,
+    - )
+    - return should_preserve_service_choice_specialist_availability_followup_owner(
+    - semantic_view=semantic_view,
+    - policy_goal=policy_goal,
+    - policy_collect_slot=policy_collect_slot,
+    - expected_reply_type=expected_reply_type,
+    - def _should_preserve_active_name_time_availability_followup_owner(
+    - 'expected_reply_type: str | None,'
+    - 'policy_resolution_mode: str | None,'
+    - 'policy_pending_question_act: str | None,'
+    - 'policy_pending_question_target: str | None,'
+    - 'policy_temporal_scope: str | None,'
+    - 'policy_active_question_relation: str | None,'
+    - semantic_view = build_semantic_contract_view(
+    - subject_kind=policy_subject_kind,
+    - capability=policy_capability,
+    - temporal_scope=policy_temporal_scope,
+    - resolution_mode=policy_resolution_mode,
+    - pending_question_act=policy_pending_question_act,
+    - pending_question_target=policy_pending_question_target,
+    - active_question_relation=policy_active_question_relation,
+    - )
+    - return should_preserve_active_name_time_availability_followup_owner(
+    - semantic_view=semantic_view,
+    - policy_goal=policy_goal,
+    - policy_collect_slot=policy_collect_slot,
+    - expected_reply_type=expected_reply_type,
+    - def _should_preserve_active_time_slot_question_owner(
+    - 'policy_pending_question_act: str | None,'
+    - pending_question_target = _normalize_pending_question_target(policy_pending_question_target)
+    - 'if pending_question_target != "time":'
+    - pending_question_act = _normalize_pending_question_act(policy_pending_question_act)
+    - 'if pending_question_act not in {None, "ask_about_requested_slot", "slot_constraint",
+      "slot_compare"}:'
+    - relation_token = _normalize_active_question_relation(policy_active_question_relation)
+    - return relation_token in {"ask_about_requested_slot", "slot_constraint", "slot_compare"}
+    - def _should_admit_active_time_duration_info_interrupt(
+    - 'policy_capability: str | None,'
+    - 'message_text: str | None,'
+    - 'info_refs: list[str] | None,'
+    - if not _should_preserve_active_time_slot_question_owner(
+    - policy_goal=policy_goal,
+    - policy_pending_question_act=policy_pending_question_act,
+    - policy_pending_question_target=policy_pending_question_target,
+    - policy_active_question_relation=policy_active_question_relation,
+    - '):'
+    - return False
+    - normalized_info_refs = {
+    - ref.strip().casefold()
+    - for ref in info_refs or []
+    - if isinstance(ref, str) and ref.strip()
+    - '}'
+    - 'if "duration" not in normalized_info_refs:'
+    - return False
+    - 'if normalized_capability != "duration":'
+    - 'if not isinstance(message_text, str) or not message_text.strip():'
+    - return False
+    - normalized_service_message = _normalize_service_text(message_text)
+    - 'if not _has_duration_signal(normalized_service_message, message_text):'
+    - return False
+    - normalized_message = (
+    - normalize_for_matching(message_text)
+    - if isinstance(message_text, str) and message_text.strip()
+    - if normalized_message and _looks_like_time_preference_statement(
+    - message_text,
+    - normalized_text=normalized_message,
+    - '):'
+    - POLICY_STYLE_REFERENCE_HINT_INTENTS = {"style_reference", "ask_photo", "send_photo"}
+    - get_active_handover = _handover_owner_get_active_handover
+    - return _handover_owner_reuse_active_handover(
+    - source=source,
+    - intent=intent,
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - def _create_pending_escalation_with_notification(
+    - '*,'
+    - 'db: Session,'
+    - 'conversation: Conversation,'
+    - 'user: User,'
+    - 'user_message: str,'
+    - 'trigger_type: str,'
+    - 'trigger_value: str | None = None,'
+    - '):'
+    - return _handover_owner_create_pending_escalation_with_notification(
+    - db=db,
+    - conversation=conversation,
+    - user=user,
+    - user_message=user_message,
+    - trigger_type=trigger_type,
+    - trigger_value=trigger_value,
+    - hooks=PendingEscalationNotificationRuntimeHooks(
+    - escalate_to_pending=escalate_to_pending,
+    - send_telegram_notification=send_telegram_notification,
+    - ),
+    - return _state_service_derive_pending_resume_reason(context)
+    - return _state_service_derive_pending_booking_resume_boundary_payload(
+    - context, now=now, prompt_builder=_booking_prompt_for_expected_reply_type
+    - escalation_notification_result = _create_pending_escalation_with_notification(
+    - user=user,
+    - 'if escalation_notification_result.ok:'
+    - handover = escalation_notification_result.handover
+    - handover_reopened = escalation_notification_result.handover_reopened
+    - telegram_sent = escalation_notification_result.telegram_sent
+    - logger.error(
+    - '"Minimum data safe-mode escalation failed: %s",'
+    - escalation_notification_result.error,
+    - )
+    - '"error": escalation_notification_result.error,'
+    - escalation_notification_result = _create_pending_escalation_with_notification(
+    - user=user,
+    - 'if escalation_notification_result.ok:'
+    - handover = escalation_notification_result.handover
+    - handover_reopened = escalation_notification_result.handover_reopened
+    - telegram_sent = escalation_notification_result.telegram_sent
+    - logger.error(
+    - '"Safe-mode escalation failed: %s",'
+    - escalation_notification_result.error,
+    - )
+    - '"error": escalation_notification_result.error,'
+    - from app.core.consultant_core_v2 import handle_webhook_payload as handle_consultant_core_v2
+    - return await handle_consultant_core_v2(
+    - payload,
+    - provided_secret=provided_secret,
+    - enforce_secret=enforce_secret,
+    - enqueue_only=enqueue_only,
+    - skip_persist=skip_persist,
+    - conversation_id=conversation_id,
+    - batch_messages=batch_messages,
+    - outbox_ids=outbox_ids,
+    - outbox_created_at=outbox_created_at,
+    - from app.routers.webhook.expected_reply_interrupt_runtime import (
+    - '    _has_explicit_location_or_hours_request as _interrupt_runtime_has_explicit_location_or_hours_request,'
+    - from app.routers.webhook.expected_reply_interrupt_runtime import (
+    - '    _is_question_like_time_slot_constraint_candidate as _interrupt_runtime_is_question_like_time_slot_constraint_candidate,'
+    - from app.routers.webhook.expected_reply_interrupt_runtime import (
+    - '    _is_time_slot_constraint_candidate as _interrupt_runtime_is_time_slot_constraint_candidate,'
+    - from app.routers.webhook.expected_reply_interrupt_runtime import (
+    - '    _looks_like_booking_verification_request as _interrupt_runtime_looks_like_booking_verification_request,'
+    - from app.routers.webhook.expected_reply_interrupt_runtime import (
+    - '    _should_block_expected_reply_by_info as _interrupt_runtime_should_block_expected_reply_by_info,'
+    - from app.routers.webhook.expected_reply_interrupt_runtime import (
+    - '    _validate_expected_reply_value as _interrupt_runtime_validate_expected_reply_value,'
+    - '    return _interrupt_runtime_should_block_expected_reply_by_info('
+    - '        message_text=message_text,'
+    - '    return _interrupt_runtime_is_question_like_time_slot_constraint_candidate('
+    - '        message_text=message_text,'
+    - '        candidate_value=candidate_value,'
+    - '    return _interrupt_runtime_is_time_slot_constraint_candidate('
+    - '    return _interrupt_runtime_validate_expected_reply_value('
+    - '        value=value,'
+    - '        client_slug=client_slug,'
+    - 'def _count_pending_time_question_markers(normalized_message: str | None) ->
+      int:'
+    - '    if not isinstance(normalized_message, str) or not normalized_message.strip():'
+    - '        return 0'
+    - '    markers = get_booking_text_tokens("pending_time_question_markers")'
+    - '    if not markers:'
+    - '        return 0'
+    - '    normalized = normalized_message.strip()'
+    - '    return sum(1 for marker in markers if marker and marker in normalized)'
+    - def _has_timeout_slot_question_info_lock_surface(
+    - '    if not _is_question_like_message(message_text):'
+    - '    normalized_message = normalize_for_matching(message_text)'
+    - '    if not normalized_message:'
+    - '    if _count_pending_time_question_markers(normalized_message) < 2:'
+    - '    if _validate_expected_reply_value('
+    - '        expected_reply_type=EXPECTED_REPLY_TIME,'
+    - '        value=message_text,'
+    - '        client_slug=client_slug,'
+    - '    return True'
+    - def _is_timeout_pending_time_slot_question(
+    - '    expected_reply_matched: bool | None,'
+    - '    expected_reply_blocked_by_info: bool,'
+    - '    booking_service: str | None,'
+    - '    now: datetime,'
+    - '    if ('
+    - '        expected_reply_type != EXPECTED_REPLY_TIME'
+    - '        or not isinstance(message_text, str)'
+    - '        or not message_text.strip()'
+    - '        or expected_reply_matched is True'
+    - '        or not expected_reply_blocked_by_info'
+    - '    normalized_message = normalize_for_matching(message_text)'
+    - '    if not normalized_message:'
+    - '    return _interrupt_runtime_looks_like_booking_verification_request(message_text)'
+    - ') -> bool:'
+    - '    policy_goal: str | None,'
+    - '    policy_collect_slot: str | None,'
+    - '    policy_subject_kind: str | None,'
+    - ') -> bool:'
+    - '    policy_goal: str | None,'
+    - def _has_explicit_location_or_hours_request(
+    - '    client_slug: str | None,'
+    - '    strict: bool = False,'
+    - '    return _interrupt_runtime_has_explicit_location_or_hours_request('
+    - '        strict=strict,'
+    - def _build_minimum_data_contract_status(
+    - '    branch_id: UUID | None,'
+    - ') -> MinimumDataContractStatus:'
+    - '    if not branch_id:'
+    - '        return MinimumDataContractStatus(ready=True, missing_fields=[])'
+    - '    published = get_active_knowledge_version(db, branch_id=branch_id)'
+    - '    if not published or not isinstance(published.payload_json, dict):'
+    - '        return MinimumDataContractStatus(ready=False, missing_fields=["knowledge_published"])'
+    - '    return evaluate_minimum_data_contract(published.payload_json)'
+    - def _record_minimum_data_contract_meta(
+    - '    saved_message: Message | None,'
+    - '    status: MinimumDataContractStatus,'
+    - ') -> None:'
+    - '    if not saved_message:'
+    - '        return'
+    - '        saved_message,'
+    - '        {'
+    - '            "minimum_data_contract": {'
+    - '                "version": MINIMUM_DATA_CONTRACT_VERSION,'
+    - '                "ready": status.ready,'
+    - '                "missing_fields": status.missing_fields,'
+    - def _handle_minimum_data_safe_mode_gate(
+- path: truffles-api/app/routers/webhook/_legacy.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - INFO_INTENTS,
+    - MSG_BOOKING_ASK_SERVICE,
+    - MSG_BOOKING_CTA,
+    - from app.services.handover_owner_service import (
+    - _create_pending_escalation_with_notification as _handover_owner_create_pending_escalation_with_notification,
+    - )
+    - from app.services.handover_owner_service import (
+    - _reuse_active_handover as _handover_owner_reuse_active_handover,
+    - )
+    - from app.services.handover_owner_service import (
+    - escalate_to_pending as _handover_owner_escalate_to_pending,
+    - )
+    - from app.services.handover_owner_service import (
+    - get_active_handover as _handover_owner_get_active_handover,
+    - )
+    - from app.services.handover_owner_service import (
+    - manager_reassign as _handover_owner_manager_reassign,
+    - )
+    - from app.services.handover_owner_service import (
+    - manager_reopen as _handover_owner_manager_reopen,
+    - )
+    - from app.services.handover_owner_service import (
+    - manager_resolve as _handover_owner_manager_resolve,
+    - )
+    - from app.services.handover_owner_service import (
+    - manager_return as _handover_owner_manager_return,
+    - )
+    - from app.services.handover_owner_service import (
+    - manager_take as _handover_owner_manager_take,
+    - )
+    - from app.services.handover_owner_service import (
+    - resolve_active_handover_rejection as _handover_owner_resolve_active_handover_rejection,
+    - )
+    - _DECISION_EXPORTS = (
+    - '"ACKNOWLEDGEMENT_RESPONSE",'
+    - '"ASR_LOW_CONFIDENCE_MIN_CHARS",'
+    - '"ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS",'
+    - '"ASR_LOW_CONFIDENCE_MIN_WORDS",'
+    - '"ASR_LOW_CONFIDENCE_NON_LETTER_RATIO",'
+    - '"AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB",'
+    - '"BOOKING_INFO_QUESTION_TYPES",'
+    - '"CLARIFY_MAX_ATTEMPTS",'
+    - '"CLASS_CARRYOVER_KEY",'
+    - '"CONSULT_CONTEXT_KEY",'
+    - '"CONSULT_CONTEXT_TTL_MESSAGES",'
+    - '"CONSULT_INTERRUPT_INTENTS",'
+    - '"CONTROLLER_CONFIDENCE_THRESHOLD",'
+    - '"DecisionSignals",'
+    - '"DomainIntent",'
+    - '"EVENING_GREETING_KEY",'
+    - '"EVENING_GREETING_TTL_HOURS",'
+    - '"GREETING_RESPONSE",'
+    - '"LOW_CONFIDENCE_MAX_RETRIES",'
+    - '"MEDIA_MAX_DEFAULT_MB",'
+    - '"MEDIA_RATE_LIMIT_DEFAULTS",'
+    - '"MEDIA_STORAGE_DEFAULT_DIR",'
+    - '"MEDIA_STORAGE_MAX_BYTES",'
+    - '"MEDIA_TYPE_ALIASES",'
+    - '"MSG_BOOKING_ASK_ALL",'
+    - '"MSG_BOOKING_ASK_PHONE",'
+    - '"MSG_BOOKING_CANCELLED",'
+    - '"MSG_BOOKING_REENGAGE",'
+    - '"MSG_BOOKING_SLOT_LOCK_STUB",'
+    - '"MSG_ESCALATED",'
+    - '"MSG_FACT_GUARD_CLARIFY",'
+    - '"MSG_HANDOVER_CONFIRM",'
+    - '"MSG_LOW_CONFIDENCE_RETRY",'
+    - '"MSG_MEDIA_RATE_LIMIT",'
+    - '"MSG_MEDIA_TOO_LARGE",'
+    - '"MSG_MEDIA_UNSUPPORTED",'
+    - '"MSG_PENDING_ESCALATION",'
+    - '"MSG_PENDING_LOW_CONFIDENCE",'
+    - '"MSG_STYLE_REFERENCE_NEED_MEDIA",'
+    - '"NAME_NOISE_TOKENS",'
+    - '"NAME_PATTERN",'
+    - '"OUT_OF_DOMAIN_RESPONSE",'
+    - '"QUIET_HOURS_NOTICE_KEY",'
+    - '"QUIET_HOURS_NOTICE_TTL_MINUTES",'
+    - '"REENGAGE_CONFIRM_WINDOW_MINUTES",'
+    - '"ROUTING_MATRIX",'
+    - '"SERVICE_CARRYOVER_INTENTS",'
+    - '"SERVICE_CARRYOVER_KEY",'
+    - '"SERVICE_HINT_AT_KEY",'
+    - '"SERVICE_HINT_KEY",'
+    - '"SERVICE_HINT_WINDOW_MINUTES",'
+    - '"SESSION_MEMORY_KEY",'
+    - '"SESSION_MEMORY_RESET_PHRASES",'
+    - '"SESSION_MEMORY_TTL_HOURS",'
+    - '"SHIELD_CONTEXT_KEY",'
+    - '"SHIELD_LAST_TEXT_KEY",'
+    - '"SHIELD_MAX_MESSAGE_LENGTH",'
+    - '"SHIELD_MEANINGFUL_PATTERN",'
+    - '"SHIELD_RECENT_KEY",'
+    - '"SHIELD_SHORT_MESSAGE_LEN",'
+    - '"SHIELD_SPAM_MAX_MESSAGES",'
+    - '"SHIELD_SPAM_WINDOW_SECONDS",'
+    - '"SHIELD_TOXIC_PATTERNS",'
+    - '"STYLE_REFERENCE_HINT_TOKENS",'
+    - '"STYLE_REFERENCE_PATTERNS",'
+    - '"THANKS_RESPONSE",'
+    - '"TIME_HOUR_PATTERN",'
+    - '"TIME_PATTERN",'
+    - '"TOOL_VERIFIER_SLOT_BY_FIELD",'
+    - '"_POLICY_HANDLERS",'
+    - '"_append_followup",'
+    - '"_apply_expected_reply_slot",'
+    - '"_booking_clarify_guard_reason",'
+    - '"_booking_prompt_for_expected_reply_type",'
+    - '"_build_consult_return_prompt",'
+    - '"_build_controller_meta_output",'
+    - '"_clear_service_hint",'
+    - '"_clear_session_memory_expected_reply",'
+    - '"_combine_sidecar",'
+    - '"_compact_signal_snapshot",'
+    - '"_compose_fact_response",'
+    - '"_contains_any",'
+    - '"_controller_meta_updates_from_class_router",'
+    - '"_current_openai_api_key",'
+    - '"_derive_booking_followup_prompt",'
+    - '"_derive_rag_status",'
+    - '"_deserialize_media_decision",'
+    - '"_detect_fast_intent",'
+    - '"_detect_info_class_intents",'
+    - '"_detect_intent_signals",'
+    - '"_detect_llm_guard_topics",'
+    - '"_ensure_controller_output_meta",'
+    - '"_ensure_rag_meta_defaults",'
+    - '"_evaluate_booking_signal",'
+    - '"_evaluate_media_decision",'
+    - '"_expected_reply_for_booking_question",'
+    - '"_extract_datetime",'
+    - '"_extract_service_hint",'
+    - '"_find_message_by_conversation_created_at",'
+    - '"_find_message_by_message_id",'
+    - '"_format_discounts_reply_for_message",'
+    - '"_format_service_not_found_reply",'
+    - '"_get_booking_context",'
+    - '"_get_canonical_dialog_state",'
+    - '"_get_clarify_attempt_state",'
+    - '"_get_class_carryover",'
+    - '"_get_consult_context",'
+    - '"_get_context_manager",'
+    - '"_get_conversation_context",'
+    - '"_get_debounce_redis",'
+    - '"_get_expected_reply_reason",'
+    - '"_get_expected_reply_type",'
+    - '"_get_intent_queue",'
+    - '"_get_low_confidence_retry_count",'
+    - '"_get_policy_handler",'
+    - '"_get_recent_service_hint",'
+    - '"_get_routing_policy",'
+    - '"_get_service_carryover",'
+    - '"_get_session_memory",'
+    - '"_get_user_branch_preference",'
+    - '"_handle_clarify_limit_escalation",'
+    - '"_handle_truth_gate_fallback",'
+    - '"_has_booking_signal",'
+    - '"_has_duration_signal",'
+    - '"_has_explicit_service_signal",'
+    - '"_has_price_signal",'
+    - '"_has_timeout_slot_question_info_lock_surface",'
+    - '"_is_booking_cancel",'
+    - '"_is_booking_related_message",'
+    - '"_is_booking_request",'
+    - '"_is_booking_slot_signal",'
+    - '"_is_booking_time_service_decision",'
+    - '"_is_booking_verification_handoff_intent",'
+    - '"_is_env_enabled",'
+    - '"_is_hygiene_context_text",'
+    - '"_is_re_entry_required",'
+    - '"_is_reengage_confirmation_active",'
+    - '"_is_refusal_flag_active",'
+    - '"_is_session_memory_expired",'
+    - '"_is_short_reply",'
+    - '"_is_style_reference_request",'
+    - '"_is_timeout_pending_time_slot_question",'
+    - '"_llm_first_firebreak_semantic_reasons",'
+    - '"_looks_like_booking_verification_request",'
+    - '"_looks_like_carryover_followup",'
+    - '"_looks_like_hours_followup",'
+    - '"_looks_like_info_query",'
+    - '"_looks_like_policy_topic",'
+    - '"_looks_like_promo_code_request",'
+    - '"_looks_like_time_only_request",'
+    - '"_match_expected_reply_candidates",'
+    - '"_match_service",'
+    - '"_matches_guest_policy_lexicon",'
+    - '"_maybe_store_class_carryover",'
+    - '"_maybe_store_service_carryover",'
+    - '"_merge_rag_scores",'
+    - '"_next_booking_prompt",'
+    - '"_normalize_class_name",'
+    - '"_normalize_controller_fallback_reason",'
+    - '"_normalize_service_text",'
+    - '"_normalize_text",'
+    - '"_plan_has_complete_booking_slots",'
+    - '"_preflight_booking_block",'
+    - '"_record_context_manager_decision",'
+    - '"_record_decision_trace",'
+    - '"_record_knowledge_backlog",'
+    - '"_record_message_decision_meta",'
+    - '"_record_session_memory_update",'
+    - '"_register_clarify_attempt",'
+    - '"_reset_low_confidence_retry",'
+    - '"_resolve_action",'
+    - '"_resolve_backlog_language",'
+    - '"_resolve_class_router_result",'
+    - '"_resolve_controller_signal_class",'
+    - '"_resolve_current_goal",'
+    - '"_resolve_policy_collect_interrupt_arbitration",'
+    - '"_router_observability_updates_from_class_router",'
+    - '"_run_class_router_stage",'
+    - '"_run_intent_decomposition",'
+    - '"_select_expected_reply_message",'
+    - '"_select_intent_from_queue",'
+    - '"_set_booking_context",'
+    - '"_set_class_carryover",'
+    - '"_set_consult_context",'
+    - '"_set_context_manager",'
+    - '"_set_conversation_context",'
+    - '"_set_expected_reply_context",'
+    - '"_set_expected_reply_type",'
+    - '"_set_handover_confirmation",'
+    - '"_set_intent_queue",'
+    - '"_set_low_confidence_retry_count",'
+    - '"_set_re_entry_required",'
+    - '"_set_router_observability",'
+    - '"_set_service_hint",'
+    - '"_set_user_branch_preference",'
+    - '"_should_block_expected_reply_by_info",'
+    - '"_should_escalate_for_clarify",'
+    - '"_should_escalate_to_pending",'
+    - '"_should_preserve_active_name_time_availability_followup_owner",'
+    - '"_should_preserve_specialist_availability_followup_owner",'
+    - '"_should_run_booking_flow",'
+    - '"_should_run_demo_truth_gate",'
+    - '"_sync_canonical_dialog_state",'
+    - '"_update_booking_from_messages",'
+    - '"_update_compact_summary",'
+    - '"_update_message_decision_metadata",'
+    - '"_update_message_signal_snapshot",'
+    - '"_update_router_sla",'
+    - '"_update_session_memory_goal",'
+    - '"_update_session_memory_on_answer",'
+    - '"_validate_datetime_slot",'
+    - '"_validate_name_slot",'
+    - '"_verify_policy_tool_args_contract",'
+    - '"classify_domain_with_scores",'
+    - '"classify_intent",'
+    - '"detect_multi_intent",'
+    - '"detect_refusal_flags",'
+    - '"generate_bot_response",'
+    - '"interpret_expected_reply",'
+    - '"is_acknowledgement_message",'
+    - '"is_bot_status_question",'
+    - '"is_frustration_message",'
+    - '"is_greeting_message",'
+    - '"is_human_request_message",'
+    - '"is_low_signal_message",'
+    - '"is_opt_out_message",'
+    - '"is_rejection",'
+    - '"is_thanks_message",'
+    - '"load_yaml_truth",'
+    - '"logger",'
+    - '"normalize_for_matching",'
+    - '"rewrite_for_service_match",'
+    - '"route_dialogue_controller",'
+    - '"semantic_question_type",'
+    - '"semantic_service_match",'
+    - '"send_telegram_notification",'
+    - '"should_escalate",'
+    - '"should_offer_low_confidence_retry",'
+    - '"transition_state",'
+    - )
+    - _DIRECT_EXPORTS = {
+    - '"_apply_consult_return": _apply_consult_return,'
+    - '"_apply_quiet_hours_notice": _apply_quiet_hours_notice,'
+    - '"_maybe_append_booking_cta": _maybe_append_booking_cta,'
+    - '"send_bot_response": send_bot_response,'
+    - '}'
+    - globals().update(_DIRECT_EXPORTS)
+    - 'for _name in _DECISION_EXPORTS:'
+    - globals()[_name] = getattr(_decision, _name)
+    - globals().update(
+    - '{'
+    - '"get_active_handover": _handover_owner_get_active_handover,'
+    - '"_reuse_active_handover": _handover_owner_reuse_active_handover,'
+    - '"_create_pending_escalation_with_notification": ('
+    - _handover_owner_create_pending_escalation_with_notification
+    - ),
+    - '"escalate_to_pending": _handover_owner_escalate_to_pending,'
+    - '"manager_take": _handover_owner_manager_take,'
+    - '"manager_reassign": _handover_owner_manager_reassign,'
+    - '"manager_resolve": _handover_owner_manager_resolve,'
+    - '"manager_return": _handover_owner_manager_return,'
+    - '"manager_reopen": _handover_owner_manager_reopen,'
+    - '"resolve_active_handover_rejection": _handover_owner_resolve_active_handover_rejection,'
+    - '}'
+    - )
+    - __all__ = sorted(
+    - set(_SHARED_EXPORTS)
+    - '| set(_DIRECT_EXPORTS)'
+    - '| set(_DECISION_EXPORTS)'
+    - '| {'
+    - '"get_active_handover",'
+    - '"_reuse_active_handover",'
+    - '"_create_pending_escalation_with_notification",'
+    - '"escalate_to_pending",'
+    - '"manager_take",'
+    - '"manager_reassign",'
+    - '"manager_resolve",'
+    - '"manager_return",'
+    - '"manager_reopen",'
+    - '"resolve_active_handover_rejection",'
+    - '}'
+    - )
+    - del _DIRECT_EXPORTS
+    - del _name
+- path: truffles-api/app/routers/webhook/context_manager.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from app.core import DialogStateService
+    - from app.routers.webhook.class_router_runtime import _normalize_class_name
+    - from app.routers.webhook.context_runtime import (
+    - ASR_CONFIRM_KEY,
+    - ASR_CONFIRM_WINDOW_MINUTES,
+    - ASR_INFLIGHT_KEY,
+    - CLASS_CARRYOVER_CLASSES,
+    - CLASS_CARRYOVER_KEY,
+    - CLASS_CARRYOVER_TTL_MESSAGES,
+    - CONSULT_CONTEXT_KEY,
+    - CONTEXT_MANAGER_KEY,
+    - EXPECTED_REPLY_REASON_KEY,
+    - EXPECTED_REPLY_TYPE_KEY,
+    - HANDOVER_CONFIRM_WINDOW_MINUTES,
+    - MEMORY_PENDING_KEY,
+    - MEMORY_PROFILE_KEY,
+    - MEMORY_PROFILE_TTL_DAYS,
+    - REENGAGE_CONFIRM_KEY,
+    - REENGAGE_CONFIRM_WINDOW_MINUTES,
+    - RE_ENTRY_REQUIRED_KEY,
+    - SERVICE_CARRYOVER_KEY,
+    - SERVICE_CARRYOVER_SKIP_INTENTS,
+    - SERVICE_HINT_KEY,
+    - SERVICE_HINT_WINDOW_MINUTES,
+    - STYLE_REFERENCE_PENDING_KEY,
+    - _ensure_question_mark,
+    - _is_refusal_flag_active,
+    - )
+    - from app.routers.webhook.knowledge_runtime import _resolve_backlog_language
+    - from app.routers.webhook.runtime_primitives import (
+    - CONSULT_CONTEXT_TTL_MESSAGES,
+    - EXPECTED_REPLY_NAME,
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - INFO_INTENTS,
+    - SERVICE_CARRYOVER_TTL_MESSAGES,
+    - _append_followup,
+    - )
+    - SESSION_MEMORY_KEY,
+    - SESSION_MEMORY_TTL_HOURS,
+    - _DIALOG_STATE_SERVICE = DialogStateService()
+    - state = _DIALOG_STATE_SERVICE.normalize_context_manager_canonical_state(payload)
+    - 'if not state:'
+    - return _canonical_state_base()
+    - return _DIALOG_STATE_SERVICE.set_context_manager_canonical_state(
+    - manager,
+    - key=CANONICAL_DIALOG_STATE_KEY,
+    - state=state,
+    - )
+    - return _DIALOG_STATE_SERVICE.project_canonical_referent(
+    - _get_canonical_dialog_state(manager),
+    - referent_key=referent_key,
+    - message_count=message_count,
+    - projection_source=CANONICAL_DIALOG_STATE_KEY,
+    - )
+    - state, event = _DIALOG_STATE_SERVICE.prune_canonical_referent(
+    - _get_canonical_dialog_state(manager),
+    - referent_key=referent_key,
+    - message_count=message_count,
+    - projection_source=CANONICAL_DIALOG_STATE_KEY,
+    - manager = _set_canonical_dialog_state(manager, state)
+    - return manager, event
+    - return _DIALOG_STATE_SERVICE.get_canonical_consult_state(
+    - state,
+    - message_count=message_count,
+    - )
+    - state, event = _DIALOG_STATE_SERVICE.prune_canonical_consult_state(
+    - state,
+    - message_count=message_count,
+    - )
+    - return manager, event
+    - return _DIALOG_STATE_SERVICE.sync_context_manager_expected_reply_state(
+    - booking_state=booking_state,
+    - expected_reply_reason=expected_reply_reason,
+    - service_carryover=(
+    - manager.get(SERVICE_CARRYOVER_KEY)
+    - if isinstance(manager, dict) and isinstance(manager.get(SERVICE_CARRYOVER_KEY),
+      dict)
+    - else None
+    - consult_context=consult_context,
+    - legacy_consult_context=(
+    - manager.get(CONSULT_CONTEXT_KEY)
+    - if isinstance(manager, dict) and isinstance(manager.get(CONSULT_CONTEXT_KEY),
+      dict)
+    - else None
+    - ),
+    - branch_id=branch_id,
+    - interaction_target=interaction_target,
+    - interaction_relation=interaction_relation,
+    - interaction_owner=interaction_owner,
+    - degrade_reason=degrade_reason,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
+    - consult_default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
+    - conversation.context = _DIALOG_STATE_SERVICE.prepare_conversation_context_write(
+    - existing_context,
+    - context,
+    - decision_trace_key=DECISION_TRACE_KEY,
+    - preserve_keys=(
+    - '"simulation",'
+    - '"simulation_mode",'
+    - '"simulation_id",'
+    - '"simulation_llm",'
+    - '"simulation_time",'
+    - ),
+    - retain_trace=_retain_decision_trace,
+    - pending_question_contract = _get_pending_question_contract(context)
+    - 'if isinstance(pending_question_contract, dict):'
+    - expected_reply_type = pending_question_contract.get("expected_reply_type")
+    - 'if isinstance(expected_reply_type, str) and expected_reply_type.strip():'
+    - return expected_reply_type.strip()
+    - projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
+    - expected_reply_type=context.get(EXPECTED_REPLY_TYPE_KEY),
+    - )
+    - return projections.expected_reply_type
+    - pending_question_contract = _get_pending_question_contract(context)
+    - 'if isinstance(pending_question_contract, dict):'
+    - reason = pending_question_contract.get("reason")
+    - 'if isinstance(reason, str) and reason.strip():'
+    - return reason.strip()
+    - projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
+    - expected_reply_reason=context.get(EXPECTED_REPLY_REASON_KEY),
+    - )
+    - return projections.expected_reply_reason
+    - 'def _get_pending_question_contract(context: dict) -> dict[str, Any] | None:'
+    - 'if not isinstance(context, dict):'
+    - return None
+    - return _DIALOG_STATE_SERVICE.project_context_pending_question_contract(
+    - context,
+    - context_manager_key=CONTEXT_MANAGER_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - session_memory_key=SESSION_MEMORY_KEY,
+    - expected_reply_type_key=EXPECTED_REPLY_TYPE_KEY,
+    - expected_reply_reason_key=EXPECTED_REPLY_REASON_KEY,
+    - )
+    - updated = _DIALOG_STATE_SERVICE.set_expected_reply_context_fields(
+    - context,
+    - expected_reply_type=expected_reply_type,
+    - expected_reply_reason=None,
+    - )
+    - projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
+    - expected_reply_type=expected_reply_type,
+    - )
+    - manager = _get_context_manager(updated)
+    - canonical_state = _get_canonical_dialog_state(manager)
+    - canonical_state = _DIALOG_STATE_SERVICE.set_canonical_pending_question_contract(
+    - canonical_state,
+    - expected_reply_type=projections.expected_reply_type,
+    - reason=None,
+    - message_count=0,
+    - )
+    - manager = _set_canonical_dialog_state(manager, canonical_state)
+    - return _set_context_manager(updated, manager)
+    - payload = context.get(RE_ENTRY_REQUIRED_KEY) if isinstance(context, dict) else
+      None
+    - return _DIALOG_STATE_SERVICE.normalize_re_entry_required(payload)
+    - return _DIALOG_STATE_SERVICE.is_re_entry_required(_get_re_entry_required(context))
+    - return _DIALOG_STATE_SERVICE.set_context_re_entry_required(
+    - context,
+    - reason=reason,
+    - now=now,
+    - key=RE_ENTRY_REQUIRED_KEY,
+    - )
+    - return _DIALOG_STATE_SERVICE.clear_context_re_entry_required(
+    - context,
+    - reason=reason,
+    - now=now,
+    - key=RE_ENTRY_REQUIRED_KEY,
+    - )
+    - result = _DIALOG_STATE_SERVICE.build_expected_reply_context_sync_result(
+    - expected_reply_type=expected_reply_type,
+    - reason=reason,
+    - context_manager_key=CONTEXT_MANAGER_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - booking_key="booking",
+    - session_memory_key=SESSION_MEMORY_KEY,
+    - re_entry_required_key=RE_ENTRY_REQUIRED_KEY,
+    - service_carryover_key=SERVICE_CARRYOVER_KEY,
+    - consult_context_key=CONSULT_CONTEXT_KEY,
+    - session_memory_ttl_hours=SESSION_MEMORY_TTL_HOURS,
+    - service_default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
+    - consult_default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
+    - context = result.context
+    - normalized_expected_reply_type = result.expected_reply_type
+    - normalized_reason = result.expected_reply_reason
+    - pending_question_contract = result.pending_question_contract
+    - 'if result.re_entry_cleared:'
+    - '"reason": normalized_reason,'
+    - question_trace = {
+    - '"stage": "question_contract",'
+    - '"decision": "set",'
+    - '"expected_reply_type": normalized_expected_reply_type,'
+    - '"reason": normalized_reason,'
+    - '}'
+    - 'if pending_question_contract:'
+    - question_trace["pending_question_contract"] = pending_question_contract
+    - _record_decision_trace(conversation, question_trace)
+    - meta_updates = {
+    - '"expected_reply_type": normalized_expected_reply_type,'
+    - '"expected_reply_reason": normalized_reason,'
+    - '}'
+    - 'if pending_question_contract:'
+    - meta_updates["pending_question_contract"] = pending_question_contract
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - 'if normalized_expected_reply_type:'
+    - memory=result.question_memory or {},
+    - manager = context.get(CONTEXT_MANAGER_KEY) if isinstance(context, dict) else
+      None
+    - return _DIALOG_STATE_SERVICE.set_context_manager_payload(
+    - context,
+    - manager,
+    - key=CONTEXT_MANAGER_KEY,
+    - )
+    - updated, count = _DIALOG_STATE_SERVICE.increment_context_manager_message_count(manager)
+    - manager.clear()
+    - manager.update(updated)
+    - return _DIALOG_STATE_SERVICE.prune_context_manager_class_carryover(
+    - manager,
+    - manager_key=CLASS_CARRYOVER_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - message_count=message_count,
+    - default_ttl=CLASS_CARRYOVER_TTL_MESSAGES,
+    - )
+    - canonical_state = manager.get(CANONICAL_DIALOG_STATE_KEY) if isinstance(manager,
+      dict) else None
+    - 'if isinstance(canonical_state, dict):'
+    - canonical_projection = _DIALOG_STATE_SERVICE.get_canonical_class_carryover(
+    - canonical_state,
+    - message_count=message_count,
+    - )
+    - 'if isinstance(canonical_projection, dict):'
+    - return canonical_projection
+    - payload = manager.get(CLASS_CARRYOVER_KEY) if isinstance(manager, dict) else
+      None
+    - return _DIALOG_STATE_SERVICE.get_class_carryover(payload, message_count=message_count)
+    - return _DIALOG_STATE_SERVICE.set_context_manager_class_carryover(
+    - manager,
+    - manager_key=CLASS_CARRYOVER_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - class_name=class_name,
+    - intents=intents,
+    - info_sections=info_sections,
+    - message_count=message_count,
+    - default_ttl=CLASS_CARRYOVER_TTL_MESSAGES,
+    - allowed_intents=INFO_INTENTS,
+    - normalize_class_name=_normalize_class_name,
+    - )
+    - normalized_class = _normalize_class_name(class_name)
+    - 'if normalized_class not in CLASS_CARRYOVER_CLASSES:'
+    - context_manager.get(CLASS_CARRYOVER_KEY)
+    - '"ttl": CLASS_CARRYOVER_TTL_MESSAGES,'
+    - return _DIALOG_STATE_SERVICE.prune_context_manager_service_carryover(
+    - manager_key=SERVICE_CARRYOVER_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
+    - projection_source=CANONICAL_DIALOG_STATE_KEY,
+    - payload = manager.get(SERVICE_CARRYOVER_KEY)
+    - return _DIALOG_STATE_SERVICE.get_service_carryover(
+    - payload,
+    - message_count=message_count,
+    - default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
+    - )
+    - return _DIALOG_STATE_SERVICE.set_context_manager_service_carryover(
+    - manager_key=SERVICE_CARRYOVER_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - service_query=service_query,
+    - source=source,
+    - score=score,
+    - default_ttl=SERVICE_CARRYOVER_TTL_MESSAGES,
+    - projection_source=CANONICAL_DIALOG_STATE_KEY,
+    - canonical_state_owner=CANONICAL_DIALOG_STATE_OWNER,
+    - 'if intent and intent in SERVICE_CARRYOVER_SKIP_INTENTS:'
+    - '"ttl": SERVICE_CARRYOVER_TTL_MESSAGES,'
+    - return _DIALOG_STATE_SERVICE.prune_context_manager_consult_context(
+    - manager_key=CONSULT_CONTEXT_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
+    - payload = manager.get(CONSULT_CONTEXT_KEY)
+    - return _DIALOG_STATE_SERVICE.get_consult_context(
+    - payload,
+    - message_count=message_count,
+    - default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
+    - )
+    - questions = _DIALOG_STATE_SERVICE.normalize_consult_questions(
+    - questions_raw,
+    - transform=_ensure_question_mark,
+    - )
+    - return _DIALOG_STATE_SERVICE.set_context_manager_consult_context(
+    - manager_key=CONSULT_CONTEXT_KEY,
+    - canonical_state_key=CANONICAL_DIALOG_STATE_KEY,
+    - default_ttl=CONSULT_CONTEXT_TTL_MESSAGES,
+    - projection_source=CANONICAL_DIALOG_STATE_KEY,
+    - canonical_state_owner=CANONICAL_DIALOG_STATE_OWNER,
+    - "return f\"\u0415\u0441\u043B\u0438 \u0432\u0435\u0440\u043D\u0443\u0442\u044C\
+      \u0441\u044F \u043A \u0432\u0430\u0448\u0435\u043C\u0443 \u0432\u043E\u043F\u0440\
+      \u043E\u0441\u0443: {_ensure_question_mark(question)}\""
+    - return _append_followup(bot_response, consult_return_prompt)
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - 'if intent_set & INFO_INTENTS:'
+    - return _DIALOG_STATE_SERVICE.build_compact_summary_text(
+    - booking=booking,
+    - refusal_flags=refusal_flags,
+    - language=language,
+    - is_refusal_flag_active=_is_refusal_flag_active,
+    - )
+    - language = _resolve_backlog_language(saved_message) if saved_message else "unknown"
+    - manager = _DIALOG_STATE_SERVICE.set_compact_summary(
+    - manager,
+    - summary_text=summary_text,
+    - reason=reason,
+    - now=now,
+    - )
+    - return _DIALOG_STATE_SERVICE.get_low_confidence_retry_count(context)
+    - return _DIALOG_STATE_SERVICE.set_low_confidence_retry_count(context, count=count)
+    - context, changed = _DIALOG_STATE_SERVICE.reset_low_confidence_retry_count(context)
+    - 'if changed:'
+    - return _DIALOG_STATE_SERVICE.normalize_handover_confirmation(confirmation)
+    - return _DIALOG_STATE_SERVICE.set_context_handover_confirmation(context, confirmation)
+    - return _DIALOG_STATE_SERVICE.is_confirmation_active(
+    - confirmation,
+    - now=now,
+    - ttl_minutes=HANDOVER_CONFIRM_WINDOW_MINUTES,
+    - )
+    - confirmation = context.get(REENGAGE_CONFIRM_KEY) if isinstance(context, dict)
+      else None
+    - return _DIALOG_STATE_SERVICE.normalize_reengage_confirmation(confirmation)
+    - return _DIALOG_STATE_SERVICE.set_context_reengage_confirmation(
+    - context,
+    - confirmation,
+    - key=REENGAGE_CONFIRM_KEY,
+    - )
+    - return _DIALOG_STATE_SERVICE.is_confirmation_active(
+    - confirmation,
+    - now=now,
+    - ttl_minutes=REENGAGE_CONFIRM_WINDOW_MINUTES,
+    - )
+    - confirmation = context.get(ASR_CONFIRM_KEY) if isinstance(context, dict) else
+      None
+    - return _DIALOG_STATE_SERVICE.normalize_asr_confirmation(confirmation)
+    - return _DIALOG_STATE_SERVICE.set_context_asr_confirmation(
+    - context,
+    - confirmation,
+    - key=ASR_CONFIRM_KEY,
+    - )
+    - return _DIALOG_STATE_SERVICE.is_confirmation_active(
+    - confirmation,
+    - now=now,
+    - ttl_minutes=ASR_CONFIRM_WINDOW_MINUTES,
+    - )
+    - payload = context.get(ASR_INFLIGHT_KEY) if isinstance(context, dict) else None
+    - return _DIALOG_STATE_SERVICE.get_asr_inflight(payload, now=now)
+    - return _DIALOG_STATE_SERVICE.set_context_asr_inflight(
+    - context,
+    - payload,
+    - key=ASR_INFLIGHT_KEY,
+    - )
+    - payload = context.get(STYLE_REFERENCE_PENDING_KEY) if isinstance(context, dict)
+      else None
+    - return _DIALOG_STATE_SERVICE.get_style_reference_pending(payload, now=now)
+    - return _DIALOG_STATE_SERVICE.set_context_style_reference_pending(
+    - context,
+    - payload,
+    - key=STYLE_REFERENCE_PENDING_KEY,
+    - )
+    - return _DIALOG_STATE_SERVICE.normalize_memory_profile(
+    - profile,
+    - now=now,
+    - default_ttl_days=MEMORY_PROFILE_TTL_DAYS,
+    - )
+    - payload = context.get(MEMORY_PROFILE_KEY) if isinstance(context, dict) else
+      None
+    - return _DIALOG_STATE_SERVICE.get_memory_profile(
+    - payload,
+    - now=now,
+    - default_ttl_days=MEMORY_PROFILE_TTL_DAYS,
+    - )
+    - return _DIALOG_STATE_SERVICE.set_context_memory_profile(
+    - context,
+    - profile,
+    - key=MEMORY_PROFILE_KEY,
+    - )
+    - pending = context.get(MEMORY_PENDING_KEY) if isinstance(context, dict) else
+      None
+    - return _DIALOG_STATE_SERVICE.get_memory_pending(pending, now=now)
+    - return _DIALOG_STATE_SERVICE.set_context_memory_pending(
+    - context,
+    - pending,
+    - key=MEMORY_PENDING_KEY,
+    - )
+- path: truffles-api/app/routers/webhook/response.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from app.logging_config import get_logger
+    - from app.routers.webhook.booking import _get_booking_context, _next_booking_prompt
+    - from app.routers.webhook.booking_signal_runtime import (
+    - _extract_service_hint,
+    - _is_booking_request,
+    - _looks_like_time_only_request,
+    - )
+    - from app.routers.webhook.class_router_runtime import (
+    - CONSULT_INTERRUPT_INTENTS,
+    - CONTROLLER_CONFIDENCE_THRESHOLD,
+    - DomainIntent,
+    - _build_controller_meta_output,
+    - _ensure_controller_output_meta,
+    - _resolve_class_router_result,
+    - _resolve_controller_signal_class,
+    - _router_observability_updates_from_class_router,
+    - )
+    - from app.routers.webhook.context_manager import (
+    - _get_context_manager,
+    - _get_conversation_context,
+    - _get_low_confidence_retry_count,
+    - _record_context_manager_decision,
+    - _reset_low_confidence_retry,
+    - _set_consult_context,
+    - _set_context_manager,
+    - _set_conversation_context,
+    - _set_expected_reply_context,
+    - _set_handover_confirmation,
+    - _set_low_confidence_retry_count,
+    - )
+    - from app.routers.webhook.guards import (
+    - _get_clarify_attempt_state,
+    - _handle_clarify_limit_escalation,
+    - _register_clarify_attempt,
+    - _should_escalate_for_clarify,
+    - )
+    - from app.routers.webhook.knowledge_runtime import (
+    - _derive_rag_status,
+    - _merge_rag_scores,
+    - _record_knowledge_backlog,
+    - )
+    - from app.routers.webhook.media import _is_style_reference_request
+    - from app.routers.webhook.policy import _detect_llm_guard_topics, _get_policy_handler
+    - from app.routers.webhook.runtime_primitives import (
+    - CLARIFY_MAX_ATTEMPTS,
+    - CONSULT_CONTEXT_TTL_MESSAGES,
+    - EVENING_GREETING_KEY,
+    - EVENING_GREETING_TTL_HOURS,
+    - EXPECTED_REPLY_NAME,
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - LOW_CONFIDENCE_MAX_RETRIES,
+    - MSG_AI_ERROR,
+    - MSG_BOOKING_ASK_DATETIME,
+    - MSG_BOOKING_ASK_NAME,
+    - MSG_BOOKING_ASK_SERVICE,
+    - MSG_BOOKING_CTA,
+    - MSG_ESCALATED,
+    - MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    - MSG_HANDOVER_CONFIRM,
+    - MSG_LOW_CONFIDENCE_RETRY,
+    - MSG_PENDING_LOW_CONFIDENCE,
+    - MSG_STYLE_REFERENCE_NEED_MEDIA,
+    - QUIET_HOURS_NOTICE_KEY,
+    - QUIET_HOURS_NOTICE_TTL_MINUTES,
+    - _append_followup,
+    - _combine_sidecar,
+    - should_offer_low_confidence_retry,
+    - )
+    - from app.routers.webhook.session_memory import (
+    - _record_session_memory_update,
+    - _update_session_memory_goal,
+    - )
+    - from app.services.ai_service import (
+    - OUT_OF_DOMAIN_RESPONSE,
+    - is_low_signal_message,
+    - normalize_for_matching,
+    - rewrite_for_service_match,
+    - )
+    - from app.services.handover_owner_service import (
+    - ActiveHandoverReuseRuntimeHooks,
+    - _reuse_active_handover,
+    - escalate_to_pending,
+    - get_active_handover,
+    - send_telegram_notification,
+    - )
+    - from app.services.message_service import generate_bot_response
+    - from app.services.pack_runtime_service import semantic_service_match
+    - from app.services.state_service import transition_state
+    - logger = get_logger("webhook")
+    - 'if conversation.state != ConversationState.BOT_ACTIVE.value:'
+    - context.get(QUIET_HOURS_NOTICE_KEY),
+    - ttl=timedelta(minutes=QUIET_HOURS_NOTICE_TTL_MINUTES),
+    - 'context[QUIET_HOURS_NOTICE_KEY] = {"last_sent_at": now.isoformat()}'
+    - 'if context.pop(QUIET_HOURS_NOTICE_KEY, None) is not None:'
+    - context.get(EVENING_GREETING_KEY),
+    - ttl=timedelta(hours=EVENING_GREETING_TTL_HOURS),
+    - 'context[EVENING_GREETING_KEY] = {"last_sent_at": now.isoformat()}'
+    - rag_scores = _merge_rag_scores(rag_scores if isinstance(rag_scores, dict) else
+      None)
+    - rag_confident, rag_reason = _derive_rag_status(
+    - 'if expected_reply_type not in {EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:'
+    - 'if not _is_booking_request(message_text, client_slug=client_slug):'
+    - 'if expected_reply_type != EXPECTED_REPLY_TIME:'
+    - 'if _is_booking_request(message_text, client_slug=client_slug):'
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - context_manager = _set_consult_context(
+    - context = _set_context_manager(context, context_manager)
+    - _set_conversation_context(conversation, context)
+    - context, memory = _update_session_memory_goal(
+    - _set_conversation_context(conversation, context)
+    - _record_session_memory_update(
+    - '"ttl": CONSULT_CONTEXT_TTL_MESSAGES,'
+    - _record_decision_trace(conversation, consult_trace)
+    - '_update_message_decision_metadata(saved_message, {"current_goal": "consult"})'
+    - context = _get_conversation_context(conversation)
+    - _set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    - _record_decision_trace(
+    - '"expected_reply_type": EXPECTED_REPLY_SERVICE,'
+    - '"previous_expected_reply_type": EXPECTED_REPLY_TIME,'
+    - _update_message_decision_metadata(
+    - '"expected_reply_type": EXPECTED_REPLY_SERVICE,'
+    - trace_payload.update(_router_observability_updates_from_class_router(class_router_result))
+    - controller_output = _build_controller_meta_output(error="skipped")
+    - controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+    - controller_output = _ensure_controller_output_meta(controller_output, error="skipped")
+    - '"signal_class": _resolve_controller_signal_class('
+    - return _resolve_class_router_result(
+    - domain_intent=DomainIntent.UNKNOWN,
+    - intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_set else set()
+    - normalized = normalize_for_matching(message_text)
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - _record_decision_trace(
+    - clarify_prompt = MSG_EXPECTED_SERVICE_OFF_TOPIC
+    - clarify_count = _register_clarify_attempt(
+    - context = _get_conversation_context(conversation)
+    - context = _set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    - _record_decision_trace(
+    - handler_override = _get_policy_handler(None, client_slug=client_slug)
+    - _record_decision_trace(
+    - _record_decision_trace(conversation, controller_trace)
+    - _record_decision_trace(conversation, consult_flow_trace)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - else CLARIFY_MAX_ATTEMPTS
+    - clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
+    - response=MSG_ESCALATED,
+    - clarify_prompt = MSG_EXPECTED_SERVICE_OFF_TOPIC
+    - clarify_count = _register_clarify_attempt(
+    - context = _get_conversation_context(conversation)
+    - context = _set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    - _record_decision_trace(conversation, matcher_trace)
+    - combined_response = _append_followup(consult_decision.response, service_reply)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - 'elif _should_escalate_for_clarify(context_manager, "consult"):'
+    - clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
+    - _record_context_manager_decision(
+    - response=MSG_ESCALATED,
+    - clarify_count = _register_clarify_attempt(
+    - consult_meta["consult_questions"] = [MSG_EXPECTED_SERVICE_OFF_TOPIC]
+    - context = _get_conversation_context(conversation)
+    - context = _set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    - response=MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    - consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    - _record_decision_trace(conversation, consult_flow_trace)
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - context_manager = _set_consult_context(
+    - context = _set_context_manager(context, context_manager)
+    - _set_conversation_context(conversation, context)
+    - context, memory = _update_session_memory_goal(
+    - _set_conversation_context(conversation, context)
+    - _record_session_memory_update(
+    - '"ttl": CONSULT_CONTEXT_TTL_MESSAGES,'
+    - _record_decision_trace(conversation, consult_trace)
+    - '_update_message_decision_metadata(saved_message, {"current_goal": "consult"})'
+    - _record_decision_trace(conversation, consult_trace)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(saved_message, consult_meta)
+    - bot_response = consult_decision.response or MSG_ESCALATED
+    - _reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - normalize_for_matching(message_text) if isinstance(message_text, str) else ""
+    - _is_style_reference_request(message_text, has_media=False)
+    - bot_response = _combine_sidecar(bot_response, MSG_STYLE_REFERENCE_NEED_MEDIA)
+    - bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+    - bot_response = _combine_sidecar(bot_response, intent_queue_followup)
+    - 'if expected_reply_type == EXPECTED_REPLY_SERVICE:'
+    - booking_followup = MSG_BOOKING_ASK_SERVICE
+    - 'elif expected_reply_type == EXPECTED_REPLY_TIME:'
+    - booking_followup = MSG_BOOKING_ASK_DATETIME
+    - 'elif expected_reply_type == EXPECTED_REPLY_NAME:'
+    - booking_followup = MSG_BOOKING_ASK_NAME
+    - context = _get_conversation_context(conversation)
+    - context_manager = _get_context_manager(context)
+    - booking_state = _get_booking_context(context)
+    - _, booking_followup = _next_booking_prompt(
+    - bot_response = _append_followup(bot_response, booking_followup)
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - _extract_service_hint(message_text, client_slug)
+    - context = _get_conversation_context(conversation)
+    - context = _set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    - _record_decision_trace(
+    - '"expected_reply_type": EXPECTED_REPLY_SERVICE,'
+    - _update_message_decision_metadata(
+    - '"expected_reply_type": EXPECTED_REPLY_SERVICE,'
+    - _reset_low_confidence_retry(conversation)
+    - llm_primary_result = generate_bot_response(
+    - pending_hint=conversation.state == ConversationState.PENDING.value,
+    - blocked_topics = _detect_llm_guard_topics(
+    - bot_response = MSG_ESCALATED
+    - _reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+    - _reset_low_confidence_retry(conversation)
+    - 'if message_text and is_low_signal_message(message_text) and not expected_reply_shortcircuit:'
+    - bot_response = OUT_OF_DOMAIN_RESPONSE
+    - _reset_low_confidence_retry(conversation)
+    - gen_result = generate_bot_response(
+    - pending_hint=conversation.state == ConversationState.PENDING.value,
+    - bot_response = MSG_AI_ERROR
+    - _record_knowledge_backlog(
+    - _reset_low_confidence_retry(conversation)
+    - bot_response = OUT_OF_DOMAIN_RESPONSE
+    - bot_response = OUT_OF_DOMAIN_RESPONSE
+    - 'if _looks_like_time_only_request(message_text):'
+    - bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
+    - explicit_service_hint = _extract_service_hint(
+    - bot_response = OUT_OF_DOMAIN_RESPONSE
+    - semantic_result = semantic_service_match(message_text, client_slug)
+    - rewrite_query = rewrite_for_service_match(
+    - semantic_result = semantic_service_match(rewrite_query, client_slug)
+    - _reset_low_confidence_retry(conversation)
+    - _reset_low_confidence_retry(conversation)
+    - 'if conversation.state == ConversationState.PENDING.value:'
+    - bot_response = MSG_PENDING_LOW_CONFIDENCE
+    - context = _get_conversation_context(conversation)
+    - retry_count = _get_low_confidence_retry_count(context)
+    - 'if should_offer_low_confidence_retry(conversation, now):'
+    - 'if retry_count < LOW_CONFIDENCE_MAX_RETRIES:'
+    - context_manager = _get_context_manager(context)
+    - 'if _should_escalate_for_clarify(context_manager, clarify_intent):'
+    - clarify_count, _ = _get_clarify_attempt_state(
+    - _record_context_manager_decision(
+    - clarify_limit_response = _handle_clarify_limit_escalation(
+    - bot_response = MSG_ESCALATED
+    - _register_clarify_attempt(
+    - bot_response = MSG_LOW_CONFIDENCE_RETRY
+    - context = _set_low_confidence_retry_count(context, retry_count + 1)
+    - _set_conversation_context(conversation, context)
+    - context = _set_handover_confirmation(context, confirmation)
+    - _set_conversation_context(conversation, context)
+    - bot_response = MSG_HANDOVER_CONFIRM
+    - logger.debug(
+    - _reset_low_confidence_retry(conversation)
+    - _record_knowledge_backlog(
+    - explicit_service_hint = _extract_service_hint(message_text, client_slug)
+    - bot_response = OUT_OF_DOMAIN_RESPONSE
+    - context = _get_conversation_context(conversation)
+    - retry_count = _get_low_confidence_retry_count(context)
+    - 'if should_offer_low_confidence_retry(conversation, now):'
+    - 'if retry_count < LOW_CONFIDENCE_MAX_RETRIES:'
+    - bot_response = MSG_LOW_CONFIDENCE_RETRY
+    - context = _set_low_confidence_retry_count(context, retry_count + 1)
+    - _set_conversation_context(conversation, context)
+    - context = _set_handover_confirmation(context, confirmation)
+    - _set_conversation_context(conversation, context)
+    - bot_response = MSG_HANDOVER_CONFIRM
+- path: truffles-api/app/routers/webhook/booking.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from app.routers.webhook.booking_runtime import (
+    - MSG_BOOKING_ASK_ALL,
+    - MSG_BOOKING_CANCELLED,
+    - MSG_BOOKING_REENGAGE,
+    - MSG_BOOKING_SLOT_LOCK_STUB,
+    - NAME_NOISE_TOKENS,
+    - NAME_PATTERN,
+    - _is_booking_cancel,
+    - _matches_guest_policy_lexicon,
+    - )
+    - from app.routers.webhook.booking_signal_runtime import (
+    - TIME_HOUR_PATTERN,
+    - TIME_PATTERN,
+    - _extract_datetime,
+    - _extract_service_hint,
+    - _is_booking_request,
+    - )
+    - from app.routers.webhook.context_runtime import (
+    - SERVICE_HINT_AT_KEY,
+    - SERVICE_HINT_KEY,
+    - SERVICE_HINT_WINDOW_MINUTES,
+    - _is_refusal_flag_active,
+    - )
+    - from app.routers.webhook.guard_runtime import MSG_FACT_GUARD_CLARIFY
+    - from app.routers.webhook.pending_runtime import MSG_PENDING_ESCALATION
+    - from app.routers.webhook.info import _detect_info_class_intents, _looks_like_info_query
+    - from app.routers.webhook.class_router_runtime import (
+    - CONTROLLER_CONFIDENCE_THRESHOLD,
+    - DomainIntent,
+    - _build_controller_meta_output,
+    - _ensure_controller_output_meta,
+    - _resolve_class_router_result,
+    - _resolve_controller_signal_class,
+    - _router_observability_updates_from_class_router,
+    - )
+    - from app.routers.webhook.media import _is_style_reference_request
+    - from app.routers.webhook.runtime_primitives import (
+    - BOOKING_TIME_SERVICE_INTENTS,
+    - EXPECTED_REPLY_NAME,
+    - EXPECTED_REPLY_PHONE,
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - INFO_INTENTS,
+    - MSG_AI_ERROR,
+    - MSG_BOOKING_ASK_DATETIME,
+    - MSG_BOOKING_ASK_NAME,
+    - MSG_BOOKING_ASK_SERVICE,
+    - MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE,
+    - MSG_ESCALATED,
+    - MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    - MSG_STYLE_REFERENCE_NEED_MEDIA,
+    - _combine_sidecar,
+    - )
+    - from app.services.ai_service import (
+    - detect_refusal_flags,
+    - is_acknowledgement_message,
+    - is_bot_status_question,
+    - is_greeting_message,
+    - is_low_signal_message,
+    - is_thanks_message,
+    - normalize_for_matching,
+    - )
+    - from app.services.handover_owner_service import (
+    - ActiveHandoverReuseRuntimeHooks,
+    - _reuse_active_handover,
+    - escalate_to_pending,
+    - get_active_handover,
+    - send_telegram_notification,
+    - )
+    - from app.services.intent_service import (
+    - is_frustration_message,
+    - is_human_request_message,
+    - is_opt_out_message,
+    - )
+    - from app.services.pack_runtime_service import (
+    - _format_service_not_found_reply,
+    - _normalize_text,
+    - get_system_lexicon_list,
+    - load_yaml_truth,
+    - phrase_match_intent,
+    - )
+    - from app.services.state_machine import ConversationState
+    - from app.services.state_service import transition_state
+    - from .trace import (
+    - _record_decision_trace,
+    - _record_message_decision_meta,
+    - _update_message_decision_metadata,
+    - )
+    - 'def _context_runtime():'
+    - from . import context_manager as context_router
+    - return context_router
+    - 'def _guards_runtime():'
+    - from . import guards as guards_router
+    - return guards_router
+    - swapped_normalized = _normalize_text(swapped)
+    - normalized = _normalize_text(raw)
+    - and _looks_like_info_query(message_text, client_slug=client_slug)
+    - context[SERVICE_HINT_KEY] = service
+    - context[SERVICE_HINT_AT_KEY] = now.isoformat()
+    - context.pop(SERVICE_HINT_KEY, None)
+    - context.pop(SERVICE_HINT_AT_KEY, None)
+    - value = context.get(SERVICE_HINT_KEY)
+    - timestamp_raw = context.get(SERVICE_HINT_AT_KEY)
+    - 'if (now - timestamp) > timedelta(minutes=SERVICE_HINT_WINDOW_MINUTES):'
+    - return is_opt_out_message(message_text) or is_frustration_message(message_text)
+    - is_low_signal_message(message_text)
+    - or is_acknowledgement_message(message_text)
+    - or is_greeting_message(message_text)
+    - or is_thanks_message(message_text)
+    - or is_bot_status_question(message_text)
+    - or is_human_request_message(message_text)
+    - canonical = _normalize_text(canonical_raw)
+    - normalized = _normalize_text(variant)
+    - normalized = _normalize_text(message_text)
+    - extracted = _extract_service_hint(message_text, client_slug)
+    - normalized = _normalize_text(message_text)
+    - booking_signal = bool(_is_booking_request(message_text, client_slug=client_slug))
+    - 'if TIME_PATTERN.search(value) or TIME_HOUR_PATTERN.search(value):'
+    - extracted = _extract_datetime(message_text, client_slug=client_slug)
+    - resolved_normalized = normalize_for_matching(resolved_partial)
+    - name_match = NAME_PATTERN.search(message_text)
+    - if _extract_service_hint(message_text, client_slug) or _extract_datetime(
+    - normalized = _normalize_text(cleaned)
+    - 'if all(token in NAME_NOISE_TOKENS for token in tokens):'
+    - return EXPECTED_REPLY_SERVICE
+    - return EXPECTED_REPLY_TIME
+    - return EXPECTED_REPLY_NAME
+    - return EXPECTED_REPLY_PHONE
+    - existing_normalized = normalize_for_matching(existing)
+    - incoming_normalized = normalize_for_matching(incoming)
+    - 'if TIME_PATTERN.search(existing) or TIME_HOUR_PATTERN.search(existing):'
+    - 'if not (TIME_PATTERN.search(incoming) or TIME_HOUR_PATTERN.search(incoming)):'
+    - 'if _is_booking_request(message_text, client_slug=client_slug):'
+    - refusal_flags = detect_refusal_flags(message_text)
+    - 'if allow_service and _extract_service_hint(message_text, client_slug):'
+    - 'if _extract_datetime(message_text, client_slug=client_slug):'
+    - if _looks_like_info_query(message_text, client_slug=client_slug) and not _is_booking_request(
+    - 'if _looks_like_info_query(message, client_slug=client_slug):'
+    - booking_info_intents = sorted(intent_decomp_set & INFO_INTENTS)
+    - anchor_intents, _ = _detect_info_class_intents(
+    - normalized = _normalize_text(message_text or "")
+    - 'if intent_signals & INFO_INTENTS:'
+    - 'if _looks_like_info_query(message_text, client_slug=client_slug):'
+    - if TIME_PATTERN.search(existing_datetime) or TIME_HOUR_PATTERN.search(
+    - 'if TIME_PATTERN.search(value) or TIME_HOUR_PATTERN.search(value):'
+    - return booking, MSG_BOOKING_ASK_SERVICE
+    - return booking, MSG_BOOKING_ASK_DATETIME
+    - 'if _is_refusal_flag_active(refusal_flags, "name"):'
+    - return booking, MSG_BOOKING_ASK_NAME
+    - normalized = normalize_for_matching(message_text)
+    - return booking_state, MSG_BOOKING_ASK_ALL
+    - return intent.strip().casefold() in BOOKING_TIME_SERVICE_INTENTS
+    - name_refused = _is_refusal_flag_active(refusal_flags, "name")
+    - 'if _is_refusal_flag_active(refusal_flags, "phone"):'
+    - controller_output = _build_controller_meta_output(error="skipped")
+    - controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+    - controller_output = _ensure_controller_output_meta(controller_output, error="skipped")
+    - '"signal_class": _resolve_controller_signal_class('
+    - return _resolve_class_router_result(
+    - domain_intent=DomainIntent.UNKNOWN,
+    - trace_payload.update(_router_observability_updates_from_class_router(class_router_result))
+    - _record_decision_trace(conversation, trace_payload)
+    - booking_state = booking if isinstance(booking, dict) else _get_booking_context(booking_context
+      or {})
+    - has_info_interrupt = bool(intent_decomp_set & INFO_INTENTS)
+    - and conversation.state == ConversationState.BOT_ACTIVE.value
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - bot_response, sent = send_and_save(MSG_ESCALATED)
+    - and expected_reply_type == EXPECTED_REPLY_TIME
+    - and _matches_guest_policy_lexicon(
+    - 'if _is_booking_time_service_decision(candidate):'
+    - 'if _is_booking_time_service_decision(candidate):'
+    - and expected_reply_type == EXPECTED_REPLY_TIME
+    - else _context_runtime()._get_conversation_context(conversation)
+    - booking if isinstance(booking, dict) else _get_booking_context(context)
+    - booking_state = _update_booking_from_messages(
+    - service_hint = _get_recent_service_hint(context, now)
+    - context = _clear_service_hint(context)
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - booking_state, prompt = _next_booking_prompt(
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - booking_expected = _expected_reply_for_booking_question(
+    - 'if booking_expected == EXPECTED_REPLY_TIME:'
+    - context = _context_runtime()._set_expected_reply_context(
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(
+    - bot_response = MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
+    - and _is_style_reference_request(message_text, has_media=has_media)
+    - bot_response = _combine_sidecar(
+    - MSG_STYLE_REFERENCE_NEED_MEDIA,
+    - bot_response = _context_runtime()._apply_consult_return(
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - response=MSG_FACT_GUARD_CLARIFY,
+    - _record_decision_trace(conversation, gate_trace)
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(
+    - bot_response = info_decision.response or MSG_ESCALATED
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - booking_time_service_candidate and _is_booking_time_service_decision(info_decision)
+    - else _context_runtime()._get_conversation_context(conversation)
+    - booking if isinstance(booking, dict) else _get_booking_context(context)
+    - booking_state = _update_booking_from_messages(
+    - service_hint = _get_recent_service_hint(context, now)
+    - context = _clear_service_hint(context)
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - booking_state, prompt = _next_booking_prompt(
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - booking_expected = _expected_reply_for_booking_question(
+    - context = _context_runtime()._set_expected_reply_context(
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - 'if _guards_runtime()._should_escalate_for_clarify(context_manager, clarify_intent):'
+    - clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(
+    - _context_runtime()._record_context_manager_decision(
+    - return _guards_runtime()._handle_clarify_limit_escalation(
+    - _guards_runtime()._register_clarify_attempt(
+    - context = _context_runtime()._set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - clarify_guard_reason = _guards_runtime()._booking_clarify_guard_reason(
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - 'elif _guards_runtime()._should_escalate_for_clarify(context_manager, "booking"):'
+    - clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager,
+      "booking")
+    - _context_runtime()._record_context_manager_decision(
+    - return _guards_runtime()._handle_clarify_limit_escalation(
+    - _guards_runtime()._register_clarify_attempt(
+    - and booking_expected == EXPECTED_REPLY_NAME
+    - and booking_expected == EXPECTED_REPLY_NAME
+    - and booking_expected == EXPECTED_REPLY_TIME
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_decision_trace(conversation, matcher_trace)
+    - _record_decision_trace(conversation, gate_trace)
+    - _record_decision_trace(conversation, multi_trace)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(
+    - _context_runtime()._maybe_store_service_carryover(
+    - _context_runtime()._maybe_store_class_carryover(
+    - bot_response = _combine_sidecar(bot_response, prompt_text)
+    - and _is_style_reference_request(message_text, has_media=has_media)
+    - bot_response = _combine_sidecar(
+    - MSG_STYLE_REFERENCE_NEED_MEDIA,
+    - bot_response = _context_runtime()._apply_consult_return(
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - else _context_runtime()._get_conversation_context(conversation)
+    - booking_context = _set_service_hint(booking_context, price_item, now)
+    - _context_runtime()._set_conversation_context(conversation, booking_context)
+    - bot_response = decision.response or MSG_ESCALATED
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(saved_message, decision.meta)
+    - else _context_runtime()._get_conversation_context(conversation)
+    - booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
+    - and is_human_request_message(message_text)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - bot_response = MSG_ESCALATED
+    - elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - bot_response = MSG_ESCALATED
+    - bot_response = MSG_AI_ERROR
+    - bot_response = MSG_PENDING_ESCALATION
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - conflict_prompt = _combine_sidecar(
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - 'if booking_active and _is_booking_cancel(message_text, policy_pack=policy_pack):'
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - bot_response = _combine_sidecar(MSG_BOOKING_CANCELLED, multi_intent_booking_followup)
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - booking_state, prompt = _next_booking_prompt(
+    - booking_expected = _expected_reply_for_booking_question(
+    - context = _context_runtime()._set_expected_reply_context(
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - bot_response = _combine_sidecar(
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(
+    - bot_response = _combine_sidecar(prompt, multi_intent_booking_followup)
+    - _is_booking_related_message(msg, client_slug) for msg in booking_messages
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - EXPECTED_REPLY_SERVICE,
+    - EXPECTED_REPLY_TIME,
+    - EXPECTED_REPLY_NAME,
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - bot_response = _combine_sidecar(MSG_BOOKING_REENGAGE, multi_intent_booking_followup)
+    - booking_state = _update_booking_from_messages(
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - service_hint = _get_recent_service_hint(context, now)
+    - context = _clear_service_hint(context)
+    - carryover = _context_runtime()._get_service_carryover(
+    - _record_decision_trace(
+    - _update_message_decision_metadata(
+    - booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+    - normalized_invalid_choice = normalize_for_matching(message_text)
+    - _extract_datetime(message_text, client_slug=client_slug)
+    - service_not_found_reply = _format_service_not_found_reply(
+    - load_yaml_truth(client_slug)
+    - _record_decision_trace(
+    - prompt = MSG_EXPECTED_SERVICE_OFF_TOPIC
+    - prompt = _combine_sidecar(prompt, MSG_BOOKING_SLOT_LOCK_STUB)
+    - context = _set_booking_context(context, booking_state)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
+    - context = _context_runtime()._set_expected_reply_context(
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - clarify_guard_reason = _guards_runtime()._booking_clarify_guard_reason(
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - 'elif _guards_runtime()._should_escalate_for_clarify(context_manager, "booking"):'
+    - clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager,
+      "booking")
+    - _context_runtime()._record_context_manager_decision(
+    - response=_guards_runtime()._handle_clarify_limit_escalation(
+    - _guards_runtime()._register_clarify_attempt(
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(
+    - bot_response = _combine_sidecar(prompt, policy_price_sidecar)
+    - bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
+    - bot_response = _context_runtime()._apply_consult_return(
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - _update_message_decision_metadata(saved_message, appointment_meta)
+    - _record_decision_trace(
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+    - bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+    - bot_response = MSG_AI_ERROR
+    - bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+    - bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
+    - 'context = _set_booking_context(context, {"active": False})'
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+- path: truffles-api/app/routers/webhook/info.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - import re
+    - from app.core import DialogStateService
+    - from app.routers.webhook.booking_signal_runtime import (
+    - _extract_datetime,
+    - _extract_service_hint,
+    - _has_explicit_service_signal,
+    - )
+    - from app.routers.webhook.class_router_runtime import (
+    - CONTROLLER_CONFIDENCE_THRESHOLD,
+    - DomainIntent,
+    - _build_controller_meta_output,
+    - _controller_meta_updates_from_class_router,
+    - _ensure_controller_output_meta,
+    - _resolve_class_router_result,
+    - _resolve_controller_signal_class,
+    - _router_observability_updates_from_class_router,
+    - )
+    - from app.routers.webhook.info_followup_runtime import (
+    - _looks_like_carryover_followup,
+    - _looks_like_hours_followup,
+    - )
+    - EXPECTED_REPLY_SERVICE,
+    - MSG_BOOKING_ASK_DATETIME,
+    - MSG_BOOKING_ASK_NAME,
+    - MSG_ESCALATED,
+    - MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    - _combine_sidecar,
+    - from app.services.ai_service import _current_openai_api_key, normalize_for_matching
+    - from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
+    - from app.services.handover_owner_service import (
+    - _reuse_active_handover,
+    - escalate_to_pending,
+    - get_active_handover,
+    - send_telegram_notification,
+    - _match_service,
+    - _detect_promotion_intent,
+    - _normalize_text,
+    - get_signal_lexicon_list,
+    - get_system_lexicon_list,
+    - semantic_question_type,
+    - )
+    - from app.services.state_machine import ConversationState
+    - from app.services.state_service import transition_state
+    - from app.services.signal_manifest_service import get_info_regex_pattern
+    - from .trace import (
+    - _record_decision_trace,
+    - _record_message_decision_meta,
+    - _update_message_decision_metadata,
+    - _TOKENIZE_WORD_RE = get_info_regex_pattern("tokenize_word_pattern") or re.compile(r"\w+")
+    - 'def _context_runtime():'
+    - from . import context_manager as context_router
+    - return context_router
+    - 'def _guards_runtime():'
+    - from . import guards as guards_router
+    - return guards_router
+    - 'def _response_runtime():'
+    - from . import response as response_router
+    - return response_router
+    - 'def _booking_runtime():'
+    - from . import booking as booking_router
+    - return booking_router
+    - 'def _tokenize_for_matching(normalized: str) -> list[str]:'
+    - return _TOKENIZE_WORD_RE.findall(normalized)
+    - 'def _normalized_contains_any(normalized: str, phrases: tuple[str, ...] | list[str])
+      -> bool:'
+    - 'if not normalized:'
+    - return False
+    - return any(phrase and phrase in normalized for phrase in phrases)
+    - 'def _signal_phrase_list(client_slug: str | None, *keys: str) -> list[str]:'
+    - 'phrases: list[str] = []'
+    - 'for key in keys:'
+    - 'for phrase in get_signal_lexicon_list(client_slug, key):'
+    - token = phrase.strip() if isinstance(phrase, str) else ""
+    - 'if token and token not in phrases:'
+    - phrases.append(token)
+    - return phrases
+    - 'def _signal_any_match(normalized: str, client_slug: str | None, *keys: str)
+      -> bool:'
+    - return bool(keys) and _normalized_contains_any(normalized, _signal_phrase_list(client_slug,
+      *keys))
+    - 'def _signal_all_match(normalized: str, client_slug: str | None, key: str) ->
+      bool:'
+    - phrases = _signal_phrase_list(client_slug, key)
+    - return bool(phrases) and all(phrase in normalized for phrase in phrases)
+    - def _signal_pair_match(
+    - 'normalized: str,'
+    - 'client_slug: str | None,'
+    - 'key_a: str,'
+    - 'key_b: str,'
+    - ') -> bool:'
+    - phrases_a = _signal_phrase_list(client_slug, key_a)
+    - phrases_b = _signal_phrase_list(client_slug, key_b)
+    - return bool(phrases_a and phrases_b) and _normalized_contains_any(
+    - normalized, phrases_a
+    - ) and _normalized_contains_any(normalized, phrases_b)
+    - 'def _system_any_match(normalized: str, key: str) -> bool:'
+    - phrases = get_system_lexicon_list(key)
+    - return bool(phrases) and _normalized_contains_any(normalized, phrases)
+    - 'def _system_any_match_multi(normalized: str, *keys: str) -> bool:'
+    - return any(_system_any_match(normalized, key) for key in keys)
+    - 'def _has_token_prefix(tokens: list[str], prefix: str) -> bool:'
+    - return any(token.startswith(prefix) for token in tokens)
+    - 'def _tokens_have_prefixes(tokens: list[str], prefixes: tuple[str, ...]) ->
+      bool:'
+    - return any(_has_token_prefix(tokens, prefix) for prefix in prefixes)
+    - 'def _has_anchor_prefix(tokens: list[str], prefix: str) -> bool:'
+    - 'if len(prefix) <= 2:'
+    - return any(token == prefix for token in tokens)
+    - return any(token.startswith(prefix) for token in tokens)
+    - 'def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:'
+    - return all(_has_anchor_prefix(tokens, prefix) for prefix in group)
+    - 'def _count_anchor_hits(tokens: list[str], groups: list[tuple[str, ...]]) ->
+      int:'
+    - return sum(1 for group in groups if _anchor_group_hit(tokens, group))
+    - normalized = _normalize_text(message_text)
+    - 'if not normalized:'
+    - return False
+    - tokens = _tokenize_for_matching(normalized)
+    - return 0 < len(tokens) <= SESSION_MEMORY_SHORT_TOKENS
+    - def _looks_like_services_overview_message(
+    - 'text: str | None,'
+    - '*,'
+    - 'client_slug: str | None = None,'
+    - ') -> bool:'
+    - 'if not isinstance(text, str) or not text.strip():'
+    - return False
+    - normalized = _normalize_text(text)
+    - 'if not normalized:'
+    - return False
+    - 'if _detect_promotion_intent(normalized, client_slug=client_slug) is not None:'
+    - return False
+    - 'if client_slug and "services_overview" in phrase_match_intent(text, client_slug):'
+    - return True
+    - markers = _signal_phrase_list(client_slug, "services_overview_phrases")
+    - 'for phrase in get_system_lexicon_list("services_overview_phrases"):'
+    - token = phrase.strip() if isinstance(phrase, str) else ""
+    - 'if token and token not in markers:'
+    - markers.append(token)
+    - return bool(markers and _normalized_contains_any(normalized, markers))
+    - def _detect_location_policy_pack_refs(
+    - 'text: str | None,'
+    - '*,'
+    - 'client_slug: str | None = None,'
+    - ') -> tuple[str, ...]:'
+    - 'if not isinstance(text, str) or not text.strip():'
+    - return ()
+    - normalized = _normalize_text(text)
+    - 'if not normalized:'
+    - return ()
+    - tokens = _tokenize_for_matching(normalized)
+    - "question_like = \"?\" in text or _tokens_have_prefixes(tokens, (\"\u0433\u0434\
+      \u0435\",))"
+    - parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
+    - location_signal = parking_signal or _signal_any_match(
+    - normalized, client_slug, "location_keywords", "location_phrases"
+    - )
+    - if (
+    - question_like
+    - "and _tokens_have_prefixes(tokens, (\"\u0433\u0434\u0435\",))"
+    - and _signal_any_match(normalized, client_slug, "location_question_scope_terms")
+    - '):'
+    - location_signal = True
+    - 'if not location_signal and not parking_signal:'
+    - return ()
+    - 'refs: list[str] = []'
+    - 'if location_signal:'
+    - refs.append("location")
+    - 'if parking_signal:'
+    - refs.append("parking")
+    - return tuple(refs)
+    - def _looks_like_hours_policy_message(
+    - 'text: str | None,'
+    - '*,'
+    - 'client_slug: str | None = None,'
+    - ') -> bool:'
+    - 'if not isinstance(text, str) or not text.strip():'
+    - return False
+    - normalized = _normalize_text(text)
+    - 'if not normalized:'
+    - return False
+    - 'if _has_parking_signal(normalized, client_slug=client_slug):'
+    - return False
+    - if _signal_any_match(
+    - normalized,
+    - client_slug,
+    - '"location_keywords",'
+    - '"location_phrases",'
+    - '"location_question_scope_terms",'
+    - '):'
+    - return False
+    - 'if _signal_any_match(normalized, client_slug, "hours_question_phrases", "hours_keywords"):'
+    - return True
+    - return _signal_any_match(normalized, client_slug, "info_hours_stems") and _signal_any_match(
+    - normalized,
+    - client_slug,
+    - '"info_time_markers",'
+    - '"hours_question_time_phrases",'
+    - '"hours_question_work_verbs",'
+    - '"hours_question_work_singular",'
+    - )
+    - def _looks_like_promotions_policy_message(
+    - 'text: str | None,'
+    - '*,'
+    - 'client_slug: str | None = None,'
+    - ') -> bool:'
+    - 'if not isinstance(text, str) or not text.strip():'
+    - return False
+    - normalized = _normalize_text(text)
+    - 'if not normalized:'
+    - return False
+    - 'if _signal_any_match(normalized, client_slug, "promotions_stacking_phrases"):'
+    - return False
+    - 'if _signal_all_match(normalized, client_slug, "promotions_stacking_terms"):'
+    - return False
+    - 'if _detect_location_policy_pack_refs(text, client_slug=client_slug):'
+    - return False
+    - 'if _looks_like_hours_policy_message(text, client_slug=client_slug):'
+    - return False
+    - 'if _has_price_signal(normalized, text, client_slug=client_slug):'
+    - return False
+    - 'if _has_duration_signal(normalized, text, client_slug=client_slug):'
+    - return False
+    - 'if _detect_promotion_intent(normalized, client_slug=client_slug) is not None:'
+    - return True
+    - 'if _looks_like_services_overview_message(text, client_slug=client_slug):'
+    - return False
+    - from app.routers.webhook.policy import _looks_like_promotions_request
+    - return _looks_like_promotions_request(text, client_slug=client_slug)
+    - def _looks_like_promotions_rules_policy_message(
+    - 'text: str | None,'
+    - '*,'
+    - 'client_slug: str | None = None,'
+    - ') -> bool:'
+    - 'if not isinstance(text, str) or not text.strip():'
+    - return False
+    - normalized = _normalize_text(text)
+    - 'if not normalized:'
+    - return False
+    - 'if _looks_like_services_overview_message(text, client_slug=client_slug):'
+    - return False
+    - 'if _detect_location_policy_pack_refs(text, client_slug=client_slug):'
+    - return False
+    - 'if _looks_like_hours_policy_message(text, client_slug=client_slug):'
+    - return False
+    - 'if _has_price_signal(normalized, text, client_slug=client_slug):'
+    - return False
+    - 'if _has_duration_signal(normalized, text, client_slug=client_slug):'
+    - return False
+    - 'if get_pack_service_hint(text, client_slug=client_slug):'
+    - return False
+    - return _signal_any_match(normalized, client_slug, "promotions_stacking_phrases")
+      or _signal_all_match(
+    - normalized,
+    - client_slug,
+    - '"promotions_stacking_terms",'
+    - )
+    - normalized = normalize_for_matching(message_text) if message_text else ""
+    - price_signal = _has_price_signal(
+    - duration_signal = _has_duration_signal(
+    - prep_brows_lashes_signal = bool(
+    - _signal_any_match(normalized, client_slug, "prep_brows_lashes_prepare_terms")
+    - and (
+    - _signal_any_match(normalized, client_slug, "prep_brows_lashes_focus_terms")
+    - or _signal_any_match(normalized, client_slug, "prep_brows_lashes_extra_terms")
+    - )
+    - )
+    - hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_keywords")
+    - 'if not hygiene_signal:'
+    - hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_dry_heat_terms")
+    - 'if not hygiene_signal:'
+    - hygiene_signal = _signal_any_match(normalized, client_slug, "hygiene_disposables_terms")
+    - 'if not hygiene_signal:'
+    - hygiene_signal = _signal_any_match(
+    - normalized,
+    - client_slug,
+    - '"hygiene_friend_inflammation_terms",'
+    - )
+    - for token in normalize_for_matching(address_full).split()
+    - 'if "pricing" in anchor_intents and not price_signal:'
+    - anchor_intents.discard("pricing")
+    - anchor_hits.pop("pricing", None)
+    - 'if prep_brows_lashes_signal:'
+    - intents.add("prep_brows_lashes")
+    - 'if hygiene_signal:'
+    - intents.add("hygiene")
+    - promotions_rules_signal = _looks_like_promotions_rules_policy_message(
+    - message_text,
+    - client_slug=client_slug,
+    - )
+    - promotions_signal = False
+    - from app.routers.webhook.policy import _looks_like_promotions_request
+    - 'if promotions_rules_signal:'
+    - intents.add("promotions_rules")
+    - 'else:'
+    - promotions_signal = _looks_like_promotions_policy_message(
+    - message_text,
+    - client_slug=client_slug,
+    - )
+    - promotions_request_like = _looks_like_promotions_request(
+    - message_text,
+    - client_slug=client_slug,
+    - )
+    - promotions_service_mention_rescue = bool(
+    - promotions_request_like
+    - and get_pack_service_hint(message_text, client_slug=client_slug)
+    - )
+    - if (
+    - not promotions_signal
+    - and promotions_request_like
+    - and not price_signal
+    - and not duration_signal
+    - and not hours_signal
+    - '):'
+    - promotions_signal = True
+    - meta["promotions_request_rescue"] = True
+    - elif (
+    - promotions_signal
+    - and promotions_service_mention_rescue
+    - and not price_signal
+    - and not duration_signal
+    - and not hours_signal
+    - '):'
+    - meta["promotions_request_rescue"] = True
+    - 'if promotions_signal:'
+    - intents.add("promotions")
+    - question_type = semantic_question_type(message_text, include_kinds=INFO_INTENTS)
+    - explicit_hours_request = (
+    - not daypart_preference_statement
+    - and _looks_like_hours_policy_message(
+    - message_text,
+    - client_slug=client_slug,
+    - )
+    - )
+    - 'if explicit_hours_request:'
+    - intents.add("hours")
+    - intents.discard("duration")
+    - anchor_intents.discard("duration")
+    - anchor_hits.pop("duration", None)
+    - meta["explicit_hours_request"] = True
+    - 'if explicit_hours_request:'
+    - duration_signal = False
+    - hours_signal = True
+    - '"prep_brows_lashes": prep_brows_lashes_signal,'
+    - '"hygiene": hygiene_signal,'
+    - '"promotions": promotions_signal,'
+    - '"promotions_rules": promotions_rules_signal,'
+    - '"prep_brows_lashes",'
+    - '"hygiene",'
+    - normalized = normalize_for_matching(message_text)
+    - for token in normalize_for_matching(address_full).split()
+    - '"service_clarify": MSG_EXPECTED_SERVICE_OFF_TOPIC,'
+    - '"booking_ask_datetime": MSG_BOOKING_ASK_DATETIME,'
+    - '"booking_ask_name": MSG_BOOKING_ASK_NAME,'
+    - is_short_reply = _is_short_reply(message_text) if has_message_text else False
+    - _booking_runtime()._is_booking_slot_signal(message_text, client_slug=client_slug)
+    - has_datetime_slot = bool(_extract_datetime(message_text)) if has_message_text
+      else False
+    - _booking_runtime()._validate_name_slot(
+    - normalized = normalize_for_matching(message_text) if message_text else ""
+    - 'if intent == "hygiene":'
+    - reply = format_reply_from_truth("hygiene", client_slug=client_slug)
+    - 'if not reply:'
+    - return None, None
+    - meta = _build_fact_meta(
+    - fact_source="truth",
+    - fact_intents=["hygiene"],
+    - info_sections=["hygiene"],
+    - )
+    - return reply, _resolverize(meta, resolved_intent="hygiene")
+    - 'if intent == "prep_brows_lashes":'
+    - reply = format_reply_from_truth("prep_brows_lashes", client_slug=client_slug)
+    - 'if not reply:'
+    - return None, None
+    - meta = _build_fact_meta(
+    - fact_source="truth",
+    - fact_intents=["prep_brows_lashes"],
+    - info_sections=["prep_brows_lashes"],
+    - )
+    - return reply, _resolverize(meta, resolved_intent="prep_brows_lashes")
+    - 'if intent == "promotions_rules":'
+    - reply = format_reply_from_truth("promotions_rules", client_slug=client_slug)
+    - 'if not reply:'
+    - return None, None
+    - meta = _build_fact_meta(
+    - fact_source="truth",
+    - fact_intents=["promotions"],
+    - info_sections=["promotions"],
+    - )
+    - return reply, _resolverize(meta, resolved_intent="promotions_rules")
+    - _router_observability_updates_from_class_router(class_router_result)
+    - _record_decision_trace(conversation, trace_payload)
+    - bot_response, composer_meta = _response_runtime()._compose_fact_response(
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(saved_message, multi_meta)
+    - _update_message_decision_metadata(saved_message, composer_meta)
+    - _context_runtime()._maybe_store_class_carryover(
+    - _context_runtime()._maybe_store_service_carryover(
+    - explicit_service_signal = _has_explicit_service_signal(
+    - class_router_result = _resolve_class_router_result(
+    - domain_intent=DomainIntent.UNKNOWN,
+    - normalized = normalize_for_matching(message_text)
+    - _has_price_signal(normalized, message_text)
+    - or _has_duration_signal(normalized, message_text)
+    - normalized_for_alias = _normalize_text(message_text)
+    - alias_match = _match_service(normalized_for_alias, client_slug=client_slug)
+    - service_carryover_meta = _context_runtime()._get_service_carryover(
+    - normalized_followup = normalize_for_matching(message_text) if message_text else
+      ""
+    - and _looks_like_hours_followup(message_text)
+    - for key in (
+    - '"parking",'
+    - '"pricing",'
+    - '"duration",'
+    - '"contact",'
+    - '"guest",'
+    - '"location",'
+    - '"hours",'
+    - '"prep_brows_lashes",'
+    - '"hygiene",'
+    - '"master",'
+    - )
+    - and _looks_like_carryover_followup(message_text)
+    - info_service_query = _extract_service_hint(message_text, client_slug)
+    - bot_response, composer_meta = _response_runtime()._compose_fact_response(
+    - bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _controller_meta_updates_from_class_router(class_router_result)
+    - _router_observability_updates_from_class_router(class_router_result)
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - _update_message_decision_metadata(saved_message, composer_meta)
+    - _context_runtime()._maybe_store_class_carryover(
+    - _context_runtime()._maybe_store_service_carryover(
+    - bot_response = _context_runtime()._apply_consult_return(
+    - bot_response, composer_meta = _response_runtime()._compose_fact_response(
+    - bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _controller_meta_updates_from_class_router(class_router_result)
+    - _router_observability_updates_from_class_router(class_router_result)
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - _update_message_decision_metadata(saved_message, composer_meta)
+    - _context_runtime()._maybe_store_class_carryover(
+    - _context_runtime()._maybe_store_service_carryover(
+    - bot_response = _context_runtime()._apply_consult_return(
+    - normalized_message = normalize_for_matching(message_text)
+    - for key in (
+    - '"parking",'
+    - '"location",'
+    - '"hours",'
+    - '"guest",'
+    - '"pricing",'
+    - '"duration",'
+    - '"prep_brows_lashes",'
+    - '"hygiene",'
+    - )
+    - '"prep_brows_lashes",'
+    - '"hygiene",'
+    - or _has_price_signal(normalized_message, message_text)
+    - or _has_duration_signal(normalized_message, message_text)
+    - bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+    - bot_response, composer_meta = _response_runtime()._compose_fact_response(
+    - bot_response = _context_runtime()._apply_consult_return(
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - context = _context_runtime()._get_conversation_context(conversation)
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - 'if _guards_runtime()._should_escalate_for_clarify(context_manager, clarify_intent):'
+    - clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager,
+      clarify_intent)
+    - _context_runtime()._record_context_manager_decision(
+    - response=_guards_runtime()._handle_clarify_limit_escalation(
+    - _guards_runtime()._register_clarify_attempt(
+    - context = _context_runtime()._get_conversation_context(conversation)
+    - context = _context_runtime()._set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(saved_message, service_decision.meta)
+    - _update_message_decision_metadata(saved_message, composer_meta)
+    - '_update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})'
+    - _context_runtime()._maybe_store_service_carryover(
+    - _context_runtime()._maybe_store_class_carryover(
+    - controller_output = _build_controller_meta_output(error="skipped")
+    - controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+    - controller_output = _ensure_controller_output_meta(
+    - '"signal_class": _resolve_controller_signal_class('
+    - return _resolve_class_router_result(
+    - domain_intent=DomainIntent.OUT_OF_DOMAIN,
+    - context = _context_runtime()._get_conversation_context(conversation)
+    - context = _booking_runtime()._set_service_hint(context, price_item, now)
+    - _context_runtime()._set_conversation_context(conversation, context)
+    - response=MSG_ESCALATED,
+    - context = _context_runtime()._get_conversation_context(conversation)
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - 'if _guards_runtime()._should_escalate_for_clarify(context_manager, clarify_intent):'
+    - clarify_count, _ = _guards_runtime()._get_clarify_attempt_state(context_manager,
+      clarify_intent)
+    - _context_runtime()._record_context_manager_decision(
+    - response=MSG_ESCALATED,
+    - _guards_runtime()._register_clarify_attempt(
+    - context = _context_runtime()._get_conversation_context(conversation)
+    - context = _context_runtime()._set_expected_reply_context(
+    - expected_reply_type=EXPECTED_REPLY_SERVICE,
+    - bot_response = _response_runtime()._maybe_append_booking_cta(
+    - bot_response = _context_runtime()._apply_consult_return(
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - 'elif conversation.state == ConversationState.BOT_ACTIVE.value:'
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - context = _context_runtime()._get_conversation_context(conversation)
+    - expected_reply_type = _context_runtime()._get_expected_reply_type(context)
+    - context = _context_runtime()._set_expected_reply_context(
+    - pending_question_contract = DialogStateService().project_context_pending_question_contract(
+    - context,
+    - session_memory_key="__disabled_session_memory__",
+    - )
+    - 'if pending_question_contract:'
+    - override_meta["pending_question_contract"] = pending_question_contract
+    - trace_payload = {
+    - '"stage": "truth_gate",'
+    - '"decision": "expected_reply_override",'
+    - '"expected_reply_type": expected_reply_type,'
+    - '"expected_reply_matched": expected_reply_matched,'
+    - '}'
+    - 'if pending_question_contract:'
+    - trace_payload["pending_question_contract"] = pending_question_contract
+    - _record_decision_trace(conversation, trace_payload)
+    - context_manager = _context_runtime()._get_context_manager(context)
+    - class_carryover = _context_runtime()._get_class_carryover(
+    - normalized = normalize_for_matching(message_text) if message_text else ""
+    - and conversation.state == ConversationState.BOT_ACTIVE.value
+    - _record_decision_trace(
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(saved_message, decision.meta)
+    - '_update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})'
+    - _context_runtime()._maybe_store_class_carryover(
+    - _context_runtime()._maybe_store_service_carryover(
+    - offline_controller = (not _current_openai_api_key()) or controller_error ==
+      "no_api_key"
+    - bot_response, composer_meta = _response_runtime()._compose_fact_response(
+    - bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+    - _context_runtime()._reset_low_confidence_retry(conversation)
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _controller_meta_updates_from_class_router(class_router_result)
+    - _router_observability_updates_from_class_router(class_router_result)
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - _update_message_decision_metadata(saved_message, composer_meta)
+    - _context_runtime()._maybe_store_class_carryover(
+    - _context_runtime()._maybe_store_service_carryover(
+    - bot_response = _context_runtime()._apply_consult_return(
+- path: truffles-api/app/routers/webhook/pending.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from datetime import datetime
+    - from functools import partial
+    - from app.logging_config import get_logger
+    - from app.routers.webhook.context_manager import (
+    - _get_conversation_context,
+    - _get_handover_confirmation,
+    - _is_handover_confirmation_active,
+    - _reset_low_confidence_retry,
+    - _set_conversation_context,
+    - _set_handover_confirmation,
+    - )
+    - from app.routers.webhook.guard_runtime import MSG_MUTED_TEMP
+    - from app.routers.webhook.media import (
+    - _build_media_caption,
+    - _is_voice_note,
+    - _send_telegram_media,
+    - _update_message_media_metadata,
+    - )
+    - from app.routers.webhook.pending_runtime import (
+    - MSG_HANDOVER_DECLINED,
+    - MSG_PENDING_ACK,
+    - MSG_PENDING_SLA_PING,
+    - MSG_PENDING_STATUS,
+    - MSG_PENDING_WAIT,
+    - PENDING_SLA_PING_MINUTES,
+    - PENDING_SLA_PING_SENT_KEY,
+    - is_handover_status_question,
+    - )
+    - from app.routers.webhook.runtime_primitives import MSG_AI_ERROR, MSG_ESCALATED
+    - from app.routers.webhook.trace import (
+    - _record_decision_trace,
+    - _record_message_decision_meta,
+    - _set_router_observability,
+    - _update_message_decision_metadata,
+    - )
+    - from app.services.ai_service import classify_confirmation, normalize_for_matching
+    - from app.services.escalation_service import get_telegram_credentials
+    - from app.services.handover_owner_service import (
+    - _reuse_active_handover,
+    - escalate_to_pending,
+    - get_active_handover,
+    - manager_resolve,
+    - send_telegram_notification,
+    - from app.services.intent_service import is_opt_out_message
+    - from app.services.pack_runtime_service import get_system_lexicon_list
+    - from app.services.sla_runtime_service import resolve_pending_sla_violation
+    - from app.services.state_service import (
+    - ContinuityTransportDecision,
+    - HandoverConfirmationRuntimeHooks,
+    - PendingContinuityRuntimeHooks,
+    - _handle_handover_confirmation_runtime,
+    - _handle_pending_sla_runtime,
+    - _resolve_pending_ack,
+    - _resolve_pending_close,
+    - _resolve_pending_no_handover_reset,
+    - transition_state,
+    - )
+    - from app.services.telegram_service import TelegramService
+    - logger = get_logger("webhook")
+    - 'def _normalize_pending_text(text: str) -> str:'
+    - normalized = normalize_for_matching(text)
+    - def _build_transport_webhook_response(
+    - 'db: Session,'
+    - 'conversation: Conversation,'
+    - 'decision: ContinuityTransportDecision,'
+    - send_and_save,
+    - ') -> WebhookResponse | None:'
+    - 'if not decision.handled:'
+    - return None
+    - bot_response = None
+    - result_message = decision.success_message or "Handled"
+    - 'if isinstance(decision.bot_response, str):'
+    - bot_response, sent = send_and_save(decision.bot_response)
+    - result_message = decision.success_message if sent else decision.failure_message
+      or result_message
+    - db.commit()
+    - return WebhookResponse(
+    - success=True,
+    - message=result_message,
+    - conversation_id=conversation.id,
+    - bot_response=bot_response,
+    - decision = _handle_handover_confirmation_runtime(
+    - db=db,
+    - conversation=conversation,
+    - user=user,
+    - message_text=message_text,
+    - now=now,
+    - hooks=HandoverConfirmationRuntimeHooks(
+    - get_conversation_context=_get_conversation_context,
+    - get_handover_confirmation=_get_handover_confirmation,
+    - is_handover_confirmation_active=_is_handover_confirmation_active,
+    - set_handover_confirmation=_set_handover_confirmation,
+    - set_conversation_context=_set_conversation_context,
+    - reset_low_confidence_retry=_reset_low_confidence_retry,
+    - classify_confirmation=classify_confirmation,
+    - reuse_active_handover=_reuse_active_handover,
+    - escalate_to_pending=escalate_to_pending,
+    - send_telegram_notification=send_telegram_notification,
+    - record_escalation_metric=record_escalation_metric,
+    - record_decision_trace=_record_decision_trace,
+    - msg_escalated=MSG_ESCALATED,
+    - msg_ai_error=MSG_AI_ERROR,
+    - msg_handover_declined=MSG_HANDOVER_DECLINED,
+    - ),
+    - )
+    - return _build_transport_webhook_response(
+    - db=db,
+    - conversation=conversation,
+    - decision=decision,
+    - send_and_save=send_and_save,
+    - bot_token, chat_id = get_telegram_credentials(db, client_id)
+    - telegram = TelegramService(bot_token)
+    - caption = _build_media_caption(message_text, media_info)
+    - forward_result = _send_telegram_media(
+    - and _is_voice_note(media_info)
+    - _update_message_media_metadata(
+    - logger.warning(
+    - and _is_voice_note(media_info)
+    - bot_token, chat_id = get_telegram_credentials(db, client_id)
+    - telegram = TelegramService(bot_token)
+    - _update_message_media_metadata(
+    - logger.warning(
+    - router_pending_meta = _set_router_observability(
+    - _record_decision_trace(conversation, trace_payload)
+    - router_pending_meta = _set_router_observability(
+    - continuity_hooks = PendingContinuityRuntimeHooks(
+    - get_conversation_context=_get_conversation_context,
+    - set_conversation_context=_set_conversation_context,
+    - transition_state=transition_state,
+    - manager_resolve=partial(manager_resolve, db),
+    - record_decision_trace=_record_decision_trace,
+    - update_message_decision_metadata=_update_message_decision_metadata,
+    - )
+    - handover = get_active_handover(db, conversation.id)
+    - _resolve_pending_no_handover_reset(
+    - conversation=conversation,
+    - saved_message=saved_message,
+    - router_pending_meta=router_pending_meta,
+    - hooks=continuity_hooks,
+    - 'if is_opt_out_message(message_text):'
+    - manager_resolve(
+    - bot_response = MSG_MUTED_TEMP
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - return _build_transport_webhook_response(
+    - db=db,
+    - conversation=conversation,
+    - decision=_resolve_pending_close(
+    - conversation=conversation,
+    - handover=handover,
+    - saved_message=saved_message,
+    - router_pending_meta=router_pending_meta,
+    - hooks=continuity_hooks,
+    - ),
+    - send_and_save=send_and_save,
+    - return _build_transport_webhook_response(
+    - db=db,
+    - conversation=conversation,
+    - decision=_resolve_pending_ack(
+    - conversation=conversation,
+    - handover=handover,
+    - saved_message=saved_message,
+    - router_pending_meta=router_pending_meta,
+    - msg_pending_ack=MSG_PENDING_ACK,
+    - hooks=continuity_hooks,
+    - ),
+    - send_and_save=send_and_save,
+    - if is_handover_status_question(message_text) and not (
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+    - bot_response = MSG_PENDING_STATUS
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+    - bot_response = MSG_PENDING_WAIT
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+    - sla_decision = _handle_pending_sla_runtime(
+    - db=db,
+    - saved_message=saved_message,
+    - guard_only_skip=guard_only_skip,
+    - router_pending_meta=router_pending_meta,
+    - pending_sla_ping_minutes=PENDING_SLA_PING_MINUTES,
+    - pending_sla_ping_sent_key=PENDING_SLA_PING_SENT_KEY,
+    - msg_pending_wait=MSG_PENDING_WAIT,
+    - msg_pending_sla_ping=MSG_PENDING_SLA_PING,
+    - resolve_pending_sla_violation_fn=resolve_pending_sla_violation,
+    - hooks=continuity_hooks,
+    - 'if sla_decision is not None:'
+    - return _build_transport_webhook_response(
+    - db=db,
+    - conversation=conversation,
+    - decision=sla_decision,
+    - send_and_save=send_and_save,
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(
+- path: truffles-api/app/routers/webhook/policy.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
+    - from app.services.handover_owner_service import (
+    - _reuse_active_handover,
+    - escalate_to_pending,
+    - get_active_handover,
+    - send_telegram_notification,
+    - )
+    - from app.services.intent_service import Intent, _normalize_text, should_escalate
+    - get_pack_service_decision,
+    - from app.services.policy_snapshot_service import (
+    - build_policy_pack_snapshot,
+    - build_routing_policy_snapshot,
+    - resolve_policy_type,
+    - )
+    - from app.services.state_machine import ConversationState
+    - from app.services.state_service import transition_state
+    - from .trace import (
+    - _record_decision_trace,
+    - _record_message_decision_meta,
+    - _set_router_observability,
+    - _update_message_decision_metadata,
+    - )
+    - from .runtime_primitives import MSG_ESCALATED, _combine_sidecar, _contains_any
+    - 'def _context_runtime():'
+    - from . import context_manager as context_router
+    - return context_router
+    - return build_routing_policy_snapshot(state).as_compat_policy()
+    - return bool(policy.get("allow_handover_create")) and should_escalate(intent)
+    - return build_policy_pack_snapshot(
+    - client,
+    - client_slug=client_slug,
+    - db=db,
+    - ).policy_pack
+    - normalized = _normalize_text(message_text or "")
+    - normalized = _normalize_text(message_text or "")
+    - normalized = _normalize_text(message_text or "")
+    - if normalized and _contains_any(
+    - normalized = _normalize_text(message_text or "")
+    - if normalized and consult_override and _contains_any(
+    - normalized, consult_override
+    - '):'
+    - normalized = _normalize_text(message_text or "")
+    - asks_policy = _contains_any(normalized, policy_question_cues)
+    - direct_request = _contains_any(normalized, cancel_request_cues)
+    - normalized = _normalize_text(message_text or "")
+    - asks_policy = _contains_any(normalized, policy_question_cues)
+    - direct_request = _contains_any(normalized, cancel_request_cues)
+    - normalized = _normalize_text(response_text)
+    - normalized = _normalize_text(message_text)
+    - 'if keywords and _contains_any(normalized, keywords):'
+    - 'if phrase in normalized and _contains_any(normalized, day_words):'
+    - 'if decision.intent in {"medical"} and _is_hygiene_context_text(message):'
+    - _HYGIENE_KEYWORDS = [
+    - "\"\u0441\u0442\u0435\u0440\u0438\u043B\u0438\u0437\","
+    - "\"\u0434\u0435\u0437\u0440\u0430\u0441\u0442\u0432\","
+    - "\"\u0434\u0435\u0437\u0438\u043D\u0444\","
+    - "\"\u0443\u043B\u044C\u0442\u0440\u0430\u0437\u0432\u0443\u043A\","
+    - "\"\u0443\u0437-\u0432\u0430\u043D\u043D\","
+    - "\"\u0441\u0443\u0445\u043E\u0436\u0430\u0440\","
+    - "\"\u043A\u0440\u0430\u0444\u0442\","
+    - "\"\u043E\u0434\u043D\u043E\u0440\u0430\u0437\","
+    - "\"\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\","
+    - "\"\u043E\u0431\u0440\u0430\u0431\u0430\u0442\u044B\u0432\u0430\","
+    - ']'
+    - 'def _is_hygiene_context_text(text: str) -> bool:'
+    - normalized = _normalize_text(text)
+    - 'if not normalized:'
+    - return False
+    - return any(keyword in normalized for keyword in _HYGIENE_KEYWORDS)
+    - _DEFAULT_POLICY_HANDLER = {
+    - '"escalation_gate": _pack_escalation_gate,'
+    - '"service_matcher": get_pack_service_decision,'
+    - '"truth_gate": get_pack_decision,'
+    - '"price_item": get_pack_price_item,'
+    - '"price_sidecar": _pack_price_sidecar,'
+    - '}'
+    - _POLICY_HANDLERS = {
+    - '"default": _DEFAULT_POLICY_HANDLER,'
+    - '}'
+    - return resolve_policy_type(client, client_slug=client_slug)
+    - snapshot = build_policy_pack_snapshot(client, client_slug=client_slug)
+    - policy_type = snapshot.policy_type
+    - handler = _POLICY_HANDLERS.get(policy_type) or _POLICY_HANDLERS.get("default")
+    - payload["policy_pack"] = snapshot.policy_pack
+    - context_router = _context_runtime()
+    - bot_response = decision.response or MSG_ESCALATED
+    - bot_response = _combine_sidecar(bot_response, sidecar)
+    - context_router._reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - router_gate_meta = _set_router_observability(
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - normalized = _normalize_text(message_text or "")
+    - if normalized and consult_override and _contains_any(
+    - normalized, consult_override
+    - '):'
+    - router_gate_meta = _set_router_observability(
+    - _record_decision_trace(conversation, trace_payload)
+    - _update_message_decision_metadata(saved_message, meta_updates)
+    - normalized_text = _normalize_text(message_text)
+    - and _contains_any(normalized_text, explicit_keywords)
+    - and _contains_any(normalized_text, consult_override_keywords)
+    - _update_message_decision_metadata(
+    - _record_decision_trace(
+    - return MSG_ESCALATED
+- path: truffles-api/app/routers/webhook/guards.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from app.core import DialogStateService
+    - from app.logging_config import get_logger
+    - from app.routers.webhook.booking import _get_booking_context, _set_booking_context
+    - from app.routers.webhook.guard_runtime import (
+    - MSG_FACT_GUARD_CLARIFY,
+    - MSG_MUTED_LONG,
+    - MSG_MUTED_TEMP,
+    - MSG_REENGAGE_CONFIRM,
+    - MSG_REENGAGE_DECLINED,
+    - MULTI_INTENT_LABELS,
+    - SESSION_TIMEOUT_HOURS,
+    - _coerce_batch_messages,
+    - get_mute_settings,
+    - )
+    - from app.routers.webhook.booking_signal_runtime import _evaluate_booking_signal
+    - from app.routers.webhook.context_manager import (
+    - _get_context_manager,
+    - _get_conversation_context,
+    - _get_reengage_confirmation,
+    - _is_reengage_confirmation_active,
+    - _record_context_manager_decision,
+    - _reset_low_confidence_retry,
+    - _set_context_manager,
+    - _set_conversation_context,
+    - _set_reengage_confirmation,
+    - _update_compact_summary,
+    - )
+    - from app.routers.webhook.runtime_primitives import CLARIFY_MAX_ATTEMPTS, MSG_ESCALATED
+    - _record_decision_trace,
+    - _set_router_observability,
+    - from app.services.ai_service import (
+    - is_acknowledgement_message,
+    - is_low_signal_message,
+    - normalize_for_matching,
+    - )
+    - from app.services.handover_owner_service import (
+    - ActiveHandoverReuseRuntimeHooks,
+    - _reuse_active_handover,
+    - escalate_to_pending,
+    - get_active_handover,
+    - send_telegram_notification,
+    - )
+    - from app.services.intent_service import is_opt_out_message
+    - from app.services.message_service import save_message
+    - from app.services.state_machine import ConversationState
+    - from app.services.state_service import transition_state
+    - logger = get_logger("webhook")
+    - _DIALOG_STATE_SERVICE = DialogStateService()
+    - context = _get_conversation_context(conversation)
+    - _set_conversation_context(conversation, context)
+    - return _DIALOG_STATE_SERVICE.get_intent_queue(context)
+    - return _DIALOG_STATE_SERVICE.set_intent_queue(context, queue=queue)
+    - label = MULTI_INTENT_LABELS.get(intent)
+    - label = MULTI_INTENT_LABELS.get(intent)
+    - label = MULTI_INTENT_LABELS.get(intent)
+    - return _DIALOG_STATE_SERVICE.get_clarify_attempt_state(manager, intent=intent)
+    - return _DIALOG_STATE_SERVICE.set_clarify_attempt_state(
+    - manager,
+    - intent=intent,
+    - count=count,
+    - now=now,
+    - )
+    - return count >= CLARIFY_MAX_ATTEMPTS
+    - is_low_signal_message(message_text)
+    - or is_acknowledgement_message(message_text)
+    - context = _get_conversation_context(conversation)
+    - manager = _get_context_manager(context)
+    - context = _set_context_manager(context, manager)
+    - _set_conversation_context(conversation, context)
+    - _record_context_manager_decision(
+    - 'if count >= CLARIFY_MAX_ATTEMPTS:'
+    - _update_compact_summary(
+    - bot_response = MSG_ESCALATED
+    - _reset_low_confidence_retry(conversation)
+    - _, reused, telegram_sent = _reuse_active_handover(
+    - hooks=ActiveHandoverReuseRuntimeHooks(
+    - get_active_handover=get_active_handover,
+    - transition_state=transition_state,
+    - send_telegram_notification=send_telegram_notification,
+    - record_decision_trace=_record_decision_trace,
+    - ),
+    - 'elif conversation.state == ConversationState.BOT_ACTIVE.value and allow_handover:'
+    - result = escalate_to_pending(
+    - telegram_sent = send_telegram_notification(
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - '_update_message_decision_metadata(saved_message, {"clarify_limit": True})'
+    - save_message(
+    - 'if time_since_last > timedelta(hours=SESSION_TIMEOUT_HOURS):'
+    - _set_conversation_context(conversation, {})
+    - 'logger.info(f"Session reset: {time_since_last} since last message")'
+    - batch_messages = _coerce_batch_messages(message_text, batch_messages)
+    - opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
+    - booking_signal, _ = _evaluate_booking_signal(
+    - context = _get_conversation_context(conversation)
+    - booking_state = _get_booking_context(context)
+    - conversation.state == ConversationState.BOT_ACTIVE.value
+    - _record_decision_trace(conversation, trace_payload)
+    - 'if conversation.state == ConversationState.BOT_ACTIVE.value:'
+    - reengage_confirmation = _get_reengage_confirmation(context)
+    - 'if not _is_reengage_confirmation_active(reengage_confirmation, now):'
+    - context = _set_reengage_confirmation(context, None)
+    - _set_conversation_context(conversation, context)
+    - context = _set_reengage_confirmation(context, None)
+    - _set_conversation_context(conversation, context)
+    - batch_messages = _coerce_batch_messages("", stored_messages)
+    - booking_signal, _ = _evaluate_booking_signal(
+    - _record_decision_trace(
+    - context = _set_reengage_confirmation(context, None)
+    - _set_conversation_context(conversation, context)
+    - mute_first, mute_second = get_mute_settings(db, client_id)
+    - _record_decision_trace(
+    - bot_response = MSG_REENGAGE_DECLINED
+    - context = _set_reengage_confirmation(context, reengage_confirmation)
+    - _set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - bot_response = MSG_REENGAGE_CONFIRM
+    - 'if conversation.state == ConversationState.BOT_ACTIVE.value and opt_out_in_batch
+      and booking_signal:'
+    - context = _set_reengage_confirmation(context, confirmation_payload)
+    - context = _set_booking_context(context, booking_state)
+    - _set_conversation_context(conversation, context)
+    - _record_decision_trace(
+    - bot_response = MSG_REENGAGE_CONFIRM
+    - _record_decision_trace(
+    - _record_decision_trace(
+    - def _handle_post_debounce_muted_state_gate(
+    - '*,'
+    - 'conversation: Conversation,'
+    - 'message_text: str,'
+    - 'batch_messages: list[str] | None,'
+    - 'client_slug: str,'
+    - 'now: datetime,'
+    - ') -> WebhookResponse | None:'
+    - is_muted = conversation.bot_status == "muted" or (
+    - conversation.bot_muted_until and conversation.bot_muted_until > now
+    - )
+    - 'if not is_muted:'
+    - return None
+    - signal_messages = _coerce_batch_messages(message_text, batch_messages)
+    - opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
+    - booking_signal, _ = _evaluate_booking_signal(
+    - signal_messages,
+    - client_slug=client_slug,
+    - message_text=message_text,
+    - )
+    - context = _get_conversation_context(conversation)
+    - booking_active = bool(_get_booking_context(context).get("active"))
+    - reengage_confirmation = _get_reengage_confirmation(context)
+    - 'if reengage_confirmation and _is_reengage_confirmation_active(reengage_confirmation,
+      now):'
+    - conversation.bot_status = "active"
+    - conversation.bot_muted_until = None
+    - conversation.no_count = 0
+    - return None
+    - 'if (booking_signal or booking_active) and not opt_out_in_batch:'
+    - conversation.bot_status = "active"
+    - conversation.bot_muted_until = None
+    - conversation.no_count = 0
+    - return None
+    - _record_decision_trace(
+    - conversation,
+    - '{'
+    - '"stage": "routing",'
+    - '"decision": "muted_skip_after_debounce",'
+    - '"state": conversation.state,'
+    - '"booking_signal": booking_signal,'
+    - '"booking_active": booking_active,'
+    - '"opt_out_in_batch": opt_out_in_batch,'
+    - '},'
+    - )
+    - return WebhookResponse(
+    - success=True,
+    - message="Bot muted (after debounce), forwarded to topic"
+    - if conversation.telegram_topic_id
+    - else "Bot muted (after debounce)",
+    - conversation_id=conversation.id,
+    - bot_response=None,
+    - )
+    - conversation.state != ConversationState.BOT_ACTIVE.value
+    - mute_first, mute_second = get_mute_settings(db, client_id)
+    - bot_response = MSG_MUTED_TEMP
+    - bot_response = MSG_MUTED_LONG
+    - _record_decision_trace(
+    - _record_message_decision_meta(
+    - 'if conversation.state != ConversationState.BOT_ACTIVE.value:'
+    - context = _get_conversation_context(conversation)
+    - _set_conversation_context(conversation, context)
+    - router_pending_meta = _set_router_observability(
+    - _record_decision_trace(conversation, trace_payload)
+    - _record_message_decision_meta(
+    - _update_message_decision_metadata(
+    - bot_response, sent = send_and_save(MSG_FACT_GUARD_CLARIFY)
+- path: truffles-api/app/routers/webhook/dedup.py
+  status: frozen_for_new_semantic_fact_or_continuity_logic
+  added_code_policy: waiver_required
+  allowed_changes:
+  - deletion
+  - narrowing
+  - adapter_redirection
+  - trace_or_shadow_only
+  - architect_approved_waiver
+  active_waiver:
+    id: DEC-2026-03-30-freeze-baseline-reconciliation
+    scope: preexisting_branch_delta_baseline_only
+    reason: Repository already contains committed branch delta versus origin/main
+      for this frozen surface; freeze now baselines the current branch content and
+      forbids any new executable growth beyond the recorded lines.
+    opened_on: '2026-03-30'
+    expiry_trigger: remove once the frozen file is drained, deleted, or the branch
+      delta is merged and the waiver can collapse to zero.
+    allowed_executable_lines:
+    - from dataclasses import dataclass
+    - from sqlalchemy import or_, text
+    - '@dataclass(frozen=True)'
+    - 'class DuplicateMessageProbe:'
+    - 'duplicate: bool'
+    - 'backend: str'
+    - 'fallback_reason: str | None = None'
+    - 'def _is_env_enabled(value: str | None, default: bool = True) -> bool:'
+    - 'if value is None:'
+    - return default
+    - return value.strip().lower() not in {"0", "false", "no", "off"}
+    - 'def _get_debounce_settings() -> tuple[bool, float, int, str, float]:'
+    - enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+    - enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+    - test_mode = _is_env_enabled(os.environ.get("TEST_MODE"), default=False)
+    - fast_dedup = _is_env_enabled(os.environ.get("LLM_QUALITY_FAST_DEDUP"), default=False)
+    - 'def _merge_duplicate_fallback_reason(current: str | None, addition: str) ->
+      str:'
+    - 'if not current:'
+    - return addition
+    - return f"{current}+{addition}"
+    - def _lookup_duplicate_message_in_messages_table(
+    - 'db: Session,'
+    - '*,'
+    - client_id,
+    - 'message_id: str,'
+    - ') -> Message | None:'
+    - return (
+    - db.query(Message)
+    - .filter(
+    - Message.client_id == client_id,
+    - Message.role == "user",
+    - or_(
+    - Message.message_metadata["message_id"].astext == message_id,
+    - Message.message_metadata["messageId"].astext == message_id,
+    - ),
+    - )
+    - .order_by(Message.created_at.desc())
+    - .first()
+    - )
+    - def _lookup_preexisting_duplicate_message(
+    - 'db: Session,'
+    - '*,'
+    - client_id,
+    - 'message_id: str | None,'
+    - ') -> DuplicateMessageProbe:'
+    - 'if _is_fast_dedup_bypass_enabled():'
+    - return DuplicateMessageProbe(
+    - duplicate=False,
+    - backend="fast_test_bypass",
+    - fallback_reason="test_mode_fast_dedup",
+    - )
+    - 'if client_id is None or not message_id:'
+    - return DuplicateMessageProbe(duplicate=False, backend="message_dedup")
+    - fallback_reason = None
+    - 'try:'
+    - existing_dedup = db.execute(
+    - text(
+    - SELECT 1
+    - FROM message_dedup
+    - WHERE client_id = :client_id AND message_id = :message_id
+    - LIMIT 1
+    - ),
+    - '{"client_id": client_id, "message_id": message_id},'
+    - ).first()
+    - 'if existing_dedup is not None:'
+    - return DuplicateMessageProbe(
+    - duplicate=True,
+    - backend="message_dedup",
+    - )
+    - 'except Exception as exc:'
+    - fallback_reason = _merge_duplicate_fallback_reason(
+    - fallback_reason,
+    - '"message_dedup_lookup_error",'
+    - )
+    - logger.warning(
+    - '"Dedup owner message_dedup lookup failed, falling back to messages table",'
+    - extra={
+    - '"context": {'
+    - '"client_id": str(client_id),'
+    - '"message_id": message_id,'
+    - '"error": str(exc),'
+    - '}'
+    - '},'
+    - )
+    - 'try:'
+    - db.rollback()
+    - 'except Exception:'
+    - pass
+    - 'try:'
+    - duplicate = _lookup_duplicate_message_in_messages_table(
+    - db,
+    - client_id=client_id,
+    - message_id=message_id,
+    - )
+    - 'except Exception as exc:'
+    - fallback_reason = _merge_duplicate_fallback_reason(
+    - fallback_reason,
+    - '"messages_lookup_error",'
+    - )
+    - logger.warning(
+    - '"Dedup owner messages-table fallback lookup failed",'
+    - extra={
+    - '"context": {'
+    - '"client_id": str(client_id),'
+    - '"message_id": message_id,'
+    - '"error": str(exc),'
+    - '}'
+    - '},'
+    - )
+    - 'try:'
+    - db.rollback()
+    - 'except Exception:'
+    - pass
+    - return DuplicateMessageProbe(
+    - duplicate=False,
+    - backend="messages_table",
+    - fallback_reason=fallback_reason,
+    - )
+    - 'if duplicate is not None:'
+    - return DuplicateMessageProbe(
+    - duplicate=True,
+    - backend="messages_table",
+    - fallback_reason=fallback_reason,
+    - )
+    - return DuplicateMessageProbe(
+    - duplicate=False,
+    - backend="message_dedup" if fallback_reason is None else "messages_table",
+    - fallback_reason=fallback_reason,
+    - )
+    - duplicate = _lookup_duplicate_message_in_messages_table(
+    - db,
+    - client_id=client_id,
+    - message_id=message_id,
+    - from .guards import _handle_post_debounce_muted_state_gate
+    - from .trace import _record_decision_trace
+    - _record_decision_trace(
+    - batch_messages = [message.strip() for message in buffered_messages if message
+      and message.strip()]
+    - 'if not batch_messages and message_text.strip():'
+    - batch_messages = [message_text.strip()]
+    - _record_decision_trace(
+    - muted_state_response = _handle_post_debounce_muted_state_gate(
+    - conversation=conversation,
+    - message_text=message_text,
+    - batch_messages=batch_messages,
+    - client_slug=payload_client_slug,
+    - now=now,
+    - )
+    - 'if muted_state_response is not None:'
+    - return (
+    - muted_state_response,
+    - message_text,
+    - batch_messages,
+    - append_user_message,
+    - now,
+    - '"DuplicateMessageProbe",'
+    - '"_lookup_preexisting_duplicate_message",'
 proof_only_files:
-  - ops/diagnose.py
-  - scripts/booking_dialog_scenarios.py
-
+- ops/diagnose.py
+- scripts/booking_dialog_scenarios.py
 continuity_guard:
   allowed_writer_paths:
   - truffles-api/app/core/dialog_state_service.py
   guarded_tokens:
-    - expected_reply_type
-    - expected_reply_reason
-    - interaction_state
-    - pending_resume
-
-proof_guard:
-  forbidden_runtime_imports:
-    - ops.diagnose
-    - scripts.booking_dialog_scenarios
-  forbidden_test_imports:
-    - ops.diagnose
-    - scripts.booking_dialog_scenarios
-  forbidden_test_path_suffixes:
-    - diagnose.py
-    - booking_dialog_scenarios.py
-  forbidden_test_ast_exec_tokens:
-    - ast.parse(
-    - exec(compile(
-    - read_text(
-  semantic_contract_tokens:
-    - pending_question_target
-    - active_question_relation
-    - interaction_owner
-    - pending_question_contract
-    - semantic rewrite
-    - retag
+  - consultant_runtime
+  - canonical_dialog_state
+  - booking
+  - expected_reply_type
+  - expected_reply_reason
+  - current_goal
+  - service_carryover
+  - consult_context
+  - class_carryover
+  - session_memory
+  - pending_resume
+  - intent_queue
+  - last_service_hint
+  - last_service_hint_at
+  - re_entry_required
+  - handover_confirmation
+  - reengage_confirmation
+  - asr_confirm_pending
+  - asr_inflight
+  - style_reference_pending
+  - memory_profile
+  - memory_pending

@@ -30,7 +30,8 @@ Each hotspot file analysis must answer:
 2. Record the analysis in `docs/system_forensics/files/`.
 3. Update the ledgers in `docs/system_forensics/ledgers/`.
 4. Update `docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md` with any new stable conclusions.
-5. Register new document families in `STRUCTURE.md` and summarize the new forensic state in `STATE.md`.
+5. If archive synthesis/program docs now conflict with fresh deep-audit conclusions, publish an explicit contradiction review before treating the archive as governing.
+6. Register new document families in `STRUCTURE.md` and summarize the new forensic state in `STATE.md`.
 
 ## Strict Non-Goals
 - No runtime behavior fixes.
@@ -49,9 +50,11 @@ Each hotspot file analysis must answer:
 - Decision: integrate a layered architecture-forensics document system rather than a single summary file.
 
 ## Document Layers
-1. File analyses: one file, one deep document.
-2. Ledgers: cross-cut system views that aggregate multiple file analyses.
-3. Final synthesis: a single system-level guide that points back to the detailed docs.
+1. Primary deep-audit layer: fresh first-hand system-level research before any outside handoff is treated as authoritative.
+2. Executive packet scaffold: top-level docs plus the machine-readable companion for outside readers and future implementation governance.
+3. File analyses: one file, one deep document.
+4. Ledgers: cross-cut system views that aggregate multiple file analyses.
+5. Final synthesis: older deep synthesis and research/program packet that still acts as archive evidence.
 
 ## Acceptance For A Finished Analysis Block
 A forensic block is acceptable only if:

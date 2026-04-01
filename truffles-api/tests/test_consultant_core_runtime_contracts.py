@@ -20,6 +20,11 @@ from app.core import (
     DegradeBoundaryRequest,
     DialogState,
     DialogStateService,
+    FactContractV1,
+    FactManifestV1,
+    FactPlanV1,
+    FactRequestV1,
+    FactResultV1,
     PendingQuestionContract,
     PolicyDecision,
     RuntimeTraceContractV1,
@@ -30,7 +35,7 @@ from app.core import (
     TurnExecutor,
     TurnPlanner,
 )
-from app.core.consultant_runtime import ConsultantRuntime
+from app.core.consultant_runtime import ConsultantRuntime, LoadedRuntimeState
 from app.core.turn_executor import RuntimeExecutionResult
 from app.core.policy_tool_projector import build_binding_plan
 from app.services.policy_validation_boundary_service import (
@@ -119,6 +124,130 @@ def _binding_plan_payload() -> dict:
         "deny_reason_code": None,
         "degrade_reason_code": None,
         "handoff_reason_code": None,
+    }
+
+
+def _fact_manifest_payload() -> dict:
+    return {
+        "schema_version": "fact_manifest.v1",
+        "manifest_id": "default_fact_manifest.v1",
+        "namespace": "consultant_core",
+        "entries": [
+            {
+                "canonical_ref": "pricing",
+                "scope_namespace": "info",
+                "aliases": ["payment"],
+                "resolver_id": "catalog.service_query",
+                "renderer_id": "catalog.service_query.reply",
+                "provenance_sources": ["service_catalog", "pack_manifest"],
+                "companion_group_id": None,
+            },
+            {
+                "canonical_ref": "parking",
+                "scope_namespace": "info",
+                "aliases": ["parking_info"],
+                "resolver_id": "catalog.location",
+                "renderer_id": "catalog.location.reply",
+                "provenance_sources": ["branch_catalog", "pack_manifest"],
+                "companion_group_id": "location_base_bundle",
+            },
+        ],
+        "companion_groups": [
+            {
+                "group_id": "location_base_bundle",
+                "members": ["location", "hours", "parking"],
+                "requested_ref_policies": {
+                    "location": ["location", "hours"],
+                    "hours": ["location", "hours"],
+                    "parking": ["location", "hours", "parking"],
+                },
+                "composition_mode": "companion_allowed",
+                "renderer_id": "catalog.location.reply",
+                "provenance_sources": ["branch_catalog", "pack_manifest"],
+            }
+        ],
+    }
+
+
+def _fact_request_payload() -> dict:
+    return {
+        "schema_version": "fact_request.v1",
+        "manifest_id": "default_fact_manifest.v1",
+        "request_id": "fact-request-001",
+        "decision_id": "decision-001",
+        "intent": "pricing",
+        "scope_namespace": "info",
+        "requested_fact_refs": ["pricing"],
+        "requested_scopes": ["info.pricing"],
+        "supporting_pack_refs": ["pricing"],
+        "supporting_capability_refs": ["pricing"],
+        "subject_kind": "service",
+        "subject_scope": "service",
+        "resolution_mode": "policy_fact",
+        "composition_mode": "single_only",
+        "locale_hint": "ru-kz",
+        "format_hint": "concise_text",
+        "owner_source": "policy_core",
+    }
+
+
+def _fact_plan_payload() -> dict:
+    return {
+        "schema_version": "fact_plan.v1",
+        "manifest_id": "default_fact_manifest.v1",
+        "plan_id": "fact-plan-001",
+        "request_id": "fact-request-001",
+        "decision_id": "decision-001",
+        "binding_id": "binding-001",
+        "selected_tool_or_workflow_ref": "catalog.service_query",
+        "selected_resolver": "catalog.service_query",
+        "renderer_id": "catalog.service_query.reply",
+        "scope_namespace": "info",
+        "requested_fact_refs": ["pricing"],
+        "requested_scopes": ["info.pricing"],
+        "composition_mode": "single_only",
+        "allowed_emitted_sets": [["pricing"]],
+        "allowed_emitted_fact_refs": ["pricing"],
+        "allowed_emitted_scopes": ["info.pricing"],
+        "blocked_scopes": [],
+        "bundle_policy": "requested_only",
+        "scope_policy_source": "default",
+        "fallback_policy": "deny_out_of_plan",
+        "provenance_sources": ["service_catalog", "pack_manifest"],
+    }
+
+
+def _fact_result_payload() -> dict:
+    return {
+        "schema_version": "fact_result.v1",
+        "result_id": "fact-result-001",
+        "plan_id": "fact-plan-001",
+        "decision_id": "decision-001",
+        "selected_tool_or_workflow_ref": "catalog.service_query",
+        "selected_source": "tool_registry",
+        "resolution_source": "tool_registry",
+        "retrieval_mode": "resolved",
+        "renderer_id": "catalog.service_query.reply",
+        "scope_namespace": "info",
+        "emitted_fact_refs": ["pricing"],
+        "emitted_scopes": ["info.pricing"],
+        "omitted_fact_refs": [],
+        "out_of_scope_fact_refs": [],
+        "scope_verdict": "ok",
+        "response_generated": True,
+        "resolution_reason": "pricing",
+        "fallback_reason": None,
+        "provenance": ["service_catalog", "pack_manifest"],
+    }
+
+
+def _fact_contract_payload() -> dict:
+    return {
+        "schema_version": "fact_contract.v1",
+        "manifest_id": "default_fact_manifest.v1",
+        "request": _fact_request_payload(),
+        "plan": _fact_plan_payload(),
+        "result": _fact_result_payload(),
     }
 
 
@@ -520,8 +649,10 @@ def test_consultant_runtime_plan_turn_degrades_synthetic_decision_without_semant
 
     assert decision.meta["degrade_path"] is True
     assert decision.meta["reason_code"] == "planner:missing_semantic_owner"
-    assert decision.intent == "planner_missing_semantic_owner"
+    assert decision.intent == "system_control"
     assert decision.interaction.owner == "semantic_owner_guard"
+    assert decision.source == "planner_control"
+    assert decision.meta["control_label"] == "planner_missing_semantic_owner"
     assert decision.meta["missing_semantic_owner_guard"] == {
         "reason_code": "missing_semantic_owner",
         "source": "llm_policy_core",
@@ -587,7 +718,9 @@ def test_consultant_runtime_plan_turn_degrades_owner_backed_decision_without_bin
 
     assert planned.meta["degrade_path"] is True
     assert planned.meta["reason_code"] == "planner:missing_binding_plan"
-    assert planned.intent == "planner_missing_binding_plan"
+    assert planned.intent == "system_control"
+    assert planned.source == "planner_control"
+    assert planned.meta["control_label"] == "planner_missing_binding_plan"
     assert planned.meta["missing_binding_plan_guard"] == {
         "reason_code": "missing_binding_plan",
         "semantic_decision_id": semantic_decision.decision_id,
@@ -596,6 +729,207 @@ def test_consultant_runtime_plan_turn_degrades_owner_backed_decision_without_bin
     }
     assert override is not None
     assert override.reason_code == "planner:missing_binding_plan"
+
+
+def test_consultant_runtime_plan_turn_invalid_outcome_degrades_with_explicit_override() -> None:
+    runtime = ConsultantRuntime()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core_booking",
+        source="llm_policy_core",
+    )
+    decision.outcome = "UNSUPPORTED"
+
+    runtime.planner.plan = lambda **_kwargs: decision
+    runtime._build_memory_summary = lambda *_args, **_kwargs: "user: test"
+
+    planned, override = runtime._plan_turn(
+        db=None,
+        payload=SimpleNamespace(
+            client_slug="demo_salon",
+            body=SimpleNamespace(message="Хочу записаться."),
+        ),
+        prepared=SimpleNamespace(
+            conversation=SimpleNamespace(state="bot_active"),
+            branch_id=uuid4(),
+        ),
+        runtime_state=SimpleNamespace(
+            dialog_state=DialogState.model_validate(_dialog_state_payload()),
+            booking_state={},
+            expected_reply_type=None,
+            expected_reply_reason=None,
+            current_goal=None,
+        ),
+    )
+
+    assert planned.meta["degrade_path"] is True
+    assert planned.meta["reason_code"] == "planner:invalid_outcome"
+    assert planned.intent == "system_control"
+    assert planned.interaction.owner == "turn_planner"
+    assert planned.source == "planner_control"
+    assert planned.meta["control_label"] == "planner_invalid_outcome"
+    assert override is not None
+    assert override.reason_code == "planner:invalid_outcome"
+    assert override.meta == {
+        "activate_handoff": True,
+        "reply_kind": "handoff",
+        "degrade_stage": "planner",
+    }
+
+
+def test_consultant_runtime_plan_turn_preserves_explicit_boundary_handoff_on_existing_degrade_path() -> None:
+    runtime = ConsultantRuntime()
+    decision = TurnPlanner().build_controlled_degrade(
+        reason_code="planner:existing_degrade",
+        control_label="planner_existing_degrade",
+        interaction_owner="turn_planner",
+    )
+
+    runtime.planner.plan = lambda **_kwargs: decision
+    runtime._build_memory_summary = lambda *_args, **_kwargs: "user: test"
+
+    planned, override = runtime._plan_turn(
+        db=None,
+        payload=SimpleNamespace(
+            client_slug="demo_salon",
+            body=SimpleNamespace(message="Что-то пошло не так."),
+        ),
+        prepared=SimpleNamespace(
+            conversation=SimpleNamespace(state="bot_active"),
+            branch_id=uuid4(),
+        ),
+        runtime_state=SimpleNamespace(
+            dialog_state=DialogState.model_validate(_dialog_state_payload()),
+            booking_state={},
+            expected_reply_type=None,
+            expected_reply_reason=None,
+            current_goal=None,
+        ),
+    )
+
+    assert planned.meta["degrade_path"] is True
+    assert planned.meta["reason_code"] == "planner:existing_degrade"
+    assert override is not None
+    assert override.reason_code == "planner:existing_degrade"
+    assert override.meta == {
+        "activate_handoff": True,
+        "reply_kind": "handoff",
+        "degrade_stage": "planner",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation_kind", "expected_diff_key"),
+    [
+        ("intent", "intent"),
+        ("interaction_target", "interaction.target"),
+        ("shadow_pending_question", "pending_question_contract"),
+        ("shadow_semantic_frame", "semantic_frame"),
+        ("shadow_semantic_contract", "meta.semantic_contract"),
+    ],
+)
+def test_consultant_runtime_plan_turn_degrades_on_post_owner_semantic_mutation(
+    mutation_kind: str,
+    expected_diff_key: str,
+) -> None:
+    runtime = ConsultantRuntime()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "slots": {"service": "Маникюр"},
+            "capability": "booking_manage",
+            "subject_kind": "booking",
+            "resolution_mode": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+            "reason": "collect:datetime",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core_booking",
+        source="llm_policy_core",
+    )
+    if mutation_kind == "intent":
+        decision.intent = "hours"
+    elif mutation_kind == "interaction_target":
+        decision.interaction.target = "service"
+    elif mutation_kind == "shadow_pending_question":
+        decision.pending_question_contract = PendingQuestionContract(
+            expected_reply_type="time",
+            next_question="datetime",
+            open_questions=["datetime"],
+        )
+    elif mutation_kind == "shadow_semantic_frame":
+        decision.semantic_frame = SemanticFrame(
+            user_goal="booking",
+            requested_effect="commit_booking",
+            subject={"kind": "service", "value": "Маникюр"},
+        )
+    elif mutation_kind == "shadow_semantic_contract":
+        decision.meta["semantic_contract"] = {
+            "contract_version": "semantic_contract.v1",
+            "capability": "booking_manage",
+            "subject_kind": "service",
+        }
+    else:
+        raise AssertionError(f"unsupported mutation_kind: {mutation_kind}")
+
+    runtime.planner.plan = lambda **_kwargs: decision
+    runtime._build_memory_summary = lambda *_args, **_kwargs: "user: test"
+
+    planned, override = runtime._plan_turn(
+        db=None,
+        payload=SimpleNamespace(
+            client_slug="demo_salon",
+            body=SimpleNamespace(message="Хочу записаться."),
+        ),
+        prepared=SimpleNamespace(
+            conversation=SimpleNamespace(state="bot_active"),
+            branch_id=uuid4(),
+        ),
+        runtime_state=SimpleNamespace(
+            dialog_state=DialogState.model_validate(_dialog_state_payload()),
+            booking_state={},
+            expected_reply_type=None,
+            expected_reply_reason=None,
+            current_goal=None,
+        ),
+    )
+
+    assert planned.meta["degrade_path"] is True
+    assert planned.meta["reason_code"] == "planner:semantic_decision_post_owner_mutation"
+    assert planned.intent == "system_control"
+    assert planned.interaction.owner == "semantic_decision_guard"
+    assert planned.source == "planner_control"
+    assert planned.meta["control_label"] == "planner_semantic_decision_guard"
+    mutation_guard = planned.meta["semantic_mutation_guard"]
+    assert mutation_guard["reason_code"] == "semantic_decision_post_owner_mutation"
+    assert mutation_guard["semantic_decision_id"] == semantic_decision.decision_id
+    assert expected_diff_key in mutation_guard["diffs"]
+    assert override is not None
+    assert override.reason_code == "planner:semantic_decision_post_owner_mutation"
+    assert override.meta["semantic_mutation_guard"]["reason_code"] == "semantic_decision_post_owner_mutation"
+    assert expected_diff_key in override.meta["semantic_mutation_guard"]["diffs"]
 
 
 def _build_boundary_turn_result(
@@ -682,10 +1016,94 @@ def _build_owner_cutover_artifact(
 
 def test_runtime_contract_schemas_validate_example_payloads() -> None:
     _load_schema("contracts/runtime/binding_plan.v1.jsonschema").validate(_binding_plan_payload())
+    _load_schema("contracts/runtime/fact_manifest.v1.jsonschema").validate(_fact_manifest_payload())
+    _load_schema("contracts/runtime/fact_request.v1.jsonschema").validate(_fact_request_payload())
+    _load_schema("contracts/runtime/fact_plan.v1.jsonschema").validate(_fact_plan_payload())
+    _load_schema("contracts/runtime/fact_result.v1.jsonschema").validate(_fact_result_payload())
+    _load_schema("contracts/runtime/fact_contract.v1.jsonschema").validate(_fact_contract_payload())
     _load_schema("contracts/runtime/policy_decision.v1.jsonschema").validate(_policy_payload())
     _load_schema("contracts/runtime/dialog_state.v1.jsonschema").validate(_dialog_state_payload())
     _load_schema("contracts/runtime/boundary_override.v1.jsonschema").validate(_boundary_override_payload())
     _load_schema("contracts/runtime/turn_result.v1.jsonschema").validate(_turn_result_payload())
+
+
+def test_fact_plane_contract_models_validate_scope_chain() -> None:
+    fact_manifest = FactManifestV1.model_validate(_fact_manifest_payload())
+    fact_request = FactRequestV1.model_validate(_fact_request_payload())
+    fact_plan = FactPlanV1.model_validate(_fact_plan_payload())
+    fact_result = FactResultV1.model_validate(_fact_result_payload())
+    fact_contract = FactContractV1.model_validate(_fact_contract_payload())
+
+    assert fact_manifest.manifest_id == "default_fact_manifest.v1"
+    assert fact_request.requested_fact_refs == ["pricing"]
+    assert fact_request.composition_mode == "single_only"
+    assert fact_plan.allowed_emitted_fact_refs == ["pricing"]
+    assert fact_plan.allowed_emitted_sets == [["pricing"]]
+    assert fact_plan.allowed_info_sections == ["pricing"]
+    assert fact_result.emitted_fact_refs == ["pricing"]
+    assert fact_result.selected_source == "tool_registry"
+    assert fact_result.scope_verdict == "ok"
+    assert fact_contract.plan.allowed_emitted_sets == [["pricing"]]
+
+
+def test_fact_result_contract_rejects_ok_verdict_with_out_of_scope_refs() -> None:
+    with pytest.raises(PydanticValidationError):
+        FactResultV1.model_validate(
+            _fact_result_payload()
+            | {
+                "scope_verdict": "ok",
+                "out_of_scope_fact_refs": ["promotions"],
+            }
+        )
+
+
+def test_fact_result_contract_marks_unplanned_bundle_as_out_of_scope() -> None:
+    fact_plan = FactPlanV1.model_validate(
+        _fact_plan_payload()
+        | {
+            "allowed_emitted_sets": [["location", "hours"]],
+            "allowed_emitted_fact_refs": ["location", "hours"],
+            "allowed_emitted_scopes": ["info.location", "info.hours"],
+            "bundle_policy": "location_base_bundle",
+            "renderer_id": "catalog.location.reply",
+        }
+    )
+
+    fact_result = FactResultV1.build_from_runtime_payload(
+        fact_plan,
+        resolution_source="tool_registry",
+        response_text="Есть парковка и работаем до 22:00.",
+        meta={"info_sections": ["hours"]},
+    )
+
+    assert fact_result.scope_verdict == "out_of_scope"
+    assert fact_result.out_of_scope_fact_refs == ["hours"]
+
+
+def test_fact_plan_materializes_location_base_bundle_authority() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "parking",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "fact_refs": ["parking"],
+            "reason": "parking_question",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    fact_request = FactRequestV1.build_from_policy_decision(decision)
+    fact_plan = FactPlanV1.build_from_request(fact_request, decision=decision)
+
+    assert fact_request.requested_fact_refs == ["parking"]
+    assert fact_request.composition_mode == "companion_allowed"
+    assert fact_plan.bundle_policy == "location_base_bundle"
+    assert fact_plan.allowed_emitted_sets == [["parking"]]
+    assert fact_plan.allowed_emitted_fact_refs == ["parking"]
+    assert fact_plan.allowed_emitted_scopes == ["info.parking"]
 
 
 def test_policy_decision_schema_requires_binding_plan_for_semantic_decision() -> None:
@@ -768,7 +1186,7 @@ def test_runtime_core_scaffolding_round_trips_contract_payloads() -> None:
     assert result.schema_version == "turn_result.v1"
     assert result.contract_status == "degraded"
     assert result.dialog_state.interaction_state.interaction_owner == "booking_time_followup"
-    assert result.reply.reply_kind == "collect"
+    assert result.reply.reply_kind == "handoff"
 
 
 def test_turn_planner_builds_binding_plan_for_owner_backed_decision() -> None:
@@ -1153,6 +1571,80 @@ def test_policy_decision_schema_rejects_owner_backed_populated_shadow_carriers()
         )
 
 
+def test_policy_decision_schema_rejects_owner_backed_meta_semantic_contract_only() -> None:
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "policy_collect",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    decision.meta["semantic_contract"] = {
+        "contract_version": "semantic_contract.v1",
+        "capability": "bookability",
+        "subject_kind": "service",
+    }
+
+    with pytest.raises(ValidationError):
+        _load_schema("contracts/runtime/policy_decision.v1.jsonschema").validate(
+            decision.model_dump(mode="json")
+        )
+
+
+def test_policy_decision_schema_rejects_owner_backed_populated_semantic_frame() -> None:
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "policy_collect",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    decision.semantic_frame = SemanticFrame(
+        user_goal="booking",
+        requested_effect="collect_missing_input",
+        continuation={"next_question": "datetime"},
+    )
+
+    with pytest.raises(ValidationError):
+        _load_schema("contracts/runtime/policy_decision.v1.jsonschema").validate(
+            decision.model_dump(mode="json")
+        )
+
+
 def test_boundary_validator_builds_typed_block_override() -> None:
     boundary = BoundaryValidator()
 
@@ -1200,11 +1692,29 @@ def test_boundary_validator_strips_semantic_meta_from_override() -> None:
     }
 
 
+def test_boundary_validator_strips_non_boundary_reply_kind_override() -> None:
+    boundary = BoundaryValidator()
+
+    override = boundary.build_degrade_override(
+        reason_code="runtime_exception",
+        public_message="Fallback response skipped",
+        trace_message="reasoning_core exception degraded through new core",
+        meta={
+            "reply_kind": "fact",
+            "activate_handoff": True,
+        },
+    )
+
+    assert override.meta == {
+        "activate_handoff": True,
+    }
+
+
 def test_boundary_validator_validate_normalizes_override_surface() -> None:
     boundary = BoundaryValidator()
     decision = TurnPlanner().build_controlled_degrade(
         reason_code="runtime_exception",
-        intent="runtime_error",
+        control_label="runtime_error",
         interaction_owner="reasoning_core_exception_degrade",
         interaction_relation="runtime_exception",
     )
@@ -1232,7 +1742,7 @@ def test_turn_executor_builds_typed_block_boundary_turn_result() -> None:
     boundary = BoundaryValidator()
     decision = planner.build_preflight_reject(
         reason_code="missing_remote_jid",
-        intent="missing_remote_jid",
+        control_label="missing_remote_jid",
         interaction_owner="reasoning_core_missing_remote_jid",
         interaction_relation="missing_remote_jid",
     )
@@ -1267,7 +1777,7 @@ def test_turn_executor_builds_typed_degrade_boundary_turn_result() -> None:
     boundary = BoundaryValidator()
     decision = planner.build_controlled_degrade(
         reason_code="runtime_exception",
-        intent="runtime_error",
+        control_label="runtime_error",
         interaction_owner="reasoning_core_exception_degrade",
         interaction_relation="runtime_exception",
     )
@@ -1308,7 +1818,7 @@ def test_turn_executor_builds_typed_block_boundary_artifact() -> None:
     boundary = BoundaryValidator()
     decision = planner.build_preflight_reject(
         reason_code="missing_remote_jid",
-        intent="missing_remote_jid",
+        control_label="missing_remote_jid",
         interaction_owner="reasoning_core_missing_remote_jid",
         interaction_relation="missing_remote_jid",
     )
@@ -1339,7 +1849,7 @@ def test_turn_executor_builds_typed_degrade_boundary_artifact() -> None:
     boundary = BoundaryValidator()
     decision = planner.build_controlled_degrade(
         reason_code="runtime_exception",
-        intent="runtime_error",
+        control_label="runtime_error",
         interaction_owner="reasoning_core_exception_degrade",
         interaction_relation="runtime_exception",
     )
@@ -1370,7 +1880,7 @@ def test_turn_executor_builds_typed_block_boundary_artifact_from_request() -> No
     artifact = TurnExecutor().build_block_boundary_artifact_from_request(
         request=BlockBoundaryRequest(
             reason_code="missing_remote_jid",
-                intent="missing_remote_jid",
+            intent="missing_remote_jid",
             interaction_owner="reasoning_core_missing_remote_jid",
             interaction_relation="missing_remote_jid",
             trace_message="reasoning_core blocked inbound without metadata.remoteJid",
@@ -1391,15 +1901,18 @@ def test_turn_executor_builds_typed_block_boundary_artifact_from_request() -> No
     assert artifact.turn_result.boundary_override is not None
     assert artifact.turn_result.boundary_override.reason_code == "missing_remote_jid"
     assert artifact.turn_result.dialog_state.meta["block_path"] is True
+    assert artifact.turn_result.policy_decision.intent == "system_control"
+    assert artifact.turn_result.policy_decision.meta["control_label"] == "missing_remote_jid"
     assert artifact.turn_outcome.tool_action == "preflight.missing_remote_jid"
     assert artifact.turn_outcome.meta["preflight_path"] is True
+    assert artifact.turn_outcome.meta["control_label"] == "missing_remote_jid"
 
 
 def test_turn_executor_builds_typed_degrade_boundary_artifact_from_request() -> None:
     artifact = TurnExecutor().build_degrade_boundary_artifact_from_request(
         request=DegradeBoundaryRequest(
             reason_code="runtime_exception",
-                intent="runtime_error",
+            intent="runtime_error",
             interaction_owner="reasoning_core_exception_degrade",
             interaction_relation="runtime_exception",
             public_message="Fallback response skipped",
@@ -1421,8 +1934,11 @@ def test_turn_executor_builds_typed_degrade_boundary_artifact_from_request() -> 
     assert artifact.turn_result.boundary_override is not None
     assert artifact.turn_result.boundary_override.reason_code == "runtime_exception"
     assert artifact.turn_result.dialog_state.meta["degrade_path"] is True
+    assert artifact.turn_result.policy_decision.intent == "system_control"
+    assert artifact.turn_result.policy_decision.meta["control_label"] == "runtime_error"
     assert artifact.turn_outcome.tool_action == "handoff"
     assert artifact.turn_outcome.meta["degrade_path"] is True
+    assert artifact.turn_outcome.meta["control_label"] == "runtime_error"
     assert artifact.turn_outcome.observability.transport_reason == "fallback_send_failed"
 
 
@@ -1875,24 +2391,7 @@ def test_turn_executor_semantic_decision_emits_enrichment_only_meta() -> None:
 
     assert "semantic_contract" not in result.meta
     assert "pending_question_contract" not in result.meta
-    assert result.meta["semantic_enrichment"] == {
-        "referents": {
-            "service": {
-                "value": "Маникюр",
-                "entity_id": "svc:manicure",
-                "entity_type": "service",
-                "source_ref": "memory",
-            }
-        },
-        "entity_refs": [
-            {
-                "entity_id": "svc:manicure",
-                "entity_type": "service",
-                "source_ref": "memory",
-                "value": "Маникюр",
-            }
-        ],
-    }
+    assert "semantic_enrichment" not in result.meta
 
 
 def test_turn_executor_routes_master_query_through_master_catalog() -> None:
@@ -2131,6 +2630,7 @@ def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_regis
     assert captured["service_query"] == "маникюр"
     assert captured["tool_args"] == {"service_query": "маникюр"}
     assert captured["info_sections_hint"] == ["promotions"]
+    assert captured["allowed_fact_refs"] == ["promotions"]
     assert result.text == "Официальные акции: первое посещение 10%."
     assert result.tool_decision == "promotions"
     assert result.tool_action == "catalog.service_query"
@@ -2218,6 +2718,7 @@ def test_turn_executor_uses_binding_plan_for_owner_backed_fact_execution(monkeyp
 
     assert captured["tool_action"] == "catalog.service_query"
     assert captured["tool_args"] == {"service_query": "Маникюр"}
+    assert captured["allowed_fact_refs"] == ["pricing"]
     assert result.tool_action == "catalog.service_query"
     assert result.tool_decision == "pricing"
     projection = result.meta["tool_execution_projection"]
@@ -2225,6 +2726,429 @@ def test_turn_executor_uses_binding_plan_for_owner_backed_fact_execution(monkeyp
     assert projection["binding_id"] == "binding-owner-pricing"
     assert projection["tool_action"] == "catalog.service_query"
     assert projection["service_query"] == "Маникюр"
+    assert result.meta["fact_manifest_id"] == "default_fact_manifest.v1"
+    assert result.meta["fact_requested_refs"] == ["pricing"]
+    assert result.meta["fact_allowed_refs"] == ["pricing"]
+    assert result.meta["fact_allowed_sets"] == [["pricing"]]
+    assert result.meta["fact_emitted_refs"] == ["pricing"]
+    fact_contract = result.meta["fact_contract"]
+    assert fact_contract["manifest_id"] == "default_fact_manifest.v1"
+    assert fact_contract["request"]["requested_fact_refs"] == ["pricing"]
+    assert fact_contract["plan"]["allowed_emitted_fact_refs"] == ["pricing"]
+    assert fact_contract["plan"]["allowed_emitted_sets"] == [["pricing"]]
+    assert fact_contract["result"]["emitted_fact_refs"] == ["pricing"]
+    assert fact_contract["result"]["scope_verdict"] == "ok"
+
+
+def test_turn_executor_rejects_out_of_plan_tool_fact_scope(monkeypatch) -> None:
+    def _execute_tool_action(db, **kwargs):
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Есть акция 10%.",
+            error_code=None,
+            decision_meta={
+                "tool_action": kwargs["tool_action"],
+                "tool_decision": "promotions",
+                "info_sections": ["promotions"],
+            },
+            trace={"stage": "tool_registry", "decision": "promotions"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.get_pack_decision",
+        lambda *args, **kwargs: SimpleNamespace(response="", intent=None, meta={}, action="reply"),
+    )
+
+    planner = TurnPlanner()
+    semantic_payload = build_test_semantic_decision_payload(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action_hint": "catalog.service_query",
+            "slots": {"service": "Маникюр"},
+            "reason": "pricing_question",
+            "subject_kind": "service",
+            "capability": "pricing",
+            "resolution_mode": "policy_fact",
+        }
+    )
+    binding_payload = {
+        "schema_version": "binding_plan.v1",
+        "binding_id": "binding-owner-pricing",
+        "decision_id": semantic_payload["decision_id"],
+        "binding_outcome_type": "tool_call",
+        "capability_id": "pricing",
+        "selected_tool_or_workflow_ref": "catalog.service_query",
+        "authz_scope": {},
+        "resolved_args": {"service_query": "Маникюр"},
+        "timeout_policy": {},
+        "retry_policy": {},
+        "idempotency_key": semantic_payload["decision_id"],
+        "deny_reason_code": None,
+        "degrade_reason_code": None,
+        "handoff_reason_code": None,
+    }
+    decision = planner._build_policy_core_decision(
+        semantic_payload,
+        binding_plan_payload=binding_payload,
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Сколько стоит маникюр?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == "Я уточню это для вас."
+    assert result.tool_decision == "info_ref_unresolved"
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "policy_info_unresolved"
+    assert result.meta["fact_scope_violations"] == [
+        {
+            "resolution_source": "tool_registry",
+            "out_of_scope_fact_refs": ["promotions"],
+        }
+    ]
+    assert result.meta["fact_requested_refs"] == ["pricing"]
+    assert result.meta["fact_allowed_refs"] == ["pricing"]
+    assert result.meta["fact_emitted_refs"] == []
+    assert result.meta["fact_contract"]["result"]["scope_verdict"] == "empty"
+
+
+def test_tool_registry_catalog_service_query_blocks_out_of_plan_fact_reply(monkeypatch) -> None:
+    from app.services import tool_registry_service
+
+    branch = SimpleNamespace(booking_settings={}, client_id=uuid4(), id=uuid4())
+    monkeypatch.setattr(tool_registry_service, "_resolve_branch", lambda db, branch_id: branch)
+    monkeypatch.setattr(
+        tool_registry_service,
+        "resolve_tool_protocol_decision",
+        lambda tool_action: SimpleNamespace(
+            allowed=True,
+            reason=None,
+            source="test",
+            enforcement_enabled=True,
+            deny_by_default=False,
+        ),
+    )
+    monkeypatch.setattr(
+        tool_registry_service,
+        "resolve_tool_certification_decision",
+        lambda db, tool_action, scope: SimpleNamespace(
+            allowed=True,
+            reason=None,
+            source="test",
+            registry_status="ready",
+            certification_status="ready",
+            health_status="ready",
+            allowed_scopes=[],
+        ),
+    )
+    monkeypatch.setattr(
+        tool_registry_service,
+        "_detect_promotion_intent",
+        lambda normalized, client_slug=None: "promotions",
+    )
+    monkeypatch.setattr(
+        tool_registry_service,
+        "format_reply_from_truth",
+        lambda *args, **kwargs: "Есть акция 10%.",
+    )
+
+    result = tool_registry_service.execute_tool_action(
+        object(),
+        tool_action="catalog.service_query",
+        tool_args={},
+        conversation_id=None,
+        branch_id=uuid4(),
+        client_slug="demo_salon",
+        service_query=None,
+        info_sections_hint=["promotions"],
+        message_text="Есть ли акции?",
+        expected_reply_type=None,
+        now=datetime.now(timezone.utc),
+        allowed_fact_refs=["pricing"],
+    )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.response_text is None
+    assert result.error_code == "fact_scope_not_allowed"
+    assert result.decision_meta["tool_decision"] == "fact_scope_not_allowed"
+
+
+def test_turn_executor_first_fact_family_reroutes_stale_service_query_binding(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _execute_tool_action(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Работаем ежедневно с 10:00 до 20:00.",
+            error_code=None,
+            decision_meta={
+                "tool_action": kwargs["tool_action"],
+                "tool_decision": "hours",
+                "info_sections": ["hours"],
+            },
+            trace={"stage": "tool_registry", "decision": "hours"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "tool_args": {"service_query": "маникюр"},
+            "pack_refs": ["hours"],
+            "fact_refs": ["hours"],
+            "slots": {"service": "маникюр"},
+            "reason": "hours_lookup",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="До скольки вы сегодня работаете?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert captured["tool_action"] == "catalog.location"
+    assert captured["tool_args"] == {}
+    assert captured["allowed_fact_refs"] == ["hours"]
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "hours"
+    projection = result.meta["tool_execution_projection"]
+    assert projection["projection_source"] == "binding_plan.v1"
+    assert projection["tool_action"] == "catalog.location"
+    assert projection["fact_family_cutover"] == "location_hours_parking"
+    assert projection["fact_family_bundle_policy"] == "location_base_bundle"
+    assert "service_query" not in projection
+    assert result.meta["fact_manifest_id"] == "default_fact_manifest.v1"
+    assert result.meta["fact_requested_refs"] == ["hours"]
+    assert result.meta["fact_allowed_refs"] == ["hours"]
+    assert result.meta["fact_allowed_sets"] == [["hours"]]
+    assert result.meta["fact_emitted_refs"] == ["hours"]
+    fact_contract = result.meta["fact_contract"]
+    assert fact_contract["plan"]["bundle_policy"] == "location_base_bundle"
+    assert fact_contract["plan"]["allowed_emitted_sets"] == [["hours"]]
+    assert fact_contract["result"]["emitted_fact_refs"] == ["hours"]
+
+
+def test_turn_executor_first_fact_family_blocks_direct_truth_and_pack_bypass(monkeypatch) -> None:
+    calls = {"direct_truth": 0, "pack_runtime": 0}
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        lambda db, **kwargs: SimpleNamespace(
+            handled=False,
+            ok=False,
+            response_text=None,
+            error_code=None,
+            decision_meta={},
+            trace={},
+        ),
+    )
+
+    def _format_reply_from_truth(*args, **kwargs):
+        calls["direct_truth"] += 1
+        return "Есть парковка рядом с салоном."
+
+    def _get_pack_decision(*args, **kwargs):
+        calls["pack_runtime"] += 1
+        return SimpleNamespace(
+            response="Есть парковка рядом с салоном.",
+            intent="parking",
+            meta={"info_sections": ["parking"]},
+            action="reply",
+        )
+
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.format_reply_from_truth",
+        _format_reply_from_truth,
+    )
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.get_pack_decision",
+        _get_pack_decision,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "parking",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["parking"],
+            "fact_refs": ["parking"],
+            "reason": "parking_question",
+            "goal": "info",
+            "capability": "parking",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="У вас есть парковка?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == {"direct_truth": 0, "pack_runtime": 0}
+    assert result.text == "Я уточню это для вас."
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "fact_family_unresolved"
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "first_fact_family_cutover_unresolved"
+    assert result.meta["fact_family_cutover"] == "location_hours_parking"
+    assert result.meta["required_tool_action"] == "catalog.location"
+    assert result.meta["fact_manifest_id"] == "default_fact_manifest.v1"
+    assert result.meta["fact_requested_refs"] == ["parking"]
+    assert result.meta["fact_allowed_refs"] == ["parking"]
+    assert result.meta["fact_allowed_sets"] == [["parking"]]
+    assert result.meta["fact_emitted_refs"] == []
+
+
+def test_turn_executor_first_fact_family_blocks_mixed_scope_direct_truth_and_pack_bypass(monkeypatch) -> None:
+    calls = {"direct_truth": 0, "pack_runtime": 0}
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        lambda db, **kwargs: SimpleNamespace(
+            handled=False,
+            ok=False,
+            response_text=None,
+            error_code=None,
+            decision_meta={},
+            trace={},
+        ),
+    )
+
+    def _format_reply_from_truth(*args, **kwargs):
+        calls["direct_truth"] += 1
+        return "Адрес: Абая 10."
+
+    def _get_pack_decision(*args, **kwargs):
+        calls["pack_runtime"] += 1
+        return SimpleNamespace(
+            response="Адрес: Абая 10.",
+            intent="location",
+            meta={"info_sections": ["location"]},
+            action="reply",
+        )
+
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.format_reply_from_truth",
+        _format_reply_from_truth,
+    )
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.get_pack_decision",
+        _get_pack_decision,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "other",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["parking", "promotions"],
+            "fact_refs": ["parking", "promotions"],
+            "reason": "mixed_scope_question",
+            "goal": "info",
+            "capability": "parking",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Подскажите парковку и акции.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == {"direct_truth": 0, "pack_runtime": 0}
+    assert result.text == "Я уточню это для вас."
+    assert result.tool_decision == "fact_family_unresolved"
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "first_fact_family_mixed_scope_unresolved"
+    assert result.meta["fact_family_cutover"] == "location_hours_parking"
+    assert result.meta["family_overlap_fact_refs"] == ["parking"]
+    assert result.meta["fact_requested_refs"] == ["parking", "promotions"]
+    assert result.meta["fact_allowed_refs"] == ["parking", "promotions"]
+    assert result.meta["fact_emitted_refs"] == []
+
+
+def test_tool_registry_catalog_location_does_not_reinfer_parking_outside_allowed_scope(monkeypatch) -> None:
+    from app.services import tool_registry_service
+
+    monkeypatch.setattr(tool_registry_service, "_resolve_branch", lambda db, branch_id: None)
+
+    result = tool_registry_service.execute_tool_action(
+        object(),
+        tool_action="catalog.location",
+        tool_args={},
+        conversation_id=None,
+        branch_id=None,
+        client_slug="demo_salon",
+        service_query=None,
+        info_sections_hint=["location", "hours"],
+        message_text="У вас есть парковка?",
+        expected_reply_type=None,
+        now=datetime.now(timezone.utc),
+        allowed_fact_refs=["location", "hours"],
+    )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "parking" not in (result.decision_meta.get("info_sections") or [])
 
 
 def test_turn_executor_routes_owner_backed_collect_by_binding_outcome(monkeypatch) -> None:
@@ -2522,7 +3446,7 @@ def test_turn_executor_ignores_stale_compat_control_fields_when_binding_tool_cal
 def test_turn_executor_routes_degrade_binding_even_when_outcome_is_stale_fact() -> None:
     decision = TurnPlanner().build_controlled_degrade(
         reason_code="planner_timeout",
-        intent="planner_timeout",
+        control_label="planner_timeout",
         interaction_owner="turn_planner",
     )
     decision.outcome = "FACT"
@@ -2657,6 +3581,7 @@ def test_turn_executor_projects_policy_info_refs_into_catalog_execution(monkeypa
 
     assert captured["tool_action"] == "catalog.service_query"
     assert captured["info_sections_hint"] == ["promotions"]
+    assert captured["allowed_fact_refs"] == ["promotions"]
     assert result.tool_action == "catalog.service_query"
     assert result.tool_decision == "promotions"
     assert result.text == "Официальные акции: первое посещение 10%."
@@ -2795,12 +3720,11 @@ def test_turn_executor_uses_governed_logical_info_tool_candidates_without_echo(m
     assert captured
     assert captured[0][0] == "catalog.service_query"
     assert captured[0][1]["service_query"] == "маникюр"
-    assert result.tool_action == "catalog.service_query"
-    assert result.tool_decision == "promotions"
-    assert result.text == "Официальные акции: первое посещение 10%."
-    assert result.meta.get("logical_info_resolution") is True
-    assert result.meta.get("logical_info_resolution_source") == "tool_registry_policy_candidates"
-    assert result.meta.get("info_sections") == ["promotions"]
+    assert result.tool_action == "info"
+    assert result.tool_decision == "info_ref_unresolved"
+    assert result.text == "Я уточню это для вас."
+    assert result.meta.get("fact_fallback_reason") == "policy_info_unresolved"
+    assert result.meta.get("policy_info_refs") == ["other", "bookability"]
 
 
 def test_turn_executor_projects_specialist_referent_into_tool_args(monkeypatch) -> None:
@@ -3094,6 +4018,49 @@ def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(m
     assert result.tool_decision == "price_query"
 
 
+def test_turn_executor_pricing_fact_uses_public_pack_runtime_seam_without_adapter_runtime_fallback(
+    monkeypatch,
+) -> None:
+    def _runtime_pack_decision(*_args, **_kwargs):
+        raise AssertionError("default adapter fallback should stay unused on the active pricing seam")
+
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service._runtime_get_pack_decision",
+        _runtime_pack_decision,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "fact_refs": ["pricing"],
+            "reason": "pricing_question",
+            "goal": "info",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Сколько стоит маникюр?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.tool_decision == "price_query"
+    assert "маникюр" in (result.text or "").lower()
+    semantic_contract = result.meta.get("semantic_contract") or {}
+    assert semantic_contract.get("referents", {}).get("service", {}).get("value") == "Маникюр"
+
+
 def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> None:
     def _get_pack_decision(query_text: str, client_slug: str | None = None):
         assert query_text == "Сколько стоит маникюр?"
@@ -3279,10 +4246,11 @@ def test_turn_executor_does_not_use_truth_semantic_fallback_when_pack_misses(mon
 
     assert result.text == "Я уточню это для вас."
     assert result.tool_decision == "fact_unresolved"
-    assert result.meta == {
-        "fact_fallback": True,
-        "fact_fallback_reason": "fact_execution_unresolved",
-    }
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "fact_execution_unresolved"
+    assert result.meta["fact_allowed_refs"] == ["promotions"]
+    assert result.meta["fact_allowed_sets"] == [["promotions"]]
+    assert result.meta["fact_emitted_refs"] == []
 
 
 def test_consultant_runtime_records_question_contract_trace_entries() -> None:
@@ -3490,7 +4458,7 @@ def test_consultant_runtime_trace_emits_reason_code_for_controlled_degrade() -> 
     runtime = ConsultantRuntime()
     decision = TurnPlanner().build_controlled_degrade(
         reason_code="planner:invalid_schema",
-        intent="planner_degrade",
+        control_label="planner_degrade",
         interaction_owner="turn_planner_degrade",
     )
     dialog_state = DialogState.model_validate({"meta": {"current_goal": "booking"}})
@@ -3517,17 +4485,28 @@ def test_consultant_runtime_trace_emits_reason_code_for_controlled_degrade() -> 
     assert any(
         entry.get("stage") == "consultant_runtime"
         and entry.get("reason_code") == "planner:invalid_schema"
+        and entry.get("control_label") == "planner_degrade"
         for entry in trace
     )
+    runtime_entries = [
+        entry for entry in trace if entry.get("stage") == "consultant_runtime"
+    ]
+    assert runtime_entries
+    assert all("semantic_contract" not in entry for entry in runtime_entries)
+    assert all("pending_question_contract" not in entry for entry in runtime_entries)
     decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
     assert decision_meta.get("reason_code") == "planner:invalid_schema"
+    assert decision_meta.get("intent") == "system_control"
+    assert decision_meta.get("control_label") == "planner_degrade"
+    assert "semantic_contract" not in decision_meta
+    assert "pending_question_contract" not in decision_meta
 
 
 def test_consultant_runtime_trace_records_policy_core_causal_bundle() -> None:
     runtime = ConsultantRuntime()
     decision = TurnPlanner().build_controlled_degrade(
         reason_code="planner:invalid_schema",
-        intent="planner_degrade",
+        control_label="planner_degrade",
         interaction_owner="turn_planner_degrade",
     )
     decision.meta["earliest_failed_stage"] = "policy_core"
@@ -3621,6 +4600,264 @@ def test_consultant_runtime_write_runtime_state_persists_semantic_runtime_path()
     )
 
     assert updated_context["consultant_runtime"]["semantic_runtime_path"] == "consultant_core_v2"
+
+
+def test_consultant_runtime_write_runtime_state_projects_touched_slice_class_carryover() -> None:
+    runtime = ConsultantRuntime()
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "fact_refs": ["hours"],
+            "reason": "hours_lookup",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    updated_context, dialog_state = runtime._write_runtime_state(
+        prepared=SimpleNamespace(),
+        runtime_state=SimpleNamespace(
+            context={
+                "context_manager": {
+                    "message_count": 7,
+                    "canonical_dialog_state": {
+                        "owner_id": "context_manager.dialog_state.v1",
+                        "version": "v1",
+                    },
+                }
+            },
+            dialog_state=DialogState.model_validate({}),
+            booking_state={},
+        ),
+        decision=decision,
+        execution=SimpleNamespace(
+            meta={
+                "fact_family_cutover": "location_hours_parking",
+                "info_sections": ["address", "hours"],
+                "fact_emitted_refs": ["location", "hours"],
+            },
+            clear_booking=False,
+            tool_decision="location_bundle",
+        ),
+        now=datetime.now(timezone.utc),
+    )
+
+    expected = {
+        "class": "info_bundle",
+        "intents": ["location", "hours"],
+        "info_sections": ["address", "hours"],
+        "message_count": 7,
+        "ttl": 4,
+    }
+
+    assert dialog_state.meta["class_carryover"] == expected
+    assert updated_context["context_manager"]["class_carryover"] == expected
+    assert updated_context["context_manager"]["canonical_dialog_state"]["meta"]["class_carryover"] == expected
+
+
+def test_consultant_runtime_write_runtime_state_reprojects_compatibility_continuity_from_canonical_runtime_state() -> None:
+    runtime = ConsultantRuntime()
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "goal": "booking",
+            "reason": "collect_datetime",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="ask_about_requested_slot",
+        source="llm_policy_core",
+    )
+
+    updated_context, dialog_state = runtime._write_runtime_state(
+        prepared=SimpleNamespace(),
+        runtime_state=SimpleNamespace(
+            context={
+                "context_manager": {
+                    "message_count": 4,
+                    "current_goal": "handoff",
+                    "canonical_dialog_state": {
+                        "owner_id": "context_manager.dialog_state.v1",
+                        "version": "v1",
+                        "pending_question_contract": {
+                            "expected_reply_type": "name",
+                            "reason": "stale_projection",
+                            "next_question": "name",
+                            "open_questions": ["name"],
+                        },
+                    },
+                },
+                "expected_reply_type": "name",
+                "expected_reply_reason": "stale_projection",
+                "current_goal": "handoff",
+                "session_memory": {
+                    "active_goal": "handoff",
+                    "pending_question_contract": {
+                        "expected_reply_type": "name",
+                        "reason": "stale_projection",
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                    },
+                },
+            },
+            dialog_state=DialogState.model_validate({}),
+            booking_state={},
+        ),
+        decision=decision,
+        execution=SimpleNamespace(
+            meta={},
+            clear_booking=False,
+            tool_decision="datetime",
+        ),
+        now=datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc),
+    )
+
+    expected_pending_question = {
+        "expected_reply_type": "time",
+        "reason": "collect_datetime",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+
+    assert "expected_reply_type" not in updated_context
+    assert "expected_reply_reason" not in updated_context
+    assert "current_goal" not in updated_context
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == expected_pending_question
+    assert updated_context["context_manager"]["current_goal"] == "booking"
+    assert (
+        updated_context["context_manager"]["canonical_dialog_state"]["pending_question_contract"]
+        == expected_pending_question
+    )
+    assert updated_context["session_memory"]["active_goal"] == "booking"
+    assert updated_context["session_memory"]["pending_question_contract"] == expected_pending_question
+
+
+def test_consultant_runtime_control_turn_gate_does_not_claim_first_fact_family_question() -> None:
+    runtime = ConsultantRuntime()
+    runtime_state = SimpleNamespace(context={}, dialog_state=DialogState.model_validate({}), booking_state={})
+
+    response, returned_state = runtime._handle_control_turn(
+        object(),
+        payload=SimpleNamespace(body=SimpleNamespace(message="До скольки вы сегодня работаете?")),
+        prepared=SimpleNamespace(),
+        runtime_state=runtime_state,
+        now=datetime(2026, 3, 30, 14, 0, tzinfo=timezone.utc),
+        enqueue_only=False,
+        skip_persist=False,
+    )
+
+    assert response is None
+    assert returned_state is runtime_state
+
+
+def test_consultant_runtime_control_turn_reset_records_control_only_metadata() -> None:
+    runtime = ConsultantRuntime()
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        channel="whatsapp",
+        context={"session_memory": {"active_goal": "booking"}},
+    )
+    user_message = SimpleNamespace(message_metadata={})
+    bot_response = SimpleNamespace(message_metadata={})
+    loaded_state = SimpleNamespace(
+        context=conversation.context,
+        dialog_state=DialogState.model_validate({}),
+        booking_state={},
+    )
+
+    runtime._load_runtime_state = lambda *_args, **_kwargs: loaded_state
+    runtime._send_and_persist_reply = lambda *args, **kwargs: bot_response
+
+    response, _returned_state = runtime._handle_control_turn(
+        object(),
+        payload=SimpleNamespace(body=SimpleNamespace(message="новый вопрос")),
+        prepared=SimpleNamespace(conversation=conversation, user_message=user_message),
+        runtime_state=loaded_state,
+        now=datetime(2026, 3, 31, 12, 0, tzinfo=timezone.utc),
+        enqueue_only=False,
+        skip_persist=False,
+    )
+
+    assert response is not None
+    expected_meta = {
+        "source": "consultant_runtime",
+        "control_action": "session_reset",
+        "control_reason": "explicit_reset",
+        "control_source": "session_memory",
+        "session_memory_reset": "explicit_reset",
+    }
+    assert user_message.message_metadata["decision_meta"] == expected_meta
+    assert bot_response.message_metadata["decision_meta"] == expected_meta
+    assert "action" not in expected_meta
+    assert "intent" not in expected_meta
+    assert "outcome" not in expected_meta
+
+
+def test_consultant_runtime_reset_runtime_context_clears_touched_slice_carryover() -> None:
+    runtime = ConsultantRuntime()
+    conversation = SimpleNamespace(
+        context={
+            "context_manager": {
+                "message_count": 7,
+                "class_carryover": {
+                    "class": "info_bundle",
+                    "message_count": 7,
+                    "ttl": 4,
+                },
+                "canonical_dialog_state": {
+                    "owner_id": "context_manager.dialog_state.v1",
+                    "version": "v1",
+                    "meta": {
+                        "class_carryover": {
+                            "class": "info_bundle",
+                            "message_count": 7,
+                            "ttl": 4,
+                        }
+                    },
+                },
+            },
+            "session_memory": {"active_goal": "info"},
+        }
+    )
+
+    snapshot = runtime._reset_runtime_context(
+        conversation,
+        now=datetime(2026, 3, 30, 14, 0, tzinfo=timezone.utc),
+        reason="explicit_reset",
+    )
+
+    assert snapshot["active_goal"] == "info"
+    assert "session_memory" not in conversation.context
+    assert conversation.context["context_manager"] == {
+        "message_count": 7,
+        "canonical_dialog_state": {
+            "owner_id": "context_manager.dialog_state.v1",
+            "version": "v1",
+            "current_referents": {},
+        },
+    }
 
 
 def test_consultant_runtime_trace_prefers_policy_core_semantic_contract_over_runtime_projection() -> None:
@@ -3819,6 +5056,396 @@ def test_turn_executor_omits_empty_pending_question_contract_from_execution_meta
     )
 
     assert TurnExecutor._build_execution_pending_question_contract(decision) is None
+
+
+def test_turn_executor_realizes_consult_media_followup_on_owner_path() -> None:
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "consult",
+            "action": "collect",
+            "tool_action": "consult",
+            "goal": "consult",
+            "reason": "user_offers_photos_for_style_reference",
+            "capability": "consultation",
+            "pack_refs": ["style_reference"],
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Я могу прислать фото своих ногтей.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime(2026, 3, 30, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert result.text == "Пришлите, пожалуйста, фото-пример желаемого результата."
+    assert result.tool_action == "collect"
+    assert result.tool_decision == "media"
+    assert result.meta["next_slot"] == "media"
+
+
+def test_dialog_state_service_projects_booking_resume_contract_for_active_media_followup() -> None:
+    resume_contract = DialogStateService().project_interrupt_resume_pending_question_contract(
+        {
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+        },
+        current_goal="booking",
+        booking_payload={"service": "Маникюр"},
+    )
+
+    assert resume_contract == {
+        "expected_reply_type": "time",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+    }
+
+
+def test_consultant_runtime_exposes_resume_contract_for_active_media_followup() -> None:
+    planner = TurnPlanner()
+    runtime = ConsultantRuntime()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "consult",
+            "action": "collect",
+            "tool_action": "consult",
+            "goal": "booking",
+            "reason": "user_offers_photo_reference_before_time_selection",
+            "capability": "bookability",
+            "pack_refs": ["style_reference"],
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    execution = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Вот фото референса",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
+    )
+
+    updated, dialog_state, booking_payload = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution.meta,
+        now=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    runtime_state = LoadedRuntimeState(
+        context=updated,
+        dialog_state=dialog_state,
+        booking_state=booking_payload or {},
+    )
+
+    profile = runtime._build_policy_core_memory_profile(runtime_state)
+
+    assert profile["pending_question_contract"] == {
+        "expected_reply_type": "media",
+        "reason": "user_offers_photo_reference_before_time_selection",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "next_question": "media",
+        "open_questions": ["media"],
+    }
+    assert profile["resume_pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+    }
+
+
+def test_consultant_runtime_preserves_consult_media_followup_without_booking_goal_pollution() -> None:
+    planner = TurnPlanner()
+    service = DialogStateService()
+    runtime = ConsultantRuntime()
+    now = datetime(2026, 3, 30, 12, 5, tzinfo=timezone.utc)
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "consult",
+            "action": "collect",
+            "tool_action": "consult",
+            "goal": "consult",
+            "reason": "user_offers_photos_for_style_reference",
+            "capability": "consultation",
+            "pack_refs": ["style_reference"],
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    execution = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Я могу прислать фото своих ногтей.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=now,
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution.meta,
+        now=now,
+    )
+
+    assert booking_payload is None
+    assert "booking" not in updated["consultant_runtime"]
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
+        "expected_reply_type": "media",
+        "reason": "user_offers_photos_for_style_reference",
+        "next_question": "media",
+        "open_questions": ["media"],
+    }
+    assert dialog_state.interaction_state.resume_slot == "media"
+    assert dialog_state.meta["current_goal"] == "consult"
+    assert dialog_state.semantic_state.materialized_frame.reason == "user_offers_photos_for_style_reference"
+    assert dialog_state.meta["semantic_contract"]["capability"] == "consultation"
+
+    loaded = service.load_runtime_payload(updated)
+    assert loaded["expected_reply_type"] == "media"
+    assert loaded["expected_reply_reason"] == "user_offers_photos_for_style_reference"
+    assert loaded["current_goal"] == "consult"
+    assert loaded["dialog_state"].pending_question_contract.next_question == "media"
+
+    conversation = SimpleNamespace(context=updated, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    turn_result = TurnExecutor().assemble(
+        decision=decision,
+        dialog_state=dialog_state,
+        reply=ResponseRealizer().realize(decision, text=execution.text),
+        stages=["ingress", "planner", "boundary", "state", "executor", "realizer"],
+    )
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    runtime_entry = next(
+        entry
+        for entry in conversation.context.get("decision_trace") or []
+        if entry.get("stage") == "consultant_runtime"
+    )
+    runtime_trace_contract = RuntimeTraceContractV1.model_validate(
+        runtime_entry["runtime_trace_contract"]
+    )
+    assert runtime_trace_contract.state_transition.current_goal == "consult"
+    assert runtime_trace_contract.state_transition.pending_question_contract == {
+        "expected_reply_type": "media",
+        "reason": "user_offers_photos_for_style_reference",
+        "next_question": "media",
+        "open_questions": ["media"],
+    }
+
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta["pending_question_contract"] == {
+        "expected_reply_type": "media",
+        "reason": "user_offers_photos_for_style_reference",
+        "next_question": "media",
+        "open_questions": ["media"],
+    }
+    assert decision_meta["runtime_trace_contract"]["state_transition"]["current_goal"] == "consult"
+
+
+def test_consultant_runtime_refreshes_core_trace_stages_for_current_media_turn() -> None:
+    planner = TurnPlanner()
+    service = DialogStateService()
+    runtime = ConsultantRuntime()
+    now = datetime(2026, 3, 30, 12, 5, tzinfo=timezone.utc)
+    semantic_payload = {
+        "intent": "consult",
+        "action": "collect",
+        "tool_action": "consult",
+        "goal": "booking",
+        "reason": "user_offers_photos_for_style_reference",
+        "capability": "consultation",
+        "pack_refs": ["style_reference"],
+        "slots": {"service": "маникюр"},
+        "referents": {
+            "service": {
+                "value": "маникюр",
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "source_ref": "user_message",
+            }
+        },
+        "subject_kind": "service",
+        "temporal_scope": "none",
+        "resolution_mode": "direct",
+        "expected_reply_type": "media",
+        "next_question": "media",
+        "open_questions": ["media"],
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(semantic_payload)
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    decision.meta["policy_core_trace"] = {
+        "attempted": True,
+        "status": "ok",
+        "schema_verdict": "ok",
+        "projection_verdict": "ok",
+        "input": {
+            "message": "Могу прислать фото своих ногтей.",
+        },
+        "raw_output": json.dumps(semantic_payload, ensure_ascii=False),
+    }
+    execution = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Могу прислать фото своих ногтей.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=now,
+    )
+    updated, dialog_state, _ = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution.meta,
+        now=now,
+    )
+    conversation = SimpleNamespace(
+        context={
+            **updated,
+            "decision_trace": [
+                {
+                    "stage": "policy_core",
+                    "raw_output": "{\"intent\":\"booking\",\"expected_reply_type\":\"time\"}",
+                },
+                {
+                    "stage": "pending_question_interaction",
+                    "expected_reply_type": "time",
+                    "pending_question_target": "time",
+                },
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "time",
+                    "reason": "booking_collect_requested_time_for_service",
+                },
+                {
+                    "stage": "policy_validation_boundary",
+                    "reason_code": "boundary:test",
+                },
+                {
+                    "stage": "consultant_runtime",
+                    "expected_reply_type": "time",
+                    "tool_decision": "datetime",
+                },
+            ],
+        },
+        state="bot_active",
+    )
+    user_message = SimpleNamespace(message_metadata={})
+    turn_result = TurnExecutor().assemble(
+        decision=decision,
+        dialog_state=dialog_state,
+        reply=ResponseRealizer().realize(decision, text=execution.text),
+        stages=["ingress", "planner", "boundary", "state", "executor", "realizer"],
+    )
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "policy_validation_boundary"
+        and entry.get("reason_code") == "boundary:test"
+        for entry in trace
+    )
+    assert not any(
+        entry.get("stage") == "question_contract"
+        and entry.get("expected_reply_type") == "time"
+        and entry.get("reason") == "booking_collect_requested_time_for_service"
+        for entry in trace
+    )
+    assert any(
+        entry.get("stage") == "policy_core"
+        and entry.get("input", {}).get("message") == "Могу прислать фото своих ногтей."
+        and "\"expected_reply_type\": \"media\"" in str(entry.get("raw_output"))
+        for entry in trace
+    )
+    assert any(
+        entry.get("stage") == "question_contract"
+        and entry.get("expected_reply_type") == "media"
+        and entry.get("pending_question_contract", {}).get("next_question") == "media"
+        for entry in trace
+    )
 
 
 def test_consultant_runtime_records_referent_followup_axes_in_trace_and_meta() -> None:
@@ -5128,12 +6755,11 @@ def test_consultant_runtime_memory_profile_deep_copies_canonical_semantic_payloa
 
 
 def test_turn_executor_builds_execution_contract_from_canonical_semantic_frame() -> None:
-    decision = build_test_policy_override_decision(
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
         {
             "intent": "booking",
             "action": "collect",
             "tool_action": "collect",
-            "tool_action_hint": "collect",
             "goal": "booking",
             "reason": "collect_datetime",
             "subject_kind": "service",
@@ -5154,21 +6780,29 @@ def test_turn_executor_builds_execution_contract_from_canonical_semantic_frame()
             "active_question_relation": "ask_about_requested_slot",
             "next_question": "datetime",
             "open_questions": ["datetime"],
-        },
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
         interaction_owner="llm_policy_core",
         source="llm_policy_core",
     )
-    decision.meta.pop("semantic_contract", None)
 
     contract = TurnExecutor()._build_execution_semantic_contract(
         decision,
-        booking_state={"service": "Маникюр"},
+        booking_state={"service": "Педикюр"},
+        service_name="Педикюр",
     )
     pending_question = TurnExecutor()._build_execution_pending_question_contract(decision)
 
     assert contract is not None
     assert contract["capability"] == "bookability"
+    assert contract["subject_kind"] == "service"
+    assert contract["resolution_mode"] == "ask_about_requested_slot"
     assert contract["referents"]["service"]["value"] == "Маникюр"
+    assert contract["referents"]["service"]["source_ref"] == "memory"
+    assert "specialist" not in contract.get("referents", {})
     assert pending_question == {
         "expected_reply_type": "time",
         "reason": "collect_datetime",
@@ -5629,7 +7263,7 @@ def test_boundary_validator_builds_typed_block_turn_outcome() -> None:
     boundary = BoundaryValidator()
     decision = planner.build_preflight_reject(
         reason_code="missing_remote_jid",
-        intent="missing_remote_jid",
+        control_label="missing_remote_jid",
         interaction_owner="reasoning_core_missing_remote_jid",
         interaction_relation="missing_remote_jid",
     )
@@ -5652,7 +7286,7 @@ def test_boundary_validator_builds_typed_block_turn_outcome() -> None:
     )
 
     assert outcome.action == "reject"
-    assert outcome.intent == "missing_remote_jid"
+    assert outcome.intent == "system_control"
     assert outcome.tool_action == "preflight.missing_remote_jid"
     assert outcome.tool_decision == "blocked"
     assert outcome.contract_status == "invalid"
@@ -5660,6 +7294,45 @@ def test_boundary_validator_builds_typed_block_turn_outcome() -> None:
     assert outcome.observability.transport_reason == "missing_remote_jid"
     assert outcome.meta["preflight_path"] is True
     assert outcome.meta["boundary_decision"] == "block"
+    assert outcome.meta["control_label"] == "missing_remote_jid"
+
+
+def test_boundary_validator_builds_typed_ignored_block_turn_outcome() -> None:
+    planner = TurnPlanner()
+    boundary = BoundaryValidator()
+    decision = planner.build_preflight_reject(
+        reason_code="duplicate_message_id",
+        control_label="duplicate_message_id",
+        interaction_owner="reasoning_core_duplicate_message",
+        interaction_relation="duplicate_message_id",
+    )
+    override = boundary.build_block_override(
+        reason_code="duplicate_message_id",
+        trace_message="reasoning_core ignored preexisting duplicate message_id",
+        replan_hints=["skip duplicate inbound message_id"],
+        meta={"source": "reasoning_core"},
+    )
+    turn_result = _build_boundary_turn_result(
+        decision=decision,
+        override=override,
+        contract_status="blocked",
+        text="",
+    )
+
+    outcome = boundary.build_block_turn_outcome(
+        turn_result=turn_result,
+        tool_action="preflight.duplicate_message_id",
+        ignored=True,
+    )
+
+    assert outcome.action == "ignore"
+    assert outcome.intent == "system_control"
+    assert outcome.tool_action == "preflight.duplicate_message_id"
+    assert outcome.tool_decision == "blocked"
+    assert outcome.contract_status == "invalid"
+    assert outcome.meta["ignored_path"] is True
+    assert "preflight_path" not in outcome.meta
+    assert outcome.meta["control_label"] == "duplicate_message_id"
 
 
 def test_boundary_validator_builds_typed_degrade_turn_outcome() -> None:
@@ -5667,7 +7340,7 @@ def test_boundary_validator_builds_typed_degrade_turn_outcome() -> None:
     boundary = BoundaryValidator()
     decision = planner.build_controlled_degrade(
         reason_code="runtime_exception",
-        intent="runtime_error",
+        control_label="runtime_error",
         interaction_owner="reasoning_core_exception_degrade",
         interaction_relation="runtime_exception",
     )
@@ -5691,7 +7364,7 @@ def test_boundary_validator_builds_typed_degrade_turn_outcome() -> None:
     )
 
     assert outcome.action == "handoff"
-    assert outcome.intent == "runtime_error"
+    assert outcome.intent == "system_control"
     assert outcome.tool_action == "handoff"
     assert outcome.tool_decision == "runtime_exception"
     assert outcome.contract_status == "degraded"
@@ -5699,6 +7372,42 @@ def test_boundary_validator_builds_typed_degrade_turn_outcome() -> None:
     assert outcome.observability.transport_reason == "fallback_send_failed"
     assert outcome.meta["degrade_path"] is True
     assert outcome.meta["boundary_decision"] == "degrade"
+    assert outcome.meta["control_label"] == "runtime_error"
+
+
+def test_boundary_validator_resolve_reason_code_falls_back_to_observability_and_raises_when_missing() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "duration",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+    turn_result = TurnExecutor().assemble(
+        decision=decision,
+        dialog_state=DialogState.model_validate(_dialog_state_payload()),
+        reply=ResponseRealizer().realize(decision, text="ignored"),
+        contract_status="ok",
+        reason_code="fallback_reason",
+        stages=["planner", "boundary", "executor", "realizer"],
+    )
+
+    assert BoundaryValidator()._resolve_reason_code(turn_result) == "fallback_reason"
+
+    missing_reason_result = TurnExecutor().assemble(
+        decision=decision,
+        dialog_state=DialogState.model_validate(_dialog_state_payload()),
+        reply=ResponseRealizer().realize(decision, text="ignored"),
+        contract_status="ok",
+        reason_code=None,
+        stages=["planner", "boundary", "executor", "realizer"],
+    )
+
+    with pytest.raises(ValueError, match="boundary_reason_code_missing"):
+        BoundaryValidator()._resolve_reason_code(missing_reason_result)
 
 
 def test_turn_executor_builds_typed_owner_cutover_turn_outcome() -> None:
@@ -5763,6 +7472,43 @@ def test_response_realizer_honors_degrade_reply_kind_override() -> None:
     assert reply.text == "Передаю диалог менеджеру."
 
 
+def test_response_realizer_uses_system_block_and_keeps_non_boundary_degrade_reply_kinds_out_of_fact_collect() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="fill_requested_slot",
+        source="llm_policy_core",
+    )
+    block_override = BoundaryValidator().build_block_override(
+        reason_code="missing_remote_jid",
+        trace_message="reasoning_core blocked inbound without metadata.remoteJid",
+        replan_hints=["require metadata.remoteJid"],
+        public_message="Системная блокировка.",
+    )
+    block_reply = ResponseRealizer().realize(decision, override=block_override, text="ignored")
+
+    assert block_reply.reply_kind == "system"
+    assert block_reply.text == "Системная блокировка."
+
+    degrade_override = BoundaryOverride.model_validate(
+        {
+            "decision": "degrade",
+            "reason_code": "runtime_exception",
+            "preserve_fields": ["outcome"],
+            "public_message": "Передаю диалог менеджеру.",
+            "meta": {"reply_kind": "fact"},
+        }
+    )
+    degrade_reply = ResponseRealizer().realize(decision, override=degrade_override, text="ignored")
+
+    assert degrade_reply.reply_kind == "handoff"
+    assert degrade_reply.text == "Передаю диалог менеджеру."
+
+
 def test_consultant_runtime_preserves_owner_decision_when_executor_requests_handoff() -> None:
     runtime = ConsultantRuntime()
     decision = build_test_policy_override_decision(
@@ -5778,7 +7524,7 @@ def test_consultant_runtime_preserves_owner_decision_when_executor_requests_hand
     execution = TurnExecutor().execute(
         TurnPlanner().build_controlled_degrade(
             reason_code="branch_missing",
-                intent="branch_missing",
+            control_label="branch_missing",
             interaction_owner="turn_executor",
         ),
         db=None,

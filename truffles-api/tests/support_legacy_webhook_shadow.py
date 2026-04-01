@@ -1,7 +1,7 @@
-"""Legacy webhook compatibility shim.
+"""Shadow-only legacy root webhook helper for tests.
 
-Active webhook ingress lives in `app.routers.webhook.http`.
-This module preserves only thin delegates for legacy callers.
+`app/webhook.py` is removed from runtime code. This file preserves the
+former thin compatibility delegate only for deterministic test coverage.
 """
 
 from __future__ import annotations

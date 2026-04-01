@@ -550,6 +550,88 @@ def _policy_core_active_pending_contract(
     return dict(pending) if isinstance(pending, Mapping) else {}
 
 
+def _policy_core_resume_pending_contract(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(normalized_memory_profile, Mapping):
+        return {}
+    pending = normalized_memory_profile.get("resume_pending_question_contract")
+    return dict(pending) if isinstance(pending, Mapping) else {}
+
+
+def _policy_core_expected_open_questions(contract_payload: Mapping[str, Any]) -> list[str]:
+    raw_open_questions = contract_payload.get("open_questions") or []
+    open_questions = [
+        item
+        for item in raw_open_questions
+        if isinstance(item, str) and item.strip()
+    ]
+    if open_questions:
+        return open_questions
+    next_question = contract_payload.get("next_question")
+    if isinstance(next_question, str) and next_question.strip():
+        return [next_question]
+    return []
+
+
+def _policy_core_is_media_reason_family(reason: str | None) -> bool:
+    if not isinstance(reason, str) or not reason.strip():
+        return False
+    normalized = reason.strip().casefold()
+    return normalized.startswith(
+        (
+            "user_offers_photo_reference",
+            "user_offers_photos_for_style_reference",
+        )
+    )
+
+
+def _policy_core_reason_indicates_followup_interrupt(reason: str | None) -> bool:
+    if not isinstance(reason, str) or not reason.strip():
+        return False
+    normalized = reason.strip().casefold()
+    return "_query" in normalized or "_interrupt" in normalized
+
+
+def _policy_core_is_active_followup_info_interrupt(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    if contract.action != "fact":
+        return False
+    if contract.capability == "booking_manage":
+        return False
+    if contract.active_question_relation == "generic_info_interrupt":
+        return True
+    if contract.intent in {
+        "pricing",
+        "hours",
+        "location",
+        "parking",
+        "duration",
+        "promotions",
+        "contact",
+        "master_query",
+    }:
+        return True
+    if contract.capability in {
+        "pricing",
+        "hours",
+        "location",
+        "parking",
+        "duration",
+        "promotions",
+        "contact",
+        "portfolio",
+    }:
+        return True
+    pack_refs = {
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    }
+    return bool(pack_refs & {"pricing", "hours", "location", "parking", "promotions", "contact", "master"})
+
+
 def _validate_policy_core_runtime_contract(
     contract: LlmPolicyCoreOutput,
     *,
@@ -592,32 +674,58 @@ def _validate_policy_core_runtime_contract(
             return "llm_policy_core_error:booking_manage_reference_stale_axes"
 
     pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
-    carry_reply_type = pending_contract.get("expected_reply_type")
-    carry_next_question = pending_contract.get("next_question")
-    carry_open_questions = pending_contract.get("open_questions") or []
+    resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
+    carry_contract = resume_contract or pending_contract
+
+    if _policy_core_is_media_reason_family(contract.reason):
+        if resume_contract and _policy_core_reason_indicates_followup_interrupt(contract.reason):
+            return "llm_policy_core_error:active_followup_interrupt_reclassification_required"
+        if contract.intent != "consult":
+            return "llm_policy_core_error:consult_media_intent_invalid"
+        if contract.action != "collect":
+            return "llm_policy_core_error:consult_media_action_invalid"
+        if contract.tool_action_hint != "consult":
+            return "llm_policy_core_error:consult_media_tool_action_invalid"
+        if contract.capability not in {"consultation", "bookability"}:
+            return "llm_policy_core_error:consult_media_capability_invalid"
+        if "style_reference" not in list(contract.pack_refs or []):
+            return "llm_policy_core_error:consult_media_pack_refs_invalid"
+        if contract.expected_reply_type != "media":
+            return "llm_policy_core_error:consult_media_expected_reply_invalid"
+        if contract.next_question != "media":
+            return "llm_policy_core_error:consult_media_next_question_invalid"
+        if list(contract.open_questions or []) != ["media"]:
+            return "llm_policy_core_error:consult_media_open_questions_invalid"
+        expected_pending_act = resume_contract.get("pending_question_act")
+        if expected_pending_act and contract.pending_question_act != expected_pending_act:
+            return "llm_policy_core_error:consult_media_pending_act_invalid"
+        expected_pending_target = resume_contract.get("pending_question_target")
+        if expected_pending_target and contract.pending_question_target != expected_pending_target:
+            return "llm_policy_core_error:consult_media_pending_target_invalid"
+        expected_relation = resume_contract.get("active_question_relation")
+        if expected_relation and contract.active_question_relation != expected_relation:
+            return "llm_policy_core_error:consult_media_relation_invalid"
+
+    carry_reply_type = carry_contract.get("expected_reply_type")
+    carry_next_question = carry_contract.get("next_question")
     if (
-        contract.action == "fact"
-        and contract.active_question_relation == "generic_info_interrupt"
+        _policy_core_is_active_followup_info_interrupt(contract)
         and isinstance(carry_reply_type, str)
         and carry_reply_type.strip()
         and isinstance(carry_next_question, str)
         and carry_next_question.strip()
     ):
-        expected_open_questions = [
-            item
-            for item in carry_open_questions
-            if isinstance(item, str) and item.strip()
-        ] or [carry_next_question]
+        expected_open_questions = _policy_core_expected_open_questions(carry_contract)
         if contract.expected_reply_type != carry_reply_type:
             return "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
         if contract.next_question != carry_next_question:
             return "llm_policy_core_error:generic_info_interrupt_next_question_invalid"
         if list(contract.open_questions or []) != expected_open_questions:
             return "llm_policy_core_error:generic_info_interrupt_open_questions_invalid"
-        expected_pending_act = pending_contract.get("pending_question_act")
+        expected_pending_act = carry_contract.get("pending_question_act")
         if expected_pending_act and contract.pending_question_act != expected_pending_act:
             return "llm_policy_core_error:generic_info_interrupt_pending_act_invalid"
-        expected_pending_target = pending_contract.get("pending_question_target")
+        expected_pending_target = carry_contract.get("pending_question_target")
         if expected_pending_target and contract.pending_question_target != expected_pending_target:
             return "llm_policy_core_error:generic_info_interrupt_pending_target_invalid"
 
@@ -634,9 +742,10 @@ def _build_policy_core_contract_repair_instruction(
 
     token = schema_error.removeprefix("llm_policy_core_error:")
     pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
-    carry_reply_type = pending_contract.get("expected_reply_type")
-    carry_next_question = pending_contract.get("next_question")
-    carry_open_questions = pending_contract.get("open_questions") or []
+    resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
+    carry_contract = resume_contract or pending_contract
+    carry_reply_type = carry_contract.get("expected_reply_type")
+    carry_next_question = carry_contract.get("next_question")
 
     if token.startswith("booking_manage_reference_"):
         has_customer = False
@@ -656,30 +765,84 @@ def _build_policy_core_contract_repair_instruction(
             "`active_question_relation`. Return corrected JSON only."
         )
 
+    if token.startswith("consult_media_"):
+        preserve_parts: list[str] = []
+        pending_act = resume_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            preserve_parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = resume_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            preserve_parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        relation = resume_contract.get("active_question_relation")
+        if isinstance(relation, str) and relation.strip():
+            preserve_parts.append(f'Keep `active_question_relation="{relation}"`.')
+        return (
+            "The previous JSON violated the governed consult-media follow-up contract. "
+            "For the governed photo/style-reference continuation reason family "
+            "(`user_offers_photo_reference*` / `user_offers_photos_for_style_reference*`), keep "
+            '`intent=\"consult\"`, `action=\"collect\"`, '
+            '`tool_action_hint=\"consult\"`, and `capability` inside '
+            '`{\"consultation\",\"bookability\"}`. '
+            '`pack_refs=[\"style_reference\"]`, `expected_reply_type=\"media\"`, '
+            '`next_question=\"media\"`, and `open_questions=[\"media\"]`. '
+            + (" ".join(preserve_parts) + " " if preserve_parts else "")
+            + "Return corrected JSON only."
+        )
+
     if token.startswith("generic_info_interrupt_"):
         if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
             return None
-        open_questions = [
-            item
-            for item in carry_open_questions
-            if isinstance(item, str) and item.strip()
-        ] or [carry_next_question]
+        open_questions = _policy_core_expected_open_questions(carry_contract)
         pending_parts: list[str] = [
-            "The previous JSON violated the governed generic-info-interrupt follow-up contract.",
-            "When `active_question_relation=\"generic_info_interrupt\"` and booking carryover is active,",
-            "preserve the active follow-up contract from `memory.profile.pending_question_contract` exactly:",
+            "The previous JSON violated the governed active-followup info-interrupt contract.",
+            "When a fact-side side question interrupts an active follow-up,",
+            "preserve the active resume contract exactly:",
             f'`expected_reply_type="{carry_reply_type}"`,',
             f'`next_question="{carry_next_question}"`,',
             f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
         ]
-        pending_act = pending_contract.get("pending_question_act")
+        source_ref = "memory.profile.resume_pending_question_contract"
+        if not resume_contract:
+            source_ref = "memory.profile.pending_question_contract"
+        pending_parts.append(f"Use `{source_ref}` as the carryover source of truth.")
+        pending_act = carry_contract.get("pending_question_act")
         if isinstance(pending_act, str) and pending_act.strip():
             pending_parts.append(f'Keep `pending_question_act="{pending_act}"`.')
-        pending_target = pending_contract.get("pending_question_target")
+        pending_target = carry_contract.get("pending_question_target")
         if isinstance(pending_target, str) and pending_target.strip():
             pending_parts.append(f'Keep `pending_question_target="{pending_target}"`.')
         pending_parts.append("Return corrected JSON only.")
         return " ".join(pending_parts)
+
+    if token.startswith("active_followup_interrupt_reclassification_required"):
+        if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
+            return None
+        open_questions = _policy_core_expected_open_questions(carry_contract)
+        parts: list[str] = [
+            "The previous JSON incorrectly kept a media/style-reference continuation active.",
+            "The owner reason already signals a later side-question (`...query` / `...interrupt`),",
+            "so reclassify this turn as the correct interrupt family instead of continuing media.",
+            "Do NOT return `expected_reply_type=\"media\"` or `next_question=\"media\"`.",
+            "Preserve the active booking resume contract exactly:",
+            f'`expected_reply_type="{carry_reply_type}"`,',
+            f'`next_question="{carry_next_question}"`,',
+            f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
+        ]
+        pending_act = carry_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = carry_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        parts.extend(
+            [
+                "If the user is asking which specialist/master performs the service without temporal scope,",
+                "emit the generic master/specialist info interrupt instead of consult-media continuation.",
+                "Use carried service grounding from memory when available.",
+                "Return corrected JSON only.",
+            ]
+        )
+        return " ".join(parts)
 
     return None
 
@@ -1308,6 +1471,79 @@ def _normalize_policy_core_slot_state(slot_state: dict[str, Any] | None) -> dict
     return normalized or None
 
 
+def _normalize_policy_core_pending_contract_payload(
+    payload: dict[str, Any] | None,
+    *,
+    allowed_next_questions: set[str],
+    allowed_expected_reply_types: set[str],
+    allowed_pending_question_acts: set[str],
+    allowed_pending_question_targets: set[str],
+    allowed_active_question_relations: set[str],
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    cleaned_pending: dict[str, Any] = {}
+    next_question = payload.get("next_question") or payload.get("slot")
+    if isinstance(next_question, str) and next_question.strip():
+        slot_token = next_question.strip().casefold()
+        slot_token = {"time": "datetime", "date": "datetime"}.get(slot_token, slot_token)
+        if slot_token in allowed_next_questions:
+            cleaned_pending["next_question"] = slot_token
+    open_questions = payload.get("open_questions")
+    if isinstance(open_questions, list):
+        cleaned_questions: list[str] = []
+        seen_questions: set[str] = set()
+        for raw_question in open_questions:
+            if len(cleaned_questions) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                break
+            if not isinstance(raw_question, str) or not raw_question.strip():
+                continue
+            question_token = raw_question.strip().casefold()
+            question_token = {"time": "datetime", "date": "datetime"}.get(
+                question_token,
+                question_token,
+            )
+            if question_token not in allowed_next_questions:
+                continue
+            if question_token in seen_questions:
+                continue
+            cleaned_questions.append(question_token)
+            seen_questions.add(question_token)
+        if cleaned_questions:
+            cleaned_pending["open_questions"] = cleaned_questions
+    pending_expected_reply_type = payload.get("expected_reply_type")
+    if isinstance(pending_expected_reply_type, str) and pending_expected_reply_type.strip():
+        expected_token = pending_expected_reply_type.strip().casefold()
+        if expected_token in allowed_expected_reply_types:
+            cleaned_pending["expected_reply_type"] = expected_token
+    reason = payload.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        cleaned_pending["reason"] = " ".join(reason.split())[
+            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+        ]
+    pending_question_act = payload.get("pending_question_act")
+    if isinstance(pending_question_act, str) and pending_question_act.strip():
+        act_token = pending_question_act.strip().casefold()
+        if act_token in allowed_pending_question_acts:
+            cleaned_pending["pending_question_act"] = act_token
+    pending_question_target = payload.get("pending_question_target")
+    if isinstance(pending_question_target, str) and pending_question_target.strip():
+        target_token = pending_question_target.strip().casefold()
+        if target_token in allowed_pending_question_targets:
+            cleaned_pending["pending_question_target"] = target_token
+    active_question_relation = payload.get("active_question_relation")
+    if isinstance(active_question_relation, str) and active_question_relation.strip():
+        relation_token = active_question_relation.strip().casefold()
+        if relation_token in allowed_active_question_relations:
+            cleaned_pending["active_question_relation"] = relation_token
+    value = payload.get("value")
+    if isinstance(value, str) and value.strip():
+        cleaned_pending["value"] = " ".join(value.split())[
+            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+        ]
+    return cleaned_pending or None
+
+
 def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(profile, dict):
         return None
@@ -1397,72 +1633,26 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     allowed_pending_question_targets = set(vocabulary_snapshot.pending_question_targets)
     allowed_active_question_relations = set(vocabulary_snapshot.active_question_relations)
 
-    pending_question_contract = profile.get("pending_question_contract")
-    if isinstance(pending_question_contract, dict):
-        cleaned_pending: dict[str, Any] = {}
-        next_question = pending_question_contract.get("next_question") or pending_question_contract.get("slot")
-        if isinstance(next_question, str) and next_question.strip():
-            slot_token = next_question.strip().casefold()
-            slot_token = {"time": "datetime", "date": "datetime"}.get(slot_token, slot_token)
-            if slot_token in allowed_next_questions:
-                cleaned_pending["next_question"] = slot_token
-        open_questions = pending_question_contract.get("open_questions")
-        if isinstance(open_questions, list):
-            cleaned_questions: list[str] = []
-            seen_questions: set[str] = set()
-            for raw_question in open_questions:
-                if len(cleaned_questions) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
-                    break
-                if not isinstance(raw_question, str) or not raw_question.strip():
-                    continue
-                question_token = raw_question.strip().casefold()
-                question_token = {"time": "datetime", "date": "datetime"}.get(
-                    question_token,
-                    question_token,
-                )
-                if question_token not in allowed_next_questions:
-                    continue
-                if question_token in seen_questions:
-                    continue
-                cleaned_questions.append(question_token)
-                seen_questions.add(question_token)
-            if cleaned_questions:
-                cleaned_pending["open_questions"] = cleaned_questions
-        pending_expected_reply_type = pending_question_contract.get("expected_reply_type")
-        if (
-            isinstance(pending_expected_reply_type, str)
-            and pending_expected_reply_type.strip()
-        ):
-            expected_token = pending_expected_reply_type.strip().casefold()
-            if expected_token in allowed_expected_reply_types:
-                cleaned_pending["expected_reply_type"] = expected_token
-        reason = pending_question_contract.get("reason")
-        if isinstance(reason, str) and reason.strip():
-            cleaned_pending["reason"] = " ".join(reason.split())[
-                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-            ]
-        pending_question_act = pending_question_contract.get("pending_question_act")
-        if isinstance(pending_question_act, str) and pending_question_act.strip():
-            act_token = pending_question_act.strip().casefold()
-            if act_token in allowed_pending_question_acts:
-                cleaned_pending["pending_question_act"] = act_token
-        pending_question_target = pending_question_contract.get("pending_question_target")
-        if isinstance(pending_question_target, str) and pending_question_target.strip():
-            target_token = pending_question_target.strip().casefold()
-            if target_token in allowed_pending_question_targets:
-                cleaned_pending["pending_question_target"] = target_token
-        active_question_relation = pending_question_contract.get("active_question_relation")
-        if isinstance(active_question_relation, str) and active_question_relation.strip():
-            relation_token = active_question_relation.strip().casefold()
-            if relation_token in allowed_active_question_relations:
-                cleaned_pending["active_question_relation"] = relation_token
-        value = pending_question_contract.get("value")
-        if isinstance(value, str) and value.strip():
-            cleaned_pending["value"] = " ".join(value.split())[
-                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-            ]
-        if cleaned_pending:
-            normalized["pending_question_contract"] = cleaned_pending
+    pending_question_contract = _normalize_policy_core_pending_contract_payload(
+        profile.get("pending_question_contract"),
+        allowed_next_questions=allowed_next_questions,
+        allowed_expected_reply_types=allowed_expected_reply_types,
+        allowed_pending_question_acts=allowed_pending_question_acts,
+        allowed_pending_question_targets=allowed_pending_question_targets,
+        allowed_active_question_relations=allowed_active_question_relations,
+    )
+    if pending_question_contract:
+        normalized["pending_question_contract"] = pending_question_contract
+    resume_pending_question_contract = _normalize_policy_core_pending_contract_payload(
+        profile.get("resume_pending_question_contract"),
+        allowed_next_questions=allowed_next_questions,
+        allowed_expected_reply_types=allowed_expected_reply_types,
+        allowed_pending_question_acts=allowed_pending_question_acts,
+        allowed_pending_question_targets=allowed_pending_question_targets,
+        allowed_active_question_relations=allowed_active_question_relations,
+    )
+    if resume_pending_question_contract:
+        normalized["resume_pending_question_contract"] = resume_pending_question_contract
     semantic_contract = profile.get("semantic_contract")
     if isinstance(semantic_contract, dict):
         cleaned_contract: dict[str, Any] = {}
@@ -1633,6 +1823,7 @@ def _build_policy_core_pending_contract_from_expected_reply_type(
         "time": "datetime",
         "name": "name",
         "phone": "phone",
+        "media": "media",
     }.get(expected_token)
     if next_question is None:
         return None

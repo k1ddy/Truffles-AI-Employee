@@ -1,8 +1,7 @@
-"""Legacy reasoning-core compatibility shim.
+"""Shadow-only reasoning-core helper for tests.
 
-Active webhook runtime ownership lives in `app.core.consultant_core_v2`.
-This module only preserves the thin compatibility surface that tests and
-legacy wrappers still import while shadow runtime code is removed.
+`app/services/reasoning_core.py` is removed from runtime code. This file
+preserves the former shim surface only for deterministic test coverage.
 """
 
 from __future__ import annotations

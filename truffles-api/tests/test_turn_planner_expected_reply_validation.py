@@ -79,7 +79,8 @@ def test_plan_degrades_when_policy_core_success_is_missing_binding(monkeypatch):
     )
 
     assert decision.action == "handoff"
-    assert decision.intent == "planner_degrade"
+    assert decision.intent == "system_control"
+    assert decision.meta["control_label"] == "planner_degrade"
     assert decision.meta["reason_code"] == "planner:invalid_projection"
     assert decision.meta["earliest_failed_stage"] == "policy_projection"
     assert decision.meta["root_reason_code"] == "policy_projection:binding_tool_action_missing"
@@ -122,7 +123,8 @@ def test_plan_degrades_when_policy_core_success_uses_legacy_policy_payload(monke
     )
 
     assert decision.action == "handoff"
-    assert decision.intent == "planner_degrade"
+    assert decision.intent == "system_control"
+    assert decision.meta["control_label"] == "planner_degrade"
     assert decision.meta["reason_code"] == "planner:invalid_projection"
     assert decision.meta["earliest_failed_stage"] == "policy_projection"
     assert decision.meta["root_reason_code"] == "policy_projection:semantic_decision_required"
@@ -149,7 +151,8 @@ def test_plan_degrades_when_policy_core_is_unavailable_instead_of_routing_fallba
     )
 
     assert decision.action == "handoff"
-    assert decision.intent == "planner_degrade"
+    assert decision.intent == "system_control"
+    assert decision.meta["control_label"] == "planner_degrade"
     assert decision.interaction.owner == "turn_planner_degrade"
     assert decision.meta["reason_code"] == "planner:policy_timeout"
     assert decision.meta["earliest_failed_stage"] == "policy_core"
@@ -361,3 +364,56 @@ def test_plan_delegates_context_assembly_to_policy_core_route(monkeypatch):
     assert captured_kwargs["memory_summary"] == "Клиент хочет маникюр"
     assert "info_refs" not in captured_kwargs
     assert "consult_refs" not in captured_kwargs
+
+
+def test_plan_preserves_consult_media_followup_contract(monkeypatch):
+    planner = TurnPlanner()
+
+    monkeypatch.setattr(
+        "app.services.consult_pack_service.load_consult_playbook",
+        lambda client_slug: ({}, None),
+    )
+    monkeypatch.setattr(
+        "app.services.intent_service.route_llm_policy_core",
+        lambda *args, **kwargs: {
+            "payload": build_test_semantic_decision_payload(
+                {
+                    "action": "collect",
+                    "intent": "consult",
+                    "tool_action": "consult",
+                    "goal": "consult",
+                    "reason": "user_offers_photos_for_style_reference",
+                    "capability": "consultation",
+                    "pack_refs": ["style_reference"],
+                    "expected_reply_type": "media",
+                    "next_question": "media",
+                    "open_questions": ["media"],
+                }
+            ),
+            "binding": {
+                "tool_action": "collect",
+                "tool_args": {},
+            },
+        },
+    )
+
+    decision = planner.plan(
+        message_text="Я могу прислать фото своих ногтей.",
+        client_slug="demo_salon",
+        booking_state=None,
+    )
+
+    assert decision.source == "llm_policy_core"
+    assert decision.intent == "consult"
+    assert decision.tool_action == "collect"
+    assert decision.meta["reason"] == "user_offers_photos_for_style_reference"
+    assert decision.meta["goal"] == "consult"
+    assert decision.pack_refs == ["style_reference"]
+    assert planner.canonical_pending_question_contract(
+        decision
+    ).model_dump(mode="python", exclude_none=True) == {
+        "expected_reply_type": "media",
+        "reason": "user_offers_photos_for_style_reference",
+        "next_question": "media",
+        "open_questions": ["media"],
+    }

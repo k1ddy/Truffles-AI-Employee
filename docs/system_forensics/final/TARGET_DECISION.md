@@ -1,7 +1,9 @@
 # Consultant Core Target Decision
 
 Status: `open`
-Purpose: freeze one canonical target decision from the existing forensic corpus and external research so implementation can proceed against one architecture hypothesis instead of a moving debate.
+Purpose: record the archived target hypothesis that previously guided implementation planning. After the fresh primary deep audit, this is no longer the unchallengeable current outside-reader decision.
+
+Archive-layer note: this document now acts as an archived target hypothesis. It may inform the current packet, but it is not the current implementation go-signal and it remains challengeable by outside review.
 
 ## Decision
 Accepted target architecture:

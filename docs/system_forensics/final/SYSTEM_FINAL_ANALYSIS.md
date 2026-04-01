@@ -3,6 +3,10 @@
 Status: `open`
 Purpose: accumulate stable system-level conclusions from the forensic documents and become the guide for future architecture work.
 
+Archive-layer note: the root-level executive packet under `docs/system_forensics/*.md` is now the first reading layer for external researchers; this synthesis remains the deeper archive layer that backs those summaries.
+
+Contradiction-resolution note: older go-signal language in this file is now superseded by `docs/system_forensics/PRIMARY_DEEP_AUDIT_PROGRAM.md`, `docs/system_forensics/PRIMARY_DEEP_AUDIT_CONTRADICTION_REVIEW.md`, and `docs/system_forensics/EXTERNAL_PACKET_READINESS_REVIEW.md`. Use this file as archive synthesis and evidence depth, not as the current implementation start signal.
+
 ## Source Documents
 - `docs/system_forensics/INDEX.md`
 - `docs/system_forensics/WORK_METHOD.md`
@@ -65,9 +69,9 @@ Purpose: accumulate stable system-level conclusions from the forensic documents 
 - `FACT`: A full zero-context execution prompt now exists at `NEXT_AGENT_FULL_PROMPT.md`, tying together workspace anchor, mandatory reading order, settled decisions, forbidden regressions, current workstream, and done criteria for future implementation agents.
 - `INFERENCE`: The repo now contains enough repo-backed continuity to hand off direct implementation without relying on chat-history reconstruction.
 
-- `FACT`: The forensic corpus and external research recommendations are now translated into a canonical execution packet: `TARGET_DECISION.md`, `IMPLEMENTATION_PROGRAM.md`, `SEMANTIC_DECISION_V1.md`, `BINDING_PLAN_V1.md`, `TURN_JOURNAL_V1.md`, and `CONVERSATION_PROJECTION_V1.md`.
-- `FACT`: The accepted target hypothesis is now frozen as `Governed Semantic Kernel + Durable Action Plane` with bounded single-agent online runtime, multi-agent mainly offline, and first extraction focused on `SemanticDecisionV1 + BindingGatewayV1`.
-- `INFERENCE`: The next useful work is no longer more broad analysis; it is Workstream 1 implementation against the newly fixed contracts and authority-reduction criteria.
+- `FACT`: The forensic corpus contains an archived execution-packet hypothesis: `TARGET_DECISION.md`, `IMPLEMENTATION_PROGRAM.md`, `SEMANTIC_DECISION_V1.md`, `BINDING_PLAN_V1.md`, `TURN_JOURNAL_V1.md`, and `CONVERSATION_PROJECTION_V1.md`.
+- `FACT`: The archived target hypothesis remains `Governed Semantic Kernel + Durable Action Plane` with bounded single-agent online runtime and multi-agent mainly offline.
+- `INFERENCE`: After the fresh primary deep-audit reset, these archive contracts remain useful design hypotheses, but they are no longer the current go-signal for direct implementation. The packet must first satisfy the reviewed outside-readiness requirements.
 
 - `FACT`: Active callers already route to `consultant_core_v2`, but active orchestration still lives in `truffles-api/app/core/consultant_runtime.py:88` via wrapper delegation from `truffles-api/app/core/consultant_core_v2.py:36`.
 - `FACT`: `consultant_runtime.py` still owns planner invocation, boundary validation, executor invocation, runtime state write, reply realization, send/persist, and trace/meta recording.

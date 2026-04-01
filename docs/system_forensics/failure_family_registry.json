@@ -1,0 +1,160 @@
+{
+  "schema_version": "v1",
+  "current_practical_truth": "r35f",
+  "families": [
+    {
+      "family_id": "owner_side_booking_service_grounding",
+      "lane": "product_practical",
+      "mechanism": "owner grounding / slot carry",
+      "status": "closed_as_scoped",
+      "proven_layer_classification": "owner_error",
+      "closure_truth_run": "r26c",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-29-consultant-core-owner-service-grounding-family-a922.md",
+        "docs/REPORTS/2026-03-29-consultant-core-r26c-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "collect_to_commit_stale_service_reprompt",
+      "lane": "product_practical",
+      "mechanism": "booking collect to commit transition",
+      "status": "closed_as_scoped",
+      "proven_layer_classification": "boundary_fallback_error",
+      "closure_truth_run": "r27",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-29-consultant-core-collect-commit-transition-filled-booking-slots-a922.md",
+        "docs/REPORTS/2026-03-29-consultant-core-r27-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "booking_datetime_continuity_under_degrade",
+      "lane": "product_practical",
+      "mechanism": "boundary continuity preservation",
+      "status": "closed_as_scoped",
+      "proven_layer_classification": "boundary_fallback_error",
+      "closure_truth_run": "r30",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-29-consultant-core-booking-datetime-continuity-degrade-a922.md",
+        "docs/REPORTS/2026-03-29-consultant-core-r30-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "live_check_booking_temporal_clue_continuity",
+      "lane": "product_practical",
+      "mechanism": "booking-manage continuity through degraded follow-up",
+      "status": "closed_as_scoped",
+      "proven_layer_classification": "boundary_fallback_error",
+      "closure_truth_run": "r32g",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-check-booking-temporal-clue-continuity-a922.md",
+        "docs/REPORTS/2026-03-30-consultant-core-r32g-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "booking_verification_confirm_recovery",
+      "lane": "product_practical",
+      "mechanism": "degrade-time confirm continuity",
+      "status": "closed_as_scoped",
+      "proven_layer_classification": "boundary_fallback_error",
+      "closure_truth_run": "r34d",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-check-booking-confirm-recovery-invalid-schema-a922.md",
+        "docs/REPORTS/2026-03-30-consultant-core-r34d-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "parking_owner_grounding",
+      "lane": "product_practical",
+      "mechanism": "owner branch-fact specificity",
+      "status": "closed_as_scoped",
+      "proven_layer_classification": "owner_error",
+      "closure_truth_run": "r35f",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-parking-owner-grounding-r34d-a922.md",
+        "docs/REPORTS/2026-03-30-consultant-core-r35f-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "fact_over_composition_location_parking_replies",
+      "lane": "product_practical",
+      "mechanism": "fact selection / fact composition",
+      "status": "open_visible_weak_residue",
+      "proven_layer_classification": "fact_composition_error",
+      "current_truth_run": "r35f",
+      "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-fact-overcomposition-location-parking-a922.md",
+        "docs/REPORTS/2026-03-30-consultant-core-r35f-human-semantic-audit-a922.md"
+      ]
+    },
+    {
+      "family_id": "distributed_semantic_ownership",
+      "lane": "architecture",
+      "mechanism": "multiple meaning-bearing layers",
+      "status": "open_architecture_blocker",
+      "proven_layer_classification": null,
+      "evidence": [
+        "docs/system_forensics/SEMANTIC_OWNERSHIP_AUDIT.md",
+        "docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md"
+      ]
+    },
+    {
+      "family_id": "multiple_truth_carriers",
+      "lane": "architecture",
+      "mechanism": "semantic and state duplication across artifacts",
+      "status": "open_architecture_blocker",
+      "proven_layer_classification": null,
+      "evidence": [
+        "docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md",
+        "docs/system_forensics/ledgers/TRUTH_CARRIER_MATRIX.md"
+      ]
+    },
+    {
+      "family_id": "boundary_semantic_leakage",
+      "lane": "architecture",
+      "mechanism": "deterministic boundary taking semantic decisions",
+      "status": "open_architecture_blocker",
+      "proven_layer_classification": null,
+      "evidence": [
+        "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md",
+        "docs/system_forensics/ledgers/DETERMINISTIC_REWRITE_LEDGER.md"
+      ]
+    },
+    {
+      "family_id": "mixed_pack_runtime_behavior",
+      "lane": "architecture",
+      "mechanism": "data and runtime behavior mixed in factual replies",
+      "status": "open_architecture_blocker",
+      "proven_layer_classification": null,
+      "evidence": [
+        "docs/system_forensics/PACK_RUNTIME_SEPARATION_AUDIT.md",
+        "docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md"
+      ]
+    },
+    {
+      "family_id": "live_legacy_compatibility_mesh",
+      "lane": "architecture",
+      "mechanism": "multiple live compatibility modules outside the narrow spine",
+      "status": "open_architecture_blocker",
+      "proven_layer_classification": null,
+      "evidence": [
+        "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md"
+      ]
+    },
+    {
+      "family_id": "duplicated_operational_entrypoints",
+      "lane": "architecture",
+      "mechanism": "multiple live admin/service/worker/console callers for one operational seam",
+      "status": "open_architecture_blocker",
+      "proven_layer_classification": null,
+      "evidence": [
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+        "docs/system_forensics/files/app_routers_outbox_service.md",
+        "docs/system_forensics/files/app_routers_admin.md",
+        "docs/system_forensics/files/app_workers_outbox.md",
+        "docs/system_forensics/files/app_routers_console.md"
+      ]
+    }
+  ],
+  "packet_status": "ready_for_external_handoff"
+}

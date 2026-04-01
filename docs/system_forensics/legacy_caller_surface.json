@@ -1,0 +1,205 @@
+{
+  "schema_version": "v1",
+  "status": "machine_readable_system_reproof_base",
+  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "current_practical_truth": "r35f",
+  "scope_note": "Broader live-code reproof is complete repo-side. Router shadow surfaces remain outside live app runtime, and acceptance stays blocked pending replay and full human semantic audit.",
+  "freeze_policy": {
+    "policy": "Router shadow and legacy surfaces may not regain live semantic, continuity, fact-scope, boundary, or operational authority while the live-code reproof block is active and acceptance remains pending.",
+    "frozen_adapter_only_modules": [
+      "truffles-api/app/routers/webhook/info.py",
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/app/routers/webhook/response.py",
+      "truffles-api/app/routers/webhook/context_manager.py"
+    ],
+    "shadow_or_wrapper_candidates": [],
+    "forbidden_new_authority_classes": [
+      "semantic",
+      "continuity",
+      "fact_scope",
+      "boundary_override"
+    ],
+    "evidence": [
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+      "docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md",
+      "docs/system_forensics/dead_surface_registry.json"
+    ],
+    "shadow_only_modules": [
+      "truffles-api/app/routers/webhook/_legacy.py",
+      "truffles-api/app/routers/webhook/decision.py"
+    ]
+  },
+  "entries": [
+    {
+      "module_path": "truffles-api/app/routers/webhook/_legacy.py",
+      "module_role": "shadow_test_compatibility_bus",
+      "freeze_mode": "shadow_only_after_shadow_lane_elimination",
+      "mechanism_pressure": "shadow_test_bus_pressure",
+      "hot_path_status": "shadow_only_test_compatibility_bus",
+      "live_runtime_callers": [],
+      "static_app_importers": [],
+      "test_only_importers": [
+        "truffles-api/tests/test_booking_appointments.py",
+        "truffles-api/tests/test_booking_chaos_dialogs.py",
+        "truffles-api/tests/test_booking_info_interrupt_contract.py",
+        "truffles-api/tests/test_consult_followup_guard.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_policy_handler_runtime.py",
+        "truffles-api/tests/test_state_service.py",
+        "truffles-api/tests/test_webhook_response.py"
+      ],
+      "target_fate": "keep shadow-only until remaining router shadow callers are eliminated, then delete",
+      "evidence": [
+        "docs/LEGACY_MESH_DRAIN_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-legacy-mesh-drain-a922.md",
+        "scripts/legacy_mesh_drain_guard.py",
+        "truffles-api/tests/architecture/test_legacy_mesh_drain_guard.py",
+        "truffles-api/app/routers/webhook/_legacy.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "module_path": "truffles-api/app/routers/webhook/context_manager.py",
+      "module_role": "legacy_context_helper",
+      "freeze_mode": "adapter_only_after_shadow_lane_elimination",
+      "mechanism_pressure": "continuity_shadow_pressure",
+      "hot_path_status": "lazy_export_only_unmounted_legacy_helper",
+      "live_runtime_callers": [],
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/branch_selection.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/policy.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/routers/webhook/shield.py",
+        "truffles-api/app/routers/webhook/trace.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/__init__.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "target_fate": "delete or shadow-only once sibling legacy callers are drained; startup load is already removed from the mounted package root",
+      "evidence": [
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "module_path": "truffles-api/app/routers/webhook/decision.py",
+      "module_role": "legacy_decision_router",
+      "freeze_mode": "shadow_only_after_shadow_lane_elimination",
+      "mechanism_pressure": "semantic_and_boundary_shadow_pressure",
+      "hot_path_status": "shadow_only_test_compatibility_surface",
+      "live_runtime_callers": [],
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/_legacy.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/__init__.py",
+        "truffles-api/tests/support_booking_prompt_owner_shadow.py",
+        "truffles-api/tests/test_booking_info_interrupt_contract.py",
+        "truffles-api/tests/test_booking_prompt_leak_guard.py",
+        "truffles-api/tests/test_booking_relative_date_resolution.py",
+        "truffles-api/tests/test_knowledge_safe_mode_gate.py",
+        "truffles-api/tests/test_llm_policy_core.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_pending_pack_lexicons.py",
+        "truffles-api/tests/test_reasoning_core.py",
+        "truffles-api/tests/test_safe_mode_gate.py",
+        "truffles-api/tests/test_state_service.py",
+        "truffles-api/tests/test_webhook_dedup.py",
+        "truffles-api/tests/test_webhook_marketing_reply_context.py"
+      ],
+      "target_fate": "keep shadow-only until _legacy.py and other shadow callers are eliminated, then delete",
+      "evidence": [
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "truffles-api/app/routers/webhook/decision.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "module_path": "truffles-api/app/routers/webhook/info.py",
+      "module_role": "legacy_fact_scope_helper",
+      "freeze_mode": "adapter_only_after_shadow_lane_elimination",
+      "mechanism_pressure": "fact_scope_and_compatibility",
+      "hot_path_status": "unmounted_legacy_helper_surface",
+      "live_runtime_callers": [],
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/booking_signal_runtime.py",
+        "truffles-api/app/routers/webhook/decision.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/test_booking_info_interrupt_contract.py",
+        "truffles-api/tests/test_cross_domain_signal_contract_suite.py",
+        "truffles-api/tests/test_info_master_long_hair.py",
+        "truffles-api/tests/test_master_info_flow.py",
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "target_fate": "demote to adapter-only or shadow-only after sibling legacy callers are drained",
+      "evidence": [
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/app/routers/webhook/info.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "module_path": "truffles-api/app/routers/webhook/response.py",
+      "module_role": "legacy_response_helper",
+      "freeze_mode": "adapter_only_after_shadow_lane_elimination",
+      "mechanism_pressure": "boundary_and_continuity_shadow_pressure",
+      "hot_path_status": "lazy_export_only_unmounted_legacy_helper",
+      "live_runtime_callers": [],
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/info.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/test_consult_followup_guard.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_webhook_response.py"
+      ],
+      "target_fate": "delete or shadow-only once sibling legacy callers are drained; startup load is already removed from the mounted package root",
+      "evidence": [
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "confidence": "high"
+    }
+  ]
+}

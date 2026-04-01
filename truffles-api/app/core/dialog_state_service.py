@@ -12,12 +12,13 @@ from app.core.turn_journal import TurnJournalV1, build_turn_journal_events
 from app.core.turn_planner import PendingQuestionContract, PolicyDecision, SemanticFrame, TurnPlanner
 from app.schemas.webhook import InteractionStateContract, MemoryContract
 
-_SESSION_MEMORY_INTERACTION_RESUME_SLOTS = {"service", "datetime", "name", "phone"}
-_SESSION_MEMORY_QUESTION_TYPES = {"service_choice", "time", "name"}
+_SESSION_MEMORY_INTERACTION_RESUME_SLOTS = {"service", "datetime", "name", "phone", "media"}
+_SESSION_MEMORY_QUESTION_TYPES = {"service_choice", "time", "name", "media"}
 _SESSION_MEMORY_PENDING_SLOT_BY_REPLY_TYPE = {
     "service_choice": "service",
     "time": "datetime",
     "name": "name",
+    "media": "media",
 }
 _RUNTIME_CONTEXT_KEY = "consultant_runtime"
 _RUNTIME_PENDING_RESUME_SNAPSHOT_KEYS = {
@@ -55,13 +56,14 @@ _BOOKING_CONTEXT_STRING_KEYS = {
 _CANONICAL_DIALOG_STATE_OWNER = "context_manager.dialog_state.v1"
 _CANONICAL_DIALOG_STATE_VERSION = "v1"
 _CANONICAL_REFERENT_KEYS = {"service", "master", "branch", "booking_ref"}
-_CANONICAL_PENDING_SLOTS = {"service", "datetime", "name", "phone"}
+_CANONICAL_PENDING_SLOTS = {"service", "datetime", "name", "phone", "media"}
 _CANONICAL_PENDING_SLOT_ORDER = ("service", "datetime", "name", "phone")
 _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE = {
     "service_choice": "service",
     "time": "datetime",
     "name": "name",
     "phone": "phone",
+    "media": "media",
 }
 _PENDING_RESUME_BOUNDARY_REPLY_BY_SLOT = {
     "service": "service_choice",
@@ -84,6 +86,10 @@ _CANONICAL_INTERACTION_RELATION_VALUES = {
 }
 _CANONICAL_INTERACTION_REFERENT_KEYS = {"service", "specialist", "branch", "booking_ref"}
 _MEMORY_PROFILE_CONSENT_STATUSES = {"unknown", "asked", "granted", "declined"}
+_TOUCHED_SLICE_CLASS_CARRYOVER_FAMILY_ID = "location_hours_parking"
+_TOUCHED_SLICE_CLASS_CARRYOVER_CLASS = "info_bundle"
+_TOUCHED_SLICE_CLASS_CARRYOVER_TTL_MESSAGES = 4
+_TOUCHED_SLICE_CLASS_CARRYOVER_INTENTS = {"location", "hours", "parking"}
 _CLASS_CARRYOVER_SECTION_INTENT_MAP = {
     "address": "location",
     "location": "location",
@@ -290,7 +296,7 @@ class DialogStateService:
         *,
         conversation_id: str | None,
         existing_projection: ConversationProjectionV1 | None,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
         semantic_state: CanonicalSemanticState,
         semantic_contract: dict[str, Any] | None,
         pending_question_contract: dict[str, Any] | None,
@@ -305,7 +311,7 @@ class DialogStateService:
         )
         pending_contract = self.project_pending_question_contract(pending_question_contract) or {}
         contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
-        if not contract:
+        if not contract and not self._is_synthetic_control_decision(decision):
             contract = self._semantic_contract_from_frame(frame) or {}
         slot_values = (
             frame.continuation.get("slot_values")
@@ -332,16 +338,22 @@ class DialogStateService:
             else None
         ) or self._normalize_projection_token(contract.get("capability"))
         active_workflow_ref = None
-        if decision.binding_plan is not None:
+        if isinstance(decision, PolicyDecision) and decision.binding_plan is not None:
             active_workflow_ref = self._normalize_projection_token(
                 decision.binding_plan.selected_tool_or_workflow_ref
             )
-        if active_workflow_ref is None:
+        if active_workflow_ref is None and isinstance(decision, PolicyDecision):
             active_workflow_ref = self._normalize_projection_token(
                 decision.tool_action
             )
+        if active_workflow_ref is None and isinstance(existing_projection, ConversationProjectionV1):
+            active_workflow_ref = self._normalize_projection_token(
+                existing_projection.active_workflow_ref
+            )
         pending_handoff_state: dict[str, Any] = {}
-        if decision.outcome == "HANDOFF" or bool(decision.meta.get("degrade_path")):
+        if isinstance(decision, PolicyDecision) and (
+            decision.outcome == "HANDOFF" or bool(decision.meta.get("degrade_path"))
+        ):
             pending_handoff_state = {
                 "active": True,
                 "outcome": "handoff" if decision.outcome == "HANDOFF" else "degrade",
@@ -356,7 +368,7 @@ class DialogStateService:
 
         semantic_decision_ref = (
             decision.semantic_decision.decision_id
-            if decision.semantic_decision is not None
+            if isinstance(decision, PolicyDecision) and decision.semantic_decision is not None
             else (
                 existing_projection.current_semantic_decision_ref
                 if isinstance(existing_projection, ConversationProjectionV1)
@@ -367,7 +379,7 @@ class DialogStateService:
             semantic_decision_ref
             or (
                 decision.binding_plan.decision_id
-                if decision.binding_plan is not None
+                if isinstance(decision, PolicyDecision) and decision.binding_plan is not None
                 else (
                     existing_projection.last_turn_id
                     if isinstance(existing_projection, ConversationProjectionV1)
@@ -718,7 +730,11 @@ class DialogStateService:
         owner_payload = self.project_semantic_frame(owner_frame) or {}
         existing_payload = self.project_semantic_frame(existing) or {}
         decision_payload = owner_payload
-        if not decision_payload and not self._has_canonical_semantic_owner(decision):
+        if (
+            not decision_payload
+            and not self._has_canonical_semantic_owner(decision)
+            and not self._is_synthetic_control_decision(decision)
+        ):
             decision_payload = self.project_semantic_frame(decision.semantic_frame) or {}
         materialized = deepcopy(owner_payload) if owner_payload else deepcopy(existing_payload)
         for section_name in (
@@ -744,7 +760,11 @@ class DialogStateService:
             if isinstance(incoming, dict) and incoming:
                 materialized[section_name].update(incoming)
         incoming_pending_contract = self._canonical_decision_pending_question_contract(decision)
-        if not incoming_pending_contract and not self._has_canonical_semantic_owner(decision):
+        if (
+            not incoming_pending_contract
+            and not self._has_canonical_semantic_owner(decision)
+            and not self._is_synthetic_control_decision(decision)
+        ):
             incoming_pending_contract = (
                 self.project_pending_question_contract(decision.pending_question_contract) or {}
             )
@@ -914,6 +934,12 @@ class DialogStateService:
     def _has_canonical_semantic_owner(decision: PolicyDecision) -> bool:
         return isinstance(getattr(decision, "semantic_decision", None), BaseModel)
 
+    @staticmethod
+    def _is_synthetic_control_decision(decision: PolicyDecision | None) -> bool:
+        return bool(
+            isinstance(decision, PolicyDecision) and decision.is_synthetic_control_decision()
+        )
+
     def _canonical_decision_semantic_frame(
         self,
         decision: PolicyDecision,
@@ -949,6 +975,8 @@ class DialogStateService:
     ) -> PendingQuestionContract:
         if self._has_canonical_semantic_owner(decision):
             return TurnPlanner().canonical_pending_question_contract(decision)
+        if self._is_synthetic_control_decision(decision):
+            return PendingQuestionContract()
         return decision.pending_question_contract
 
     def _decision_semantic_contract(
@@ -958,6 +986,8 @@ class DialogStateService:
         canonical_contract = self._canonical_decision_semantic_contract(decision)
         if canonical_contract:
             return canonical_contract
+        if self._is_synthetic_control_decision(decision):
+            return {}
         return (
             self._semantic_contract_from_frame(decision.semantic_frame)
             or (
@@ -1445,6 +1475,7 @@ class DialogStateService:
                 "datetime": "time",
                 "name": "name",
                 "phone": "phone",
+                "media": "media",
             }.get(normalized_next_question)
         normalized_reason = self._normalize_projection_token(
             expected_reply_reason if expected_reply_reason is not None else base_payload.get("reason")
@@ -1480,6 +1511,51 @@ class DialogStateService:
         if normalized_open_questions:
             payload["open_questions"] = normalized_open_questions
         return payload or None
+
+    def project_interrupt_resume_pending_question_contract(
+        self,
+        pending_question_contract: PendingQuestionContract | dict[str, Any] | None,
+        *,
+        current_goal: str | None,
+        booking_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        projected = self.project_pending_question_contract(pending_question_contract) or {}
+        if projected.get("expected_reply_type") != "media":
+            return None
+        if self._normalize_projection_token(current_goal) != "booking":
+            return None
+        normalized_booking = self.normalize_booking_payload(booking_payload) or {}
+        pending_question_act = self._normalize_projection_token(
+            projected.get("pending_question_act")
+        )
+        pending_question_target = self._normalize_projection_token(
+            projected.get("pending_question_target")
+        )
+        active_question_relation = self._normalize_projection_token(
+            projected.get("active_question_relation")
+        )
+        if (
+            not pending_question_target
+            and self._normalize_projection_token(normalized_booking.get("service"))
+            and not self._normalize_projection_token(normalized_booking.get("datetime"))
+        ):
+            pending_question_act = pending_question_act or "ask_about_requested_slot"
+            pending_question_target = "time"
+            active_question_relation = (
+                active_question_relation or "ask_about_requested_slot"
+            )
+        if pending_question_target != "time":
+            return None
+        return self.project_pending_question_contract(
+            {
+                "expected_reply_type": "time",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "pending_question_act": pending_question_act,
+                "pending_question_target": pending_question_target,
+                "active_question_relation": active_question_relation,
+            }
+        )
 
     def project_context_pending_question_contract(
         self,
@@ -1629,6 +1705,32 @@ class DialogStateService:
             None,
             expected_reply_type=projections.expected_reply_type,
             expected_reply_reason=projections.expected_reply_reason,
+        )
+
+    def project_context_manager_pending_question_contract(
+        self,
+        context: dict[str, Any] | None,
+        *,
+        context_manager_key: str = "context_manager",
+        canonical_state_key: str = "canonical_dialog_state",
+    ) -> dict[str, Any] | None:
+        if not isinstance(context, dict):
+            return None
+
+        context_manager = (
+            context.get(context_manager_key)
+            if isinstance(context.get(context_manager_key), dict)
+            else None
+        )
+        canonical_state = self.normalize_context_manager_canonical_state(
+            context_manager.get(canonical_state_key)
+            if isinstance(context_manager, dict)
+            else None
+        )
+        return self.project_pending_question_contract(
+            canonical_state.get("pending_question_contract")
+            if isinstance(canonical_state, dict)
+            else None
         )
 
     def project_context_current_goal(
@@ -2096,6 +2198,57 @@ class DialogStateService:
             dict(session_memory) if isinstance(session_memory, dict) else {},
         )
 
+    def sync_runtime_compatibility_context(
+        self,
+        context: dict[str, Any] | None,
+        *,
+        now: datetime,
+        runtime_key: str = _RUNTIME_CONTEXT_KEY,
+        context_manager_key: str = "context_manager",
+        canonical_state_key: str = "canonical_dialog_state",
+        session_memory_key: str = "session_memory",
+        expected_reply_type_key: str = "expected_reply_type",
+        expected_reply_reason_key: str = "expected_reply_reason",
+        current_goal_key: str = "current_goal",
+        session_memory_ttl_hours: int = 24,
+    ) -> dict[str, Any]:
+        updated = deepcopy(context) if isinstance(context, dict) else {}
+        updated.pop(expected_reply_type_key, None)
+        updated.pop(expected_reply_reason_key, None)
+        updated.pop(current_goal_key, None)
+
+        manager = self.build_context_manager_compatibility_snapshot(
+            updated,
+            runtime_key=runtime_key,
+            context_manager_key=context_manager_key,
+            canonical_state_key=canonical_state_key,
+            session_memory_key=session_memory_key,
+            expected_reply_type_key=expected_reply_type_key,
+            expected_reply_reason_key=expected_reply_reason_key,
+        )
+        updated = self.set_context_manager_payload(
+            updated,
+            manager,
+            key=context_manager_key,
+        )
+
+        session_memory = self.build_context_session_memory_snapshot(
+            updated,
+            now=now,
+            default_ttl_hours=session_memory_ttl_hours,
+            runtime_key=runtime_key,
+            context_manager_key=context_manager_key,
+            canonical_state_key=canonical_state_key,
+            session_memory_key=session_memory_key,
+            expected_reply_type_key=expected_reply_type_key,
+            expected_reply_reason_key=expected_reply_reason_key,
+        )
+        return self.set_context_session_memory(
+            updated,
+            session_memory,
+            key=session_memory_key,
+        )
+
     def project_pending_question_contract_with_projection_fallback(
         self,
         contract: PendingQuestionContract | dict[str, Any] | None,
@@ -2305,6 +2458,8 @@ class DialogStateService:
         execution_payload: dict[str, Any] | None,
         grounded_referents: dict[str, str] | None,
     ) -> dict[str, Any] | None:
+        if self._is_synthetic_control_decision(decision):
+            return None
         existing_contract = self._semantic_contract_from_frame(
             existing_state.semantic_state.materialized_frame
         ) or (
@@ -2331,16 +2486,18 @@ class DialogStateService:
                 contract.pop("entity_refs", None)
             grounding_provenance = self._normalize_grounding_provenance(
                 execution_contract.get("grounding_provenance")
+            ) or self._normalize_grounding_provenance(
+                decision_contract.get("grounding_provenance")
             )
             if grounding_provenance:
                 contract["grounding_provenance"] = grounding_provenance
             referents = self._build_semantic_referents(
                 existing_contract={},
                 entity_refs=entity_refs,
-                grounded_referents=grounded_referents,
-                booking_payload=booking_payload,
+                grounded_referents=None,
+                booking_payload=None,
                 decision=decision,
-                execution_payload=execution_payload,
+                execution_payload=None,
                 execution_contract=execution_contract,
             )
             if referents:
@@ -3199,13 +3356,7 @@ class DialogStateService:
             runtime_projection = self._build_conversation_projection(
                 conversation_id=None,
                 existing_projection=None,
-                decision=PolicyDecision(
-                    outcome="FACT",
-                    action="respond",
-                    intent=self._normalize_projection_token(current_goal) or "other",
-                    tool_action="respond",
-                    interaction={"owner": "dialog_state_service"},
-                ),
+                decision=None,
                 semantic_state=dialog_state.semantic_state,
                 semantic_contract=(
                     dict(dialog_state.meta.get("semantic_contract"))
@@ -3253,24 +3404,29 @@ class DialogStateService:
             slot_values = decision.slots
 
         clear_booking = bool(execution_payload.get("clear_booking"))
+        is_synthetic_control = self._is_synthetic_control_decision(decision)
         merged_booking = self.normalize_booking_payload(existing_booking)
         loaded_current_goal = self._normalize_projection_token(loaded.get("current_goal"))
         decision_pending_contract = self._decision_pending_question_contract(decision)
         decision_semantic_contract = self._decision_semantic_contract(decision)
+        collect_next_slot = self._normalize_projection_token(
+            execution_payload.get("next_slot")
+            or decision_pending_contract.next_question
+            or _CANONICAL_EXPECTED_REPLY_SLOT_BY_TYPE.get(
+                self._normalize_projection_token(decision_pending_contract.expected_reply_type) or ""
+            )
+        )
+        collect_is_booking_followup = collect_next_slot in _BOOKING_CONTEXT_SLOT_KEYS
         owner_pending_question_contract = None
         if decision.outcome != "COLLECT":
             owner_pending_question_contract = self.project_pending_question_contract(
                 decision_pending_contract,
             )
-        if decision.outcome == "COLLECT":
+        if decision.outcome == "COLLECT" and collect_is_booking_followup:
             merged_booking = self.build_collect_owner_booking_payload(
                 existing_booking=existing_booking,
                 now=now,
-                last_question=self._normalize_projection_token(
-                    execution_payload.get("next_slot")
-                    or decision_pending_contract.next_question
-                    or "service"
-                ) or "service",
+                last_question=collect_next_slot or "service",
                 slot_values=slot_values,
             )
         elif (
@@ -3336,19 +3492,24 @@ class DialogStateService:
             if current_goal is None and (merged_booking or decision.intent == "booking"):
                 current_goal = "booking"
         elif decision.outcome == "COLLECT":
-            next_slot = self._normalize_projection_token(
-                execution_payload.get("next_slot")
-                or decision_pending_contract.next_question
-            )
+            next_slot = collect_next_slot
             if next_slot:
                 expected_reply_type = {
                     "service": "service_choice",
                     "datetime": "time",
                     "name": "name",
                     "phone": "phone",
+                    "media": "media",
                 }.get(next_slot)
                 expected_reply_reason = f"collect:{next_slot}"
-            current_goal = "booking"
+            if collect_is_booking_followup:
+                current_goal = "booking"
+            else:
+                current_goal = (
+                    self._normalize_projection_token(decision.meta.get("goal"))
+                    or self._normalize_projection_token(decision.intent)
+                    or loaded_current_goal
+                )
         elif merged_booking:
             existing_pending_question_contract = (
                 self.project_pending_question_contract_with_projection_fallback(
@@ -3385,10 +3546,6 @@ class DialogStateService:
                 semantic_execution_payload,
                 owner_only=True,
             )
-            if not semantic_enrichment:
-                semantic_enrichment = self._execution_semantic_enrichment_from_contract(
-                    semantic_contract
-                )
             if semantic_enrichment and "semantic_enrichment" not in semantic_execution_payload:
                 semantic_execution_payload["semantic_enrichment"] = semantic_enrichment
             semantic_execution_payload.pop("semantic_contract", None)
@@ -3405,11 +3562,12 @@ class DialogStateService:
         current_goal = current_goal or self._normalize_projection_token(
             semantic_state.materialized_frame.user_goal
         )
-        semantic_contract = (
-            self._semantic_contract_from_frame(semantic_state.materialized_frame)
-            or semantic_contract
-        )
-        if not expected_reply_type:
+        if not is_synthetic_control:
+            semantic_contract = (
+                self._semantic_contract_from_frame(semantic_state.materialized_frame)
+                or semantic_contract
+            )
+        if not expected_reply_type and not is_synthetic_control:
             frame_pending_contract = self._pending_question_from_frame(
                 semantic_state.materialized_frame
             ) or {}
@@ -3476,6 +3634,29 @@ class DialogStateService:
             expected_reply_type=expected_reply_type,
             expected_reply_reason=expected_reply_reason,
         )
+        manager_payload = (
+            working_context.get("context_manager")
+            if isinstance(working_context.get("context_manager"), dict)
+            else None
+        )
+        manager_message_count = self._canonical_int(
+            manager_payload.get("message_count") if isinstance(manager_payload, dict) else None
+        )
+        existing_runtime_class_carryover = self._normalize_class_carryover_payload(
+            loaded["dialog_state"].meta.get("class_carryover")
+            if isinstance(loaded["dialog_state"].meta, dict)
+            else None
+        )
+        runtime_class_carryover = self._build_touched_slice_class_carryover_payload(
+            execution_meta=execution_payload,
+            message_count=manager_message_count,
+        ) or existing_runtime_class_carryover
+        dialog_meta = dict(dialog_state.meta)
+        if runtime_class_carryover:
+            dialog_meta["class_carryover"] = deepcopy(runtime_class_carryover)
+        else:
+            dialog_meta.pop("class_carryover", None)
+        dialog_state = dialog_state.model_copy(update={"meta": dialog_meta})
         projection_pending_contract = self.project_pending_question_contract_with_projection_fallback(
             dialog_state.pending_question_contract,
             expected_reply_type=dialog_state.projections.expected_reply_type,
@@ -3537,9 +3718,31 @@ class DialogStateService:
             merged_booking,
             key="booking",
         )
-        updated_context.pop("expected_reply_type", None)
-        updated_context.pop("expected_reply_reason", None)
-        updated_context.pop("current_goal", None)
+        updated_context = self.sync_runtime_compatibility_context(
+            updated_context,
+            now=now,
+            runtime_key=runtime_key,
+            context_manager_key="context_manager",
+            canonical_state_key="canonical_dialog_state",
+            session_memory_key="session_memory",
+            expected_reply_type_key="expected_reply_type",
+            expected_reply_reason_key="expected_reply_reason",
+            current_goal_key="current_goal",
+            session_memory_ttl_hours=24,
+        )
+        if runtime_class_carryover is not None or existing_runtime_class_carryover is not None:
+            updated_context = self.set_context_manager_payload(
+                updated_context,
+                self.set_context_manager_class_carryover_payload(
+                    updated_context.get("context_manager")
+                    if isinstance(updated_context.get("context_manager"), dict)
+                    else None,
+                    manager_key="class_carryover",
+                    canonical_state_key="canonical_dialog_state",
+                    payload=runtime_class_carryover,
+                ),
+                key="context_manager",
+            )
 
         if decision.outcome == "HANDOFF":
             pending_resume = self.capture_pending_resume_payload(
@@ -4335,7 +4538,9 @@ class DialogStateService:
         restored: dict[str, Any] = {}
 
         restored["context_manager"] = self.build_context_manager_compatibility_snapshot(pending_resume)
-        pending_question_contract = self.project_context_pending_question_contract(pending_resume)
+        pending_question_contract = self.project_context_manager_pending_question_contract(
+            pending_resume
+        )
         projections = self.project_expected_reply_projections(
             expected_reply_type=(
                 pending_question_contract.get("expected_reply_type")
@@ -4402,13 +4607,10 @@ class DialogStateService:
             return None
 
         def _extract_reason(candidate_context: dict[str, Any] | None) -> str | None:
-            pending_contract = self.project_context_pending_question_contract(
+            pending_contract = self.project_context_manager_pending_question_contract(
                 candidate_context,
                 context_manager_key=context_manager_key,
                 canonical_state_key=canonical_state_key,
-                session_memory_key=session_memory_key,
-                expected_reply_type_key="expected_reply_type",
-                expected_reply_reason_key=expected_reply_reason_key,
             )
             if not isinstance(pending_contract, dict):
                 return None
@@ -4422,17 +4624,7 @@ class DialogStateService:
         if not isinstance(pending_resume, dict):
             return None
 
-        pending_context: dict[str, Any] = {}
-        for key in (
-            context_manager_key,
-            "expected_reply_type",
-            expected_reply_reason_key,
-            "booking",
-            session_memory_key,
-        ):
-            if key in pending_resume:
-                pending_context[key] = pending_resume.get(key)
-        return _extract_reason(pending_context)
+        return _extract_reason(pending_resume)
 
     def derive_pending_booking_resume_boundary_payload(
         self,
@@ -4524,12 +4716,9 @@ class DialogStateService:
                 payload["prompt"] = boundary_prompt
             return payload
 
-        live_pending_question_contract = self.project_context_pending_question_contract(
+        live_pending_question_contract = self.project_context_manager_pending_question_contract(
             context,
             context_manager_key=context_manager_key,
-            session_memory_key=session_memory_key,
-            expected_reply_type_key=expected_reply_type_key,
-            expected_reply_reason_key="expected_reply_reason",
         )
         live_boundary_payload = _build_boundary_payload(
             expected_reply_type=(
@@ -4552,12 +4741,9 @@ class DialogStateService:
         if not isinstance(pending_resume, dict):
             return None
 
-        pending_question_contract = self.project_context_pending_question_contract(
+        pending_question_contract = self.project_context_manager_pending_question_contract(
             pending_resume,
             context_manager_key=context_manager_key,
-            session_memory_key=session_memory_key,
-            expected_reply_type_key=expected_reply_type_key,
-            expected_reply_reason_key="expected_reply_reason",
         )
         return _build_boundary_payload(
             expected_reply_type=(
@@ -5196,6 +5382,88 @@ class DialogStateService:
             "remaining": remaining,
         }
 
+    def _normalize_class_carryover_payload(
+        self,
+        payload: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(payload, dict):
+            return None
+        raw_ttl = self._canonical_int(payload.get("ttl"))
+        if raw_ttl <= 0:
+            return None
+        normalized = self.build_class_carryover_payload(
+            class_name=payload.get("class"),
+            intents=payload.get("intents") if isinstance(payload.get("intents"), list) else None,
+            info_sections=(
+                payload.get("info_sections")
+                if isinstance(payload.get("info_sections"), list)
+                else None
+            ),
+            message_count=self._canonical_int(payload.get("message_count")),
+            default_ttl=raw_ttl,
+            allowed_intents={
+                self._normalize_projection_token(item)
+                for item in (_CLASS_CARRYOVER_SECTION_INTENT_MAP.values())
+            }
+            | {
+                item.strip().casefold()
+                for item in (payload.get("intents") or [])
+                if isinstance(item, str) and item.strip()
+            },
+            normalize_class_name=lambda value: value.strip().casefold(),
+        )
+        if normalized is None:
+            return None
+        normalized["ttl"] = raw_ttl
+        return normalized
+
+    def _build_touched_slice_class_carryover_payload(
+        self,
+        *,
+        execution_meta: dict[str, Any] | None,
+        message_count: int,
+    ) -> dict[str, Any] | None:
+        if not isinstance(execution_meta, dict):
+            return None
+        family_id = self._normalize_projection_token(execution_meta.get("fact_family_cutover"))
+        if family_id != _TOUCHED_SLICE_CLASS_CARRYOVER_FAMILY_ID:
+            return None
+
+        raw_info_sections = execution_meta.get("info_sections")
+        info_sections = [
+            item.strip()
+            for item in raw_info_sections
+            if isinstance(item, str) and item.strip()
+        ] if isinstance(raw_info_sections, list) else []
+
+        emitted_refs: list[str] = []
+        raw_fact_refs = execution_meta.get("fact_emitted_refs")
+        if isinstance(raw_fact_refs, list):
+            for item in raw_fact_refs:
+                normalized = self._normalize_projection_token(item)
+                if normalized and normalized in _TOUCHED_SLICE_CLASS_CARRYOVER_INTENTS:
+                    emitted_refs.append(normalized)
+                    existing_intents = {
+                        _CLASS_CARRYOVER_SECTION_INTENT_MAP.get(section.strip().casefold())
+                        for section in info_sections
+                        if isinstance(section, str) and section.strip()
+                    }
+                    if normalized not in existing_intents and normalized not in info_sections:
+                        info_sections.append(normalized)
+
+        if not info_sections and not emitted_refs:
+            return None
+
+        return self.build_class_carryover_payload(
+            class_name=_TOUCHED_SLICE_CLASS_CARRYOVER_CLASS,
+            intents=emitted_refs,
+            info_sections=info_sections,
+            message_count=message_count,
+            default_ttl=_TOUCHED_SLICE_CLASS_CARRYOVER_TTL_MESSAGES,
+            allowed_intents=_TOUCHED_SLICE_CLASS_CARRYOVER_INTENTS,
+            normalize_class_name=lambda value: value.strip().casefold(),
+        )
+
     def set_canonical_class_carryover(
         self,
         state: dict[str, Any] | None,
@@ -5275,8 +5543,34 @@ class DialogStateService:
                 state=self.set_canonical_class_carryover(
                     canonical_state,
                     payload=payload,
-                ),
-            )
+            ),
+        )
+
+    def set_context_manager_class_carryover_payload(
+        self,
+        manager: dict[str, Any] | None,
+        *,
+        manager_key: str,
+        canonical_state_key: str,
+        payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized_payload = self._normalize_class_carryover_payload(payload)
+        updated = self._set_optional_manager_payload(
+            manager,
+            key=manager_key,
+            payload=normalized_payload,
+        )
+        canonical_state = self.normalize_context_manager_canonical_state(
+            updated.get(canonical_state_key) if isinstance(updated.get(canonical_state_key), dict) else None
+        )
+        return self.set_context_manager_canonical_state(
+            updated,
+            key=canonical_state_key,
+            state=self.set_canonical_class_carryover(
+                canonical_state,
+                payload=normalized_payload,
+            ),
+        )
         if isinstance(canonical_state, dict):
             return self.set_context_manager_canonical_state(
                 updated,

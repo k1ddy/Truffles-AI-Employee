@@ -1,37 +1,194 @@
-version: 2026-03-15.v1
-active_dec: docs/DECISIONS/DEC-2026-03-15-consultant-core-controlled-demolition.md
-active_master_tp: docs/TASK_PACKAGES/TP-2026-03-15-consultant-core-controlled-demolition-master.md
-active_block_tp: docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-behavioral-proof-lock-a922.md
+version: 2026-03-31.v1
+active_dec: docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md
+active_master_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md
 active_canon: docs/ACTIVE_CANON.md
 legacy_sunset: docs/LEGACY_SUNSET.yaml
+authority_registry: docs/system_forensics/authority_registry.json
+compatibility_carrier_inventory: docs/system_forensics/compatibility_carrier_inventory.json
+dead_surface_registry: docs/system_forensics/dead_surface_registry.json
+current_practical_truth:
+  label: r35f
+  run_id: a922-practical-proof-20260330-r35f
+  artifact_dir: /tmp/booking_quality/a922-practical-proof-20260330-r35f
+  report: docs/REPORTS/2026-03-30-consultant-core-r35f-human-semantic-audit-a922.md
+  infra_valid: true
+  semantic_valid: false
+  human_semantic_valid: false
+  manual_audit_status: done
+governance_registries:
+  authority:
+    path: docs/system_forensics/authority_registry.json
+    required_status: machine_readable_system_reproof_base
+    required_mechanisms:
+    - semantic_turn_meaning
+    - post_owner_semantic_reconstruction
+    - continuity_state
+    - boundary_and_degrade
+    - fact_scope
+    - legacy_behavior_authority
+  compatibility_carriers:
+    path: docs/system_forensics/compatibility_carrier_inventory.json
+    required_status: machine_readable_system_reproof_base
+    required_carriers:
+    - consultant_runtime.dialog_state
+    - consultant_runtime.booking_payload
+    - consultant_runtime.conversation_projection
+    - consultant_runtime.turn_journal
+    - runtime_trace_contract.state_transition
+    - context_manager.canonical_dialog_state
+    - context.booking
+    - context.expected_reply_fields
+    - context.current_goal
+    - session_memory
+    - pending_resume
+    - intent_queue_and_service_hints
+    - handover_confirmation
+    - reengage_confirmation
+    - style_reference_pending
+    - memory_profile
+    - memory_pending
+  surface_topology:
+    path: docs/system_forensics/dead_surface_registry.json
+    required_status: machine_readable_system_reproof_base
+    required_surfaces:
+    - truffles-api/app/main.py
+    - truffles-api/app/routers/webhook/__init__.py
+    - truffles-api/app/routers/webhook/http.py
+    - truffles-api/app/routers/webhook/session_memory.py
+    - truffles-api/app/routers/webhook/trace.py
+    - truffles-api/app/routers/webhook/decision.py
+    - truffles-api/app/routers/webhook/_legacy.py
+    - truffles-api/app/routers/webhook/context_manager.py
+    - truffles-api/app/routers/webhook/response.py
+    - truffles-api/app/routers/webhook/booking.py
+    - truffles-api/app/routers/webhook/info.py
+    - truffles-api/app/routers/webhook/pending.py
+    - truffles-api/app/routers/webhook/policy.py
+    - truffles-api/app/routers/webhook/guards.py
+    - truffles-api/app/routers/webhook/dedup.py
+    - truffles-api/app/services/reasoning_core.py
+    - truffles-api/app/webhook.py
+    - truffles-api/app/core/booking_prompt_owner.py
+    - truffles-api/tests/support_booking_prompt_owner_shadow.py
+    - truffles-api/tests/support_reasoning_core_shadow.py
+    - truffles-api/tests/support_legacy_webhook_shadow.py
+  legacy_caller_surface:
+    path: docs/system_forensics/legacy_caller_surface.json
+    required_status: machine_readable_system_reproof_base
+    required_modules:
+    - truffles-api/app/routers/webhook/info.py
+    - truffles-api/app/routers/webhook/decision.py
+    - truffles-api/app/routers/webhook/_legacy.py
+    - truffles-api/app/routers/webhook/response.py
+    - truffles-api/app/routers/webhook/context_manager.py
+  governance_delta:
+    path: docs/system_forensics/governance_delta.json
+    required_status: machine_readable_system_reproof_delta
+    required_locked_mechanisms:
+    - semantic_turn_meaning
+    - post_owner_semantic_reconstruction
+    - continuity_state
+    - boundary_and_degrade
+    - fact_scope
+    - legacy_behavior_authority
+current_non_negotiable_next_move: run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim
+governing_architecture:
+  statement: Single Semantic Owner + Strict Binding Boundary + Canonical Continuity State + First-Class Fact Plane + Adapter-only Legacy Mesh
+  planes:
+  - semantic_owner
+  - binding_boundary
+  - canonical_continuity_state
+  - first_class_fact_plane
+  - adapter_only_legacy_mesh
+anti_partial_closure_law:
+  summary: no block may claim closure while any live writer, live caller, sibling path, or compatibility carrier inside the declared mechanism envelope still bypasses the intended contract
+  unacceptable_if:
+  - live_writer_or_caller_bypasses_declared_contract
+  - legacy_path_still_co_owns_same_mechanism
+  - sibling_paths_of_same_mechanism_are_left_open_but_omitted_from_scope
+  - code_moves_without_authority_delta
+  - acceptance_relies_on_surface_wording_not_executable_contract
+  - deterministic_proof_replay_or_human_audit_missing_for_behavioral_closure
+authority_recovery_program:
+  phases:
+  - governing_decision_freeze
+  - authority_freeze
+  - fact_contract_schema
+  - narrow_fact_family_cutover
+  - continuity_state_normalization
+  - post_owner_semantic_constriction
+  - boundary_constriction
+  - pack_runtime_separation_completion
+  - legacy_mesh_drain
+  - shadow_lane_elimination
+  - operational_entrypoint_dedupe
+  - closure_claim_truth_correction_and_semantic_owner_reopen
+  - semantic_owner_and_post_owner_reconstruction_reopen
+  - continuity_boundary_pack_runtime_legacy_and_operational_reproof
+  - replay_and_human_audit_acceptance
+execution_strategy:
+  mode: wave_based_whole_system_architecture_closure
+  progress_credit_rule: no_progress_credit_without_named_authority_delta_full_block_closure_and_machine_readable_evidence
+  mandatory_sequence:
+  - governing_decision_freeze
+  - authority_freeze
+  - fact_contract_schema
+  - narrow_fact_family_cutover
+  - continuity_state_normalization
+  - post_owner_semantic_constriction
+  - boundary_constriction
+  - pack_runtime_separation_completion
+  - legacy_mesh_drain
+  - shadow_lane_elimination
+  - operational_entrypoint_dedupe
+  - closure_claim_truth_correction_and_semantic_owner_reopen
+  - semantic_owner_and_post_owner_reconstruction_reopen
+  - continuity_boundary_pack_runtime_legacy_and_operational_reproof
+  - replay_and_human_audit_acceptance
+  forbidden_shortcuts:
+  - start_from_visible_family_symptom_before_authority_and_fact_contract_freeze
+  - boundary_cleanup_before_explicit_fact_scope_contract
+  - forced_journal_first_rewrite_before_continuity_normalization
+  - deleting_legacy_before_caller_proof_and_replacement_seam
+  - claiming_green_without_whole_system_architecture_closure_and_final_replay_human_audit
+  - canon_or_state_updates_after_micro_fix_inside_unfinished_block
+  operator_instruction_if_uncertain:
+  - Stop and map the full writer/caller envelope of the targeted mechanism before editing code.
+  - If the block cannot explain how it reduces system-level authority debt, it is not admissible.
+  - Only update STATE.md, ACTIVE_*, packet, and reports after one full block completes.
+  current_nonnegotiable_next_move: run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim
+  block_closeout_rule: state_canon_packet_and_report_sync_only_after_full_block_completion_never_after_micro_actions
 semantic_owner:
-  contract: PolicyDecision
+  contract: SemanticDecisionV1
   current_primary_files:
-  - prompts/llm_policy_core.md
-  - truffles-api/app/routers/webhook/decision.py
-  target_primary_files:
-  - contracts/runtime/policy_decision.v1.jsonschema
+  - truffles-api/app/services/intent_service.py
   - truffles-api/app/core/turn_planner.py
-  cutover_status: wrapped_ingress_preflight_cache_secret_safe_runtime_loader_active_conversation_snapshot_service_referent_projection_active_booking_datetime_value_and_exact_time_token_lexical_intent_primitive_protective_lexical_confirmation_refusal_domain_router_bounded_controller_route_bounded_policy_core_handoff_text_only_style_reference_booking_verification_services_overview_location_parking_and_hours_and_pricing_fact_and_pricing_collect_and_duration_fact_and_duration_collect_and_active_service_gated_bookability_time_collect_and_active_name_specific_time_availability_followup_and_active_name_deictic_time_availability_followup_and_active_name_deictic_day_availability_followup_and_active_name_relative_date_availability_followup_and_active_name_relative_daypart_availability_followup_and_specialist_date_range_followup_and_grounded_specialist_transition_and_service_choice_specialist_weekend_followup_and_service_choice_specialist_weekday_followup_and_service_choice_specialist_day_followup_and_service_choice_specialist_daypart_followup_and_service_choice_specialist_exact_time_followup_and_promotions_and_promotions_rules_and_contact_and_master_query_fact_and_master_query_collect_policy_bridges_active_plus_turn_planner_safe_info_owner_cutover_for_contact_hours_promotions_and_promotions_rules_and_turn_planner_safe_catalog_fact_owner_cutover_for_services_overview_location_and_portfolio_ok_and_portfolio_not_found_and_turn_planner_safe_service_query_fact_owner_cutover_for_grounded_pricing_and_duration_and_turn_planner_safe_master_query_fact_owner_cutover_for_grounded_service_match_master_query_and_turn_planner_safe_master_query_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_master_query_service_not_found_collect_owner_cutover_for_grounded_service_not_found_and_turn_planner_safe_pricing_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_duration_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_booking_verification_fact_owner_cutover_for_safe_calendar_get_booking_ok_and_not_found_paths_and_turn_planner_safe_bookability_time_collect_owner_cutover_for_deterministic_missing_temporal_scope_booking_collect_and_turn_planner_safe_active_name_followup_family_owner_cutover_for_deterministic_specific_time_deictic_time_deictic_day_relative_date_and_relative_daypart_booking_followups_and_turn_planner_safe_explicit_handoff_owner_family_cutover_for_deterministic_explicit_human_request_and_frustration_handoff_turns_and_turn_planner_safe_greeting_owner_family_cutover_for_deterministic_greeting_thanks_and_ack_smalltalk_turns_and_turn_planner_safe_specialist_name_collect_owner_cutover_for_deterministic_specialist_name_collect_followup_and_turn_planner_safe_specialist_datetime_collect_owner_cutover_for_deterministic_specialist_date_range_datetime_collect_followup_and_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover_for_deterministic_service_choice_specialist_day_weekday_weekend_time_collect_followups_and_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover_for_deterministic_service_choice_specialist_prefilled_datetime_collect_followups_and_turn_planner_safe_booking_prompt_owner_cutover_for_bounded_active_booking_continuation_and_intent_queue_booking_entry_and_safe_llm_policy_core_collect_prompts_that_preserve_same_missing_slot_and_safe_llm_policy_core_initial_booking_prompt_for_service_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_to_datetime_booking_prompt_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_exact_datetime_to_name_booking_prompt_without_active_conversation_snapshot_and_turn_planner_safe_booking_prompt_owner_session_memory_expected_reply_restore_for_short_booking_replies_before_fallback_excluding_direct_booking_requests_and_turn_planner_safe_check_booking_prompt_owner_cutover_for_bounded_booking_verification_collect_reference_without_booking_reference_or_mixed_followup_envelopes_and_turn_planner_safe_specialist_followup_owner_cutover_for_bounded_named_specialist_followups_that_preserve_same_missing_slot_without_mixed_envelopes_and_turn_planner_safe_semantic_arbitration_owner_cutover_for_style_reference_portfolio_normalization_collect_to_info_interrupt_arbitration_complete_slot_booking_promotion_name_stage_booking_commit_booking_tool_hint_backfill_and_active_service_referent_duration_master_query_arbitration_and_safe_semantic_service_query_master_override_tool_reply_cutover_and_safe_semantic_service_query_services_overview_tool_reply_cutover_and_turn_planner_safe_semantic_service_query_fact_rescue_owner_cutover_for_critical_pending_invalid_schema_replay_and_turn_planner_safe_semantic_reschedule_guard_handoff_owner_cutover_for_misrouted_booking_reschedule_without_reference_and_turn_planner_safe_timeout_degraded_collect_reschedule_handoff_owner_cutover_for_timeout_degraded_collect_reschedule_without_booking_reference_and_turn_planner_safe_timeout_services_overview_fallback_owner_cutover_for_bounded_nonbooking_policy_timeout_services_overview_recovery_and_turn_planner_safe_timeout_active_name_time_collect_owner_cutover_for_bounded_timeout_active_name_specific_time_availability_followup_recovery_and_turn_planner_safe_timeout_specialist_followup_owner_cutover_for_bounded_timeout_specialist_followup_recovery_on_active_booking_snapshot_drift_paths_and_turn_planner_safe_semantic_needs_manager_and_risk_signal_handoff_owner_cutover_and_final_reasoning_core_fallback_removal_and_terminal_unresolved_owner_closure_on_main_path
+  target_primary_files:
+  - contracts/runtime/semantic_decision.v1.jsonschema
+  - truffles-api/app/core/semantic_decision.py
+  cutover_status: hot_path_single_semantic_owner_remains_reproven_and_adjacent_runtime_reproof_is_complete_repo_side_pending_acceptance
 continuity_owner:
   contract: DialogState
   current_primary_files:
+  - truffles-api/app/core/dialog_state_service.py
   - truffles-api/app/routers/webhook/context_manager.py
-  - truffles-api/app/routers/webhook/session_memory.py
-  - truffles-api/app/services/state_service.py
-  - truffles-api/app/routers/webhook/pending.py
   target_primary_files:
   - contracts/runtime/dialog_state.v1.jsonschema
   - truffles-api/app/core/dialog_state_service.py
-  cutover_status: session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback
+  - truffles-api/app/core/conversation_projection.py
+  - truffles-api/app/core/turn_journal.py
+  cutover_status: canonical_runtime_continuity_and_boundary_resume_restore_are_reproven_against_live_code_pending_acceptance
 boundary_owner:
   contract: BoundaryOverride
   current_primary_files:
-  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/app/core/boundary_validator.py
+  - truffles-api/app/core/consultant_runtime.py
+  - truffles-api/app/core/response_realizer.py
   target_primary_files:
   - contracts/runtime/boundary_override.v1.jsonschema
   - truffles-api/app/core/boundary_validator.py
-  cutover_status: legacy_boundary_mixed_with_frozen_tool_reply_guard_finalize_invocation_authority_plus_turn_executor_and_boundary_validator_block_degrade_and_owner_artifact_and_tool_reply_artifact_sidecar_payload_and_tool_reply_policy_payload_interaction_owner_and_guard_send_trace_orchestration_cutovers_done_plus_timeout_owner_boundary_application_and_policy_validation_and_timeout_degrade_retry_and_timeout_nonbooking_recovery_and_timeout_booking_specialist_and_invalid_schema_specialist_and_invalid_schema_service_grounded_booking_and_timeout_pending_slot_question_and_timeout_active_name_time_followup_and_timeout_services_overview_info_fallback_owner_cutovers_done_plus_reasoning_core_terminal_unresolved_boundary_owner_cutover_and_main_path_frozen_boundary_residuals_unreachable
+  cutover_status: boundary_reply_envelope_and_restore_constraints_are_reproven_against_live_code_pending_acceptance
 turn_result_contract:
   contract: TurnResult
   target_primary_files:
@@ -41,17 +198,26 @@ projection_only:
   fields:
   - expected_reply_type
   - expected_reply_reason
+  - current_goal
+  - service_carryover
+  - consult_context
+  - class_carryover
   - session_memory.interaction_state
-  - pending_resume.expected_reply_type
-  - pending_resume.expected_reply_reason
 proof_only:
   files:
   - ops/diagnose.py
   - scripts/booking_dialog_scenarios.py
 forbidden_semantic_files:
 - truffles-api/app/routers/webhook/decision.py
+- truffles-api/app/routers/webhook/_legacy.py
+- truffles-api/app/routers/webhook/context_manager.py
+- truffles-api/app/routers/webhook/response.py
 - truffles-api/app/routers/webhook/booking.py
+- truffles-api/app/routers/webhook/info.py
 - truffles-api/app/routers/webhook/pending.py
+- truffles-api/app/routers/webhook/policy.py
+- truffles-api/app/routers/webhook/guards.py
+- truffles-api/app/routers/webhook/dedup.py
 platform_evidence_requirement:
   minimum_packs: 3
   required_profiles:
@@ -59,845 +225,109 @@ platform_evidence_requirement:
   - clinic_or_dental
   - generic_service
 program:
-  name: Consultant Core Controlled Demolition
-  current_block: Consultant Core Behavioral Proof Lock
+  current_block: Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof
+  historical_residue_rule: later_r36_star_and_invalidated_whole_system_closure_claims_remain_non_governing_history_while_the_live_code_reproof_block_is_active
   runtime_cutover_status:
-    semantic_core: wrapped_ingress_preflight_cache_secret_safe_runtime_loader_active_conversation_snapshot_service_referent_projection_active_booking_datetime_value_and_exact_time_token_lexical_intent_primitive_protective_lexical_confirmation_refusal_domain_router_bounded_controller_route_bounded_policy_core_handoff_text_only_style_reference_booking_verification_services_overview_location_parking_and_hours_and_pricing_fact_and_pricing_collect_and_duration_fact_and_duration_collect_and_active_service_gated_bookability_time_collect_and_active_name_specific_time_availability_followup_and_active_name_deictic_time_availability_followup_and_active_name_deictic_day_availability_followup_and_active_name_relative_date_availability_followup_and_active_name_relative_daypart_availability_followup_and_specialist_date_range_followup_and_grounded_specialist_transition_and_service_choice_specialist_weekend_followup_and_service_choice_specialist_weekday_followup_and_service_choice_specialist_day_followup_and_service_choice_specialist_daypart_followup_and_service_choice_specialist_exact_time_followup_and_promotions_and_promotions_rules_and_contact_and_master_query_fact_and_master_query_collect_policy_bridges_active_plus_turn_planner_safe_info_owner_cutover_for_contact_hours_promotions_and_promotions_rules_and_turn_planner_safe_catalog_fact_owner_cutover_for_services_overview_location_and_portfolio_ok_and_portfolio_not_found_and_turn_planner_safe_service_query_fact_owner_cutover_for_grounded_pricing_and_duration_and_turn_planner_safe_master_query_fact_owner_cutover_for_grounded_service_match_master_query_and_turn_planner_safe_master_query_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_master_query_service_not_found_collect_owner_cutover_for_grounded_service_not_found_and_turn_planner_safe_pricing_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_duration_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_booking_verification_fact_owner_cutover_for_safe_calendar_get_booking_ok_and_not_found_paths_and_turn_planner_safe_bookability_time_collect_owner_cutover_for_deterministic_missing_temporal_scope_booking_collect_and_turn_planner_safe_active_name_followup_family_owner_cutover_for_deterministic_specific_time_deictic_time_deictic_day_relative_date_and_relative_daypart_booking_followups_and_turn_planner_safe_explicit_handoff_owner_family_cutover_for_deterministic_explicit_human_request_and_frustration_handoff_turns_and_turn_planner_safe_greeting_owner_family_cutover_for_deterministic_greeting_thanks_and_ack_smalltalk_turns_and_turn_planner_safe_specialist_name_collect_owner_cutover_for_deterministic_specialist_name_collect_followup_and_turn_planner_safe_specialist_datetime_collect_owner_cutover_for_deterministic_specialist_date_range_datetime_collect_followup_and_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover_for_deterministic_service_choice_specialist_day_weekday_weekend_time_collect_followups_and_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover_for_deterministic_service_choice_specialist_prefilled_datetime_collect_followups_and_turn_planner_safe_booking_prompt_owner_cutover_for_bounded_active_booking_continuation_and_intent_queue_booking_entry_and_safe_llm_policy_core_collect_prompts_that_preserve_same_missing_slot_and_safe_llm_policy_core_initial_booking_prompt_for_service_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_to_datetime_booking_prompt_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_exact_datetime_to_name_booking_prompt_without_active_conversation_snapshot_and_turn_planner_safe_booking_prompt_owner_session_memory_expected_reply_restore_for_short_booking_replies_before_fallback_excluding_direct_booking_requests_and_turn_planner_safe_check_booking_prompt_owner_cutover_for_bounded_booking_verification_collect_reference_without_booking_reference_or_mixed_followup_envelopes_and_turn_planner_safe_specialist_followup_owner_cutover_for_bounded_named_specialist_followups_that_preserve_same_missing_slot_without_mixed_envelopes_and_turn_planner_safe_semantic_arbitration_owner_cutover_for_style_reference_portfolio_normalization_collect_to_info_interrupt_arbitration_complete_slot_booking_promotion_name_stage_booking_commit_booking_tool_hint_backfill_and_active_service_referent_duration_master_query_arbitration_and_safe_semantic_service_query_master_override_tool_reply_cutover_and_safe_semantic_service_query_services_overview_tool_reply_cutover_and_turn_planner_safe_semantic_service_query_fact_rescue_owner_cutover_for_critical_pending_invalid_schema_replay_and_turn_planner_safe_semantic_reschedule_guard_handoff_owner_cutover_for_misrouted_booking_reschedule_without_reference_and_turn_planner_safe_timeout_degraded_collect_reschedule_handoff_owner_cutover_for_timeout_degraded_collect_reschedule_without_booking_reference_and_turn_planner_safe_timeout_services_overview_fallback_owner_cutover_for_bounded_nonbooking_policy_timeout_services_overview_recovery_and_turn_planner_safe_timeout_active_name_time_collect_owner_cutover_for_bounded_timeout_active_name_specific_time_availability_followup_recovery_and_turn_planner_safe_timeout_specialist_followup_owner_cutover_for_bounded_timeout_specialist_followup_recovery_on_active_booking_snapshot_drift_paths_and_turn_planner_safe_semantic_needs_manager_and_risk_signal_handoff_owner_cutover_and_final_reasoning_core_fallback_removal_and_terminal_unresolved_owner_closure_on_main_path
-    continuity: session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback
-    proof_path: response_guard_ast_excision_ops_helper_booking_scenario_expectation_helper_followup_rewrite_slot_normalization_post_coverage_repair_pending_question_contract_master_specialist_followup_booking_progress_and_management_stateful_helper_extraction_plus_in_script_sanitize_owner_cutover_to_llm_quality_contracts_black_box_proof_runtime_convergence
-  objective:
-  - replace multi-owner runtime with one semantic core, one continuity store, and
-    black-box proof
-  progress_unit:
-  - >-
-    closed
-    `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-continuity-writer-guard-and-owner-reset-a922.md`
-    locally: `python3 scripts/continuity_writer_guard.py` is green after
-    AST-aware write detection replaced the line-token heuristic and the
-    remaining pending-resume writes were moved behind canonical helpers in
-    `truffles-api/app/services/state_service.py`.
-  - >-
-    the governance stack is green on the current worktree:
-    `python3 scripts/arch_guard.py` -> `OK`,
-    `python3 scripts/semantic_bridge_growth_guard.py` -> `OK`,
-    `python3 scripts/legacy_freeze_guard.py` -> `OK`,
-    `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture` ->
-    `23 passed`, `SESSION_AGENT=a922 scripts/session_check.sh` -> `Session OK`,
-    and `git diff --check` -> `pass`.
-  - >-
-    published
-    `docs/REPORTS/artifacts/2026-03-25-consultant-core-policy-core-live-manual-closure-a922.md`
-    and opened
-    `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-behavioral-proof-lock-a922.md`;
-    live runtime health remains green on the current worktree lane
-    (`eval_mode=livecheck`, `transport_send_mode=allowlist`,
-    `outbox_worker_mode=off`, `danger_flags=[]`), but truthful behavioral
-    proof is still blocked until fresh `L1` JUnit evidence plus fresh green
-    non-acceptance `L2` summaries for seeds `7`, `19`, and `42` rebuild the
-    current `go_to_full` checklist.
-  - >-
-    fresh `L0/L1` proof prerequisites are green on the current worktree and a
-    truthful local runtime now runs at `127.0.0.1:18190` with
-    `/admin/version.git_commit == HEAD` and `test_mode_enabled=true`, but the
-    first required `L2` seed already fail-closed the proof lane:
-    `/tmp/booking_quality/a922-l2-proof-seed7-20260325/summary.json` is
-    `infra_valid=true`, `semantic_valid=false`, `manual_audit_status=done`,
-    `stop_reason=signal_15`, with blocking reasons
-    `{'hardcode_core_violation': 1, 'wrong_action': 1, 'run_completion_gap': 98}`
-    after the truthful runtime degraded simple booking/info entry into
-    `planner_degrade -> HANDOFF/pending`.
-  - >-
-    closed
-    `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-public-entrypoint-http-contract-and-message-endpoint-surface-reset-a922.md`
-    locally: `truffles-api/app/core/consultant_runtime.py` now re-raises
-    `HTTPException`, so invalid-secret / invalid-tenant public-entrypoint
-    failures propagate as HTTP errors instead of being swallowed by the
-    generic runtime fallback.
-  - >-
-    `truffles-api/tests/test_message_endpoint.py` is green again
-    (`187 passed`) after resetting the file to the current live test surface;
-    `/message` patches now target the public entrypoint/runtime path and the
-    stale top-level `_handle_webhook_payload` wrapper family was cut instead of
-    being preserved through a new compatibility layer.
-  - >-
-    the current full guard stack remains green on the current worktree:
-    `python3 scripts/semantic_bridge_growth_guard.py` -> `OK`,
-    `python3 scripts/continuity_writer_guard.py` -> `OK`,
-    `python3 scripts/legacy_freeze_guard.py` -> `OK`,
-    `python3 scripts/arch_guard.py` -> `OK`,
-    `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture` ->
-    `23 passed`, `SESSION_AGENT=a922 scripts/session_check.sh` -> `Session OK`,
-    and `git diff --check` -> `pass`.
-  - >-
-    the next honest move is to open one bounded blocker family for the
-    truthful worktree-runtime `planner_degrade -> HANDOFF/pending` entry
-    regression before any further behavioral-proof chain attempt.
-  - >-
-    published
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-reentry-initial-booking-invalid-schema-authority-reset-structural-implementation-a922.md`
-    and
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-reentry-initial-booking-invalid-schema-authority-reset-structural-implementation-a922.md`,
-    then switched canon from the `r53` decision block to the structural
-    implementation block.
-  - >-
-    `initial_booking_prompt_owner` now runs before early explicit handoff in
-    the direct-owner chain at
-    `truffles-api/app/services/reasoning_core.py:12058`, ahead of
-    `truffles-api/app/services/reasoning_core.py:12085`.
-  - >-
-    reusable invalid-schema collect recovery is now shared through
-    `truffles-api/app/services/policy_validation_boundary_service.py:121`
-    and consumed by `truffles-api/app/core/booking_prompt_owner.py:286`,
-    with the touched `invalid_schema` branch returning a canonical booking
-    candidate at `truffles-api/app/core/booking_prompt_owner.py:504`.
-  - >-
-    initial booking invalid-schema recovery now records explicit guard
-    observability at `truffles-api/app/services/reasoning_core.py:8255`,
-    and the dead earlier `_should_accept_turn_planner_service_query_result(...)`
-    duplicate def is deleted, reducing duplicate debt to `18` duplicate
-    top-level names across `137` defs / `119` unique names.
-  - >-
-    focused deterministic validation is green: `python3 -m py_compile
-    truffles-api/app/core/booking_prompt_owner.py
-    truffles-api/app/services/reasoning_core.py
-    truffles-api/app/services/policy_validation_boundary_service.py
-    truffles-api/tests/test_reasoning_core.py
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py` ->
-    `pass`; `pytest -q truffles-api/tests/test_reasoning_core.py -k
-    "pending_booking_reentry_preempts_explicit_handoff_without_boundary_payload
-    or pending_invalid_schema_reactivation_keeps_booking_prompt or
-    initial_booking_owner_recovers_invalid_schema_before_terminal_handoff
-    or answers_service_grounded_promotions_interrupt_and_advances_to_time
-    or explicit_handoff_owner or terminal_unresolved"` -> `18 passed,
-    199 deselected`; `pytest -q
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py` -> `1
-    passed`.
-  - >-
-    all required guard and packet checks are green: `python3
-    scripts/build_agent_packet.py` regenerated
-    `docs/_generated/AGENT_PACKET.md` and
-    `docs/_generated/AGENT_PACKET.json`; `python3
-    scripts/build_agent_packet.py --check` -> `OK`; `pytest -q
-    truffles-api/tests/architecture/test_arch_guard_packet.py` -> `1
-    passed`; `pytest -q truffles-api/tests/architecture` -> `19 passed`;
-    `SESSION_AGENT=a922 scripts/session_check.sh` -> `Session OK`; `git
-    diff --check` -> `pass`.
-  - >-
-    no replay was opened in this block; the next admissible move is now
-    `run_one_fresh_closure_replay_only_after_pending_booking_reentry_initial_booking_invalid_schema_authority_reset_evidence`.
-  - >-
-    published
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-reentry-booking-prompt-authority-reset-closure-replay-a922.md`,
-    kept
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-reentry-booking-prompt-authority-decision-a922.md`
-    as the active delete-first decision block, and switched canon back from
-    the failed `r53` closure replay to that decision block.
-  - >-
-    fresh closure replay `/tmp/booking_quality/a922-go2f-seed19-r53` is
-    complete and strict-audited: `infra_valid=true`, `semantic_valid=false`,
-    `dialogs=10`, `turns=143`, `turns_strict_failed=5`, and
-    `strict_pass_rate=0.965`.
-  - >-
-    the exact strict-failed rows are
-    `LLM-QUAL-a922-go2f-seed19-r53-002-09-bf0a7d`,
-    `LLM-QUAL-a922-go2f-seed19-r53-002-10-864323`,
-    `LLM-QUAL-a922-go2f-seed19-r53-003-01-f32c28`,
-    `LLM-QUAL-a922-go2f-seed19-r53-003-02-a02bfb`, and
-    `LLM-QUAL-a922-go2f-seed19-r53-006-01-0835dc`.
-  - >-
-    the same family is still live on two adjacent seams:
-    `booking_prompt_owner` still requires `conversation_snapshot is not None`
-    at `truffles-api/app/services/reasoning_core.py:6457`, and early
-    explicit handoff still runs at
-    `truffles-api/app/services/reasoning_core.py:12095` before late
-    `initial_booking_prompt_owner` at
-    `truffles-api/app/services/reasoning_core.py:12307`.
-  - >-
-    pending service-choice reactivation still drops recoverable
-    `invalid_schema` collect payloads because
-    `resolve_llm_booking_prompt_candidate(...)` only rescues timeout and
-    deadline failures at `truffles-api/app/core/booking_prompt_owner.py:284`,
-    while the reusable non-frozen invalid-schema boundary path already exists
-    in `truffles-api/app/services/policy_validation_boundary_service.py`.
-  - >-
-    replay-first stays invalid; the next admissible move is now
-    `execute_delete_first_pending_booking_reentry_initial_booking_invalid_schema_authority_reset_structural_block_after_one_precise_web_search`.
-  - >-
-    published
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-reentry-booking-prompt-authority-reset-structural-implementation-a922.md`
-    and
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-reentry-booking-prompt-authority-reset-structural-implementation-a922.md`,
-    then switched canon from the delete-first decision block to the
-    structural implementation block.
-  - >-
-    `booking_prompt_owner` now executes before touched catalog/info seams
-    in the direct-owner chain, so pending booking reentry reaches
-    canonical continuity before the old nearby fallback family.
-  - >-
-    `_finalize_turn_planner_owner_cutover(...)` now applies centralized
-    continuity sync on the artifact fast path, and the service-grounded
-    promotions path persists booking payload through the same finalizer.
-  - >-
-    the dead earlier `_try_handle_turn_planner_safe_catalog_fact_owner_cutover(...)`
-    and `_try_handle_turn_planner_safe_service_query_fact_owner_cutover(...)`
-    top-level defs are deleted, reducing duplicate debt to `19`
-    duplicate top-level names across `138` defs / `119` unique names.
-  - >-
-    focused deterministic validation is green: `python3 -m py_compile
-    truffles-api/app/services/reasoning_core.py
-    truffles-api/tests/test_reasoning_core.py
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py` ->
-    `pass`; `pytest -q truffles-api/tests/test_reasoning_core.py -k
-    "pending_booking_reentry_preempts_explicit_handoff_without_boundary_payload
-    or answers_service_grounded_promotions_interrupt_and_advances_to_time
-    or booking_prompt_owner_reactivates_pending_collect_without_active_booking_snapshot
-    or booking_prompt_owner_answers_promotions_interrupt_and_resumes_time_collect
-    or pending_boundary_promotions_interrupt or explicit_handoff_owner or
-    terminal_unresolved or
-    pending_ack_continuity_family_clears_pending_before_terminal_unresolved"`
-    -> `19 passed, 196 deselected`; `pytest -q
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py` -> `1
-    passed`; `pytest -q truffles-api/tests/architecture` -> `19 passed`.
-  - >-
-    all required guard and packet checks are green: `python3
-    scripts/build_agent_packet.py` regenerated
-    `docs/_generated/AGENT_PACKET.md` and
-    `docs/_generated/AGENT_PACKET.json`; `python3
-    scripts/build_agent_packet.py --check` -> `OK`; `pytest -q
-    truffles-api/tests/architecture/test_arch_guard_packet.py` -> `1
-    passed`; `SESSION_AGENT=a922 scripts/session_check.sh` -> `Session OK`;
-    `git diff --check` -> `pass`.
-  - >-
-    no replay was opened in this block; the next admissible move is now
-    `run_one_fresh_closure_replay_only_after_pending_booking_reentry_booking_prompt_authority_reset_evidence`.
-  - >-
-    published
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-post-cancel-rebooking-continuity-handoff-info-authority-reset-closure-replay-a922.md`
-    and
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-reentry-booking-prompt-authority-decision-a922.md`,
-    then switched canon from the failed closure replay to the new
-    delete-first decision block.
-  - >-
-    fresh closure replay `/tmp/booking_quality/a922-go2f-seed19-r52` is
-    complete and strict-audited: `infra_valid=true`, `semantic_valid=false`,
-    `turns=143`, `strict_pass_rate=0.986`, and the only strict-failed rows are
-    `LLM-QUAL-a922-go2f-seed19-r52-002-09-c14afa` plus
-    `LLM-QUAL-a922-go2f-seed19-r52-002-10-733e03`.
-  - >-
-    the same artifact still contains `44` executions of
-    `turn_planner.safe_explicit_handoff_owner.v1` (`24` with
-    `reason_code=terminal_owner_unresolved`), and row `002-10` still exits
-    through `turn_planner.safe_info_fact.v1`, so the next honest move became a
-    delete-first structural block rather than another replay.
-  - >-
-    published
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-post-cancel-rebooking-continuity-handoff-info-authority-reset-structural-implementation-a922.md`
-    and
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-post-cancel-rebooking-continuity-handoff-info-authority-reset-structural-implementation-a922.md`,
-    then switched canon from the delete-first decision block to the
-    structural implementation block.
-  - >-
-    `DialogStateService` now infers pending booking boundary state
-    from the active booking gap itself, so post-cancel rebooking no
-    longer needs explicit expected-reply metadata before the
-    direct-owner chain can defer info/handoff fallback.
-  - >-
-    `reasoning_core.py` still precomputes
-    `pending_booking_resume_boundary_payload` before the
-    direct-owner chain, and the existing `safe_info_fact` plus
-    explicit-handoff guards now see that inferred boundary on the
-    touched family.
-  - >-
-    the dead earlier
-    `_try_handle_turn_planner_safe_semantic_arbitration_owner_cutover(...)`
-    top-level def is deleted, reducing duplicate debt to `21`
-    duplicate top-level names across `140` defs / `119` unique
-    names.
-  - >-
-    focused deterministic validation is green: `python3 -m py_compile
-    truffles-api/app/core/dialog_state_service.py
-    truffles-api/app/services/reasoning_core.py
-    truffles-api/tests/test_dialog_state_service.py
-    truffles-api/tests/test_reasoning_core.py
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py`
-    -> `pass`; `pytest -q truffles-api/tests/test_dialog_state_service.py
-    -k "pending_resume_boundary"` -> `2 passed, 56 deselected`;
-    `pytest -q truffles-api/tests/test_reasoning_core.py -k
-    "booking_prompt_owner_reactivates_pending_post_cancel_rebooking_state
-    or infers_post_cancel_rebooking_boundary_before_semantic_handoff
-    or pending_boundary_promotions_interrupt or
-    explicit_handoff_owner or terminal_unresolved"` -> `17
-    passed, 196 deselected`; `pytest -q
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py`
-    -> `1 passed`.
-  - >-
-    no replay was opened in this block; the next admissible move is
-    now
-    `run_one_fresh_closure_replay_only_after_pending_post_cancel_rebooking_continuity_handoff_info_authority_reset_evidence`.
-  - >-
-    published
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-continuity-info-handoff-authority-reset-closure-replay-a922.md`
-    and
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-post-cancel-rebooking-continuity-handoff-info-authority-decision-a922.md`,
-    then switched canon from the failed closure replay to the new
-    delete-first decision block.
-  - >-
-    fresh closure replay `/tmp/booking_quality/a922-go2f-seed19-r51`
-    is complete and strict-audited: `infra_valid=true`,
-    `semantic_valid=false`, `turns=143`, `strict_pass_rate=0.986`,
-    and the only strict-failed rows are
-    `LLM-QUAL-a922-go2f-seed19-r51-002-09-c838ba` plus
-    `LLM-QUAL-a922-go2f-seed19-r51-002-10-b85502`.
-  - >-
-    the first live continuity collapse actually starts one turn
-    earlier at `LLM-QUAL-a922-go2f-seed19-r51-002-08-97382a`:
-    pending post-cancel rebooking still routes through
-    `turn_planner.safe_explicit_handoff_owner.v1` with
-    `reason_code=semantic_arbitration_needs_manager` while
-    `current_goal` and `expected_reply_type` are absent.
-  - >-
-    the next admissible move is now
-    `execute_delete_first_pending_post_cancel_rebooking_continuity_handoff_info_structural_block_after_one_precise_web_search`,
-    not another replay and not another hotspot micro-fix in
-    `truffles-api/app/services/reasoning_core.py`.
-  - >-
-    published
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-info-handoff-authority-reset-structural-implementation-a922.md`
-    and
-    `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-continuity-info-handoff-authority-reset-structural-implementation-a922.md`,
-    then switched canon from the delete-first decision block to the
-    structural implementation block.
-  - >-
-    `reasoning_core.py` now restores pending booking continuity from
-    centralized dialog-state boundary state in
-    `_build_conversation_snapshot(...)` and precomputes the same touched
-    boundary before the direct-owner chain.
-  - >-
-    early `safe_info_fact` and non-explicit early explicit handoff now
-    defer while the pending booking boundary is active, and terminal
-    unresolved explicit handoff is skipped for that touched family.
-  - >-
-    `_finalize_turn_planner_owner_cutover(...)` now applies direct
-    `DialogStateService.build_expected_reply_context_sync_result(...)`
-    on the touched normal path instead of
-    `context_manager_router._set_expected_reply_context(...)`.
-  - >-
-    dead early greeting duplicate defs were deleted from
-    `truffles-api/app/services/reasoning_core.py`, reducing duplicate
-    debt to `22` duplicate top-level names across `141` defs / `119`
-    unique names.
-  - >-
-    focused deterministic validation is green: `python3 -m py_compile
-    truffles-api/app/services/reasoning_core.py
-    truffles-api/tests/test_reasoning_core.py
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py` ->
-    `pass`; `pytest -q truffles-api/tests/test_reasoning_core.py -k
-    "pending_boundary_promotions_interrupt or
-    promotions_interrupt_and_resumes_time_collect or
-    info_owner_defers_active_service_hours_interrupt_to_booking_prompt_owner
-    or
-    booking_prompt_owner_reactivates_pending_collect_without_active_booking_snapshot
-    or explicit_handoff_owner or terminal_unresolved"` -> `18 passed,
-    194 deselected`; `pytest -q
-    truffles-api/tests/architecture/test_no_duplicate_core_defs.py` ->
-    `1 passed`.
-  - >-
-    the next admissible move is now
-    `run_one_fresh_closure_replay_only_after_pending_booking_continuity_info_handoff_authority_reset_evidence`,
-    not another replay-first discovery loop and not another local branch
-    in `truffles-api/app/services/reasoning_core.py`.
-  - >-
-    `truffles-api/app/core/booking_prompt_owner.py` now restores pending
-    booking collect continuity from centralized dialog-state resume payloads
-    before calling the canonical LLM booking owner, so the touched family no
-    longer depends on a sparse live snapshot to reactivate booking progress.
-  - >-
-    dead earlier duplicate defs for
-    `_try_handle_turn_planner_safe_info_owner_cutover`,
-    `_try_handle_turn_planner_safe_booking_verification_owner_cutover`, and
-    `_try_handle_turn_planner_safe_specialist_followup_owner_cutover` are now
-    deleted from `truffles-api/app/services/reasoning_core.py`, reducing the
-    explicit duplicate debt to `26` duplicate top-level names across `144`
-    defs / `118` unique names.
-  - >-
-    focused deterministic validation is green:
-    `python3 -m py_compile truffles-api/app/core/booking_prompt_owner.py truffles-api/app/services/reasoning_core.py truffles-api/tests/test_reasoning_core.py truffles-api/tests/architecture/test_no_duplicate_core_defs.py`
-    -> `pass`,
-    `pytest -q truffles-api/tests/test_reasoning_core.py -k "pending_booking_reactivation_candidate or pending_collect_reactivation or post_cancel_rebooking_state or promotions_interrupt_and_resumes_time_collect or explicit_handoff_owner or terminal_unresolved"`
-    -> `17 passed, 194 deselected`,
-    and
-    `pytest -q truffles-api/tests/architecture/test_no_duplicate_core_defs.py`
-    -> `1 passed`.
-  - >-
-    `r49` remains the last truthful closure artifact and still defines the
-    touched failure family: row `LLM-QUAL-a922-go2f-seed19-r49-002-09-489e4e`
-    exits through `turn_planner.safe_explicit_handoff_owner.v1` with
-    `reason_code=terminal_owner_unresolved`, while row
-    `LLM-QUAL-a922-go2f-seed19-r49-002-10-674439` exits through
-    `turn_planner.safe_info_fact.v1` after booking continuity was lost.
-  - >-
-    the next admissible move is now one fresh closure replay after this
-    structural evidence, not another replay-first discovery loop and not
-    another local branch in `truffles-api/app/services/reasoning_core.py`.
-  - >-
-    bounded non-frozen runtime implementation for the surviving `r45` family is now landed locally: fresh initial booking entry seeds `slot_state.service` from the current message, drops `info_refs`, and caps policy-core output tokens at `160` only on the bounded fresh-entry owner path.
-  - >-
-    focused deterministic coverage for the bounded family is green: `pytest -q truffles-api/tests/test_intent.py -k "policy_core and max_tokens_override"` -> `1 passed`, and `pytest -q truffles-api/tests/test_reasoning_core.py -k "initial_booking_timeout or initial_booking_owner_recovers_timeout_before_terminal_handoff or policy_core_tokens"` -> `3 passed`.
-  - >-
-    live candidate-path probe `/tmp/booking_quality/a922-go2f-seed19-r45/initial_booking_policy_core_budget_probe_post_fix.json` now yields `3/4` non-degraded semantic collect decisions and `0/4` degraded fallbacks on the surfaced message, so the next admissible move is closure replay rather than another runtime patch by default.
-  - >-
-    truthful completion replay `/tmp/booking_quality/a922-go2f-seed19-r45` is now the first canonical closure artifact after the repaired `r44` proof family: `/tmp/booking_quality/a922-go2f-seed19-r45/summary.json` records `infra_valid=true`, `run_integrity_valid=true`, `turns_strict_failed=0`, `blocking_reasons.count=0`, and `/tmp/booking_quality/a922-go2f-seed19-r45/failure_families.json` is empty.
-  - >-
-    the old `r44` false `handoff_miss` proof blocker is closed on the live surface: `r45` has no surviving blocking reasons, and the repaired weekend-pricing runtime row remains strict-green on the same replay.
-  - >-
-    `r45` remains `semantic_valid=false`, but the surviving surface is threshold-only: `policy_core_turns=3`, `policy_core_degraded_turns=3`, and `degraded_fallback_rate=1.0` on three strict-green initial booking rows.
-  - >-
-    the surviving row is exactly `LLM-QUAL-a922-go2f-seed19-r46-005-01-df3da9`,
-    and it is a strict-green initial booking collect turn that records
-    `policy_core_mode='degraded_fallback'` with
-    `policy_core_guard_recovery='initial_booking_parser'` on service-only fresh
-    initial booking entry.
-  - >-
-    the next honest move is runtime, not proof: simple initial booking entry still times out in `_resolve_turn_planner_safe_llm_booking_prompt_candidate(...)` and degrades through observable parser recovery before the oracle reads the result.
-  - main-path runtime closure proved
-  - promo interrupt runtime closure already proved
-  - stale `r9` turn-10 `check_booking_prompt` mismatch disproved as proof drift via refreshed scenario evidence
-  - refreshed `r12` completes with `14/14` strict-pass turns on the fresh runtime
-  - >-
-    fresh comparable replay `r14` on the refreshed local runtime proves
-    turn `9` is repaired: explicit exact-time fill now advances to
-    `expected_reply_type=name` and persists `booking_slots.datetime='в субботу 11:00'`.
-  - >-
-    fresh replay `r14` also closes the old turn-12 debate: `Можно на 19:00?`
-    now yields `pending` + handoff on the same artifact, so turn `12` is no
-    longer the active blocker.
-  - >-
-    bounded turn-13 non-frozen semantic name progression is now landed
-    locally, and focused deterministic coverage for the surfaced family is
-    green (`4 passed`).
-  - >-
-    bounded seed-`19` non-frozen session-reset pending-ack terminal-unresolved
-    implementation is now landed locally: `reasoning_core.py` now reuses
-    `state_service._resolve_pending_ack(...)` on the live owner chain before
-    terminal fallback, and focused deterministic coverage is green (`3 passed`).
-  - >-
-    truthful guarded replay `r16` on the refreshed local runtime keeps turn
-    `9` repaired and turn `10` non-blocking on the locked canary scenario.
-  - >-
-    the first surviving blocker on fresh evidence is now turn `11`:
-    repeated check-booking verification rewrites `expected_reply_type` from
-    `name` to `service_choice` and drops grounded
-    `booking_slots.datetime='в субботу 11:00'`.
-  - >-
-    because fresh replay `r16` stops at turn `11`, explicit-name turn `13`
-    is now downstream unresolved debt rather than the first admissible
-    runtime blocker.
-  - >-
-    judge conflicts on turns `6` and `9` remain advisory proof debt only and
-    are not admissible runtime blockers for the next block.
-  - >-
-    family-first debug cadence reset is now active: governance docs now
-    distinguish `forensic -> implementation -> closure`, guarded dev-lane
-    forensic continuation is explicit, and a duplicate-def architecture
-    guard now records the current `reasoning_core.py` shadowed top-level
-    debt so new growth cannot stay silent.
-  - >-
-    bounded turn-11 non-frozen check-booking reference continuity
-    implementation is now landed locally: the live later duplicate
-    check-booking prompt owner rehydrates snapshot-grounded `service` /
-    `datetime`, normalizes the effective missing slot back to the earliest
-    missing reference slot, and focused deterministic coverage for the
-    surfaced family is green (`7 passed`).
-  - >-
-    truthful guarded replay `r17` on the refreshed local runtime now completes
-    the locked canary with `turns_strict_failed=0` and proves the bounded
-    turn-11 check-booking reference continuity repair on fresh replay evidence.
-  - >-
-    the same truthful replay `r17` now reaches turn `13` and proves
-    explicit-name progression closure on the fresh canary path.
-  - >-
-    truthful guarded replay `r18` on the refreshed local runtime now proves
-    the bounded turn-8 booking-interrupt exact-time progression repair on the
-    real canary path (`expected_reply_type=name`,
-    `booking_slots.datetime='в субботу 10:00'`, strict-green).
-  - >-
-    the same truthful replay `r18` reaches turns `11`, `13`, and `14`
-    strict-green, but surfaces the next surviving runtime family at turn `9`:
-    grounded datetime reschedule while `expected_reply_type=name` keeps
-    `booking_slots.datetime='в субботу 10:00'` instead of applying `11:00`.
-  - >-
-    bounded turn-9 non-frozen grounded-datetime reschedule implementation is
-    now landed locally: snapshot-echo restoration, grounded exact-time
-    replacement, and semantic booking recovery exact-time progression while
-    `expected_reply_type=name`; focused deterministic coverage is green
-    (`10 passed`).
-  - >-
-    truthful guarded replay `r19` on the refreshed local runtime now completes
-    the locked canary with `turns_strict_failed=0` and proves the bounded
-    turn-9 grounded-datetime reschedule repair on fresh replay evidence.
-  - >-
-    `r19` leaves no surviving runtime blocker: turns `8`, `9`, `11`, `12`,
-    `13`, and `14` are strict-green on the same artifact, while remaining
-    semantic red is limited to judge/HQ1 conflicts on turns `6`, `9`, `11`,
-    and `12`.
-  - >-
-    current semantic invalid status is therefore proof-only
-    (`winner=contract`, `conflict_count=4`), not a new runtime-family blocker.
-  - >-
-    bounded proof classification on `r19` now locks one oracle family in
-    `ops/diagnose.py`: semantic-blocking HQ1 false positives on turns `9`/`12`
-    plus advisory judge false positives on turns `6`/`9`/`11`/`12`.
-  - >-
-    bounded proof-only oracle implementation is now landed locally in
-    `ops/diagnose.py`: judge suppression mirrors contract-valid
-    booking-prompt / check-booking collect / master-service-not-found envelopes,
-    and HQ1 no longer blocks contract-valid active booking continuation.
-  - >-
-    focused proof regressions are green (`15 passed`), and a helper probe on
-    the existing `r19` rows now yields `suppress=True` and `hq1=[]` for turns
-    `6`, `9`, `11`, and `12`.
-  - >-
-    truthful guarded replay `r20` on the same locked canary surface now
-    completes `14/14` turns with `infra_valid=true`, `semantic_valid=true`, and
-    `turns_strict_failed=0`, closing the bounded oracle parity family on fresh
-    evidence.
-  - >-
-    strict audit on `r20` keeps `judge_oracle_alignment_gap` only as advisory
-    manual-audit debt (`winner=contract`, `conflict_count=4`), so turns `6`,
-    `9`, `11`, and `12` no longer block semantic validity.
-  - >-
-    published a fresh post-`r20` acceptance re-entry implementation bundle and
-    started a fresh local runtime on `127.0.0.1:18186`; health/version both
-    returned `200`.
-  - >-
-    the first guarded acceptance `lock` attempt
-    `booking-lock-a922-post-r20` progressed past the prior-lock guard and
-    reached chain-controller prepare, but then fail-closed on
-    `go_to_full_gate_invalid:unreadable:/tmp/booking_quality/pg_checklist-a922-post-r20.json`,
-    so no new acceptance `lock` artifact was produced.
-  - >-
-    the current blocker is therefore acceptance-preflight `go_to_full` evidence
-    materialization: fresh dev-lane `L2` evidence exists in `r20`, a fresh `L1`
-    JUnit exists at `/tmp/booking_quality/l1-promo-canary-preflight-a922/pytest-junit.xml`,
-    but no assembled PG checklist or fresh green multi-seed summaries for
-    required seeds `7`, `19`, and `42` exist yet.
-  - >-
-    the narrowed evidence-pack family then materialized a fresh dedicated `L1`
-    JUnit at `/tmp/booking_quality/l1-go-to-full-a922/pytest-junit.xml`,
-    closed one stale non-canonical preflight-only seed attempt caused by the
-    `go-to-full` run-id token, and produced one fresh green seed summary for
-    `7` at `/tmp/booking_quality/a922-go2f-seed7/summary.json`.
-  - >-
-    fresh seed `19` then stopped the lane truthfully: `/tmp/booking_quality/a922-go2f-seed19/summary.json`
-    finished `infra_valid=true`, `run_integrity_valid=true`, `semantic_valid=false`,
-    and `threshold_breaches=['irrelevant_fact_rate']`, so seed `42`, PG checklist
-    assembly, and the acceptance `lock` retry were not admissible.
-  - >-
-    the first admissible blocker is now a bounded runtime-semantic family on
-    generated multi-seed booking/check-booking interruption coverage: weekend /
-    hours / promo follow-ups misroute into irrelevant fact owners (`pricing`,
-    `duration`, `services_overview`) or lose pending continuity on fresh seed
-    `19`.
-  - >-
-    bounded seed-`19` non-frozen implementation is now landed locally:
-    direct `catalog_fact` / `service_query_fact` / `pricing_collect` /
-    `duration_collect` owners defer while active booking continuity is open,
-    explicit hours interruption resolution prefers the real `hours` signal over
-    the false-positive duration anchor, and promo requests with service mention
-    now rescue to `promotions`.
-  - >-
-    focused deterministic coverage for the surfaced family is green:
-    `pytest -q truffles-api/tests/test_master_info_flow.py -k "hours or promotions"`
-    passed `11`, and `pytest -q truffles-api/tests/test_reasoning_core.py -k
-    "booking_prompt_owner_answers_promotions_interrupt_and_resumes_time_collect or
-    booking_prompt_owner_answers_explicit_hours_interrupt or
-    direct_service_query_fact_defers_active_booking_interrupt or
-    direct_catalog_fact_defers_active_booking_interrupt"` passed `4`.
-  - >-
-    replay hygiene is now truthful for this family: `a922-go2f-seed19-r2` is
-    closed as invalid command drift because explicit `--quality-lane dev` was
-    omitted, and `a922-go2f-seed19-r3` is closed as non-canonical scenario
-    drift because it regenerated seed scenarios instead of replaying
-    `/tmp/booking_quality/a922-go2f-seed19/scenarios.json`.
-  - >-
-    fresh exact replay `/tmp/booking_quality/a922-go2f-seed19-r4/summary.json`
-    now reuses the original blocker scenarios with runtime parity `HEAD ==
-    /admin/version.git_commit`, but it is infra-invalid before runtime
-    reclassification because `tool_evidence_valid=false` and
-    `tool_evidence_reasons=['confirm_hook_missing']`.
-  - >-
-    `r4` stops at dialog `2`, turn `9` with
-    `expected_meta_mismatch + expected_trace_miss` on
-    `turn_planner_safe_explicit_handoff_owner`, but that semantic row remains
-    downstream until the replay tool-evidence gap is classified.
-  - >-
-    bounded proof classification on `r4` now locks the first surviving blocker
-    inside `ops/diagnose.py`: strict tool evidence counts `check_booking` as a
-    confirm opportunity, but the synthetic confirm-hook sender does not mirror
-    that rule on `confirm`-tagged `check_booking` turns, so fail-fast exact
-    replay can go infra-red before runtime reclassification.
-  - >-
-    bounded proof-only implementation is now landed locally in
-    `ops/diagnose.py`: synthetic confirm-hook eligibility now mirrors the
-    strict confirm-evidence contract for `confirm`-tagged `check_booking` and
-    `check_record` turns, and focused deterministic proof is green (`6 passed`).
-  - >-
-    fresh exact replay `/tmp/booking_quality/a922-go2f-seed19-r5/summary.json`
-    now reuses the original blocker scenarios with runtime parity `HEAD ==
-    /admin/version.git_commit` after the bounded confirm-hook proof repair.
-  - >-
-    `r5` restores infra/tool-evidence truth on the exact replay surface:
-    `infra_valid=true`, `tool_evidence_valid=true`, and dialog `1`, turn `12`
-    now records `tool_hooks=['confirm', 'calendar']` on
-    `tool_signals.calendar.intent='check_booking'`, so `confirm_hook_missing`
-    no longer survives.
-  - >-
-    the first surviving blocker on fresh replay evidence is now dialog `1`,
-    turn `13`: after verification collect preserved `service='Маникюр'`,
-    `datetime='15:00'`, and `expected_reply_type=name`, the user turn
-    `Можно на 18:30?` reopens generic booking collect with
-    `expected_reply_type=service_choice` and `booking_slots={'datetime':
-    '18:30'}`, which is a bounded runtime continuity bug rather than proof debt.
-  - >-
-    bounded proof-only replay fallback implementation is now landed locally in
-    `ops/diagnose.py`: contaminated replay preflight prefers remaining
-    allowlist JIDs, can iterate across tried allowlist candidates, and no
-    longer generates a non-allowlist target while outbox is enabled; focused
-    deterministic coverage in `truffles-api/tests/test_booking_quality_jid_mode.py`
-    is green (`10 passed`).
-  - >-
-    fresh replay/audit evidence `r6 -> r7 -> r9` then surfaced a different
-    first blocker before turn execution: simulated session-reset traffic still
-    resolves through the executable later explicit-handoff owner, which calls
-    direct provider transport on allowlist JIDs and triggers `ChatFlow response
-    ... "Your plan has been expired please renew."`
-  - >-
-    bounded seed-`19` non-frozen session-reset simulation transport
-    implementation is now landed locally in `truffles-api/app/services/reasoning_core.py`:
-    the executable later explicit-handoff owner routes `simulation_mode=true`
-    through `ChatFlowAdapter().send_text(...)` with
-    `MessageOptions(extra={"simulation_mode": True})`, records
-    `transport_simulated`, and focused deterministic coverage is green (`3 passed`);
-    the mandatory guard/session stack is also green.
-  - >-
-    pre-existing replay artifact `/tmp/booking_quality/a922-go2f-seed19-r10`
-    is now closed as non-canonical (`invalid_preflight`, incomplete artifact
-    discovered before the fresh closure attempt).
-  - >-
-    fresh exact replay `/tmp/booking_quality/a922-go2f-seed19-r11` no longer
-    reopens the old provider-transport blocker: replay stdout shows
-    `Turn planner safe explicit handoff sent` with
-    `decision_meta.transport_simulated=true`, so the bounded simulation
-    transport repair is active on the replay surface.
-  - >-
-    the first surviving blocker on `r11` is now different and still pre-turn:
-    contaminated preflight sends `pending_ack` text `ок`, but the live greeting
-    owner responds `Turn planner safe greeting owner sent` and leaves
-    `state_after=pending`, so preflight clear never completes and the replay
-    remains non-canonical with `dialogs_seen=0`.
-  - >-
-    bounded seed-`19` non-frozen session-reset pending-ack greeting-intercept
-    implementation is now landed locally: the executable later greeting owner
-    reuses the pending continuity contract and defers `pending_ack` while
-    `conversation.state == pending`, so contaminated preflight clear is no
-    longer consumed as smalltalk; focused deterministic coverage is green
-    (`4 passed`).
-  - >-
-    fresh exact replay `/tmp/booking_quality/a922-go2f-seed19-r12` no longer
-    reopens the pending-ack greeting-owner blocker: runtime parity stayed on
-    `HEAD`, `/admin/health` returned `200`, and contaminated preflight now
-    returns `Turn planner safe explicit handoff sent` on `pending_ack`,
-    proving the bounded greeting-owner defer repair on the replay surface.
-  - >-
-    the first surviving blocker on `r12` is now different and still pre-turn:
-    contaminated preflight sends `pending_ack` text `ок`, but the live
-    explicit-handoff owner responds `Turn planner safe explicit handoff sent`
-    and leaves `state_after=pending`, so preflight clear never completes and
-    the replay remains non-canonical with `dialogs_seen=0`.
-  - >-
-    bounded seed-`19` non-frozen session-reset pending-ack explicit-handoff-
-    intercept implementation is now landed locally: the shared pending-state
-    helper and the executable later explicit-handoff owner now defer
-    `pending_ack` while `conversation.state == pending`, so session-reset clear
-    acknowledgements no longer reopen handoff on the live path; focused
-    deterministic coverage is green (`6 passed`).
-  - >-
-    strict audit on `/tmp/booking_quality/a922-go2f-seed19-r13` now closes that
-    replay attempt as self-inflicted non-canonical evidence because runtime
-    fingerprint preflight failed with `admin_version_unreachable` after a timed
-    runtime startup probe.
-  - >-
-    fresh exact replay `/tmp/booking_quality/a922-go2f-seed19-r14` now proves the
-    bounded explicit-handoff defer repair on the real replay surface: runtime
-    parity stayed on `HEAD`, `/admin/health` returned `200`, and contaminated
-    preflight no longer returns `Turn planner safe explicit handoff sent`.
-  - >-
-    bounded reset-only runtime delegate implementation is now landed locally: exact reset-only control traffic now bypasses the direct owner shortcuts and reuses the existing session-memory reset contract before any handoff/terminal fallback path.
-  - >-
-    fresh replay `/tmp/booking_quality/a922-go2f-seed19-r22` now proves the old runtime family is closed: `session_reset` returns `Session reset ack sent`, `decision_meta.session_memory_reset=explicit_reset`, and `reset_ack_missing` no longer survives.
-  - >-
-    the first surviving blocker on `r22` is no longer runtime; replay still fail-closes before turn `1` because proof/preflight contamination survives on the outbox-enabled allowlist JID pool (`multiple_recent_conversations`, `decision_trace_present`, stale historical `booking_active`, and `simulation_id_mismatch`).
-  - >-
-    bounded seed-`19` proof-only preflight contamination implementation is now
-    landed locally in `ops/diagnose.py`: clean latest bot-active replay rows no
-    longer fail-close on historical allowlist residue alone, and focused
-    deterministic proof is green (`12 passed`).
-  - >-
-    bounded seed-`19` proof-only fallback-JID implementation is now landed
-    locally in `ops/diagnose.py`: allowlist-first replay fallback remains
-    intact, but once allowlist candidates are exhausted the helper now mints
-    deterministic fresh dialog JIDs when `allow_non_allowlist=true`; focused
-    deterministic proof is green (`12 passed`).
-  - >-
-    fresh exact replay `/tmp/booking_quality/a922-go2f-seed19-r25/summary.json`
-    now proves the old fallback-JID proof family is closed on the live
-    surface: replay reaches dialog execution with `infra_valid=true` and uses
-    fresh non-allowlist dialog JIDs such as `99953746942@s.whatsapp.net` and
-    `99905914999@s.whatsapp.net`.
-  - >-
-    bounded seed-`19` non-frozen post-cancel rebooking state runtime
-    implementation is now landed locally, but truthful fresh replay `r29`
-    on canonical runtime parity after audited stale `r26` / `r27` / `r28`
-    artifacts now surfaces a different first runtime blocker earlier than the
-    old turn-`8` family: dialog `1`, turn `1` regresses into
-    `turn_planner_safe_explicit_handoff_owner` with
-    `reason_code=terminal_owner_unresolved`.
-  - >-
-    bounded seed-`19` non-frozen initial-booking timeout implementation is
-    now landed locally: the executable later booking-prompt candidate resolver
-    recovers safe fresh booking collect on policy-core timeout via deterministic
-    booking parsing, records `policy_core_mode=degraded_fallback`,
-    `policy_core_degrade_reason=policy_error:timeout`, and
-    `policy_core_guard_recovery=initial_booking_parser`, and focused
-    deterministic coverage is green (`5 passed`).
-  - >-
-    interrupted replay `/tmp/booking_quality/a922-go2f-seed19-r38` is now
-    explicitly audited as non-canonical (`stop_reason=signal_15`,
-    `dialogs_seen=2/10`), but partial live evidence already shows dialog `1`
-    turns `1..15` strict-green on the replay surface, including the old `r29`
-    first blocker repaired on turn `1`.
-  - >-
-    bounded seed-`19` proof-only fallback-JID bookkeeping implementation is
-    now landed locally in `ops/diagnose.py`: replay fallback selection persists
-    the current contaminated JID in the shared tried set, focused deterministic
-    proof is green (`13 passed`), and interrupted replay `r40` now progresses
-    strictly through dialog `1` turn `15`, dialog `2` turn `14`, and dialog `3`
-    turn `7` before manual interruption.
-  open_blockers:
-  - >-
-    `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md`
-    is now the active block. FACT: the touched pending booking family now
-    restores booking collect continuity from centralized dialog-state resume
-    payloads before terminal fallback is eligible.
-  - >-
-    `r49` remains the truthful closure baseline for this family. FACT: no new
-    replay is admissible until the structural block is fully validated and
-    canon is rebuilt.
-  - >-
-    one fresh replay is still required for closure, but only as
-    `run_one_fresh_closure_replay_only_after_pending_booking_continuity_terminal_handoff_authority_reset_evidence`.
-  - >-
-    `truffles-api/app/services/reasoning_core.py` still carries explicit
-    structural debt outside the touched family: `26` duplicate top-level
-    function names across `144` top-level defs / `118` unique names. Broader
-    duplicate cleanup remains deferred.
-  - >-
-    acceptance remains strict; no oracle/proof thresholds were weakened in this
-    block.
-  - >-
-    final program acceptance remains open because the fresh green demo-salon
-    canary still needs canonical acceptance evidence and broader
-    multi-pack/open-world closure.
+    semantic_owner: hot_path_single_semantic_owner_remains_reproven_after_live_code_reproof
+    continuity: canonical_runtime_reprojection_and_pending_resume_restore_now_require_canonical_pending_contract_only
+    boundary: reply_envelope_narrowing_and_boundary_restore_constraints_are_reproven_against_live_code
+    fact_plane: typed_fact_contract_and_first_family_cutover_remain_reproven_on_active_runtime_paths
+    pack_runtime_split: public_pack_runtime_seam_remains_reproven_and_active_behavior_stays_on_public_runtime_helpers
+    legacy_mesh: runtime_shadow_wrappers_remain_removed_and_legacy_router_surfaces_stay_non_authoritative_on_live_paths
+    authority_topology: continuity_boundary_pack_runtime_legacy_and_operational_reproof_is_complete_repo_side_pending_acceptance
+    quality_governance: replay_and_human_audit_are_now_the_only_admissible_acceptance_lane
   allowed_touch:
-  - docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-booking-pending-handoff-authority-reset-structural-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-24-consultant-core-booking-pending-handoff-authority-reset-structural-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r44-handoff-miss-collect-prompt-oracle-parity-proof-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r44-handoff-miss-collect-prompt-oracle-parity-proof-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-final-acceptance-go-to-full-evidence-pack-family-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-final-acceptance-go-to-full-evidence-pack-family-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-generated-booking-info-divergence-canary-replay-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-generated-booking-info-divergence-canary-replay-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-proof-decision-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-proof-decision-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-contract-aligned-confirm-hook-proof-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-contract-aligned-confirm-hook-proof-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-canary-replay-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-canary-replay-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-decision-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-decision-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r6-allowlist-safe-preflight-fallback-proof-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r6-allowlist-safe-preflight-fallback-proof-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-decision-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-decision-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-canary-replay-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-canary-replay-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-decision-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-implementation-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-canary-replay-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-decision-a922.md
-  - docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-decision-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-canary-replay-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-decision-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-implementation-a922.md
-  - docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r14-session-reset-pending-ack-terminal-unresolved-runtime-implementation-a922.md
-  - truffles-api/app/services/reasoning_core.py
-  - truffles-api/tests/test_reasoning_core.py
-  - ops/diagnose.py
-  - truffles-api/tests/test_booking_quality_tool_evidence_gate.py
-  - truffles-api/tests/test_booking_quality_jid_mode.py
-  - docs/ACTIVE_PROGRAM.md
+  - docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md
+  - docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md
+  - docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-replay-and-full-human-semantic-audit-acceptance-a922.md
+  - docs/SYSTEM_REPROOF_GUARD.yaml
+  - docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml
+  - docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml
+  - docs/RECOVERY_EXECUTION_LOCK.yaml
+  - docs/RECOVERY_PHASE_WAIVER.yaml
   - docs/SOURCE_OF_TRUTH.yaml
-  - STATE.md
-  - STRUCTURE.md
-  - docs/SESSIONS/SESSION-2026-03-15-consultant-core-governance-lock-a922.md
-  - docs/SESSION_INDEX.md
+  - docs/ACTIVE_CANON.md
+  - docs/ACTIVE_PROGRAM.md
   - docs/_generated/AGENT_PACKET.md
   - docs/_generated/AGENT_PACKET.json
+  - docs/system_forensics/authority_registry.json
+  - docs/system_forensics/compatibility_carrier_inventory.json
+  - docs/system_forensics/dead_surface_registry.json
+  - docs/system_forensics/legacy_caller_surface.json
+  - docs/system_forensics/governance_delta.json
+  - STATE.md
+  - STRUCTURE.md
+  - scripts/recovery_execution_guard.py
+  - scripts/arch_guard.py
+  - scripts/system_reproof_guard.py
+  - scripts/continuity_state_normalization_guard.py
+  - truffles-api/app/core/dialog_state_service.py
+  - truffles-api/app/services/state_service.py
+  - truffles-api/app/services/outbox_runtime_service.py
+  - truffles-api/tests/test_state_service.py
+  - truffles-api/tests/test_dialog_state_service.py
+  - truffles-api/tests/test_message_endpoint.py
+  - truffles-api/tests/test_outbox_worker_settings.py
+  - truffles-api/tests/test_outbox_service_app.py
+  - truffles-api/tests/test_admin_legacy_auth.py
+  - truffles-api/tests/test_console_ops_jobs.py
   - truffles-api/tests/architecture/test_arch_guard_packet.py
+  - truffles-api/tests/architecture/test_authority_registry.py
+  - truffles-api/tests/architecture/test_recovery_execution_guard.py
+  - truffles-api/tests/architecture/test_continuity_state_normalization_guard.py
+  - truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py
+  - truffles-api/tests/architecture/test_system_reproof_guard.py
+  - docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md
+  - docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md
+  - docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md
   forbidden_touch:
-  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/app/routers/webhook/dedup.py
+  - truffles-api/app/routers/webhook/_legacy.py
+  - truffles-api/app/routers/admin.py
+  - truffles-api/app/routers/webhook/policy.py
+  - truffles-api/app/services/tool_registry_service.py
+  - truffles-api/app/routers/webhook/response.py
+  - truffles-api/app/services/intent_service.py
+  - truffles-api/app/routers/webhook/info.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/services/pack_runtime_service.py
+  - truffles-api/app/routers/webhook/context_manager.py
+  - truffles-api/app/routers/webhook/guards.py
   - truffles-api/app/routers/webhook/booking.py
+  - truffles-api/app/core/response_realizer.py
   - truffles-api/app/routers/webhook/pending.py
+  - truffles-api/app/outbox_service_app.py
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/app/workers/outbox.py
+  - truffles-api/app/routers/outbox_service.py
   required_checks:
   - python3 scripts/build_agent_packet.py
   - python3 scripts/build_agent_packet.py --check
-  - python3 scripts/semantic_bridge_growth_guard.py
-  - python3 scripts/continuity_writer_guard.py
-  - python3 scripts/legacy_freeze_guard.py
+  - python3 scripts/recovery_execution_guard.py
+  - python3 scripts/continuity_state_normalization_guard.py
+  - python3 scripts/boundary_degrade_guard.py
+  - python3 scripts/pack_runtime_separation_guard.py
+  - python3 scripts/legacy_mesh_drain_guard.py
+  - python3 scripts/operational_entrypoint_dedupe_guard.py
+  - python3 scripts/system_reproof_guard.py
   - python3 scripts/arch_guard.py
-  - pytest -q truffles-api/tests/architecture
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_state_service.py -k "restore_pending_resume_payload or prepare_pending_handoff_resume_boundary_restore or prepare_resolved_handoff_resume_boundary_restore or resolve_resolved_handoff_resume_boundary_restore or resolve_pending_resume_boundary_activation"
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_dialog_state_service.py -k "pending_resume_payload"
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py -k "provider_unavailable_human_request_pending_resume"
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_worker_settings.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_service_app.py truffles-api/tests/test_admin_legacy_auth.py -k "outbox_service or admin_outbox_process"
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_console_ops_jobs.py -k "run_outbox_process_job_execute"
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_arch_guard_packet.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_authority_registry.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_recovery_execution_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_continuity_state_normalization_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_system_reproof_guard.py
   - git diff --check
-  - SESSION_AGENT=a922 scripts/session_check.sh
-execution_strategy:
-  mode: owner_replacement_not_bridge_growth
-  progress_credit_rule: new_bridge_without_old_authority_deletion_or_unreachability_is_not_progress
-  mandatory_sequence:
-  - freeze_generic_ingress_bridge_growth
-  - richer_semantic_owner_cutover_via_turn_planner
-  - single_continuity_writer_completion
-  - boundary_owner_cutover_via_boundary_validator
-  - proof_path_black_box_completion
-  - multi_pack_acceptance_on_beauty_clinic_or_dental_generic_service
-  - retire_legacy_decision_py_semantic_role
-  forbidden_shortcuts:
-  - new_generic_ingress_phrase_bridge_family
-  - bridge_growth_counted_as_progress
-  - beauty_only_green_as_architectural_convergence
-  - proof_lane_progress_as_runtime_convergence_proxy
-  operator_instruction_if_uncertain:
-  - read the execution strategy lock in the generated AGENT_PACKET before choosing
-    the next block
-  - prefer owner cutover or governance guard work over any new hotspot bridge family
-  - if a candidate block cannot delete or bypass an old authority seam, do not count
-    it as valid progress
-  current_nonnegotiable_next_move: open_bounded_truthful_worktree_runtime_planner_degrade_handoff_entry_blocker_before_any_new_behavioral_proof_chain
+  open_blockers:
+  - fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim
+  - current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement
+  - whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes
+recovery_execution_lock: docs/RECOVERY_EXECUTION_LOCK.yaml
+legacy_caller_surface: docs/system_forensics/legacy_caller_surface.json
+governance_delta: docs/system_forensics/governance_delta.json

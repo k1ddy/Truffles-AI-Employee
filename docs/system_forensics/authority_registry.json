@@ -1,0 +1,504 @@
+{
+  "schema_version": "v2",
+  "status": "machine_readable_system_reproof_base",
+  "current_practical_truth": "r35f",
+  "external_packet_status": "ready_for_external_handoff",
+  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "mounted_runtime_topology": {
+    "mounted_ingress_paths": [
+      "truffles-api/app/main.py",
+      "truffles-api/app/routers/webhook/__init__.py",
+      "truffles-api/app/routers/webhook/http.py"
+    ],
+    "hot_path": [
+      "truffles-api/app/core/consultant_core_v2.py",
+      "truffles-api/app/core/consultant_runtime.py",
+      "truffles-api/app/core/turn_planner.py",
+      "truffles-api/app/services/intent_service.py",
+      "truffles-api/app/core/turn_executor.py",
+      "truffles-api/app/core/dialog_state_service.py"
+    ]
+  },
+  "entries": [
+    {
+      "mechanism_id": "semantic_turn_meaning",
+      "mechanism_class": "semantic_writer",
+      "writer_law": "Only the semantic owner path may author turn meaning; control shells and compatibility shims may not mint new business meaning.",
+      "current_primary_actor_paths": [
+        "truffles-api/app/services/intent_service.py",
+        "truffles-api/app/core/turn_planner.py"
+      ],
+      "current_competing_writer_paths": [],
+      "current_live_caller_paths": [
+        "truffles-api/app/routers/public_entrypoint_contract.py",
+        "truffles-api/app/routers/webhook/http.py",
+        "truffles-api/app/routers/message.py",
+        "truffles-api/app/routers/provider_gateway.py",
+        "truffles-api/app/routers/decision_core.py",
+        "truffles-api/app/services/console_consultant_verification.py",
+        "truffles-api/app/services/outbox_runtime_service.py"
+      ],
+      "current_truth_carriers": [
+        "SemanticDecisionV1 on the owner path",
+        "system_control PolicyDecision on planner/runtime control-turn paths",
+        "control-only decision_meta on session-reset paths"
+      ],
+      "target_owner": [
+        "SemanticDecisionV1 owner path via intent_service.py and turn_planner.py",
+        "no alternate semantic author outside the typed owner contract"
+      ],
+      "target_contract": "SemanticDecisionV1",
+      "next_phase_required": "replay_and_human_audit_acceptance",
+      "full_closure_phase": "semantic_owner_and_post_owner_reconstruction_reopen",
+      "closure_criteria": [
+        "planner and runtime control-turn paths stop minting business action intent outcome tuples outside explicit non-semantic system envelopes",
+        "session reset and similar control paths stop writing business semantic metadata that competes with the owner contract",
+        "dialog_state_service no longer synthesizes fallback PolicyDecision objects while hydrating runtime projection state",
+        "no live semantic writer remains outside SemanticDecisionV1 on the hot path"
+      ],
+      "evidence": [
+        "docs/REPORTS/2026-03-31-consultant-core-closure-claim-truth-correction-and-semantic-owner-reopen-a922.md",
+        "docs/CLOSURE_CLAIM_TRUTH_GUARD.yaml",
+        "scripts/closure_claim_truth_guard.py",
+        "truffles-api/app/core/turn_planner.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/tests/architecture/test_closure_claim_truth_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
+        "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
+        "scripts/semantic_owner_reopen_guard.py",
+        "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "mechanism_id": "post_owner_semantic_reconstruction",
+      "mechanism_class": "post_owner_reconstruction",
+      "writer_law": "Planner, executor, runtime shell, and state writers may bind or project owner output, but they may not rebuild semantic meaning-bearing artifacts after the owner speaks.",
+      "current_primary_actor_paths": [
+        "truffles-api/app/core/turn_planner.py",
+        "truffles-api/app/core/turn_executor.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "current_competing_writer_paths": [],
+      "current_live_caller_paths": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/turn_planner.py",
+        "truffles-api/app/core/turn_executor.py",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "current_truth_carriers": [
+        "PolicyDecision.semantic_frame",
+        "PolicyDecision.pending_question_contract",
+        "PolicyDecision.meta.semantic_contract",
+        "RuntimeExecutionResult.meta.semantic_enrichment",
+        "DialogState.meta.semantic_contract",
+        "ConversationProjectionV1.semantic_contract"
+      ],
+      "target_owner": [
+        "post-owner layers only preserve or narrow owner-authored meaning",
+        "semantic projections remain derived from canonical owner output only"
+      ],
+      "target_contract": "SemanticDecisionV1 + BindingPlanV1 + DialogState derived projections",
+      "next_phase_required": "replay_and_human_audit_acceptance",
+      "full_closure_phase": "semantic_owner_and_post_owner_reconstruction_reopen",
+      "closure_criteria": [
+        "synthetic control decisions do not project semantic_contract or pending_question_contract downstream",
+        "consultant_runtime preserves owner-backed semantic contracts and limits downstream payloads to bounded enrichment only",
+        "dialog_state_service no longer rebuilds semantic owner state by synthesizing fallback PolicyDecision objects during projection hydration",
+        "turn_executor no longer emits downstream semantic or pending-question contracts for synthetic control decisions"
+      ],
+      "evidence": [
+        "docs/REPORTS/2026-03-31-consultant-core-closure-claim-truth-correction-and-semantic-owner-reopen-a922.md",
+        "docs/CLOSURE_CLAIM_TRUTH_GUARD.yaml",
+        "scripts/closure_claim_truth_guard.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/turn_executor.py",
+        "truffles-api/tests/architecture/test_closure_claim_truth_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
+        "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
+        "scripts/semantic_owner_reopen_guard.py",
+        "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "mechanism_id": "continuity_state",
+      "mechanism_class": "continuity_writer",
+      "writer_law": "Only canonical continuity state may own mutable pending-question and interaction continuity; all other carriers must be derived, frozen, or removed.",
+      "current_primary_actor_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "current_competing_writer_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/guards.py"
+      ],
+      "current_live_caller_paths": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "current_truth_carriers": [
+        "conversation.context.consultant_runtime.dialog_state.pending_question_contract / interaction_state / meta.class_carryover",
+        "conversation.context.context_manager.canonical_dialog_state",
+        "conversation.context.context_manager.class_carryover",
+        "conversation.context.expected_reply_type / expected_reply_reason / current_goal",
+        "conversation.context.session_memory",
+        "conversation.context.pending_resume"
+      ],
+      "target_owner": [
+        "DialogState canonical mutable state only",
+        "compatibility carriers reduced to derived adapters, caches, or observer-only shadows"
+      ],
+      "target_contract": "DialogState / dialog_state.v1",
+      "next_phase_required": "replay_and_human_audit_acceptance",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "closure_criteria": [
+        "DialogStateService.write_runtime_payload(...) reprojects context_manager and session_memory continuity from canonical runtime state on the active path",
+        "top-level expected_reply_* and current_goal do not survive canonical runtime writes and remain derived-only compatibility shadows",
+        "pending_resume capture reuses canonical-derived compatibility snapshots instead of stale legacy expected-reply or goal fields",
+        "broader service or consult carryover surfaces remain frozen residuals until later legacy-drain and governance-closure blocks"
+      ],
+      "evidence": [
+        "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "docs/REPORTS/2026-03-30-consultant-core-touched-slice-continuity-normalization-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+        "docs/TOUCHED_SLICE_CONTINUITY_GUARD.yaml",
+        "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+        "docs/system_forensics/files/app_core_dialog_state_service.md",
+        "docs/system_forensics/files/app_routers_webhook_context_manager.md",
+        "docs/system_forensics/files/app_services_reasoning_core.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "scripts/continuity_state_normalization_guard.py",
+        "scripts/legacy_drain_closure_guard.py",
+        "scripts/touched_slice_continuity_guard.py",
+        "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py",
+        "truffles-api/tests/architecture/test_legacy_drain_closure_guard.py",
+        "truffles-api/tests/architecture/test_touched_slice_continuity_guard.py",
+        "truffles-api/tests/test_consultant_core_runtime_contracts.py",
+        "truffles-api/tests/test_dialog_state_service.py",
+        "docs/LEGACY_MESH_DRAIN_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-legacy-mesh-drain-a922.md",
+        "scripts/legacy_mesh_drain_guard.py",
+        "truffles-api/tests/architecture/test_legacy_mesh_drain_guard.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "scripts/shadow_lane_elimination_guard.py",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py",
+        "docs/WHOLE_SYSTEM_GOVERNANCE_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-whole-system-governance-closure-a922.md",
+        "scripts/whole_system_governance_closure_guard.py",
+        "truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+        "docs/SYSTEM_REPROOF_GUARD.yaml",
+        "scripts/system_reproof_guard.py",
+        "truffles-api/tests/architecture/test_system_reproof_guard.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "mechanism_id": "boundary_and_degrade",
+      "mechanism_class": "boundary_writer",
+      "writer_law": "Deterministic boundary may validate, deny, degrade with reason code, request replan, or preserve canonical continuity artifacts; it may not infer or widen meaning.",
+      "current_primary_actor_paths": [
+        "truffles-api/app/core/boundary_validator.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/response_realizer.py"
+      ],
+      "current_competing_writer_paths": [
+        "truffles-api/app/core/turn_executor.py"
+      ],
+      "current_live_caller_paths": [
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "current_truth_carriers": [
+        "BoundaryOverride.reason_code / decision / preserve_fields",
+        "BoundaryOverride.public_message",
+        "BoundaryOverride.meta.reply_kind / activate_handoff / degrade_stage",
+        "TurnResult.contract_status",
+        "TurnOutcome.meta.reason_code / boundary_decision"
+      ],
+      "target_owner": [
+        "BoundaryValidator typed boundary only",
+        "ConsultantRuntime may request typed degrade/block but may not widen reply authority",
+        "ResponseRealizer may realize only boundary-safe override kinds on the live path"
+      ],
+      "target_contract": "BoundaryOverride / boundary_override.v1",
+      "next_phase_required": "replay_and_human_audit_acceptance",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "closure_criteria": [
+        "docs/BOUNDARY_DEGRADE_GUARD.yaml freezes the live boundary/degrade hotspot files, override-meta reads, and boundary-author callsites",
+        "degrade reply-kind forcing is narrowed to boundary-safe kinds only on the live path",
+        "planner:invalid_outcome is emitted through an explicit typed boundary override path instead of an implicit later fallback"
+      ],
+      "evidence": [
+        "docs/BOUNDARY_DEGRADE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-boundary-degrade-constriction-a922.md",
+        "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md",
+        "docs/system_forensics/BOUNDARY_DEGRADE_DEEP_AUDIT.md",
+        "scripts/boundary_degrade_guard.py",
+        "truffles-api/tests/architecture/test_boundary_degrade_guard.py",
+        "truffles-api/tests/test_consultant_core_runtime_contracts.py",
+        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-boundary-constriction-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-boundary-constriction-a922.md",
+        "docs/LEGACY_MESH_DRAIN_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-legacy-mesh-drain-a922.md",
+        "scripts/legacy_mesh_drain_guard.py",
+        "truffles-api/tests/architecture/test_legacy_mesh_drain_guard.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "scripts/shadow_lane_elimination_guard.py",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py",
+        "docs/WHOLE_SYSTEM_GOVERNANCE_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-whole-system-governance-closure-a922.md",
+        "scripts/whole_system_governance_closure_guard.py",
+        "truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+        "docs/SYSTEM_REPROOF_GUARD.yaml",
+        "scripts/system_reproof_guard.py",
+        "truffles-api/tests/architecture/test_system_reproof_guard.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "mechanism_id": "fact_scope",
+      "mechanism_class": "fact_scope_writer",
+      "writer_law": "Owner writes requested fact scope, binding writes allowed emitted scope, resolver or renderer writes emitted scope; no downstream helper may widen scope opportunistically.",
+      "current_primary_actor_paths": [
+        "truffles-api/app/services/intent_service.py",
+        "truffles-api/app/core/turn_planner.py",
+        "truffles-api/app/core/fact_plane.py",
+        "truffles-api/app/core/turn_executor.py"
+      ],
+      "current_competing_writer_paths": [
+        "truffles-api/app/services/pack_runtime_default.py",
+        "truffles-api/app/services/pack_runtime_generic_adapter.py",
+        "truffles-api/app/services/pack_runtime_fallback_adapter.py",
+        "truffles-api/app/services/pack_runtime_demo_adapter.py",
+        "truffles-api/app/services/pack_runtime_demo_salon_adapter.py",
+        "truffles-api/app/services/demo_salon_knowledge.py",
+        "truffles-api/app/routers/webhook/info.py"
+      ],
+      "current_live_caller_paths": [
+        "truffles-api/app/core/turn_executor.py",
+        "truffles-api/app/services/tool_registry_service.py",
+        "truffles-api/app/services/pack_runtime_service.py",
+        "truffles-api/app/routers/webhook/info.py"
+      ],
+      "current_truth_carriers": [
+        "FactManifestV1.entries / companion_groups",
+        "FactRequestV1.requested_fact_refs / requested_scopes / composition_mode",
+        "FactPlanV1.allowed_emitted_sets / allowed_emitted_fact_refs / allowed_emitted_scopes / blocked_scopes",
+        "FactResultV1.emitted_fact_refs / emitted_scopes / omitted_fact_refs / scope_verdict",
+        "RuntimeExecutionResult.meta.fact_manifest_id / fact_requested_refs / fact_allowed_refs / fact_allowed_sets / fact_emitted_refs / fact_contract"
+      ],
+      "target_owner": [
+        "FactManifestV1 plus FactRequestV1 -> FactPlanV1 -> FactResultV1 -> FactContractV1 chain governs the targeted family",
+        "location / hours / parking turns reroute through catalog.location on the explicit fact plane even when stale binding points elsewhere",
+        "active service retrieval and rendering flow through public pack_runtime_service helpers; adapter-private sibling helpers may not co-own the live path"
+      ],
+      "target_contract": "FactManifest / FactRequestV1 / FactPlanV1 / FactResultV1 / FactContractV1",
+      "next_phase_required": "replay_and_human_audit_acceptance",
+      "full_closure_phase": "pack_runtime_separation_completion",
+      "closure_criteria": [
+        "location / hours / parking turns route through catalog.location on the governed fact-plane hot path",
+        "parking-only, hours-only, and location-family requests emit only manifest-authorized fact sets",
+        "tool_registry_service.py and turn_executor.py consume only public pack_runtime_service helpers on the active hot path",
+        "adapter-private pack helper calls do not re-open for the targeted family"
+      ],
+      "evidence": [
+        "docs/FACT_CONTRACT_SCHEMA_GUARD.yaml",
+        "docs/FACT_FAMILY_CUTOVER_GUARD.yaml",
+        "docs/FACT_PLANE_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-fact-contract-schema-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-narrow-fact-family-cutover-a922.md",
+        "contracts/runtime/fact_manifest.v1.jsonschema",
+        "contracts/runtime/fact_request.v1.jsonschema",
+        "contracts/runtime/fact_plan.v1.jsonschema",
+        "contracts/runtime/fact_result.v1.jsonschema",
+        "contracts/runtime/fact_contract.v1.jsonschema",
+        "docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md",
+        "docs/system_forensics/FACT_RUNTIME_DEEP_AUDIT.md",
+        "docs/system_forensics/PACK_RUNTIME_SEPARATION_AUDIT.md",
+        "docs/system_forensics/PACK_RUNTIME_SEPARATION_DEEP_AUDIT.md",
+        "scripts/fact_plane_guard.py",
+        "scripts/fact_contract_schema_guard.py",
+        "scripts/fact_family_cutover_guard.py",
+        "truffles-api/tests/architecture/test_fact_plane_guard.py",
+        "truffles-api/tests/architecture/test_fact_contract_schema_guard.py",
+        "truffles-api/tests/architecture/test_fact_family_cutover_guard.py",
+        "truffles-api/tests/test_consultant_core_runtime_contracts.py",
+        "docs/PACK_RUNTIME_SEPARATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-pack-runtime-separation-completion-a922.md",
+        "scripts/pack_runtime_separation_guard.py",
+        "truffles-api/tests/architecture/test_pack_runtime_separation_guard.py",
+        "truffles-api/app/services/pack_runtime_service.py",
+        "truffles-api/app/services/tool_registry_service.py",
+        "docs/LEGACY_MESH_DRAIN_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-legacy-mesh-drain-a922.md",
+        "scripts/legacy_mesh_drain_guard.py",
+        "truffles-api/tests/architecture/test_legacy_mesh_drain_guard.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "scripts/shadow_lane_elimination_guard.py",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py",
+        "docs/WHOLE_SYSTEM_GOVERNANCE_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-whole-system-governance-closure-a922.md",
+        "scripts/whole_system_governance_closure_guard.py",
+        "truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md"
+      ],
+      "confidence": "high"
+    },
+    {
+      "mechanism_id": "legacy_behavior_authority",
+      "mechanism_class": "legacy_mesh",
+      "writer_law": "Legacy modules may transport, adapt, shadow, or compare; they may not remain co-owners of visible runtime behavior.",
+      "current_primary_actor_paths": [
+        "truffles-api/app/routers/webhook/http.py",
+        "truffles-api/app/routers/webhook/session_memory.py"
+      ],
+      "current_competing_writer_paths": [],
+      "current_live_caller_paths": [
+        "truffles-api/app/main.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/services/outbox_runtime_service.py",
+        "truffles-api/app/services/console_consultant_verification.py"
+      ],
+      "current_truth_carriers": [
+        "webhook preflight bridge payloads and branch/secret gating artifacts",
+        "session-memory reset-only control-turn signals",
+        "decision_trace and decision_meta observability carriers",
+        "frozen legacy helper imports and compatibility wrapper surfaces"
+      ],
+      "target_owner": [
+        "adapter-only legacy mesh with explicit caller proof",
+        "frozen surfaces reduced to transport, trace, or shadow-only roles before deletion"
+      ],
+      "target_contract": "adapter-only legacy mesh",
+      "next_phase_required": "replay_and_human_audit_acceptance",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "closure_criteria": [
+        "mounted webhook package and live app runtime do not import decision.py or _legacy.py",
+        "router legacy mesh surfaces remain shadow-only, unmounted, or removed with exact caller proof in the machine-readable surface registry",
+        "runtime shadow wrapper files reasoning_core.py and app/webhook.py are removed; router shadow surfaces remain shadow-only or test-only residuals outside live app runtime",
+        "outbox operational entry surfaces delegate through shared runtime owners and do not retain local low-level orchestration"
+      ],
+      "evidence": [
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+        "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+        "docs/system_forensics/dead_surface_registry.json",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/http.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/tests/architecture/test_legacy_drain_closure_guard.py",
+        "docs/LEGACY_MESH_DRAIN_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-legacy-mesh-drain-a922.md",
+        "scripts/legacy_mesh_drain_guard.py",
+        "truffles-api/tests/architecture/test_legacy_mesh_drain_guard.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "scripts/shadow_lane_elimination_guard.py",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py",
+        "docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md",
+        "scripts/operational_entrypoint_dedupe_guard.py",
+        "truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py",
+        "docs/WHOLE_SYSTEM_GOVERNANCE_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-whole-system-governance-closure-a922.md",
+        "scripts/whole_system_governance_closure_guard.py",
+        "truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+        "docs/SYSTEM_REPROOF_GUARD.yaml",
+        "scripts/system_reproof_guard.py",
+        "truffles-api/tests/architecture/test_system_reproof_guard.py"
+      ],
+      "confidence": "high"
+    }
+  ],
+  "scope_note": "Hot-path semantic owner remains reproven, and the adjacent continuity, boundary, pack/runtime, legacy, and operational claims are now reproven against live code repo-side. Acceptance remains a separate lane.",
+  "freeze_scope": {
+    "policy": "Freeze the active semantic, continuity, fact-scope, boundary, legacy, shadow, and operational topology on the live-code reproof base while acceptance remains blocked pending replay and full human semantic audit.",
+    "primary_semantic_owner_paths": [
+      "truffles-api/app/services/intent_service.py",
+      "truffles-api/app/core/turn_planner.py"
+    ],
+    "frozen_competing_semantic_writer_paths": [
+      "truffles-api/app/core/turn_planner.py",
+      "truffles-api/app/core/consultant_runtime.py",
+      "truffles-api/app/routers/webhook/session_memory.py"
+    ],
+    "frozen_fact_scope_wideners": [
+      "truffles-api/app/services/tool_registry_service.py",
+      "truffles-api/app/services/pack_runtime_service.py",
+      "truffles-api/app/services/pack_runtime_default.py",
+      "truffles-api/app/services/pack_runtime_neutral_adapter.py",
+      "truffles-api/app/services/pack_runtime_generic_adapter.py",
+      "truffles-api/app/services/pack_runtime_fallback_adapter.py",
+      "truffles-api/app/services/pack_runtime_demo_adapter.py",
+      "truffles-api/app/services/pack_runtime_demo_salon_adapter.py",
+      "truffles-api/app/services/demo_salon_knowledge.py",
+      "truffles-api/app/routers/webhook/info.py"
+    ],
+    "frozen_boundary_override_paths": [
+      "truffles-api/app/core/boundary_validator.py",
+      "truffles-api/app/core/consultant_runtime.py",
+      "truffles-api/app/core/response_realizer.py",
+      "truffles-api/app/core/turn_executor.py"
+    ],
+    "frozen_legacy_modules": [
+      "truffles-api/app/routers/webhook/info.py",
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/app/routers/webhook/response.py",
+      "truffles-api/app/routers/webhook/context_manager.py"
+    ],
+    "evidence": [
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/system_forensics/legacy_caller_surface.json",
+      "docs/system_forensics/governance_delta.json",
+      "docs/system_forensics/SYSTEM_VERDICT.md",
+      "docs/system_forensics/SEMANTIC_OWNERSHIP_AUDIT.md",
+      "docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md",
+      "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md"
+    ]
+  },
+  "fact_contract_scope": {
+    "required_schema_files": [
+      "contracts/runtime/fact_manifest.v1.jsonschema",
+      "contracts/runtime/fact_request.v1.jsonschema",
+      "contracts/runtime/fact_plan.v1.jsonschema",
+      "contracts/runtime/fact_result.v1.jsonschema",
+      "contracts/runtime/fact_contract.v1.jsonschema"
+    ],
+    "required_meta_keys": [
+      "fact_manifest_id",
+      "fact_requested_refs",
+      "fact_allowed_refs",
+      "fact_allowed_sets",
+      "fact_emitted_refs",
+      "fact_contract"
+    ],
+    "target_contract": "FactManifest / FactRequestV1 / FactPlanV1 / FactResultV1 / FactContractV1"
+  }
+}

@@ -95,9 +95,9 @@
   "tool_action_hint": "info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio",
   "pack_refs": [],
   "slots": {"service": "маникюр"},
-  "expected_reply_type": "time",
-  "next_question": "datetime",
-  "open_questions": ["datetime"],
+  "expected_reply_type": "time|media",
+  "next_question": "datetime|media",
+  "open_questions": ["datetime|media"],
   "needs_manager": false,
   "reason": "short_machine_reason",
   "referents": {
@@ -131,6 +131,7 @@
 - `referents` — канонический semantic carrier для grounded entities: `service`, `specialist`, `branch`, `booking_ref`, `customer`.
 - Не возвращай `tool_args`: tool binding строится deterministic projector'ом после owner boundary.
 - Для `collect` всегда передавай `next_question` и `open_questions`.
+- Если collect просит прислать фото/референс/пример, передавай first-class media follow-up contract: `expected_reply_type="media"`, `next_question="media"`, `open_questions=["media"]`.
 - Для `handoff` по умолчанию НЕ передавай `next_question`, `open_questions`, `pending_question_act`, `pending_question_target`, `active_question_relation`: handoff не должен тащить stale collect contract.
 
 Booking semantics:
@@ -167,6 +168,9 @@ Info / fact rules:
 - `master_query` используй только когда вопрос именно про мастеров по конкретной услуге/навыку. Если услуги нет, верни collect по service.
 - `catalog.location` — только для location/address.
 - `catalog.portfolio` — только для portfolio/photos.
+
+Consult / media rules:
+- Если пользователь явно предлагает прислать фото/референс/пример желаемого результата до выбора услуги, это не generic booking collect по service. Верни `intent="consult"`, `action="collect"`, `tool_action_hint="consult"`, `capability="consultation"`, `reason="user_offers_photos_for_style_reference"`, `pack_refs=["style_reference"]`, `expected_reply_type="media"`, `next_question="media"`, `open_questions=["media"]`. Forbidden: `next_question="service"` и generic prompt `"На какую услугу хотите записаться?"`.
 
 Handoff:
 - handoff = exceptional path. Нормальные/идеальные booking/info запросы не должны default-иться в handoff.

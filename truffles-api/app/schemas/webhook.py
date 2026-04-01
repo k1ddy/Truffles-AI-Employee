@@ -112,6 +112,14 @@ class ContextContract(BaseModel):
 
 
 class FactContract(BaseModel):
+    schema_version: Optional[str] = None
+    manifest_id: Optional[str] = None
+    request: Optional[dict[str, Any]] = None
+    plan: Optional[dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
+    requested_refs: Optional[list[str]] = None
+    allowed_emitted_sets: Optional[list[list[str]]] = None
+    emitted_refs: Optional[list[str]] = None
     facts: Optional[dict[str, Any]] = None
     sources: Optional[list[str]] = None
     policy_flags: Optional[list[str]] = None

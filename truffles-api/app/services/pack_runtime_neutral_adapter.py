@@ -400,6 +400,71 @@ def _format_hours_line(salon: dict[str, Any]) -> str | None:
     return None
 
 
+def _format_location_line(salon: dict[str, Any]) -> str | None:
+    address = salon.get("address")
+    if isinstance(address, str) and address.strip():
+        return address.strip()
+    if not isinstance(address, dict):
+        return None
+    full = address.get("full")
+    entrance = address.get("entrance")
+    parts = [str(full).strip()] if isinstance(full, str) and full.strip() else []
+    if isinstance(entrance, str) and entrance.strip():
+        parts.append(entrance.strip())
+    if not parts:
+        return None
+    return " ".join(f"Адрес: {parts[0]}." if i == 0 else part for i, part in enumerate(parts))
+
+
+def _format_parking_line(salon: dict[str, Any]) -> str | None:
+    parking = salon.get("parking")
+    if isinstance(parking, str) and parking.strip():
+        return parking.strip()
+    if isinstance(parking, dict):
+        details = parking.get("details")
+        if isinstance(details, str) and details.strip():
+            return details.strip()
+    return None
+
+
+def _format_promotions_line(source_truth: dict[str, Any]) -> str | None:
+    promotions = source_truth.get("promotions")
+    if isinstance(promotions, str) and promotions.strip():
+        return promotions.strip()
+    if isinstance(promotions, dict):
+        for key in ("reply", "summary", "text"):
+            value = promotions.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        items = promotions.get("items")
+        parts: list[str] = []
+        if isinstance(items, list):
+            for row in items[:3]:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "").strip()
+                percent = row.get("discount_percent")
+                eligibility = str(row.get("eligibility") or "").strip()
+                detail_parts = []
+                if name:
+                    detail_parts.append(name)
+                if isinstance(percent, (int, float)):
+                    detail_parts.append(f"{int(percent) if float(percent).is_integer() else percent}%")
+                if eligibility:
+                    detail_parts.append(f"({eligibility})")
+                if detail_parts:
+                    parts.append(" ".join(detail_parts))
+        stacking = str(promotions.get("stacking") or "").strip()
+        stacking_notes = str(promotions.get("stacking_notes") or "").strip()
+        if stacking:
+            parts.append(stacking)
+        if stacking_notes:
+            parts.append(stacking_notes)
+        if parts:
+            return ". ".join(parts).strip(". ") + "."
+    return None
+
+
 def format_reply_from_truth(
     intent: str,
     slots: dict | None = None,
@@ -418,15 +483,11 @@ def format_reply_from_truth(
         else {}
     )
     if normalized_intent == "location":
-        address = salon.get("address")
-        return address.strip() if isinstance(address, str) and address.strip() else None
+        return _format_location_line(salon)
     if normalized_intent == "hours":
         return _format_hours_line(salon)
     if normalized_intent == "parking":
-        parking = salon.get("parking")
-        if isinstance(parking, str) and parking.strip():
-            return parking.strip()
-        return None
+        return _format_parking_line(salon)
     if normalized_intent == "services_overview":
         summary = salon.get("services_summary")
         if isinstance(summary, str) and summary.strip():
@@ -458,15 +519,7 @@ def format_reply_from_truth(
                 return text.strip()
         return "Подскажите услугу, и я уточню цену и длительность."
     if normalized_intent == "promotions":
-        promotions = source_truth.get("promotions")
-        if isinstance(promotions, str) and promotions.strip():
-            return promotions.strip()
-        if isinstance(promotions, dict):
-            for key in ("reply", "summary", "text"):
-                value = promotions.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-        return None
+        return _format_promotions_line(source_truth)
     if normalized_intent == "off_topic":
         reply = system_messages.get("off_topic")
         if isinstance(reply, str) and reply.strip():

@@ -343,48 +343,11 @@ async def test_run_outbox_process_job_execute_supports_archive_and_single_messag
     context = _build_context()
     captured: dict[str, object] = {}
 
-    def _fake_archive(
-        _db,
-        *,
-        client_id,
-        older_than_seconds,
-        limit,
-        reason,
-        branch_ids,
-        only_without_conversation,
-    ):
-        captured["archive"] = {
-            "client_id": client_id,
-            "older_than_seconds": older_than_seconds,
-            "limit": limit,
-            "reason": reason,
-            "branch_ids": branch_ids,
-            "only_without_conversation": only_without_conversation,
-        }
-        return {"matched": 3, "archived": 3}
+    async def _fake_run_scoped(_db, **kwargs):
+        captured.update(kwargs)
+        return {"processed": 0, "results": {"processed": 0, "failed": 0}, "archive": {"matched": 3, "archived": 3}}
 
-    def _fake_claim(
-        _db,
-        *,
-        client_id,
-        allowed_branch_ids,
-        limit,
-        idle_seconds,
-        max_wait_seconds,
-        include_without_conversation,
-    ):
-        captured["claim"] = {
-            "client_id": client_id,
-            "allowed_branch_ids": allowed_branch_ids,
-            "limit": limit,
-            "idle_seconds": idle_seconds,
-            "max_wait_seconds": max_wait_seconds,
-            "include_without_conversation": include_without_conversation,
-        }
-        return []
-
-    monkeypatch.setattr(console_router, "archive_pending_outbox", _fake_archive)
-    monkeypatch.setattr(console_router, "claim_scoped_outbox_rows", _fake_claim)
+    monkeypatch.setattr(console_router, "run_scoped_outbox_process", _fake_run_scoped)
 
     result = await console_router._run_outbox_process_job(
         db,
@@ -404,37 +367,25 @@ async def test_run_outbox_process_job_execute_supports_archive_and_single_messag
     assert result["processed"] == 0
     assert result["results"]["processed"] == 0
     assert result["archive"] == {"matched": 3, "archived": 3}
-    assert captured["claim"]["include_without_conversation"] is False
-    assert captured["claim"]["client_id"] == context.client.id
-    assert captured["claim"]["allowed_branch_ids"] is None
-    assert captured["archive"]["older_than_seconds"] == 24 * 3600
-    assert captured["archive"]["limit"] == 7
-    assert captured["archive"]["only_without_conversation"] is True
+    assert captured["include_without_conversation"] is False
+    assert captured["client_id"] == context.client.id
+    assert captured["allowed_branch_ids"] is None
+    assert captured["archive_pending_older_than_hours"] == 24
+    assert captured["archive_pending_limit"] == 7
+    assert captured["archive_pending_without_conversation_only"] is True
 
 
 @pytest.mark.asyncio
 async def test_run_outbox_process_job_execute_uses_shared_runtime_process_helper(monkeypatch):
     db = Mock()
     context = _build_context()
-    claimed_rows = [{"id": uuid4()}]
-    settings = SimpleNamespace(
-        limit=10,
-        idle_seconds=8,
-        max_wait_seconds=10,
-        max_attempts=5,
-        retry_backoff_seconds=2.0,
-    )
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(console_router, "claim_scoped_outbox_rows", lambda *_args, **_kwargs: claimed_rows)
-    monkeypatch.setattr(console_router, "load_outbox_process_settings", lambda: settings)
+    async def _fake_run_scoped(_db, **kwargs):
+        captured.update(kwargs)
+        return {"processed": 1, "results": {"claimed": 1, "sent": 1, "failed": 0, "retry_scheduled": 0}}
 
-    async def _fake_process_claimed(_db, rows, *, settings):
-        captured["rows"] = rows
-        captured["settings"] = settings
-        return {"claimed": 1, "sent": 1, "failed": 0, "retry_scheduled": 0}
-
-    monkeypatch.setattr(console_router, "process_claimed_outbox_rows", _fake_process_claimed)
+    monkeypatch.setattr(console_router, "run_scoped_outbox_process", _fake_run_scoped)
 
     result = await console_router._run_outbox_process_job(
         db,
@@ -445,5 +396,5 @@ async def test_run_outbox_process_job_execute_uses_shared_runtime_process_helper
 
     assert result["processed"] == 1
     assert result["results"]["sent"] == 1
-    assert captured["rows"] == claimed_rows
-    assert captured["settings"] is settings
+    assert captured["client_id"] == context.client.id
+    assert captured["allowed_branch_ids"] is None

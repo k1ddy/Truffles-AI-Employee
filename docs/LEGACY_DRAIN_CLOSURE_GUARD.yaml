@@ -1,0 +1,62 @@
+active_block: Consultant Core Legacy Drain And Proof Closure
+registry_path: docs/system_forensics/dead_surface_registry.json
+family_id: location_hours_parking
+package_root: truffles-api/app/routers/webhook/__init__.py
+consultant_runtime_path: truffles-api/app/core/consultant_runtime.py
+expected_registry_status: machine_readable_legacy_drain_closure_base
+required_lazy_exports:
+- _apply_quiet_hours_notice
+- _buffer_user_message
+- _drain_buffered_messages
+- _get_expected_reply_reason
+- _get_expected_reply_type
+- _is_booking_slot_signal
+- _match_expected_reply
+- _maybe_append_booking_cta
+- _set_expected_reply_type
+- _validate_name_slot
+- is_duplicate_message_id
+package_root_forbidden_eager_import_modules:
+- app.routers.webhook.booking
+- app.routers.webhook.context_manager
+- app.routers.webhook.dedup
+- app.routers.webhook.response
+allowed_core_legacy_imports:
+  truffles-api/app/core/consultant_runtime.py:
+  - app.routers.webhook
+  - app.routers.webhook.runtime_primitives
+  - app.routers.webhook.session_memory
+  - app.routers.webhook.trace
+expected_session_memory_imports:
+- _get_session_memory
+- _is_session_reset_only_message
+- _normalize_session_memory
+- _session_memory_snapshot
+- _should_reset_session_memory
+expected_http_helper_calls:
+- _run_preflight
+adapter_only_surfaces:
+- truffles-api/app/routers/webhook/http.py
+- truffles-api/app/routers/webhook/session_memory.py
+startup_load_drained_from_package_root:
+- truffles-api/app/routers/webhook/booking.py
+- truffles-api/app/routers/webhook/context_manager.py
+- truffles-api/app/routers/webhook/dedup.py
+- truffles-api/app/routers/webhook/response.py
+unreachable_surfaces_for_touched_envelope:
+- truffles-api/app/routers/webhook/_legacy.py
+- truffles-api/app/routers/webhook/booking.py
+- truffles-api/app/routers/webhook/context_manager.py
+- truffles-api/app/routers/webhook/decision.py
+- truffles-api/app/routers/webhook/dedup.py
+- truffles-api/app/routers/webhook/guards.py
+- truffles-api/app/routers/webhook/info.py
+- truffles-api/app/routers/webhook/pending.py
+- truffles-api/app/routers/webhook/policy.py
+- truffles-api/app/routers/webhook/response.py
+- truffles-api/app/services/reasoning_core.py
+- truffles-api/app/webhook.py
+forbidden_touched_tokens_in_adapter_surfaces:
+- class_carryover
+- location_hours_parking
+- catalog.location

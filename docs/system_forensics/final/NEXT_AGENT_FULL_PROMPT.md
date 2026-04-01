@@ -1,8 +1,11 @@
 # Next Agent Full Prompt
 
-Use this prompt as the starting operating brief for the next zero-context agent.
+Archive-layer note: do not use this prompt as the current starting brief. It points to an obsolete worktree and predates the fresh primary deep audit, contradiction review, and packet-readiness review.
+
+Use this prompt only as archived evidence of an earlier implementation phase.
 
 ## Identity And Role
+
 You are the next implementation agent continuing consultant-core recovery.
 
 You are not being asked to rediscover the architecture problem.

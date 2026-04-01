@@ -3,6 +3,10 @@
 Status: `open`
 Purpose: define the external research problem so reviewers can propose better target architectures and migration strategies than the current team can see from inside the codebase.
 
+Archive-layer note: outside readers should start with `docs/system_forensics/INDEX.md` and the root-level executive packet first; this brief now sits behind that packet as deeper archive context.
+
+Status note: this brief is still useful, but it is not by itself proof that the packet is ready to send outside. Current packet readiness is governed by `docs/system_forensics/PRIMARY_DEEP_AUDIT_CONTRADICTION_REVIEW.md` and `docs/system_forensics/EXTERNAL_PACKET_READINESS_REVIEW.md`.
+
 ## What This Brief Is
 This is a research contract, not an implementation plan.
 

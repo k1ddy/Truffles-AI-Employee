@@ -12,8 +12,8 @@ from app.routers.webhook import decision as decision_router
 from app.routers.webhook import dedup as dedup_module
 from app.routers.webhook import trace as trace_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
-from app.services import reasoning_core
 from tests import build_test_semantic_decision_payload
+from tests import support_reasoning_core_shadow as reasoning_core
 from tests.support_booking_prompt_owner_shadow import (
     resolve_pending_booking_reactivation_candidate,
 )
@@ -917,8 +917,9 @@ def test_build_sender_branch_ignore_artifact_uses_new_core_contracts() -> None:
     assert artifact.turn_result.reply.text == ""
     turn_outcome = artifact.turn_outcome.to_metadata()
     assert turn_outcome["action"] == "ignore"
-    assert turn_outcome["intent"] == "sender_is_branch"
+    assert turn_outcome["intent"] == "system_control"
     assert turn_outcome["observability"]["transport_reason"] == "sender_is_branch"
+    assert turn_outcome["meta"]["control_label"] == "sender_is_branch"
     assert turn_outcome["meta"]["ignored_path"] is True
 
 
@@ -933,8 +934,9 @@ def test_build_missing_remote_jid_artifact_uses_new_core_contracts() -> None:
     assert artifact.turn_result.reply.text == ""
     turn_outcome = artifact.turn_outcome.to_metadata()
     assert turn_outcome["action"] == "reject"
-    assert turn_outcome["intent"] == "missing_remote_jid"
+    assert turn_outcome["intent"] == "system_control"
     assert turn_outcome["observability"]["transport_reason"] == "missing_remote_jid"
+    assert turn_outcome["meta"]["control_label"] == "missing_remote_jid"
     assert turn_outcome["meta"]["preflight_path"] is True
 
 
@@ -949,8 +951,9 @@ def test_build_missing_tenant_context_artifact_uses_new_core_contracts() -> None
     assert artifact.turn_result.reply.text == ""
     turn_outcome = artifact.turn_outcome.to_metadata()
     assert turn_outcome["action"] == "reject"
-    assert turn_outcome["intent"] == "missing_tenant_context"
+    assert turn_outcome["intent"] == "system_control"
     assert turn_outcome["observability"]["transport_reason"] == "missing_tenant_context"
+    assert turn_outcome["meta"]["control_label"] == "missing_tenant_context"
     assert turn_outcome["meta"]["preflight_path"] is True
 
 
@@ -973,8 +976,9 @@ def test_build_tenant_context_reject_artifact_uses_new_core_contracts() -> None:
     assert artifact.turn_result.reply.text == ""
     turn_outcome = artifact.turn_outcome.to_metadata()
     assert turn_outcome["action"] == "reject"
-    assert turn_outcome["intent"] == "tenant_context_contract_invalid"
+    assert turn_outcome["intent"] == "system_control"
     assert turn_outcome["observability"]["transport_reason"] == "tenant_context_contract_invalid"
+    assert turn_outcome["meta"]["control_label"] == "tenant_context_contract_invalid"
     assert turn_outcome["meta"]["tenant_context_guard"] is True
     assert turn_outcome["meta"]["error"] == "$: invalid source"
 
@@ -992,8 +996,9 @@ def test_build_remote_branch_phone_ignore_artifact_uses_new_core_contracts() -> 
     assert artifact.turn_result.reply.text == ""
     turn_outcome = artifact.turn_outcome.to_metadata()
     assert turn_outcome["action"] == "ignore"
-    assert turn_outcome["intent"] == "remote_is_branch_phone"
+    assert turn_outcome["intent"] == "system_control"
     assert turn_outcome["observability"]["transport_reason"] == "remote_is_branch_phone"
+    assert turn_outcome["meta"]["control_label"] == "remote_is_branch_phone"
     assert turn_outcome["meta"]["matched_phone"] == "+7 (705) 574-04-56"
     assert turn_outcome["meta"]["ignored_path"] is True
 
@@ -1012,8 +1017,9 @@ def test_build_duplicate_message_artifact_uses_new_core_contracts() -> None:
     assert artifact.turn_result.reply.text == ""
     turn_outcome = artifact.turn_outcome.to_metadata()
     assert turn_outcome["action"] == "ignore"
-    assert turn_outcome["intent"] == "duplicate_message_id"
+    assert turn_outcome["intent"] == "system_control"
     assert turn_outcome["observability"]["transport_reason"] == "duplicate_message_id"
+    assert turn_outcome["meta"]["control_label"] == "duplicate_message_id"
     assert turn_outcome["meta"]["dedup_backend"] == "message_dedup"
     assert turn_outcome["meta"]["preexisting_duplicate"] is True
 

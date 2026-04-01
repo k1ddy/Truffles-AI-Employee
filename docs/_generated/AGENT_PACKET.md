@@ -1,128 +1,313 @@
 # AGENT PACKET
 
 Read only these first:
-- `docs/DECISIONS/DEC-2026-03-15-consultant-core-controlled-demolition.md`
-- `docs/TASK_PACKAGES/TP-2026-03-15-consultant-core-controlled-demolition-master.md`
-- `docs/TASK_PACKAGES/TP-2026-03-25-consultant-core-behavioral-proof-lock-a922.md`
+- `docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md`
+- `docs/ACTIVE_CANON.md`
+- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md`
+- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md`
 - `docs/SOURCE_OF_TRUTH.yaml`
 - `docs/LEGACY_SUNSET.yaml`
 
+## Recovery Execution Lock
+- Lock file: `docs/RECOVERY_EXECUTION_LOCK.yaml`
+- Active practical truth: `r35f`
+- Active block: `Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof`
+- Runtime status: `broader_live_code_reproof_block_closed_repo_side_acceptance_is_next`
+- Next move: `run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim`
+- Historical residue rule: `later_r36_star_and_invalidated_whole_system_closure_claims_remain_non_governing_history_while_the_live_code_reproof_block_is_active`
+
 ## Active Block
-- Consultant Core Behavioral Proof Lock
+- Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof
 
 ## Current Runtime Cutover
-- `semantic_core`: `wrapped_ingress_preflight_cache_secret_safe_runtime_loader_active_conversation_snapshot_service_referent_projection_active_booking_datetime_value_and_exact_time_token_lexical_intent_primitive_protective_lexical_confirmation_refusal_domain_router_bounded_controller_route_bounded_policy_core_handoff_text_only_style_reference_booking_verification_services_overview_location_parking_and_hours_and_pricing_fact_and_pricing_collect_and_duration_fact_and_duration_collect_and_active_service_gated_bookability_time_collect_and_active_name_specific_time_availability_followup_and_active_name_deictic_time_availability_followup_and_active_name_deictic_day_availability_followup_and_active_name_relative_date_availability_followup_and_active_name_relative_daypart_availability_followup_and_specialist_date_range_followup_and_grounded_specialist_transition_and_service_choice_specialist_weekend_followup_and_service_choice_specialist_weekday_followup_and_service_choice_specialist_day_followup_and_service_choice_specialist_daypart_followup_and_service_choice_specialist_exact_time_followup_and_promotions_and_promotions_rules_and_contact_and_master_query_fact_and_master_query_collect_policy_bridges_active_plus_turn_planner_safe_info_owner_cutover_for_contact_hours_promotions_and_promotions_rules_and_turn_planner_safe_catalog_fact_owner_cutover_for_services_overview_location_and_portfolio_ok_and_portfolio_not_found_and_turn_planner_safe_service_query_fact_owner_cutover_for_grounded_pricing_and_duration_and_turn_planner_safe_master_query_fact_owner_cutover_for_grounded_service_match_master_query_and_turn_planner_safe_master_query_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_master_query_service_not_found_collect_owner_cutover_for_grounded_service_not_found_and_turn_planner_safe_pricing_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_duration_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_booking_verification_fact_owner_cutover_for_safe_calendar_get_booking_ok_and_not_found_paths_and_turn_planner_safe_bookability_time_collect_owner_cutover_for_deterministic_missing_temporal_scope_booking_collect_and_turn_planner_safe_active_name_followup_family_owner_cutover_for_deterministic_specific_time_deictic_time_deictic_day_relative_date_and_relative_daypart_booking_followups_and_turn_planner_safe_explicit_handoff_owner_family_cutover_for_deterministic_explicit_human_request_and_frustration_handoff_turns_and_turn_planner_safe_greeting_owner_family_cutover_for_deterministic_greeting_thanks_and_ack_smalltalk_turns_and_turn_planner_safe_specialist_name_collect_owner_cutover_for_deterministic_specialist_name_collect_followup_and_turn_planner_safe_specialist_datetime_collect_owner_cutover_for_deterministic_specialist_date_range_datetime_collect_followup_and_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover_for_deterministic_service_choice_specialist_day_weekday_weekend_time_collect_followups_and_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover_for_deterministic_service_choice_specialist_prefilled_datetime_collect_followups_and_turn_planner_safe_booking_prompt_owner_cutover_for_bounded_active_booking_continuation_and_intent_queue_booking_entry_and_safe_llm_policy_core_collect_prompts_that_preserve_same_missing_slot_and_safe_llm_policy_core_initial_booking_prompt_for_service_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_to_datetime_booking_prompt_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_exact_datetime_to_name_booking_prompt_without_active_conversation_snapshot_and_turn_planner_safe_booking_prompt_owner_session_memory_expected_reply_restore_for_short_booking_replies_before_fallback_excluding_direct_booking_requests_and_turn_planner_safe_check_booking_prompt_owner_cutover_for_bounded_booking_verification_collect_reference_without_booking_reference_or_mixed_followup_envelopes_and_turn_planner_safe_specialist_followup_owner_cutover_for_bounded_named_specialist_followups_that_preserve_same_missing_slot_without_mixed_envelopes_and_turn_planner_safe_semantic_arbitration_owner_cutover_for_style_reference_portfolio_normalization_collect_to_info_interrupt_arbitration_complete_slot_booking_promotion_name_stage_booking_commit_booking_tool_hint_backfill_and_active_service_referent_duration_master_query_arbitration_and_safe_semantic_service_query_master_override_tool_reply_cutover_and_safe_semantic_service_query_services_overview_tool_reply_cutover_and_turn_planner_safe_semantic_service_query_fact_rescue_owner_cutover_for_critical_pending_invalid_schema_replay_and_turn_planner_safe_semantic_reschedule_guard_handoff_owner_cutover_for_misrouted_booking_reschedule_without_reference_and_turn_planner_safe_timeout_degraded_collect_reschedule_handoff_owner_cutover_for_timeout_degraded_collect_reschedule_without_booking_reference_and_turn_planner_safe_timeout_services_overview_fallback_owner_cutover_for_bounded_nonbooking_policy_timeout_services_overview_recovery_and_turn_planner_safe_timeout_active_name_time_collect_owner_cutover_for_bounded_timeout_active_name_specific_time_availability_followup_recovery_and_turn_planner_safe_timeout_specialist_followup_owner_cutover_for_bounded_timeout_specialist_followup_recovery_on_active_booking_snapshot_drift_paths_and_turn_planner_safe_semantic_needs_manager_and_risk_signal_handoff_owner_cutover_and_final_reasoning_core_fallback_removal_and_terminal_unresolved_owner_closure_on_main_path`
-- `continuity`: `session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback`
-- `proof_path`: `response_guard_ast_excision_ops_helper_booking_scenario_expectation_helper_followup_rewrite_slot_normalization_post_coverage_repair_pending_question_contract_master_specialist_followup_booking_progress_and_management_stateful_helper_extraction_plus_in_script_sanitize_owner_cutover_to_llm_quality_contracts_black_box_proof_runtime_convergence`
+- `semantic_owner`: `hot_path_single_semantic_owner_remains_reproven_after_live_code_reproof`
+- `continuity`: `canonical_runtime_reprojection_and_pending_resume_restore_now_require_canonical_pending_contract_only`
+- `boundary`: `reply_envelope_narrowing_and_boundary_restore_constraints_are_reproven_against_live_code`
+- `fact_plane`: `typed_fact_contract_and_first_family_cutover_remain_reproven_on_active_runtime_paths`
+- `pack_runtime_split`: `public_pack_runtime_seam_remains_reproven_and_active_behavior_stays_on_public_runtime_helpers`
+- `legacy_mesh`: `runtime_shadow_wrappers_remain_removed_and_legacy_router_surfaces_stay_non_authoritative_on_live_paths`
+- `authority_topology`: `continuity_boundary_pack_runtime_legacy_and_operational_reproof_is_complete_repo_side_pending_acceptance`
+- `quality_governance`: `replay_and_human_audit_are_now_the_only_admissible_acceptance_lane`
 
 ## Execution Strategy Lock
-- Mode: `owner_replacement_not_bridge_growth`
-- Progress credit rule: `new_bridge_without_old_authority_deletion_or_unreachability_is_not_progress`
-- Current non-negotiable next move: `open_bounded_truthful_worktree_runtime_planner_degrade_handoff_entry_blocker_before_any_new_behavioral_proof_chain`
+- Mode: `wave_based_whole_system_architecture_closure`
+- Progress credit rule: `no_progress_credit_without_named_authority_delta_full_block_closure_and_machine_readable_evidence`
+- Current non-negotiable next move: `run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim`
 - Mandatory sequence:
-- `freeze_generic_ingress_bridge_growth`
-- `richer_semantic_owner_cutover_via_turn_planner`
-- `single_continuity_writer_completion`
-- `boundary_owner_cutover_via_boundary_validator`
-- `proof_path_black_box_completion`
-- `multi_pack_acceptance_on_beauty_clinic_or_dental_generic_service`
-- `retire_legacy_decision_py_semantic_role`
+- `governing_decision_freeze`
+- `authority_freeze`
+- `fact_contract_schema`
+- `narrow_fact_family_cutover`
+- `continuity_state_normalization`
+- `post_owner_semantic_constriction`
+- `boundary_constriction`
+- `pack_runtime_separation_completion`
+- `legacy_mesh_drain`
+- `shadow_lane_elimination`
+- `operational_entrypoint_dedupe`
+- `closure_claim_truth_correction_and_semantic_owner_reopen`
+- `semantic_owner_and_post_owner_reconstruction_reopen`
+- `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `replay_and_human_audit_acceptance`
 - Forbidden shortcuts:
-- `new_generic_ingress_phrase_bridge_family`
-- `bridge_growth_counted_as_progress`
-- `beauty_only_green_as_architectural_convergence`
-- `proof_lane_progress_as_runtime_convergence_proxy`
+- `start_from_visible_family_symptom_before_authority_and_fact_contract_freeze`
+- `boundary_cleanup_before_explicit_fact_scope_contract`
+- `forced_journal_first_rewrite_before_continuity_normalization`
+- `deleting_legacy_before_caller_proof_and_replacement_seam`
+- `claiming_green_without_whole_system_architecture_closure_and_final_replay_human_audit`
+- `canon_or_state_updates_after_micro_fix_inside_unfinished_block`
 - If context is thin or memory is uncertain:
-- read the execution strategy lock in the generated AGENT_PACKET before choosing the next block
-- prefer owner cutover or governance guard work over any new hotspot bridge family
-- if a candidate block cannot delete or bypass an old authority seam, do not count it as valid progress
+- Stop and map the full writer/caller envelope of the targeted mechanism before editing code.
+- If the block cannot explain how it reduces system-level authority debt, it is not admissible.
+- Only update STATE.md, ACTIVE_*, packet, and reports after one full block completes.
+
+## Governing Architecture
+- Statement: `Single Semantic Owner + Strict Binding Boundary + Canonical Continuity State + First-Class Fact Plane + Adapter-only Legacy Mesh`
+- Planes:
+- `semantic_owner`
+- `binding_boundary`
+- `canonical_continuity_state`
+- `first_class_fact_plane`
+- `adapter_only_legacy_mesh`
+
+## Anti-Partial-Closure Law
+- Summary: no block may claim closure while any live writer, live caller, sibling path, or compatibility carrier inside the declared mechanism envelope still bypasses the intended contract
+- Unacceptable if:
+- `live_writer_or_caller_bypasses_declared_contract`
+- `legacy_path_still_co_owns_same_mechanism`
+- `sibling_paths_of_same_mechanism_are_left_open_but_omitted_from_scope`
+- `code_moves_without_authority_delta`
+- `acceptance_relies_on_surface_wording_not_executable_contract`
+- `deterministic_proof_replay_or_human_audit_missing_for_behavioral_closure`
+
+## Root-First Recovery Program
+- `governing_decision_freeze`
+- `authority_freeze`
+- `fact_contract_schema`
+- `narrow_fact_family_cutover`
+- `continuity_state_normalization`
+- `post_owner_semantic_constriction`
+- `boundary_constriction`
+- `pack_runtime_separation_completion`
+- `legacy_mesh_drain`
+- `shadow_lane_elimination`
+- `operational_entrypoint_dedupe`
+- `closure_claim_truth_correction_and_semantic_owner_reopen`
+- `semantic_owner_and_post_owner_reconstruction_reopen`
+- `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `replay_and_human_audit_acceptance`
+
+## Authority Base
+- Authority registry: `docs/system_forensics/authority_registry.json` (`machine_readable_system_reproof_base`, 6 mechanisms)
+- Compatibility carrier inventory: `docs/system_forensics/compatibility_carrier_inventory.json` (`machine_readable_system_reproof_base`, 22 carriers)
+- Surface topology registry: `docs/system_forensics/dead_surface_registry.json` (`machine_readable_system_reproof_base`, 21 surfaces)
+- Legacy caller surface: `docs/system_forensics/legacy_caller_surface.json` (`machine_readable_system_reproof_base`, 5 modules)
+- Governance delta: `docs/system_forensics/governance_delta.json` (`machine_readable_system_reproof_delta`, 6 locked mechanisms)
+- Source-of-truth governance requirements:
+- `authority` -> `machine_readable_system_reproof_base` with 6 required anchors
+- `compatibility_carriers` -> `machine_readable_system_reproof_base` with 17 required anchors
+- `surface_topology` -> `machine_readable_system_reproof_base` with 21 required anchors
+- `legacy_caller_surface` -> `machine_readable_system_reproof_base` with 5 required anchors
+- `governance_delta` -> `machine_readable_system_reproof_delta` with 6 required anchors
+
+## Authority Registry Snapshot
+- Mounted ingress:
+- `truffles-api/app/main.py`
+- `truffles-api/app/routers/webhook/__init__.py`
+- `truffles-api/app/routers/webhook/http.py`
+- Hot path:
+- `truffles-api/app/core/consultant_core_v2.py`
+- `truffles-api/app/core/consultant_runtime.py`
+- `truffles-api/app/core/turn_planner.py`
+- `truffles-api/app/services/intent_service.py`
+- `truffles-api/app/core/turn_executor.py`
+- `truffles-api/app/core/dialog_state_service.py`
+- `semantic_turn_meaning` -> next `replay_and_human_audit_acceptance`, full closure `semantic_owner_and_post_owner_reconstruction_reopen`, confidence `high`
+- `post_owner_semantic_reconstruction` -> next `replay_and_human_audit_acceptance`, full closure `semantic_owner_and_post_owner_reconstruction_reopen`, confidence `high`
+- `continuity_state` -> next `replay_and_human_audit_acceptance`, full closure `continuity_boundary_pack_runtime_legacy_and_operational_reproof`, confidence `high`
+- `boundary_and_degrade` -> next `replay_and_human_audit_acceptance`, full closure `continuity_boundary_pack_runtime_legacy_and_operational_reproof`, confidence `high`
+- `fact_scope` -> next `replay_and_human_audit_acceptance`, full closure `pack_runtime_separation_completion`, confidence `high`
+- `legacy_behavior_authority` -> next `replay_and_human_audit_acceptance`, full closure `continuity_boundary_pack_runtime_legacy_and_operational_reproof`, confidence `high`
+
+## Compatibility Carrier Snapshot
+- Canonical owner paths:
+- `truffles-api/app/core/dialog_state_service.py`
+- `truffles-api/app/core/consultant_runtime.py`
+- Freeze guard allowed new writer paths:
+- `truffles-api/app/core/dialog_state_service.py`
+- Freeze guard token count: `22`
+- `consultant_runtime.dialog_state` -> `canonical_mutable_source` / target `retain_as_canonical` / phase `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `consultant_runtime.booking_payload` -> `canonical_mutable_source` / target `retain_as_canonical` / phase `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `consultant_runtime.conversation_projection` -> `competing` / target `projection_only` / phase `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `consultant_runtime.turn_journal` -> `derived_but_influential` / target `observer_only` / phase `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `runtime_trace_contract.state_transition` -> `observer_shadow` / target `observer_only` / phase `continuity_boundary_pack_runtime_legacy_and_operational_reproof`
+- `context_manager.canonical_dialog_state` -> `derived_projection` / target `derived_only_compatibility_snapshot_then_remove` / phase `legacy_mesh_drain`
+- `context.booking` -> `competing` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `context.expected_reply_fields` -> `cleared_projection_shadow` / target `derived_only_or_removed` / phase `legacy_mesh_drain`
+- `context.current_goal` -> `derived_projection` / target `derived_only_or_removed` / phase `legacy_mesh_drain`
+- `context.service_carryover` -> `competing` / target `derived_adapter_then_remove` / phase `continuity_state_normalization`
+- `context.consult_context` -> `competing` / target `derived_adapter_then_remove` / phase `continuity_state_normalization`
+- `context.class_carryover` -> `competing` / target `derived_adapter_then_remove` / phase `continuity_state_normalization`
+- `session_memory` -> `derived_reset_adapter` / target `adapter_only_reset_control_helper_then_remove` / phase `legacy_mesh_drain`
+- `pending_resume` -> `canonical_restore_snapshot` / target `canonical_restore_only_or_remove` / phase `legacy_mesh_drain`
+- `intent_queue_and_service_hints` -> `competing` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `handover_confirmation` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `reengage_confirmation` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `asr_confirm_pending` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `asr_inflight` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `style_reference_pending` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `memory_profile` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+- `memory_pending` -> `compatibility_aux` / target `derived_or_removed` / phase `continuity_state_normalization`
+
+## Surface Topology Snapshot
+- Behavior-owning legacy surfaces:
+- `truffles-api/app/routers/webhook/http.py`
+- `truffles-api/app/routers/webhook/session_memory.py`
+- Shadow-only surfaces:
+- `truffles-api/app/routers/webhook/_legacy.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/tests/support_booking_prompt_owner_shadow.py`
+- `truffles-api/tests/support_reasoning_core_shadow.py`
+- `truffles-api/tests/support_legacy_webhook_shadow.py`
+- `truffles-api/app/core/booking_prompt_owner.py` -> `removed_runtime_owner_surface` / authority `removed` / hot path `False` / confidence `high`
+- `truffles-api/app/main.py` -> `mounted_live_composition_root` / authority `composition_root_only` / hot path `True` / confidence `high`
+- `truffles-api/app/routers/webhook/__init__.py` -> `mounted_live_package_surface` / authority `package_export_only` / hot path `True` / confidence `high`
+- `truffles-api/app/routers/webhook/_legacy.py` -> `shadow_only_test_compatibility_bus` / authority `shadow_only_test_bus` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/booking.py` -> `lazy_export_only_unmounted_legacy_helper` / authority `lazy_export_legacy_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/context_manager.py` -> `lazy_export_only_unmounted_legacy_helper` / authority `lazy_export_legacy_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/decision.py` -> `shadow_only_test_compatibility_surface` / authority `shadow_only_test_router` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/dedup.py` -> `lazy_export_only_unmounted_legacy_helper` / authority `lazy_export_legacy_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/guards.py` -> `unmounted_legacy_helper_surface` / authority `legacy_sibling_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/http.py` -> `mounted_live_ingress_router` / authority `behavior_owning_legacy_boundary` / hot path `True` / confidence `high`
+- `truffles-api/app/routers/webhook/info.py` -> `unmounted_legacy_helper_surface` / authority `legacy_sibling_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/pending.py` -> `unmounted_legacy_helper_surface` / authority `legacy_sibling_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/policy.py` -> `unmounted_legacy_helper_surface` / authority `legacy_sibling_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/response.py` -> `lazy_export_only_unmounted_legacy_helper` / authority `lazy_export_legacy_helper` / hot path `False` / confidence `high`
+- `truffles-api/app/routers/webhook/session_memory.py` -> `live_legacy_control_turn_helper` / authority `behavior_owning_legacy_control_helper` / hot path `True` / confidence `high`
+- `truffles-api/app/routers/webhook/trace.py` -> `live_legacy_observer_adapter` / authority `adapter_only_observer` / hot path `True` / confidence `high`
+- `truffles-api/app/services/reasoning_core.py` -> `removed_runtime_shadow_wrapper` / authority `removed` / hot path `False` / confidence `high`
+- `truffles-api/app/webhook.py` -> `removed_runtime_shadow_wrapper` / authority `removed` / hot path `False` / confidence `high`
+- `truffles-api/tests/support_booking_prompt_owner_shadow.py` -> `shadow_only_test_residue` / authority `shadow_only_test_support` / hot path `False` / confidence `high`
+- `truffles-api/tests/support_legacy_webhook_shadow.py` -> `shadow_only_test_residue` / authority `shadow_only_test_support` / hot path `False` / confidence `high`
+- `truffles-api/tests/support_reasoning_core_shadow.py` -> `shadow_only_test_residue` / authority `shadow_only_test_support` / hot path `False` / confidence `high`
+
+## Legacy Caller Freeze Snapshot
+- Frozen adapter-only modules:
+- `truffles-api/app/routers/webhook/info.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/webhook/response.py`
+- `truffles-api/app/routers/webhook/context_manager.py`
+- Shadow or wrapper candidates:
+- `truffles-api/app/routers/webhook/_legacy.py` -> `shadow_only_after_shadow_lane_elimination` / pressure `shadow_test_bus_pressure` / live callers `0` / app importers `0`
+- `truffles-api/app/routers/webhook/context_manager.py` -> `adapter_only_after_shadow_lane_elimination` / pressure `continuity_shadow_pressure` / live callers `0` / app importers `11`
+- `truffles-api/app/routers/webhook/decision.py` -> `shadow_only_after_shadow_lane_elimination` / pressure `semantic_and_boundary_shadow_pressure` / live callers `0` / app importers `1`
+- `truffles-api/app/routers/webhook/info.py` -> `adapter_only_after_shadow_lane_elimination` / pressure `fact_scope_and_compatibility` / live callers `0` / app importers `3`
+- `truffles-api/app/routers/webhook/response.py` -> `adapter_only_after_shadow_lane_elimination` / pressure `boundary_and_continuity_shadow_pressure` / live callers `0` / app importers `3`
+
+## Governance Delta Snapshot
+- Summary: Reproved continuity, boundary restore, pack/runtime, legacy, and operational closure claims against live code and converged live outbox execution surfaces on one canonical runtime helper.
+- Locked mechanisms:
+- `semantic_turn_meaning`
+- `post_owner_semantic_reconstruction`
+- `continuity_state`
+- `boundary_and_degrade`
+- `fact_scope`
+- `legacy_behavior_authority`
+- Deferred next blocks:
+- `replay_and_human_audit_acceptance`
 
 ## Semantic Owner
-- Contract: `PolicyDecision`
-- Current: `wrapped_ingress_preflight_cache_secret_safe_runtime_loader_active_conversation_snapshot_service_referent_projection_active_booking_datetime_value_and_exact_time_token_lexical_intent_primitive_protective_lexical_confirmation_refusal_domain_router_bounded_controller_route_bounded_policy_core_handoff_text_only_style_reference_booking_verification_services_overview_location_parking_and_hours_and_pricing_fact_and_pricing_collect_and_duration_fact_and_duration_collect_and_active_service_gated_bookability_time_collect_and_active_name_specific_time_availability_followup_and_active_name_deictic_time_availability_followup_and_active_name_deictic_day_availability_followup_and_active_name_relative_date_availability_followup_and_active_name_relative_daypart_availability_followup_and_specialist_date_range_followup_and_grounded_specialist_transition_and_service_choice_specialist_weekend_followup_and_service_choice_specialist_weekday_followup_and_service_choice_specialist_day_followup_and_service_choice_specialist_daypart_followup_and_service_choice_specialist_exact_time_followup_and_promotions_and_promotions_rules_and_contact_and_master_query_fact_and_master_query_collect_policy_bridges_active_plus_turn_planner_safe_info_owner_cutover_for_contact_hours_promotions_and_promotions_rules_and_turn_planner_safe_catalog_fact_owner_cutover_for_services_overview_location_and_portfolio_ok_and_portfolio_not_found_and_turn_planner_safe_service_query_fact_owner_cutover_for_grounded_pricing_and_duration_and_turn_planner_safe_master_query_fact_owner_cutover_for_grounded_service_match_master_query_and_turn_planner_safe_master_query_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_master_query_service_not_found_collect_owner_cutover_for_grounded_service_not_found_and_turn_planner_safe_pricing_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_duration_collect_owner_cutover_for_deterministic_service_clarify_and_turn_planner_safe_booking_verification_fact_owner_cutover_for_safe_calendar_get_booking_ok_and_not_found_paths_and_turn_planner_safe_bookability_time_collect_owner_cutover_for_deterministic_missing_temporal_scope_booking_collect_and_turn_planner_safe_active_name_followup_family_owner_cutover_for_deterministic_specific_time_deictic_time_deictic_day_relative_date_and_relative_daypart_booking_followups_and_turn_planner_safe_explicit_handoff_owner_family_cutover_for_deterministic_explicit_human_request_and_frustration_handoff_turns_and_turn_planner_safe_greeting_owner_family_cutover_for_deterministic_greeting_thanks_and_ack_smalltalk_turns_and_turn_planner_safe_specialist_name_collect_owner_cutover_for_deterministic_specialist_name_collect_followup_and_turn_planner_safe_specialist_datetime_collect_owner_cutover_for_deterministic_specialist_date_range_datetime_collect_followup_and_turn_planner_safe_service_choice_specialist_time_collect_owner_cutover_for_deterministic_service_choice_specialist_day_weekday_weekend_time_collect_followups_and_turn_planner_safe_service_choice_specialist_daypart_collect_owner_cutover_for_deterministic_service_choice_specialist_prefilled_datetime_collect_followups_and_turn_planner_safe_booking_prompt_owner_cutover_for_bounded_active_booking_continuation_and_intent_queue_booking_entry_and_safe_llm_policy_core_collect_prompts_that_preserve_same_missing_slot_and_safe_llm_policy_core_initial_booking_prompt_for_service_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_to_datetime_booking_prompt_without_active_conversation_snapshot_and_safe_llm_policy_core_initial_service_exact_datetime_to_name_booking_prompt_without_active_conversation_snapshot_and_turn_planner_safe_booking_prompt_owner_session_memory_expected_reply_restore_for_short_booking_replies_before_fallback_excluding_direct_booking_requests_and_turn_planner_safe_check_booking_prompt_owner_cutover_for_bounded_booking_verification_collect_reference_without_booking_reference_or_mixed_followup_envelopes_and_turn_planner_safe_specialist_followup_owner_cutover_for_bounded_named_specialist_followups_that_preserve_same_missing_slot_without_mixed_envelopes_and_turn_planner_safe_semantic_arbitration_owner_cutover_for_style_reference_portfolio_normalization_collect_to_info_interrupt_arbitration_complete_slot_booking_promotion_name_stage_booking_commit_booking_tool_hint_backfill_and_active_service_referent_duration_master_query_arbitration_and_safe_semantic_service_query_master_override_tool_reply_cutover_and_safe_semantic_service_query_services_overview_tool_reply_cutover_and_turn_planner_safe_semantic_service_query_fact_rescue_owner_cutover_for_critical_pending_invalid_schema_replay_and_turn_planner_safe_semantic_reschedule_guard_handoff_owner_cutover_for_misrouted_booking_reschedule_without_reference_and_turn_planner_safe_timeout_degraded_collect_reschedule_handoff_owner_cutover_for_timeout_degraded_collect_reschedule_without_booking_reference_and_turn_planner_safe_timeout_services_overview_fallback_owner_cutover_for_bounded_nonbooking_policy_timeout_services_overview_recovery_and_turn_planner_safe_timeout_active_name_time_collect_owner_cutover_for_bounded_timeout_active_name_specific_time_availability_followup_recovery_and_turn_planner_safe_timeout_specialist_followup_owner_cutover_for_bounded_timeout_specialist_followup_recovery_on_active_booking_snapshot_drift_paths_and_turn_planner_safe_semantic_needs_manager_and_risk_signal_handoff_owner_cutover_and_final_reasoning_core_fallback_removal_and_terminal_unresolved_owner_closure_on_main_path`
-- Current authority file: `prompts/llm_policy_core.md`
-- Current authority file: `truffles-api/app/routers/webhook/decision.py`
-- Target file: `contracts/runtime/policy_decision.v1.jsonschema`
-- Target file: `truffles-api/app/core/turn_planner.py`
+- Contract: `SemanticDecisionV1`
+- Current: `hot_path_single_semantic_owner_remains_reproven_and_adjacent_runtime_reproof_is_complete_repo_side_pending_acceptance`
+- Current authority file: `truffles-api/app/services/intent_service.py`
+- Current authority file: `truffles-api/app/core/turn_planner.py`
+- Target file: `contracts/runtime/semantic_decision.v1.jsonschema`
+- Target file: `truffles-api/app/core/semantic_decision.py`
 
 ## Continuity Owner
 - Contract: `DialogState`
-- Current: `session_memory_expected_reply_pending_resume_canonical_dialog_state_reentry_confirmation_expiring_carrier_memory_carrier_class_carryover_service_carryover_consult_context_low_confidence_retry_compact_summary_clarify_attempt_intent_queue_and_question_contract_and_session_memory_question_writer_and_session_memory_normalization_and_canonical_referent_and_session_memory_freshness_and_ancillary_context_carrier_writer_and_carryover_manager_writer_and_session_memory_carryover_reset_and_top_level_continuity_payload_writer_and_context_manager_payload_writer_bridges_plus_context_manager_expected_reply_state_sync_owner_cutover_and_broader_pending_gate_handover_confirmation_session_memory_reset_expected_reply_clear_owner_cutover_and_active_snapshot_session_memory_expected_reply_projection_for_short_booking_replies_before_fallback_plus_main_path_transport_closure_without_frozen_decision_fallback`
+- Current: `canonical_runtime_continuity_and_boundary_resume_restore_are_reproven_against_live_code_pending_acceptance`
+- Current writer file: `truffles-api/app/core/dialog_state_service.py`
 - Current writer file: `truffles-api/app/routers/webhook/context_manager.py`
-- Current writer file: `truffles-api/app/routers/webhook/session_memory.py`
-- Current writer file: `truffles-api/app/services/state_service.py`
-- Current writer file: `truffles-api/app/routers/webhook/pending.py`
 - Target file: `contracts/runtime/dialog_state.v1.jsonschema`
 - Target file: `truffles-api/app/core/dialog_state_service.py`
+- Target file: `truffles-api/app/core/conversation_projection.py`
+- Target file: `truffles-api/app/core/turn_journal.py`
 
 ## Boundary Owner
 - Contract: `BoundaryOverride`
-- Current: `legacy_boundary_mixed_with_frozen_tool_reply_guard_finalize_invocation_authority_plus_turn_executor_and_boundary_validator_block_degrade_and_owner_artifact_and_tool_reply_artifact_sidecar_payload_and_tool_reply_policy_payload_interaction_owner_and_guard_send_trace_orchestration_cutovers_done_plus_timeout_owner_boundary_application_and_policy_validation_and_timeout_degrade_retry_and_timeout_nonbooking_recovery_and_timeout_booking_specialist_and_invalid_schema_specialist_and_invalid_schema_service_grounded_booking_and_timeout_pending_slot_question_and_timeout_active_name_time_followup_and_timeout_services_overview_info_fallback_owner_cutovers_done_plus_reasoning_core_terminal_unresolved_boundary_owner_cutover_and_main_path_frozen_boundary_residuals_unreachable`
-- Current file: `truffles-api/app/routers/webhook/decision.py`
+- Current: `boundary_reply_envelope_and_restore_constraints_are_reproven_against_live_code_pending_acceptance`
+- Current file: `truffles-api/app/core/boundary_validator.py`
+- Current file: `truffles-api/app/core/consultant_runtime.py`
+- Current file: `truffles-api/app/core/response_realizer.py`
 - Target file: `contracts/runtime/boundary_override.v1.jsonschema`
 - Target file: `truffles-api/app/core/boundary_validator.py`
 
 ## Allowed Touch
-- `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-booking-pending-handoff-authority-reset-structural-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-24-consultant-core-booking-pending-handoff-authority-reset-structural-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-24-consultant-core-demo-salon-seed19-r46-initial-booking-owner-reset-runtime-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r44-handoff-miss-collect-prompt-oracle-parity-proof-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r44-handoff-miss-collect-prompt-oracle-parity-proof-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-final-acceptance-go-to-full-evidence-pack-family-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-final-acceptance-go-to-full-evidence-pack-family-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-generated-booking-info-divergence-canary-replay-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-generated-booking-info-divergence-canary-replay-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-proof-decision-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-proof-decision-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-contract-aligned-confirm-hook-proof-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-contract-aligned-confirm-hook-proof-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-canary-replay-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r4-confirm-hook-canary-replay-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-decision-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-decision-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r5-post-verification-reschedule-runtime-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r6-allowlist-safe-preflight-fallback-proof-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r6-allowlist-safe-preflight-fallback-proof-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-decision-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-decision-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-22-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-runtime-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-canary-replay-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r7-session-reset-simulation-transport-canary-replay-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-decision-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-implementation-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-canary-replay-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-decision-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-decision-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-runtime-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r11-session-reset-pending-ack-greeting-intercept-canary-replay-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-decision-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r12-session-reset-pending-ack-explicit-handoff-intercept-runtime-implementation-a922.md`
-- `docs/REPORTS/artifacts/2026-03-23-consultant-core-demo-salon-seed19-r14-session-reset-pending-ack-terminal-unresolved-runtime-implementation-a922.md`
-- `truffles-api/app/services/reasoning_core.py`
-- `truffles-api/tests/test_reasoning_core.py`
-- `ops/diagnose.py`
-- `truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
-- `truffles-api/tests/test_booking_quality_jid_mode.py`
-- `docs/ACTIVE_PROGRAM.md`
+- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md`
+- `docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md`
+- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-replay-and-full-human-semantic-audit-acceptance-a922.md`
+- `docs/SYSTEM_REPROOF_GUARD.yaml`
+- `docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml`
+- `docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml`
+- `docs/RECOVERY_EXECUTION_LOCK.yaml`
+- `docs/RECOVERY_PHASE_WAIVER.yaml`
 - `docs/SOURCE_OF_TRUTH.yaml`
-- `STATE.md`
-- `STRUCTURE.md`
-- `docs/SESSIONS/SESSION-2026-03-15-consultant-core-governance-lock-a922.md`
-- `docs/SESSION_INDEX.md`
+- `docs/ACTIVE_CANON.md`
+- `docs/ACTIVE_PROGRAM.md`
 - `docs/_generated/AGENT_PACKET.md`
 - `docs/_generated/AGENT_PACKET.json`
+- `docs/system_forensics/authority_registry.json`
+- `docs/system_forensics/compatibility_carrier_inventory.json`
+- `docs/system_forensics/dead_surface_registry.json`
+- `docs/system_forensics/legacy_caller_surface.json`
+- `docs/system_forensics/governance_delta.json`
+- `STATE.md`
+- `STRUCTURE.md`
+- `scripts/recovery_execution_guard.py`
+- `scripts/arch_guard.py`
+- `scripts/system_reproof_guard.py`
+- `scripts/continuity_state_normalization_guard.py`
+- `truffles-api/app/core/dialog_state_service.py`
+- `truffles-api/app/services/state_service.py`
+- `truffles-api/app/services/outbox_runtime_service.py`
+- `truffles-api/tests/test_state_service.py`
+- `truffles-api/tests/test_dialog_state_service.py`
+- `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_outbox_worker_settings.py`
+- `truffles-api/tests/test_outbox_service_app.py`
+- `truffles-api/tests/test_admin_legacy_auth.py`
+- `truffles-api/tests/test_console_ops_jobs.py`
 - `truffles-api/tests/architecture/test_arch_guard_packet.py`
+- `truffles-api/tests/architecture/test_authority_registry.py`
+- `truffles-api/tests/architecture/test_recovery_execution_guard.py`
+- `truffles-api/tests/architecture/test_continuity_state_normalization_guard.py`
+- `truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py`
+- `truffles-api/tests/architecture/test_system_reproof_guard.py`
+- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md`
+- `docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md`
+- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md`
 
 ## Forbidden Touch
-- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/webhook/dedup.py`
+- `truffles-api/app/routers/webhook/_legacy.py`
+- `truffles-api/app/routers/admin.py`
+- `truffles-api/app/routers/webhook/policy.py`
+- `truffles-api/app/services/tool_registry_service.py`
+- `truffles-api/app/routers/webhook/response.py`
+- `truffles-api/app/services/intent_service.py`
+- `truffles-api/app/routers/webhook/info.py`
+- `truffles-api/app/routers/console.py`
+- `truffles-api/app/services/pack_runtime_service.py`
+- `truffles-api/app/routers/webhook/context_manager.py`
+- `truffles-api/app/routers/webhook/guards.py`
 - `truffles-api/app/routers/webhook/booking.py`
+- `truffles-api/app/core/response_realizer.py`
 - `truffles-api/app/routers/webhook/pending.py`
+- `truffles-api/app/outbox_service_app.py`
+- `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/workers/outbox.py`
+- `truffles-api/app/routers/outbox_service.py`
 
 ## Proof-Only Files
 - `ops/diagnose.py`
@@ -130,24 +315,42 @@ Read only these first:
 
 ## Legacy Sunset Files
 - `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/webhook/_legacy.py`
+- `truffles-api/app/routers/webhook/context_manager.py`
+- `truffles-api/app/routers/webhook/response.py`
 - `truffles-api/app/routers/webhook/booking.py`
+- `truffles-api/app/routers/webhook/info.py`
 - `truffles-api/app/routers/webhook/pending.py`
+- `truffles-api/app/routers/webhook/policy.py`
+- `truffles-api/app/routers/webhook/guards.py`
+- `truffles-api/app/routers/webhook/dedup.py`
 
 ## Required Checks
 - `python3 scripts/build_agent_packet.py`
 - `python3 scripts/build_agent_packet.py --check`
-- `python3 scripts/semantic_bridge_growth_guard.py`
-- `python3 scripts/continuity_writer_guard.py`
-- `python3 scripts/legacy_freeze_guard.py`
+- `python3 scripts/recovery_execution_guard.py`
+- `python3 scripts/continuity_state_normalization_guard.py`
+- `python3 scripts/boundary_degrade_guard.py`
+- `python3 scripts/pack_runtime_separation_guard.py`
+- `python3 scripts/legacy_mesh_drain_guard.py`
+- `python3 scripts/operational_entrypoint_dedupe_guard.py`
+- `python3 scripts/system_reproof_guard.py`
 - `python3 scripts/arch_guard.py`
-- `pytest -q truffles-api/tests/architecture`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_state_service.py -k "restore_pending_resume_payload or prepare_pending_handoff_resume_boundary_restore or prepare_resolved_handoff_resume_boundary_restore or resolve_resolved_handoff_resume_boundary_restore or resolve_pending_resume_boundary_activation"`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_dialog_state_service.py -k "pending_resume_payload"`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py -k "provider_unavailable_human_request_pending_resume"`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_worker_settings.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_service_app.py truffles-api/tests/test_admin_legacy_auth.py -k "outbox_service or admin_outbox_process"`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_console_ops_jobs.py -k "run_outbox_process_job_execute"`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_arch_guard_packet.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_authority_registry.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_recovery_execution_guard.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_continuity_state_normalization_guard.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_system_reproof_guard.py`
 - `git diff --check`
-- `SESSION_AGENT=a922 scripts/session_check.sh`
 
 ## Open Blockers
-- `docs/TASK_PACKAGES/TP-2026-03-24-consultant-core-pending-booking-continuity-terminal-handoff-authority-reset-structural-implementation-a922.md` is now the active block. FACT: the touched pending booking family now restores booking collect continuity from centralized dialog-state resume payloads before terminal fallback is eligible.
-- `r49` remains the truthful closure baseline for this family. FACT: no new replay is admissible until the structural block is fully validated and canon is rebuilt.
-- one fresh replay is still required for closure, but only as `run_one_fresh_closure_replay_only_after_pending_booking_continuity_terminal_handoff_authority_reset_evidence`.
-- `truffles-api/app/services/reasoning_core.py` still carries explicit structural debt outside the touched family: `26` duplicate top-level function names across `144` top-level defs / `118` unique names. Broader duplicate cleanup remains deferred.
-- acceptance remains strict; no oracle/proof thresholds were weakened in this block.
-- final program acceptance remains open because the fresh green demo-salon canary still needs canonical acceptance evidence and broader multi-pack/open-world closure.
+- fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim
+- current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement
+- whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes

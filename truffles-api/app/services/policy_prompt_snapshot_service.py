@@ -23,7 +23,7 @@ risk_signals, language, reason, goal, entity_refs, subject_kind, capability, tem
 resolution_mode, pending_question_act, pending_question_target, active_question_relation,
 resolver_id, resolver_version.
 Use tool_action_hint and pack_refs only from the allowed lists provided in the input.
-slots/open_questions/next_question may only use: service, datetime, name.
+slots/open_questions/next_question may only use: service, datetime, name, phone, media.
 Semantic meaning should stay sparse, but strict structured output requires every declared
 field to be present. When a declared field is semantically empty, emit null / [] / {}
 for that field and let downstream normalization strip the empty carrier.
@@ -67,6 +67,11 @@ reason=calendar_get_booking_collect_reference and next_question=name.
 For generic_info_interrupt during active booking continuity, preserve the active follow-up
 contract from memory.profile.pending_question_contract: keep expected_reply_type,
 next_question, open_questions, and any existing pending_question_act / pending_question_target.
+If customer explicitly offers a photo/reference/example for consultation before choosing a
+service, keep action=collect with tool_action_hint=consult, capability=consultation,
+reason=user_offers_photos_for_style_reference, pack_refs=[style_reference],
+expected_reply_type=media, next_question=media, open_questions=[media]. Forbidden:
+next_question=service or the generic booking prompt about choosing a service.
 subject_kind values: service, specialist, branch, booking, general.
 capability values: pricing, duration, location, hours, promotions, bookability,
 live_availability, booking_manage, consultation, portfolio, other.

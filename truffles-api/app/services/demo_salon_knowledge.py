@@ -2999,14 +2999,6 @@ def format_reply_from_truth(
     slots = slots or {}
 
     if intent in {"location", "hours", "parking"}:
-        include_parking = intent == "parking"
-        reply, _meta = build_info_combined_reply(
-            include_parking=include_parking,
-            client_slug=client_slug,
-        )
-        if reply:
-            return reply
-        # Fallback to legacy shape if combined reply is not available.
         address = truth.get("salon", {}).get("address", {})
         hours = truth.get("salon", {}).get("hours", {})
         if intent == "location":

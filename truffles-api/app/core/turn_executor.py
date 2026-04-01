@@ -9,6 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.binding_plan import BindingPlanV1
 from app.core.boundary_validator import BoundaryOverride, BoundaryValidator
 from app.core.dialog_state_service import DialogState, DialogStateService
+from app.core.fact_plane import (
+    FactPlanV1,
+    FactRequestV1,
+    FactResultV1,
+    build_fact_contract_meta,
+    normalize_fact_ref_list,
+)
 from app.core.response_realizer import ReplyEnvelope, ResponseRealizer
 from app.core.runtime_trace_contract import RuntimeTraceContractV1
 from app.core.turn_planner import DecisionOutcome, PolicyDecision, TurnPlanner
@@ -117,6 +124,12 @@ class OwnerExecutionArtifact(NamedTuple):
 class TurnExecutor:
     """Assembles the typed turn result while runtime cutover is still pending."""
 
+    _FIRST_FACT_FAMILY_ID = "location_hours_parking"
+    _FIRST_FACT_FAMILY_REFS = {
+        "location",
+        "hours",
+        "parking",
+    }
     _DIRECT_INFO_TRUTH_REFS = {
         "location",
         "hours",
@@ -129,6 +142,9 @@ class TurnExecutor:
         "datetime": "На какую дату и время вам удобно?",
         "name": "Как вас зовут?",
         "phone": "Подскажите, пожалуйста, номер телефона для подтверждения.",
+    }
+    _CONSULT_PROMPTS = {
+        "media": "Пришлите, пожалуйста, фото-пример желаемого результата.",
     }
     _BOOKING_VERIFICATION_PROMPTS = {
         "datetime": "Подскажите точную дату и время записи, чтобы я проверил ее.",
@@ -337,7 +353,9 @@ class TurnExecutor:
             or self._first_missing_booking_slot(merged_slots)
         )
         prompt_map = self._BOOKING_PROMPTS
-        if decision.intent in {
+        if decision.intent == "consult":
+            prompt_map = {**self._BOOKING_PROMPTS, **self._CONSULT_PROMPTS}
+        elif decision.intent in {
             "check_booking",
             "verify_booking",
             "confirm_booking",
@@ -464,10 +482,73 @@ class TurnExecutor:
             service_name=service_name,
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
+        fact_request = self._build_fact_request(decision)
+        fact_plan = self._build_fact_plan(
+            decision=decision,
+            fact_request=fact_request,
+        )
+        (
+            resolved_tool_action,
+            projected_tool_args,
+            tool_execution_projection,
+            first_fact_family_cutover,
+        ) = self._apply_first_fact_family_tool_cutover(
+            resolved_tool_action=resolved_tool_action,
+            projected_tool_args=projected_tool_args,
+            tool_execution_projection=tool_execution_projection,
+            fact_request=fact_request,
+            fact_plan=fact_plan,
+        )
+        fact_scope_violations: list[dict[str, Any]] = []
+
+        def _fact_meta(
+            base_meta: dict[str, Any] | None,
+            *,
+            response_text: str | None,
+            resolution_source: str,
+            current_semantic_contract: dict[str, Any] | None,
+            fallback_fact_refs: list[str] | None = None,
+            resolution_reason: str | None = None,
+        ) -> dict[str, Any] | None:
+            fact_result = self._build_fact_result(
+                fact_plan,
+                resolution_source=resolution_source,
+                response_text=response_text,
+                meta=base_meta,
+                fallback_fact_refs=fallback_fact_refs,
+                resolution_reason=resolution_reason,
+            )
+            if fact_result.scope_verdict == "out_of_scope":
+                fact_scope_violations.append(
+                    {
+                        "resolution_source": resolution_source,
+                        "out_of_scope_fact_refs": list(fact_result.out_of_scope_fact_refs),
+                    }
+                )
+                return None
+            return self._attach_semantic_contract_meta(
+                decision,
+                build_fact_contract_meta(
+                    base_meta,
+                    fact_request=fact_request,
+                    fact_plan=fact_plan,
+                    fact_result=fact_result,
+                ),
+                semantic_contract=current_semantic_contract,
+                pending_question_contract=pending_question_contract,
+            )
+
         if resolved_tool_action == "calendar.get_booking" and decision.intent in {
             "check_booking",
             "verify_booking",
         }:
+            prompt_meta = _fact_meta(
+                {"booking_verification_prompt": True},
+                response_text=None,
+                resolution_source="booking_verification_prompt",
+                current_semantic_contract=semantic_contract,
+                resolution_reason="booking_verification_prompt",
+            )
             return RuntimeExecutionResult(
                 text=(
                     "Чтобы проверить запись, подскажите примерную дату и время "
@@ -475,24 +556,30 @@ class TurnExecutor:
                 ),
                 tool_action=resolved_tool_action,
                 tool_decision="not_found",
-                meta=self._attach_semantic_contract_meta(
-                    decision,
-                    {"booking_verification_prompt": True},
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
-                ),
+                meta=prompt_meta or {},
+            )
+        if fact_request.requested_fact_refs and not fact_plan.allowed_emitted_fact_refs and fact_plan.blocked_scopes:
+            blocked_meta = _fact_meta(
+                {
+                    "fact_fallback": True,
+                    "fact_fallback_reason": "fact_scope_blocked",
+                    "blocked_scopes": list(fact_plan.blocked_scopes),
+                },
+                response_text=None,
+                resolution_source="scope_policy",
+                current_semantic_contract=semantic_contract,
+                resolution_reason="fact_scope_blocked",
+            )
+            return RuntimeExecutionResult(
+                text="Я уточню это для вас.",
+                tool_action=resolved_tool_action,
+                tool_decision="fact_scope_blocked",
+                meta=blocked_meta or {},
             )
         policy_info_refs = self._resolve_policy_info_refs(decision)
-        fact_refs = {
-            str(item).strip().casefold()
-            for item in (
-                list(decision.pack_refs)
-                + list(decision.fact_refs)
-                + list(decision.capability_refs)
-                + policy_info_refs
-            )
-            if isinstance(item, str) and item.strip()
-        }
+        fact_refs = set(normalize_fact_ref_list(list(fact_request.requested_fact_refs) + policy_info_refs))
+        mixed_first_fact_family_refs = sorted(fact_refs & self._FIRST_FACT_FAMILY_REFS)
+        mixed_first_fact_family_scope = bool(mixed_first_fact_family_refs) and not first_fact_family_cutover
         unresolved_info_meta: dict[str, Any] | None = None
         if decision.intent == "master_query" or "master" in fact_refs:
             master_service = self._resolve_fact_service_query(
@@ -514,30 +601,30 @@ class TurnExecutor:
             )
             if master_reply and isinstance(master_reply.response, str) and master_reply.response.strip():
                 master_meta = dict(master_reply.meta) if isinstance(master_reply.meta, dict) else {}
-                info_sections = [
-                    item
-                    for item in master_meta.get("info_sections", [])
-                    if isinstance(item, str) and item.strip()
-                ]
-                if "master" not in info_sections:
-                    info_sections.append("master")
-                master_meta["info_sections"] = info_sections
                 semantic_contract = self._merge_pack_grounding_semantic_contract(
                     semantic_contract,
                     master_meta,
                 )
-                return RuntimeExecutionResult(
-                    text=master_reply.response.strip(),
-                    tool_action=resolved_tool_action,
-                    tool_decision=master_reply.intent or "master",
-                    meta=self._attach_semantic_contract_meta(
-                        decision,
-                        master_meta,
-                        semantic_contract=semantic_contract,
-                        pending_question_contract=pending_question_contract,
-                    ),
+                finalized_master_meta = _fact_meta(
+                    master_meta,
+                    response_text=master_reply.response.strip(),
+                    resolution_source="master_pack",
+                    current_semantic_contract=semantic_contract,
+                    fallback_fact_refs=["master"],
+                    resolution_reason=master_reply.intent or "master",
                 )
-        if db is not None and branch_id is not None and is_tool_action(resolved_tool_action):
+                if finalized_master_meta is not None:
+                    return RuntimeExecutionResult(
+                        text=master_reply.response.strip(),
+                        tool_action=resolved_tool_action,
+                        tool_decision=master_reply.intent or "master",
+                        meta=finalized_master_meta,
+                    )
+        if self._can_execute_tool_action(
+            tool_action=resolved_tool_action,
+            db=db,
+            branch_id=branch_id,
+        ) and is_tool_action(resolved_tool_action):
             service_query = self._resolve_fact_service_query(
                 decision=decision,
                 service_name=service_name,
@@ -551,7 +638,8 @@ class TurnExecutor:
                 branch_id=branch_id,
                 client_slug=client_slug,
                 service_query=service_query,
-                info_sections_hint=self._resolve_fact_info_sections(fact_refs),
+                info_sections_hint=list(fact_plan.allowed_info_sections),
+                allowed_fact_refs=list(fact_plan.allowed_emitted_fact_refs),
                 message_text=query_text,
                 expected_reply_type=None,
                 now=now,
@@ -561,18 +649,72 @@ class TurnExecutor:
                 tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
                 if tool_execution_projection:
                     tool_meta["tool_execution_projection"] = tool_execution_projection
-                tool_meta = self._attach_semantic_contract_meta(
-                    decision,
+                finalized_tool_meta = _fact_meta(
                     tool_meta,
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
+                    response_text=tool_result.response_text.strip(),
+                    resolution_source="tool_registry",
+                    current_semantic_contract=semantic_contract,
+                    fallback_fact_refs=[
+                        str(tool_meta.get("tool_decision") or tool_result.error_code or "").strip()
+                    ],
+                    resolution_reason=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
                 )
-                return RuntimeExecutionResult(
-                    text=tool_result.response_text.strip(),
-                    tool_action=resolved_tool_action,
-                    tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
-                    meta=tool_meta,
-                )
+                if finalized_tool_meta is not None:
+                    return RuntimeExecutionResult(
+                        text=tool_result.response_text.strip(),
+                        tool_action=resolved_tool_action,
+                        tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
+                        meta=finalized_tool_meta,
+                    )
+        if first_fact_family_cutover:
+            unresolved_family_meta = {
+                "fact_fallback": True,
+                "fact_fallback_reason": "first_fact_family_cutover_unresolved",
+                "fact_family_cutover": self._FIRST_FACT_FAMILY_ID,
+                "required_tool_action": "catalog.location",
+            }
+            if tool_execution_projection:
+                unresolved_family_meta["tool_execution_projection"] = tool_execution_projection
+            if fact_scope_violations:
+                unresolved_family_meta["fact_scope_violations"] = fact_scope_violations
+            unresolved_meta = _fact_meta(
+                unresolved_family_meta,
+                response_text=None,
+                resolution_source="fact_family_cutover",
+                current_semantic_contract=semantic_contract,
+                resolution_reason="first_fact_family_cutover_unresolved",
+            )
+            return RuntimeExecutionResult(
+                text="Я уточню это для вас.",
+                tool_action=resolved_tool_action,
+                tool_decision="fact_family_unresolved",
+                meta=unresolved_meta or {},
+            )
+        if mixed_first_fact_family_scope:
+            mixed_family_meta = {
+                "fact_fallback": True,
+                "fact_fallback_reason": "first_fact_family_mixed_scope_unresolved",
+                "fact_family_cutover": self._FIRST_FACT_FAMILY_ID,
+                "family_overlap_fact_refs": mixed_first_fact_family_refs,
+                "required_tool_action": "catalog.location",
+            }
+            if tool_execution_projection:
+                mixed_family_meta["tool_execution_projection"] = tool_execution_projection
+            if fact_scope_violations:
+                mixed_family_meta["fact_scope_violations"] = fact_scope_violations
+            unresolved_meta = _fact_meta(
+                mixed_family_meta,
+                response_text=None,
+                resolution_source="fact_family_cutover",
+                current_semantic_contract=semantic_contract,
+                resolution_reason="first_fact_family_mixed_scope_unresolved",
+            )
+            return RuntimeExecutionResult(
+                text="Я уточню это для вас.",
+                tool_action=resolved_tool_action,
+                tool_decision="fact_family_unresolved",
+                meta=unresolved_meta or {},
+            )
         should_attempt_direct_info_fallback = decision.tool_action == "info" or (
             self._has_canonical_semantic_owner(decision) and bool(policy_info_refs)
         )
@@ -592,17 +734,21 @@ class TurnExecutor:
             }
             if tool_execution_projection:
                 direct_meta["tool_execution_projection"] = tool_execution_projection
-            return RuntimeExecutionResult(
-                text=direct_info_reply,
-                tool_action=resolved_tool_action,
-                tool_decision=direct_info_ref,
-                meta=self._attach_semantic_contract_meta(
-                    decision,
-                    direct_meta,
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
-                ),
+            finalized_direct_meta = _fact_meta(
+                direct_meta,
+                response_text=direct_info_reply,
+                resolution_source="direct_truth",
+                current_semantic_contract=semantic_contract,
+                fallback_fact_refs=[direct_info_ref],
+                resolution_reason=direct_info_ref,
             )
+            if finalized_direct_meta is not None:
+                return RuntimeExecutionResult(
+                    text=direct_info_reply,
+                    tool_action=resolved_tool_action,
+                    tool_decision=direct_info_ref,
+                    meta=finalized_direct_meta,
+                )
         if (
             should_attempt_direct_info_fallback
             and resolved_tool_action == "info"
@@ -619,7 +765,8 @@ class TurnExecutor:
                 semantic_contract=semantic_contract,
                 pending_question_contract=pending_question_contract,
                 service_name=service_name,
-                fact_refs=fact_refs,
+                fact_request=fact_request,
+                fact_plan=fact_plan,
                 tool_execution_projection=tool_execution_projection,
             )
             if logical_info_result is not None:
@@ -631,70 +778,81 @@ class TurnExecutor:
                 "info_ref_source": "policy_core",
                 "policy_info_refs": policy_info_refs,
             }
+            if resolved_tool_action == "info":
+                if fact_scope_violations:
+                    unresolved_info_meta["fact_scope_violations"] = fact_scope_violations
+                unresolved_meta = _fact_meta(
+                    unresolved_info_meta,
+                    response_text=None,
+                    resolution_source="policy_info_unresolved",
+                    current_semantic_contract=semantic_contract,
+                    resolution_reason="policy_info_unresolved",
+                )
+                return RuntimeExecutionResult(
+                    text="Я уточню это для вас.",
+                    tool_action=resolved_tool_action,
+                    tool_decision="info_ref_unresolved",
+                    meta=unresolved_meta or {},
+                )
         pack_decision = get_pack_decision(query_text, client_slug=client_slug)
         if pack_decision and isinstance(pack_decision.response, str) and pack_decision.response.strip():
             pack_meta = dict(pack_decision.meta) if isinstance(pack_decision.meta, dict) else {}
-            info_sections = [
-                item
-                for item in (pack_meta.get("info_sections") or [])
-                if isinstance(item, str) and item.strip()
-            ]
-            if (
-                pack_decision.intent in {"price_query", "price_manicure"}
-                or decision.intent == "pricing"
-                or "pricing" in fact_refs
-            ) and "pricing" not in info_sections:
-                info_sections.append("pricing")
-            if (
-                pack_decision.intent in {"service_duration", "duration"}
-                or decision.intent == "duration"
-                or "duration" in fact_refs
-            ) and "duration" not in info_sections:
-                info_sections.append("duration")
-            if pack_decision.intent == "services_overview" and "services_overview" not in info_sections:
-                info_sections.append("services_overview")
-            if info_sections:
-                pack_meta["info_sections"] = info_sections
             semantic_contract = self._merge_pack_grounding_semantic_contract(
                 semantic_contract,
                 pack_meta,
             )
-            return RuntimeExecutionResult(
-                text=pack_decision.response.strip(),
-                tool_action=decision.tool_action,
-                tool_decision=pack_decision.intent or pack_decision.action,
-                meta=self._attach_semantic_contract_meta(
-                    decision,
-                    pack_meta,
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
-                ),
+            fallback_fact_refs = normalize_fact_ref_list([pack_decision.intent, decision.intent])
+            if not fallback_fact_refs and len(fact_plan.allowed_emitted_fact_refs) == 1:
+                fallback_fact_refs = list(fact_plan.allowed_emitted_fact_refs)
+            finalized_pack_meta = _fact_meta(
+                pack_meta,
+                response_text=pack_decision.response.strip(),
+                resolution_source="pack_runtime",
+                current_semantic_contract=semantic_contract,
+                fallback_fact_refs=fallback_fact_refs,
+                resolution_reason=pack_decision.intent or pack_decision.action,
             )
+            if finalized_pack_meta is not None:
+                return RuntimeExecutionResult(
+                    text=pack_decision.response.strip(),
+                    tool_action=decision.tool_action,
+                    tool_decision=pack_decision.intent or pack_decision.action,
+                    meta=finalized_pack_meta,
+                )
         if unresolved_info_meta is not None:
+            if fact_scope_violations:
+                unresolved_info_meta["fact_scope_violations"] = fact_scope_violations
+            unresolved_meta = _fact_meta(
+                unresolved_info_meta,
+                response_text=None,
+                resolution_source="policy_info_unresolved",
+                current_semantic_contract=semantic_contract,
+                resolution_reason="policy_info_unresolved",
+            )
             return RuntimeExecutionResult(
                 text="Я уточню это для вас.",
                 tool_action=resolved_tool_action,
                 tool_decision="info_ref_unresolved",
-                meta=self._attach_semantic_contract_meta(
-                    decision,
-                    unresolved_info_meta,
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
-                ),
+                meta=unresolved_meta or {},
             )
+        unresolved_meta_payload = {
+            "fact_fallback": True,
+            "fact_fallback_reason": "fact_execution_unresolved",
+        }
+        if fact_scope_violations:
+            unresolved_meta_payload["fact_scope_violations"] = fact_scope_violations
+        unresolved_meta = _fact_meta(
+            unresolved_meta_payload,
+            response_text=None,
+            resolution_source="fact_unresolved",
+            current_semantic_contract=semantic_contract,
+            resolution_reason="fact_execution_unresolved",
+        )
         return RuntimeExecutionResult(
             text="Я уточню это для вас.",
             tool_action=resolved_tool_action,
             tool_decision="fact_unresolved",
-            meta=self._attach_semantic_contract_meta(
-                decision,
-                {
-                    "fact_fallback": True,
-                    "fact_fallback_reason": "fact_execution_unresolved",
-                },
-                semantic_contract=semantic_contract,
-                pending_question_contract=pending_question_contract,
-            ),
+            meta=unresolved_meta or {},
         )
 
     @staticmethod
@@ -857,6 +1015,10 @@ class TurnExecutor:
         return getattr(decision, "semantic_decision", None) is not None
 
     @staticmethod
+    def _is_synthetic_control_decision(decision: PolicyDecision) -> bool:
+        return bool(decision.is_synthetic_control_decision())
+
+    @staticmethod
     def _binding_plan(decision: PolicyDecision) -> BindingPlanV1 | None:
         binding_plan = getattr(decision, "binding_plan", None)
         if isinstance(binding_plan, BindingPlanV1):
@@ -907,6 +1069,63 @@ class TurnExecutor:
             enrichment["grounding_provenance"] = deepcopy(grounding_provenance)
         return enrichment or None
 
+    @staticmethod
+    def _semantic_entity_ref_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            str(payload.get("entity_id") or ""),
+            str(payload.get("entity_type") or ""),
+            str(payload.get("source_ref") or ""),
+            str(payload.get("value") or ""),
+        )
+
+    @classmethod
+    def _build_owner_only_execution_semantic_enrichment(
+        cls,
+        decision: PolicyDecision,
+        semantic_contract: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        enrichment = cls._build_execution_semantic_enrichment(semantic_contract)
+        if not enrichment:
+            return None
+        owner_contract = TurnPlanner().canonical_semantic_contract(decision)
+        if not isinstance(owner_contract, dict) or not owner_contract:
+            return enrichment
+        owner_enrichment = cls._build_execution_semantic_enrichment(owner_contract) or {}
+        delta: dict[str, Any] = {}
+
+        owner_referents = cls._normalize_semantic_referents(owner_enrichment.get("referents"))
+        referents = cls._normalize_semantic_referents(enrichment.get("referents"))
+        referent_delta = {
+            referent_key: payload
+            for referent_key, payload in referents.items()
+            if owner_referents.get(referent_key) != payload
+        }
+        if referent_delta:
+            delta["referents"] = deepcopy(referent_delta)
+
+        owner_entity_refs = {
+            cls._semantic_entity_ref_key(item)
+            for item in cls._normalize_semantic_entity_refs(owner_enrichment.get("entity_refs"))
+        }
+        entity_ref_delta = [
+            item
+            for item in cls._normalize_semantic_entity_refs(enrichment.get("entity_refs"))
+            if cls._semantic_entity_ref_key(item) not in owner_entity_refs
+        ]
+        if entity_ref_delta:
+            delta["entity_refs"] = deepcopy(entity_ref_delta)
+
+        grounding_provenance = cls._normalize_grounding_provenance(
+            enrichment.get("grounding_provenance")
+        )
+        owner_grounding_provenance = cls._normalize_grounding_provenance(
+            owner_enrichment.get("grounding_provenance")
+        )
+        if grounding_provenance and grounding_provenance != owner_grounding_provenance:
+            delta["grounding_provenance"] = deepcopy(grounding_provenance)
+
+        return delta or None
+
     @classmethod
     def _attach_semantic_contract_meta(
         cls,
@@ -918,7 +1137,10 @@ class TurnExecutor:
     ) -> dict[str, Any]:
         payload = dict(meta) if isinstance(meta, dict) else {}
         if cls._has_canonical_semantic_owner(decision):
-            semantic_enrichment = cls._build_execution_semantic_enrichment(semantic_contract)
+            semantic_enrichment = cls._build_owner_only_execution_semantic_enrichment(
+                decision,
+                semantic_contract,
+            )
             if isinstance(semantic_enrichment, dict) and semantic_enrichment:
                 payload["semantic_enrichment"] = semantic_enrichment
             return payload
@@ -933,24 +1155,13 @@ class TurnExecutor:
         decision: PolicyDecision,
     ) -> dict[str, Any] | None:
         dialog_state_service = DialogStateService()
-        canonical_pending_question = TurnPlanner().canonical_pending_question_contract(decision)
-        frame_pending_question_contract = dialog_state_service._pending_question_from_frame(
-            TurnPlanner().canonical_semantic_frame(decision)
-        )
-        if isinstance(frame_pending_question_contract, dict):
+        if TurnExecutor._has_canonical_semantic_owner(decision):
             return dialog_state_service.project_pending_question_contract(
-                frame_pending_question_contract,
-                expected_reply_type=(
-                    None
-                    if frame_pending_question_contract.get("expected_reply_type")
-                    else canonical_pending_question.expected_reply_type
-                ),
-                expected_reply_reason=(
-                    None
-                    if frame_pending_question_contract.get("reason")
-                    else canonical_pending_question.reason
-                ),
+                TurnPlanner().canonical_pending_question_contract(decision)
             )
+        if TurnExecutor._is_synthetic_control_decision(decision):
+            return None
+        canonical_pending_question = TurnPlanner().canonical_pending_question_contract(decision)
         return dialog_state_service.project_pending_question_contract(
             canonical_pending_question,
         )
@@ -964,6 +1175,12 @@ class TurnExecutor:
     ) -> dict[str, Any] | None:
         base_contract = TurnPlanner().canonical_semantic_contract(decision) or {}
         if not base_contract:
+            return None
+        if self._has_canonical_semantic_owner(decision):
+            contract = dict(base_contract)
+            contract["contract_version"] = "semantic_contract.v1"
+            return contract
+        if self._is_synthetic_control_decision(decision):
             return None
         contract = dict(base_contract)
         contract["contract_version"] = "semantic_contract.v1"
@@ -1056,6 +1273,90 @@ class TurnExecutor:
                 sections.append(normalized)
         return sections or None
 
+    @staticmethod
+    def _build_fact_request(decision: PolicyDecision) -> FactRequestV1:
+        return FactRequestV1.build_from_policy_decision(decision)
+
+    @staticmethod
+    def _build_fact_plan(
+        *,
+        decision: PolicyDecision,
+        fact_request: FactRequestV1,
+    ) -> FactPlanV1:
+        return FactPlanV1.build_from_request(fact_request, decision=decision)
+
+    @staticmethod
+    def _build_fact_result(
+        fact_plan: FactPlanV1,
+        *,
+        resolution_source: str,
+        response_text: str | None,
+        meta: dict[str, Any] | None,
+        fallback_fact_refs: list[str] | None = None,
+        resolution_reason: str | None = None,
+    ) -> FactResultV1:
+        return FactResultV1.build_from_runtime_payload(
+            fact_plan,
+            resolution_source=resolution_source,
+            response_text=response_text,
+            meta=meta,
+            fallback_fact_refs=fallback_fact_refs,
+            resolution_reason=resolution_reason,
+        )
+
+    @classmethod
+    def _is_first_fact_family_cutover(
+        cls,
+        *,
+        fact_request: FactRequestV1,
+        fact_plan: FactPlanV1,
+    ) -> bool:
+        family_refs = set(
+            normalize_fact_ref_list(
+                list(fact_request.requested_fact_refs) + list(fact_plan.allowed_emitted_fact_refs)
+            )
+        )
+        return bool(family_refs) and family_refs <= cls._FIRST_FACT_FAMILY_REFS
+
+    @classmethod
+    def _apply_first_fact_family_tool_cutover(
+        cls,
+        *,
+        resolved_tool_action: str,
+        projected_tool_args: dict[str, Any],
+        tool_execution_projection: dict[str, Any] | None,
+        fact_request: FactRequestV1,
+        fact_plan: FactPlanV1,
+    ) -> tuple[str, dict[str, Any], dict[str, Any] | None, bool]:
+        if not cls._is_first_fact_family_cutover(
+            fact_request=fact_request,
+            fact_plan=fact_plan,
+        ):
+            return resolved_tool_action, projected_tool_args, tool_execution_projection, False
+        effective_projection = None
+        if isinstance(tool_execution_projection, dict):
+            effective_projection = {
+                "projection_source": tool_execution_projection.get("projection_source"),
+                "binding_id": tool_execution_projection.get("binding_id"),
+                "tool_action": "catalog.location",
+                "fact_family_cutover": cls._FIRST_FACT_FAMILY_ID,
+                "fact_family_bundle_policy": fact_plan.bundle_policy,
+            }
+        return "catalog.location", {}, effective_projection, True
+
+    @staticmethod
+    def _can_execute_tool_action(
+        *,
+        tool_action: str,
+        db: Any,
+        branch_id: Any,
+    ) -> bool:
+        if db is None:
+            return False
+        if tool_action == "catalog.location":
+            return True
+        return branch_id is not None
+
     def _resolve_policy_info_refs(self, decision: PolicyDecision) -> list[str]:
         refs: list[str] = []
         seen: set[str] = set()
@@ -1107,13 +1408,14 @@ class TurnExecutor:
         semantic_contract: dict[str, Any] | None,
         pending_question_contract: dict[str, Any] | None,
         service_name: str | None,
-        fact_refs: set[str],
+        fact_request: FactRequestV1,
+        fact_plan: FactPlanV1,
         tool_execution_projection: dict[str, Any] | None,
     ) -> RuntimeExecutionResult | None:
         from app.services.tool_registry_service import execute_tool_action
         from app.services.tool_registry_snapshot_service import list_policy_info_tool_actions
 
-        info_sections_hint = self._resolve_fact_info_sections(fact_refs)
+        info_sections_hint = list(fact_plan.allowed_info_sections)
         service_query = self._resolve_fact_service_query(
             decision=decision,
             service_name=service_name,
@@ -1129,6 +1431,7 @@ class TurnExecutor:
                 client_slug=client_slug,
                 service_query=service_query,
                 info_sections_hint=info_sections_hint,
+                allowed_fact_refs=list(fact_plan.allowed_emitted_fact_refs),
                 message_text=query_text,
                 expected_reply_type=None,
                 now=now,
@@ -1151,9 +1454,26 @@ class TurnExecutor:
             tool_meta["logical_info_resolution_source"] = "tool_registry_policy_candidates"
             if tool_execution_projection:
                 tool_meta["tool_execution_projection"] = tool_execution_projection
+            fact_result = self._build_fact_result(
+                fact_plan,
+                resolution_source="logical_info_candidates",
+                response_text=response_text,
+                meta=tool_meta,
+                fallback_fact_refs=[
+                    str(tool_meta.get("tool_decision") or tool_result.error_code or "").strip()
+                ],
+                resolution_reason=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
+            )
+            if fact_result.scope_verdict == "out_of_scope":
+                continue
             tool_meta = self._attach_semantic_contract_meta(
                 decision,
-                tool_meta,
+                build_fact_contract_meta(
+                    tool_meta,
+                    fact_request=fact_request,
+                    fact_plan=fact_plan,
+                    fact_result=fact_result,
+                ),
                 semantic_contract=semantic_contract,
                 pending_question_contract=pending_question_contract,
             )
@@ -1507,7 +1827,7 @@ class TurnExecutor:
     ) -> BoundaryExecutionArtifact:
         decision = TurnPlanner().build_preflight_reject(
             reason_code=request.reason_code,
-            intent=request.intent,
+            control_label=request.intent,
             interaction_owner=request.interaction_owner,
             interaction_target=request.interaction_target,
             interaction_relation=request.interaction_relation,
@@ -1525,6 +1845,8 @@ class TurnExecutor:
             interaction_target=request.interaction_target,
             interaction_relation=request.interaction_relation,
         )
+        outcome_meta = {"control_label": request.intent}
+        outcome_meta.update(dict(request.outcome_meta))
         return self.build_block_boundary_artifact(
             decision=decision,
             dialog_state=dialog_state,
@@ -1532,7 +1854,7 @@ class TurnExecutor:
             tool_action=request.tool_action,
             text=request.public_message,
             ignored=request.ignored,
-            meta=dict(request.outcome_meta),
+            meta=outcome_meta,
         )
 
     def build_degrade_boundary_artifact_from_request(
@@ -1542,7 +1864,7 @@ class TurnExecutor:
     ) -> BoundaryExecutionArtifact:
         decision = TurnPlanner().build_controlled_degrade(
             reason_code=request.reason_code,
-            intent=request.intent,
+            control_label=request.intent,
             interaction_owner=request.interaction_owner,
             interaction_target=request.interaction_target,
             interaction_relation=request.interaction_relation,
@@ -1559,6 +1881,8 @@ class TurnExecutor:
             interaction_target=request.interaction_target,
             interaction_relation=request.interaction_relation,
         )
+        outcome_meta = {"control_label": request.intent}
+        outcome_meta.update(dict(request.outcome_meta))
         return self.build_degrade_boundary_artifact(
             decision=decision,
             dialog_state=dialog_state,
@@ -1568,7 +1892,7 @@ class TurnExecutor:
             transport_reason=request.transport_reason,
             tool_action=request.tool_action,
             tool_decision=request.tool_decision,
-            meta=dict(request.outcome_meta),
+            meta=outcome_meta,
         )
 
     def build_owner_cutover_turn_outcome(

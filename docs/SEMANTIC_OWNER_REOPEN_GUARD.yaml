@@ -1,0 +1,34 @@
+guard_name: semantic_owner_reopen_guard
+planner_file: truffles-api/app/core/turn_planner.py
+runtime_file: truffles-api/app/core/consultant_runtime.py
+dialog_state_file: truffles-api/app/core/dialog_state_service.py
+executor_file: truffles-api/app/core/turn_executor.py
+planner_builders:
+  - build_controlled_degrade
+  - build_preflight_reject
+runtime_control_function: _handle_control_turn
+runtime_control_decision_meta_keys_required:
+  - source
+  - control_action
+  - control_reason
+  - control_source
+  - session_memory_reset
+runtime_control_decision_meta_keys_forbidden:
+  - action
+  - intent
+  - outcome
+  - tool_action
+  - interaction_owner
+required_text_markers:
+  - path: truffles-api/app/core/consultant_runtime.py
+    pattern: "if self._is_synthetic_control_decision(decision):\\n            return {}"
+  - path: truffles-api/app/core/dialog_state_service.py
+    pattern: "if not contract and not self._is_synthetic_control_decision(decision):"
+  - path: truffles-api/app/core/dialog_state_service.py
+    pattern: "decision=None,"
+  - path: truffles-api/app/core/dialog_state_service.py
+    pattern: "if self._is_synthetic_control_decision(decision):\\n            return PendingQuestionContract()"
+  - path: truffles-api/app/core/dialog_state_service.py
+    pattern: "if self._is_synthetic_control_decision(decision):\\n            return {}"
+  - path: truffles-api/app/core/turn_executor.py
+    pattern: "if TurnExecutor._is_synthetic_control_decision(decision):\\n            return None"

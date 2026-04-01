@@ -1,0 +1,150 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "fact_request.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "manifest_id": {
+      "default": "default_fact_manifest.v1",
+      "title": "Manifest Id",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "intent": {
+      "title": "Intent",
+      "type": "string"
+    },
+    "scope_namespace": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope Namespace"
+    },
+    "requested_fact_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Fact Refs",
+      "type": "array"
+    },
+    "requested_scopes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Scopes",
+      "type": "array"
+    },
+    "supporting_pack_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Supporting Pack Refs",
+      "type": "array"
+    },
+    "supporting_capability_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Supporting Capability Refs",
+      "type": "array"
+    },
+    "subject_kind": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Subject Kind"
+    },
+    "subject_scope": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Subject Scope"
+    },
+    "resolution_mode": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolution Mode"
+    },
+    "composition_mode": {
+      "default": "single_only",
+      "enum": [
+        "single_only",
+        "companion_allowed",
+        "bundle_required"
+      ],
+      "title": "Composition Mode",
+      "type": "string"
+    },
+    "locale_hint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Locale Hint"
+    },
+    "format_hint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Format Hint"
+    },
+    "owner_source": {
+      "default": "policy_decision",
+      "title": "Owner Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision_id",
+    "intent"
+  ],
+  "title": "FactRequestV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/fact_request.v1.jsonschema"
+}
