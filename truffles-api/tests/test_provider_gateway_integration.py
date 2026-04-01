@@ -9,8 +9,8 @@ import pytest
 from app.contracts import Err, ErrorCodes, IntegrationError, Ok
 from app.models import Conversation, OutboxMessage
 from app.ports.messaging import MessageSent
-from app.services import outbox_runtime_service as outbox_runtime
 from app.schemas.provider_gateway import ProviderStatus
+from app.services import outbox_runtime_service as outbox_runtime
 from app.services.provider_gateway_service import update_outbox_status_from_provider
 
 

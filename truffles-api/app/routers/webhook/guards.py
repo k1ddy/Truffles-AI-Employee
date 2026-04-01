@@ -10,17 +10,6 @@ from app.core import DialogStateService
 from app.logging_config import get_logger
 from app.models import Conversation, Message, User
 from app.routers.webhook.booking import _get_booking_context, _set_booking_context
-from app.routers.webhook.guard_runtime import (
-    MSG_FACT_GUARD_CLARIFY,
-    MSG_MUTED_LONG,
-    MSG_MUTED_TEMP,
-    MSG_REENGAGE_CONFIRM,
-    MSG_REENGAGE_DECLINED,
-    MULTI_INTENT_LABELS,
-    SESSION_TIMEOUT_HOURS,
-    _coerce_batch_messages,
-    get_mute_settings,
-)
 from app.routers.webhook.booking_signal_runtime import _evaluate_booking_signal
 from app.routers.webhook.context_manager import (
     _get_context_manager,
@@ -33,6 +22,17 @@ from app.routers.webhook.context_manager import (
     _set_conversation_context,
     _set_reengage_confirmation,
     _update_compact_summary,
+)
+from app.routers.webhook.guard_runtime import (
+    MSG_FACT_GUARD_CLARIFY,
+    MSG_MUTED_LONG,
+    MSG_MUTED_TEMP,
+    MSG_REENGAGE_CONFIRM,
+    MSG_REENGAGE_DECLINED,
+    MULTI_INTENT_LABELS,
+    SESSION_TIMEOUT_HOURS,
+    _coerce_batch_messages,
+    get_mute_settings,
 )
 from app.routers.webhook.runtime_primitives import CLARIFY_MAX_ATTEMPTS, MSG_ESCALATED
 from app.routers.webhook.trace import (

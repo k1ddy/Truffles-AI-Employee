@@ -82,8 +82,8 @@ from app.services.state_service import (
     PendingResumeBoundaryRuntimeHooks,
     _resolve_resolved_handoff_resume_boundary_restore,
 )
-from tests import support_legacy_webhook_shadow as legacy_webhook_module
 from app.services.tool_registry_service import validate_tool_args_contract
+from tests import support_legacy_webhook_shadow as legacy_webhook_module
 
 MINIMUM_DATA_READY = MinimumDataContractStatus(ready=True, missing_fields=[])
 

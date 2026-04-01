@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
-from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.handover_owner_service import (
+    ActiveHandoverReuseRuntimeHooks,
     _reuse_active_handover,
     escalate_to_pending,
     get_active_handover,
@@ -33,13 +33,13 @@ from app.services.policy_snapshot_service import (
 from app.services.state_machine import ConversationState
 from app.services.state_service import transition_state
 
+from .runtime_primitives import MSG_ESCALATED, _combine_sidecar, _contains_any
 from .trace import (
     _record_decision_trace,
     _record_message_decision_meta,
     _set_router_observability,
     _update_message_decision_metadata,
 )
-from .runtime_primitives import MSG_ESCALATED, _combine_sidecar, _contains_any
 
 _POLICY_SECTIONS = (
     "payment_info",

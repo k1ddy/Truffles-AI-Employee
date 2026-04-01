@@ -5,14 +5,14 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging
+from app.services.metrics_daily_service import (
+    get_metrics_daily_status_allowlist,
+    run_metrics_daily_snapshot,
+)
 from app.services.outbox_runtime_service import (
     OutboxProcessSettings,
     load_outbox_process_settings,
     run_outbox_worker_cycle,
-)
-from app.services.metrics_daily_service import (
-    get_metrics_daily_status_allowlist,
-    run_metrics_daily_snapshot,
 )
 from app.services.runtime_mode_service import get_outbox_worker_mode, is_outbox_worker_enabled
 from app.services.runtime_safety import assert_outbox_worker_startup_safe

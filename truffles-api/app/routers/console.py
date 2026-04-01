@@ -71,10 +71,6 @@ from app.models import (
     ToolRegistryEntry,
     User,
 )
-from app.services.outbox_runtime_service import (
-    load_outbox_process_settings,
-    run_scoped_outbox_process,
-)
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
@@ -862,6 +858,10 @@ from app.services.onboarding_state import (
     build_onboarding_scorecard,
     build_onboarding_status,
     ensure_onboarding_step,
+)
+from app.services.outbox_runtime_service import (
+    load_outbox_process_settings,
+    run_scoped_outbox_process,
 )
 from app.services.outbox_service import (
     archive_pending_outbox,

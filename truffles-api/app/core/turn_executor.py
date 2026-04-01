@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, NamedTuple
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.binding_plan import BindingPlanV1

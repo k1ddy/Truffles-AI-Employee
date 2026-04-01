@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from app.services.capability_registry_snapshot_service import (
     build_requested_fact_scopes as build_requested_fact_scopes_from_snapshot,
+)
+from app.services.capability_registry_snapshot_service import (
     resolve_fact_scope_snapshot,
     resolve_handoff_policy_snapshot,
     resolve_tool_protocol_snapshot,

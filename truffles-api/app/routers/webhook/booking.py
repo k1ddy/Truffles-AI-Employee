@@ -35,15 +35,6 @@ from app.routers.webhook.booking_signal_runtime import (
     _extract_service_hint,
     _is_booking_request,
 )
-from app.routers.webhook.context_runtime import (
-    SERVICE_HINT_AT_KEY,
-    SERVICE_HINT_KEY,
-    SERVICE_HINT_WINDOW_MINUTES,
-    _is_refusal_flag_active,
-)
-from app.routers.webhook.guard_runtime import MSG_FACT_GUARD_CLARIFY
-from app.routers.webhook.pending_runtime import MSG_PENDING_ESCALATION
-from app.routers.webhook.info import _detect_info_class_intents, _looks_like_info_query
 from app.routers.webhook.class_router_runtime import (
     CONTROLLER_CONFIDENCE_THRESHOLD,
     DomainIntent,
@@ -53,7 +44,16 @@ from app.routers.webhook.class_router_runtime import (
     _resolve_controller_signal_class,
     _router_observability_updates_from_class_router,
 )
+from app.routers.webhook.context_runtime import (
+    SERVICE_HINT_AT_KEY,
+    SERVICE_HINT_KEY,
+    SERVICE_HINT_WINDOW_MINUTES,
+    _is_refusal_flag_active,
+)
+from app.routers.webhook.guard_runtime import MSG_FACT_GUARD_CLARIFY
+from app.routers.webhook.info import _detect_info_class_intents, _looks_like_info_query
 from app.routers.webhook.media import _is_style_reference_request
+from app.routers.webhook.pending_runtime import MSG_PENDING_ESCALATION
 from app.routers.webhook.runtime_primitives import (
     BOOKING_TIME_SERVICE_INTENTS,
     EXPECTED_REPLY_NAME,
@@ -72,7 +72,6 @@ from app.routers.webhook.runtime_primitives import (
     _combine_sidecar,
 )
 from app.schemas.webhook import WebhookResponse
-from app.services.appointment_service import SchedulingService
 from app.services.ai_service import (
     detect_refusal_flags,
     is_acknowledgement_message,
@@ -82,6 +81,7 @@ from app.services.ai_service import (
     is_thanks_message,
     normalize_for_matching,
 )
+from app.services.appointment_service import SchedulingService
 from app.services.booking_signal_service import (
     clean_name_candidate as _clean_name_candidate_impl,
 )

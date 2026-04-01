@@ -10,7 +10,6 @@ from app.schemas.capabilities import CapabilitiesPayload
 from app.schemas.consult import ConsultPlaybook
 from app.schemas.intent import validate_llm_policy_core_output
 from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
-from app.services.policy_vocabulary_snapshot_service import build_policy_core_response_format
 from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
@@ -39,6 +38,7 @@ from app.services.intent_service import (
     route_llm_policy_core,
     should_escalate,
 )
+from app.services.policy_vocabulary_snapshot_service import build_policy_core_response_format
 
 
 class DummyResponse:

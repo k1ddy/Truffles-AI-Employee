@@ -107,8 +107,7 @@ from app.services.handover_owner_service import (
     send_telegram_notification,
 )
 from app.services.message_service import generate_bot_response
-from app.services.pack_runtime_service import semantic_service_match
-from app.services.pack_runtime_service import _normalize_text
+from app.services.pack_runtime_service import _normalize_text, semantic_service_match
 from app.services.state_machine import ConversationState
 from app.services.state_service import transition_state
 

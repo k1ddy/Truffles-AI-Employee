@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from app.services.intent_service import DomainIntent
+
 from .runtime_primitives import INFO_INTENTS
 from .trace import _router_observability_meta
-from app.services.intent_service import DomainIntent
 
 CONTROLLER_CONFIDENCE_THRESHOLD = float(
     os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3

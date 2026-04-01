@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.core import ConversationProjectionV1, DialogStateService, SemanticDecisionV1, TurnPlanner, TurnJournalV1
+from app.core import ConversationProjectionV1, DialogStateService, SemanticDecisionV1, TurnJournalV1, TurnPlanner
 from tests import (
     build_test_policy_override_decision,
     build_test_reset_session_memory,

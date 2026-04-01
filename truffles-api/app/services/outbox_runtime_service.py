@@ -40,6 +40,7 @@ from app.schemas.outbox_payload import validate_outbox_payload
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.ai_service import normalize_for_matching
 from app.services.alert_service import alert_error
+from app.services.appointment_reminder_service import process_reminder_jobs
 from app.services.calendar_sync_service import (
     OUTBOX_EVENT_CALENDAR_SYNC_INBOUND,
     OUTBOX_EVENT_CALENDAR_SYNC_OUTBOUND,
@@ -52,7 +53,6 @@ from app.services.knowledge_registry_service import (
     OUTBOX_EVENT_KNOWLEDGE_SYNC,
     process_knowledge_sync_event,
 )
-from app.services.appointment_reminder_service import process_reminder_jobs
 from app.services.outbox_service import (
     archive_pending_outbox,
     build_inbound_message_id,

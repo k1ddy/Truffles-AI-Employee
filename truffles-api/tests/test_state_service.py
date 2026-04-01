@@ -10,11 +10,11 @@ from app.routers.webhook import _legacy as legacy
 from app.routers.webhook.decision import (
     is_handover_status_question,
 )
+from app.routers.webhook.dedup import should_process_debounced_message
 from app.routers.webhook.runtime_primitives import (
     LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
     should_offer_low_confidence_retry,
 )
-from app.routers.webhook.dedup import should_process_debounced_message
 from app.services.handover_owner_service import (
     ActiveHandoverReuseRuntimeHooks,
     PendingEscalationNotificationRuntimeHooks,

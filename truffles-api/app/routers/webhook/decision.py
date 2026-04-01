@@ -17,7 +17,7 @@ from uuid import UUID
 
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import or_, text
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.contracts.decision import (
@@ -139,6 +139,18 @@ from app.routers.webhook.branch_selection import (
     _set_branch_selection,
     _set_user_branch_preference,
 )
+from app.routers.webhook.class_router_runtime import (
+    CONSULT_INTERRUPT_INTENTS,
+    CONTROLLER_CONFIDENCE_THRESHOLD,
+    _build_controller_meta_output,
+    _controller_meta_updates_from_class_router,
+    _ensure_controller_output_meta,
+    _normalize_class_name,
+    _normalize_controller_fallback_reason,
+    _resolve_class_router_result,
+    _resolve_controller_signal_class,
+    _router_observability_updates_from_class_router,
+)
 from app.routers.webhook.context_manager import (
     CANONICAL_DIALOG_STATE_KEY,
     _build_compact_summary_text,
@@ -190,6 +202,43 @@ from app.routers.webhook.context_manager import (
     _sync_canonical_dialog_state,
     _update_compact_summary,
 )
+from app.routers.webhook.context_runtime import (
+    ASR_CONFIRM_KEY,
+    ASR_CONFIRM_WINDOW_MINUTES,
+    ASR_INFLIGHT_KEY,
+    ASR_INFLIGHT_TTL_SECONDS,
+    CLASS_CARRYOVER_CLASSES,
+    CLASS_CARRYOVER_KEY,
+    CLASS_CARRYOVER_TTL_MESSAGES,
+    CONSULT_CONTEXT_KEY,
+    CONTEXT_MANAGER_KEY,
+    EXPECTED_REPLY_REASON_KEY,
+    EXPECTED_REPLY_TYPE_KEY,
+    HANDOVER_CONFIRM_WINDOW_MINUTES,
+    MEMORY_PENDING_KEY,
+    MEMORY_PROFILE_KEY,
+    MEMORY_PROFILE_TTL_DAYS,
+    RE_ENTRY_REQUIRED_KEY,
+    REENGAGE_CONFIRM_KEY,
+    REENGAGE_CONFIRM_WINDOW_MINUTES,
+    SERVICE_CARRYOVER_KEY,
+    SERVICE_CARRYOVER_SKIP_INTENTS,
+    SERVICE_HINT_AT_KEY,
+    SERVICE_HINT_KEY,
+    SERVICE_HINT_WINDOW_MINUTES,
+    STYLE_REFERENCE_PENDING_KEY,
+    _ensure_question_mark,
+    _is_refusal_flag_active,
+)
+from app.routers.webhook.dedup import (
+    _buffer_user_message,
+    _drain_buffered_messages,
+    _get_debounce_redis,
+    _handle_debounce_gate,
+    _handle_dedup_gate,
+    is_duplicate_message_id,
+    should_process_debounced_message,
+)
 from app.routers.webhook.expected_reply_interrupt_runtime import (
     _has_explicit_location_or_hours_request as _interrupt_runtime_has_explicit_location_or_hours_request,
 )
@@ -208,42 +257,16 @@ from app.routers.webhook.expected_reply_interrupt_runtime import (
 from app.routers.webhook.expected_reply_interrupt_runtime import (
     _validate_expected_reply_value as _interrupt_runtime_validate_expected_reply_value,
 )
-from app.routers.webhook.context_runtime import (
-    ASR_CONFIRM_KEY,
-    ASR_CONFIRM_WINDOW_MINUTES,
-    ASR_INFLIGHT_KEY,
-    ASR_INFLIGHT_TTL_SECONDS,
-    CLASS_CARRYOVER_CLASSES,
-    CLASS_CARRYOVER_KEY,
-    CLASS_CARRYOVER_TTL_MESSAGES,
-    CONSULT_CONTEXT_KEY,
-    CONTEXT_MANAGER_KEY,
-    EXPECTED_REPLY_REASON_KEY,
-    EXPECTED_REPLY_TYPE_KEY,
-    HANDOVER_CONFIRM_WINDOW_MINUTES,
-    MEMORY_PENDING_KEY,
-    MEMORY_PROFILE_KEY,
-    MEMORY_PROFILE_TTL_DAYS,
-    REENGAGE_CONFIRM_KEY,
-    REENGAGE_CONFIRM_WINDOW_MINUTES,
-    RE_ENTRY_REQUIRED_KEY,
-    SERVICE_CARRYOVER_KEY,
-    SERVICE_CARRYOVER_SKIP_INTENTS,
-    SERVICE_HINT_AT_KEY,
-    SERVICE_HINT_KEY,
-    SERVICE_HINT_WINDOW_MINUTES,
-    STYLE_REFERENCE_PENDING_KEY,
-    _ensure_question_mark,
-    _is_refusal_flag_active,
-)
-from app.routers.webhook.dedup import (
-    _buffer_user_message,
-    _drain_buffered_messages,
-    _get_debounce_redis,
-    _handle_debounce_gate,
-    _handle_dedup_gate,
-    is_duplicate_message_id,
-    should_process_debounced_message,
+from app.routers.webhook.guard_runtime import (
+    MSG_FACT_GUARD_CLARIFY,
+    MSG_MUTED_LONG,
+    MSG_MUTED_TEMP,
+    MSG_REENGAGE_CONFIRM,
+    MSG_REENGAGE_DECLINED,
+    MULTI_INTENT_LABELS,
+    SESSION_TIMEOUT_HOURS,
+    _coerce_batch_messages,
+    get_mute_settings,
 )
 from app.routers.webhook.guards import (
     _apply_session_timeout_reset,
@@ -275,6 +298,10 @@ from app.routers.webhook.info import (
     _looks_like_services_overview_message,
     _tokenize_for_matching,
 )
+from app.routers.webhook.info_followup_runtime import (
+    _looks_like_carryover_followup,
+    _looks_like_hours_followup,
+)
 from app.routers.webhook.knowledge_runtime import (
     _DEFAULT_RAG_SCORES,
     _derive_rag_status,
@@ -293,13 +320,13 @@ from app.routers.webhook.media import (
     MEDIA_STORAGE_DEFAULT_DIR,
     MEDIA_STORAGE_MAX_BYTES,
     MEDIA_TYPE_ALIASES,
-    MediaDecision,
-    MediaInfo,
     MSG_MEDIA_RATE_LIMIT,
     MSG_MEDIA_TOO_LARGE,
     MSG_MEDIA_UNSUPPORTED,
     STYLE_REFERENCE_HINT_TOKENS,
     STYLE_REFERENCE_PATTERNS,
+    MediaDecision,
+    MediaInfo,
     _build_media_caption,
     _deserialize_media_decision,
     _evaluate_media_decision,
@@ -318,18 +345,22 @@ from app.routers.webhook.media import (
     _update_message_asr_metadata,
     _update_message_media_metadata,
 )
-from app.services.outbox_runtime_service import (
-    _ensure_rag_meta_defaults,
-    _find_message_by_conversation_created_at,
-    _find_message_by_message_id,
-    _handle_enqueue_only_accept,
-    _prepare_skip_persist,
-)
 from app.routers.webhook.pending import (
     _forward_pending_to_telegram,
     _handle_handover_confirmation_gate,
     _handle_manager_active_gate,
     _handle_pending_gate,
+)
+from app.routers.webhook.pending_runtime import (
+    MSG_HANDOVER_DECLINED,
+    MSG_PENDING_ACK,
+    MSG_PENDING_ESCALATION,
+    MSG_PENDING_SLA_PING,
+    MSG_PENDING_STATUS,
+    MSG_PENDING_WAIT,
+    PENDING_SLA_PING_MINUTES,
+    PENDING_SLA_PING_SENT_KEY,
+    is_handover_status_question,
 )
 from app.routers.webhook.policy import (
     _POLICY_HANDLERS,
@@ -375,44 +406,6 @@ from app.routers.webhook.response import (
     _send_response as _send_response_helper,
 )
 from app.routers.webhook.router_sla import _update_router_sla
-from app.routers.webhook.class_router_runtime import (
-    CONSULT_INTERRUPT_INTENTS,
-    CONTROLLER_CONFIDENCE_THRESHOLD,
-    _build_controller_meta_output,
-    _controller_meta_updates_from_class_router,
-    _ensure_controller_output_meta,
-    _normalize_class_name,
-    _normalize_controller_fallback_reason,
-    _resolve_class_router_result,
-    _resolve_controller_signal_class,
-    _router_observability_updates_from_class_router,
-)
-from app.routers.webhook.guard_runtime import (
-    MSG_FACT_GUARD_CLARIFY,
-    MSG_MUTED_LONG,
-    MSG_MUTED_TEMP,
-    MSG_REENGAGE_CONFIRM,
-    MSG_REENGAGE_DECLINED,
-    MULTI_INTENT_LABELS,
-    SESSION_TIMEOUT_HOURS,
-    _coerce_batch_messages,
-    get_mute_settings,
-)
-from app.routers.webhook.info_followup_runtime import (
-    _looks_like_carryover_followup,
-    _looks_like_hours_followup,
-)
-from app.routers.webhook.pending_runtime import (
-    MSG_HANDOVER_DECLINED,
-    MSG_PENDING_ACK,
-    MSG_PENDING_ESCALATION,
-    MSG_PENDING_SLA_PING,
-    MSG_PENDING_STATUS,
-    MSG_PENDING_WAIT,
-    PENDING_SLA_PING_MINUTES,
-    PENDING_SLA_PING_SENT_KEY,
-    is_handover_status_question,
-)
 from app.routers.webhook.runtime_primitives import (
     CLARIFY_MAX_ATTEMPTS,
     CONSULT_CONTEXT_TTL_MESSAGES,
@@ -591,6 +584,13 @@ from app.services.knowledge_validation import (
     evaluate_minimum_data_contract,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
+from app.services.outbox_runtime_service import (
+    _ensure_rag_meta_defaults,
+    _find_message_by_conversation_created_at,
+    _find_message_by_message_id,
+    _handle_enqueue_only_accept,
+    _prepare_skip_persist,
+)
 from app.services.outbox_service import build_inbound_message_id
 from app.services.owner_resolver import (
     build_owner_resolution_input,

@@ -21,6 +21,7 @@ from app.routers.webhook.booking import _resolve_datetime_offline
 from app.routers.webhook.http import _find_message_by_message_id
 from app.routers.webhook.info import _is_short_reply, _looks_like_info_query
 from app.routers.webhook.media import _extract_media_info
+from app.routers.webhook.policy import _looks_like_policy_topic
 from app.routers.webhook.runtime_primitives import (
     EXPECTED_REPLY_NAME,
     EXPECTED_REPLY_SERVICE,
@@ -31,7 +32,6 @@ from app.routers.webhook.trace import DECISION_STAGE_ORDER_SNAPSHOT, _record_dec
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.booking_signal_service import extract_time_token
 from app.services.policy_snapshot_service import build_routing_policy_snapshot
-from app.routers.webhook.policy import _looks_like_policy_topic
 
 STAGE_ORDER_SNAPSHOT = DECISION_STAGE_ORDER_SNAPSHOT
 REASONING_CORE_DEGRADE_REASON = "runtime_exception"

@@ -27,17 +27,17 @@ from app.core import (
     FactResultV1,
     PendingQuestionContract,
     PolicyDecision,
-    RuntimeTraceContractV1,
     ResponseRealizer,
+    RuntimeTraceContractV1,
     SemanticDecisionV1,
     SemanticFrame,
-    TurnJournalV1,
     TurnExecutor,
+    TurnJournalV1,
     TurnPlanner,
 )
 from app.core.consultant_runtime import ConsultantRuntime, LoadedRuntimeState
-from app.core.turn_executor import RuntimeExecutionResult
 from app.core.policy_tool_projector import build_binding_plan
+from app.core.turn_executor import RuntimeExecutionResult
 from app.services.policy_validation_boundary_service import (
     PolicyValidationBoundaryRuntimeHooks,
     PolicyValidationBoundaryRuntimeInput,

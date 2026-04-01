@@ -21,7 +21,6 @@ from app.services.pack_query_backend_service import (
 from app.services.pack_runtime_neutral_adapter import (
     _build_fact_meta,
     _detect_promotion_intent,
-    _format_service_not_found_reply as _neutral_format_service_not_found_reply,
     _has_contact_signal,
     _has_duration_signal,
     _has_guest_waiting_signal,
@@ -43,6 +42,9 @@ from app.services.pack_runtime_neutral_adapter import (
     load_yaml_truth,
     phrase_match_intent,
     semantic_question_type,
+)
+from app.services.pack_runtime_neutral_adapter import (
+    _format_service_not_found_reply as _neutral_format_service_not_found_reply,
 )
 from app.services.pack_runtime_neutral_adapter import (
     get_pack_decision as _runtime_get_pack_decision,

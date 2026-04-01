@@ -1,10 +1,10 @@
+from app.core.binding_plan import BindingOutcomeType, BindingPlanV1
 from app.core.boundary_validator import (
     BoundaryDecision,
     BoundaryOverride,
     BoundaryValidationResult,
     BoundaryValidator,
 )
-from app.core.binding_plan import BindingOutcomeType, BindingPlanV1
 from app.core.conversation_projection import ConversationProjectionV1
 from app.core.dialog_state_service import (
     CanonicalSemanticState,
@@ -37,7 +37,6 @@ from app.core.semantic_decision import (
     MissingInformationV1,
     SemanticDecisionV1,
 )
-from app.core.turn_journal import TurnJournalEventV1, TurnJournalV1
 from app.core.turn_executor import (
     BlockBoundaryRequest,
     DegradeBoundaryRequest,
@@ -50,6 +49,7 @@ from app.core.turn_executor import (
     TurnResult,
     TurnTrace,
 )
+from app.core.turn_journal import TurnJournalEventV1, TurnJournalV1
 from app.core.turn_planner import (
     DecisionOutcome,
     InboundTurnInput,

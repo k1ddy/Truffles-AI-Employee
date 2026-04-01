@@ -574,6 +574,33 @@ def _policy_core_expected_open_questions(contract_payload: Mapping[str, Any]) ->
     return []
 
 
+def _policy_core_payload_token(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().casefold()
+    return normalized or None
+
+
+def _policy_core_payload_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item.strip().casefold()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    ]
+
+
+def _policy_core_has_active_media_resume(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
+    resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
+    return pending_contract.get("expected_reply_type") == "media" and bool(
+        resume_contract.get("expected_reply_type")
+    )
+
+
 def _policy_core_is_media_reason_family(reason: str | None) -> bool:
     if not isinstance(reason, str) or not reason.strip():
         return False
@@ -630,6 +657,65 @@ def _policy_core_is_active_followup_info_interrupt(
         if isinstance(item, str) and item.strip()
     }
     return bool(pack_refs & {"pricing", "hours", "location", "parking", "promotions", "contact", "master"})
+
+
+def _policy_core_is_master_query_time_collect(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    if contract.intent != "master_query" or contract.action != "collect":
+        return False
+    open_questions = {
+        item.strip().casefold()
+        for item in list(contract.open_questions or [])
+        if isinstance(item, str) and item.strip()
+    }
+    if contract.next_question == "service" or "service" in open_questions:
+        return False
+    return bool(
+        contract.expected_reply_type == "time"
+        or contract.next_question == "datetime"
+        or contract.capability == "live_availability"
+        or contract.resolution_mode == "live_calendar"
+        or contract.pending_question_target == "time"
+    )
+
+
+def _policy_core_schema_requires_master_query_reclassification(
+    *,
+    payload: Mapping[str, Any] | None,
+    schema_error: str | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(schema_error, str) or "master_query_collect_tool_action_invalid" not in schema_error:
+        return False
+    if not _policy_core_has_active_media_resume(normalized_memory_profile):
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    intent = _policy_core_payload_token(payload.get("intent"))
+    action = _policy_core_payload_token(payload.get("action"))
+    if intent != "master_query" or action != "collect":
+        return False
+    tool_action = _policy_core_payload_token(
+        payload.get("tool_action_hint") or payload.get("tool_action")
+    )
+    if tool_action not in {"calendar.list_slots", "collect"}:
+        return False
+    next_question = _policy_core_payload_token(payload.get("next_question"))
+    open_questions = set(_policy_core_payload_string_list(payload.get("open_questions")))
+    if next_question == "service" or "service" in open_questions:
+        return False
+    capability = _policy_core_payload_token(payload.get("capability"))
+    resolution_mode = _policy_core_payload_token(payload.get("resolution_mode"))
+    expected_reply_type = _policy_core_payload_token(payload.get("expected_reply_type"))
+    pending_question_target = _policy_core_payload_token(payload.get("pending_question_target"))
+    return bool(
+        expected_reply_type == "time"
+        or next_question == "datetime"
+        or capability == "live_availability"
+        or resolution_mode == "live_calendar"
+        or pending_question_target == "time"
+    )
 
 
 def _validate_policy_core_runtime_contract(
@@ -728,6 +814,12 @@ def _validate_policy_core_runtime_contract(
         expected_pending_target = carry_contract.get("pending_question_target")
         if expected_pending_target and contract.pending_question_target != expected_pending_target:
             return "llm_policy_core_error:generic_info_interrupt_pending_target_invalid"
+
+    if (
+        _policy_core_has_active_media_resume(normalized_memory_profile)
+        and _policy_core_is_master_query_time_collect(contract)
+    ):
+        return "llm_policy_core_error:active_followup_master_query_reclassification_required"
 
     return None
 
@@ -842,6 +934,31 @@ def _build_policy_core_contract_repair_instruction(
                 "Return corrected JSON only.",
             ]
         )
+        return " ".join(parts)
+
+    if token.startswith("active_followup_master_query_reclassification_required"):
+        if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
+            return None
+        open_questions = _policy_core_expected_open_questions(carry_contract)
+        parts: list[str] = [
+            "The previous JSON incorrectly turned a specialist/master side-question into live availability collection during an active media follow-up.",
+            "Do NOT ask for time availability and do NOT use live-calendar resolution for this turn.",
+            "Reclassify it as the master/specialist info interrupt instead:",
+            '`intent="master_query"`, `action="fact"`, `tool_action_hint="info"`, `pack_refs=["master"]`.',
+            "Keep the booking resume contract explicit:",
+            f'`expected_reply_type="{carry_reply_type}"`,',
+            f'`next_question="{carry_next_question}"`,',
+            f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
+            'Set `active_question_relation="generic_info_interrupt"`.',
+            "Keep carried service grounding from memory when available.",
+        ]
+        pending_act = carry_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = carry_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        parts.append("Return corrected JSON only.")
         return " ".join(parts)
 
     return None
@@ -2790,6 +2907,12 @@ def route_llm_policy_core(
     if tool_args_sanitized:
         result["tool_args_sanitized"] = True
     contract, schema_error = validate_llm_policy_core_output(payload)
+    if schema_error and _policy_core_schema_requires_master_query_reclassification(
+        payload=payload,
+        schema_error=schema_error,
+        normalized_memory_profile=normalized_memory_profile,
+    ):
+        schema_error = "llm_policy_core_error:active_followup_master_query_reclassification_required"
     if contract is not None and schema_error is None:
         schema_error = _validate_policy_core_runtime_contract(
             contract,
@@ -2832,6 +2955,12 @@ def route_llm_policy_core(
                         if repair_tool_args_sanitized:
                             result["tool_args_sanitized"] = True
                         contract, schema_error = validate_llm_policy_core_output(payload)
+                        if schema_error and _policy_core_schema_requires_master_query_reclassification(
+                            payload=payload,
+                            schema_error=schema_error,
+                            normalized_memory_profile=normalized_memory_profile,
+                        ):
+                            schema_error = "llm_policy_core_error:active_followup_master_query_reclassification_required"
                         if contract is not None and schema_error is None:
                             schema_error = _validate_policy_core_runtime_contract(
                                 contract,

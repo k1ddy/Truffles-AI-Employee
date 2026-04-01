@@ -52,15 +52,14 @@ from app.services.expected_reply_contract import (
     should_override_truth_gate_off_topic_contract,
     truth_gate_expected_reply_prompt_contract,
 )
-from app.services.handover_owner_service import ActiveHandoverReuseRuntimeHooks
 from app.services.handover_owner_service import (
+    ActiveHandoverReuseRuntimeHooks,
     _reuse_active_handover,
     escalate_to_pending,
     get_active_handover,
     send_telegram_notification,
 )
 from app.services.pack_runtime_service import (
-    _match_service,
     _build_fact_meta,
     _detect_promotion_intent,
     _has_contact_signal,
@@ -68,6 +67,7 @@ from app.services.pack_runtime_service import (
     _has_guest_waiting_signal,
     _has_parking_signal,
     _has_price_signal,
+    _match_service,
     _normalize_text,
     build_info_combined_reply,
     build_master_reply_from_pack,
@@ -83,9 +83,9 @@ from app.services.pack_runtime_service import (
     resolve_master_intent,
     semantic_question_type,
 )
+from app.services.signal_manifest_service import get_info_regex_pattern
 from app.services.state_machine import ConversationState
 from app.services.state_service import transition_state
-from app.services.signal_manifest_service import get_info_regex_pattern
 
 from .trace import (
     _record_decision_trace,
