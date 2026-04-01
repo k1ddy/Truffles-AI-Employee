@@ -31,8 +31,8 @@ def test_legacy_mesh_registry_captures_shadow_and_behavior_surfaces() -> None:
     registry = _load_registry()
     entries = {item["surface_path"]: item for item in registry["entries"]}
 
-    assert registry["status"] == "machine_readable_shadow_lane_elimination_base"
-    assert registry["active_block"] == "Consultant Core Shadow Lane Elimination"
+    assert registry["status"] == "machine_readable_system_reproof_base"
+    assert registry["active_block"] == "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof"
     assert registry["caller_proof_law"]["mounted_ingress_surfaces"] == [
         "truffles-api/app/main.py",
         "truffles-api/app/routers/webhook/__init__.py",
@@ -122,5 +122,6 @@ def test_legacy_mesh_registry_captures_frozen_surface_static_importers() -> None
     support_webhook_entry = entries["truffles-api/tests/support_legacy_webhook_shadow.py"]
     assert support_webhook_entry["classification"] == "shadow_only_test_residue"
     assert support_webhook_entry["test_only_importers"] == [
+        "truffles-api/tests/test_booking_chaos_dialogs.py",
         "truffles-api/tests/test_message_endpoint.py",
     ]

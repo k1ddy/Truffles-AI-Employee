@@ -22,8 +22,8 @@ def test_truth_carrier_freeze_inventory_materializes_guard_contract() -> None:
     legacy = _load_yaml(truth["legacy_sunset"])
 
     assert inventory["schema_version"] == "v3"
-    assert inventory["status"] == "machine_readable_truth_carrier_freeze"
-    assert inventory["active_block"] == "Consultant Core Legacy Drain And Proof Closure"
+    assert inventory["status"] == "machine_readable_system_reproof_base"
+    assert inventory["active_block"] == "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof"
     assert inventory["freeze_guard"]["allowed_new_writer_paths"] == [
         "truffles-api/app/core/dialog_state_service.py"
     ]

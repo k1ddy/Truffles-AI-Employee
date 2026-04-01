@@ -796,6 +796,399 @@ class TestPolicyCoreTimeoutRetry:
         assert result["payload"]["missing_information"]["open_questions"] == ["datetime"]
         assert result["payload"]["missing_information"]["pending_question_target"] == "time"
 
+    def test_policy_core_repairs_active_media_master_query_live_availability_interrupt(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "pack_refs": [],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asks_specialists_for_service_need_time_to_check_availability",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "live_availability",
+            "temporal_scope": "none",
+            "resolution_mode": "live_calendar",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "specialist_availability_followup",
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "resolver_id": "master_lookup",
+            "resolver_version": "2026-04-01",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                    "semantic_contract": {
+                        "capability": "bookability",
+                        "subject_kind": "service",
+                        "resolution_mode": "direct",
+                        "referents": {
+                            "service": {
+                                "value": "маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            }
+                        },
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["requested_outcome"] == "fact"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+
+    def test_policy_core_rejects_master_query_time_collect_during_active_media_followup(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "collect",
+            "tool_action_hint": "collect",
+            "pack_refs": [],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asks_specialists_for_service_need_time_to_check_availability",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "live_availability",
+            "temporal_scope": "none",
+            "resolution_mode": "live_calendar",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "specialist_availability_followup",
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["requested_outcome"] == "fact"
+
+    def test_policy_core_reclassifies_master_query_carryover_mismatch_during_active_media_followup(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "active_question_relation": "generic_info_interrupt",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "generic_info_interrupt"
+
+    def test_policy_core_repairs_invalid_master_query_consult_tool_action_during_active_media_followup(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "consult",
+            "pack_refs": [],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "fact_side_specialist_question_interrupt_preserve_resume_datetime_collect_contract",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_message",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "live_availability",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "generic_info_interrupt"
+
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(

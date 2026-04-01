@@ -5631,7 +5631,6 @@
           "target_fate": "keep shadow-only until tests migrate off the adapter bus, then delete",
           "test_only_importers": [
             "truffles-api/tests/test_booking_appointments.py",
-            "truffles-api/tests/test_booking_chaos_dialogs.py",
             "truffles-api/tests/test_booking_info_interrupt_contract.py",
             "truffles-api/tests/test_consult_followup_guard.py",
             "truffles-api/tests/test_demo_salon_eval.py",
@@ -6190,6 +6189,7 @@
           "surface_path": "truffles-api/tests/support_legacy_webhook_shadow.py",
           "target_fate": "keep shadow-only until deterministic tests no longer need the residue contract",
           "test_only_importers": [
+            "truffles-api/tests/test_booking_chaos_dialogs.py",
             "truffles-api/tests/test_message_endpoint.py"
           ]
         },

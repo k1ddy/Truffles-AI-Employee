@@ -1,41 +1,11 @@
-import ast
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
-
-
-def _load_scenario_contract_helper():
-    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
-    source = script_path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(script_path))
-
-    wanted_functions = {
-        "_llm_quality_sorted_unique",
-        "_llm_quality_parse_coverage_tokens",
-        "_llm_quality_build_scenario_contract_status",
-    }
-    selected_nodes = []
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
-            selected_nodes.append(node)
-
-    module = ast.Module(body=selected_nodes, type_ignores=[])
-    namespace = {}
-    exec(compile(module, str(script_path), "exec"), namespace, namespace)
-    return namespace["_llm_quality_build_scenario_contract_status"]
-
-
-def _load_full_diagnose_module():
-    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
-    spec = spec_from_file_location("diagnose_script_gate", script_path)
-    assert spec is not None and spec.loader is not None
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from app.services.llm_quality_contracts import (
+    build_scenario_contract_status,
+    extract_expectations,
+)
 
 
 def test_scenario_contract_blocks_booking_runs_without_check_and_confirm_tags():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [
@@ -54,31 +24,30 @@ def test_scenario_contract_blocks_booking_runs_without_check_and_confirm_tags():
 
 
 def test_scenario_contract_accepts_booking_with_check_confirm_sequence():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
-                {
-                    "turns": [
-                        {
-                            "text": "Хочу записаться",
-                            "tags": ["booking"],
-                            "expect": {"reply_type": "time"},
-                        },
-                        {
-                            "text": "Проверьте мою запись",
-                            "tags": ["check_booking"],
-                            "expect": {"action": "reply"},
-                        },
-                        {
-                            "text": "Да, подтверждаю",
-                            "tags": ["confirm"],
-                            "expect": {"action": "reply"},
-                        },
-                    ]
-                }
-            ],
-            scenario_coverage="booking,info,interrupt",
-        )
+            {
+                "turns": [
+                    {
+                        "text": "Хочу записаться",
+                        "tags": ["booking"],
+                        "expect": {"reply_type": "time"},
+                    },
+                    {
+                        "text": "Проверьте мою запись",
+                        "tags": ["check_booking"],
+                        "expect": {"action": "reply"},
+                    },
+                    {
+                        "text": "Да, подтверждаю",
+                        "tags": ["confirm"],
+                        "expect": {"action": "reply"},
+                    },
+                ]
+            }
+        ],
+        scenario_coverage="booking,info,interrupt",
+    )
 
     assert result["valid"] is True
     assert result["reasons"] == []
@@ -86,12 +55,15 @@ def test_scenario_contract_accepts_booking_with_check_confirm_sequence():
 
 
 def test_scenario_contract_accepts_independent_check_booking_and_confirm_coverage():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [
-                    {"text": "Хочу записаться", "tags": ["booking"], "expect": {"reply_type": "time"}},
+                    {
+                        "text": "Хочу записаться",
+                        "tags": ["booking"],
+                        "expect": {"reply_type": "time"},
+                    },
                     {"text": "Да, подтверждаю", "tags": ["confirm"], "expect": {"action": "reply"}},
                 ]
             },
@@ -99,7 +71,7 @@ def test_scenario_contract_accepts_independent_check_booking_and_confirm_coverag
                 "turns": [
                     {"text": "Проверьте мою запись", "tags": ["check_booking"], "expect": {"action": "reply"}},
                 ]
-            }
+            },
         ],
         scenario_coverage="booking,info,interrupt",
     )
@@ -110,8 +82,7 @@ def test_scenario_contract_accepts_independent_check_booking_and_confirm_coverag
 
 
 def test_scenario_contract_rejects_orphan_pending_question_turn():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [
@@ -139,8 +110,7 @@ def test_scenario_contract_rejects_orphan_pending_question_turn():
 
 
 def test_scenario_contract_accepts_pending_question_with_active_time_context():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [
@@ -166,9 +136,7 @@ def test_scenario_contract_accepts_pending_question_with_active_time_context():
 
 
 def test_extract_expectations_compiles_active_time_specialist_followup_contract():
-    module = _load_full_diagnose_module()
-
-    expectations = module._llm_quality_extract_expectations(
+    expectations = extract_expectations(
         {
             "tags": ["ask_about_requested_slot"],
             "expect": {
@@ -209,8 +177,7 @@ def test_extract_expectations_compiles_active_time_specialist_followup_contract(
 
 
 def test_scenario_contract_accepts_pending_question_after_generic_info_interrupt():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [
@@ -237,8 +204,7 @@ def test_scenario_contract_accepts_pending_question_after_generic_info_interrupt
 
 
 def test_scenario_contract_acceptance_rejects_relaxed_envelope():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [
@@ -263,7 +229,6 @@ def test_scenario_contract_acceptance_rejects_relaxed_envelope():
 
 
 def test_scenario_contract_acceptance_accepts_canonical_envelope():
-    fn = _load_scenario_contract_helper()
     dialogs = [
         {
             "turns": [
@@ -291,7 +256,7 @@ def test_scenario_contract_acceptance_accepts_canonical_envelope():
         }
         for _ in range(10)
     ]
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=dialogs,
         scenario_coverage="booking,info,interrupt,handoff",
         requested_count=10,
@@ -304,8 +269,7 @@ def test_scenario_contract_acceptance_accepts_canonical_envelope():
 
 
 def test_scenario_contract_reports_optional_mechanism_and_product_metadata_coverage():
-    fn = _load_scenario_contract_helper()
-    result = fn(
+    result = build_scenario_contract_status(
         dialogs=[
             {
                 "turns": [

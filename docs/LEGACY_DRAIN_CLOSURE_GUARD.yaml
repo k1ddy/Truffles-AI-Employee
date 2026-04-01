@@ -1,9 +1,9 @@
-active_block: Consultant Core Legacy Drain And Proof Closure
+active_block: Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof
 registry_path: docs/system_forensics/dead_surface_registry.json
 family_id: location_hours_parking
 package_root: truffles-api/app/routers/webhook/__init__.py
 consultant_runtime_path: truffles-api/app/core/consultant_runtime.py
-expected_registry_status: machine_readable_legacy_drain_closure_base
+expected_registry_status: machine_readable_system_reproof_base
 required_lazy_exports:
 - _apply_quiet_hours_notice
 - _buffer_user_message
@@ -54,8 +54,6 @@ unreachable_surfaces_for_touched_envelope:
 - truffles-api/app/routers/webhook/pending.py
 - truffles-api/app/routers/webhook/policy.py
 - truffles-api/app/routers/webhook/response.py
-- truffles-api/app/services/reasoning_core.py
-- truffles-api/app/webhook.py
 forbidden_touched_tokens_in_adapter_surfaces:
 - class_carryover
 - location_hours_parking

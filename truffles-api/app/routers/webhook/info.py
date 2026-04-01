@@ -488,6 +488,15 @@ def _detect_info_class_intents(
         has_work_schedule_signal = hours_stem_signal and time_marker_signal
         if has_work_schedule_signal:
             hours_signal = True
+    if not hours_signal and question_like:
+        why_booking_schedule_question = (
+            _has_token_prefix(tokens, "почему")
+            and _signal_any_match(normalized, client_slug, "booking_keywords")
+            and _signal_any_match(normalized, client_slug, "hours_question_time_phrases")
+        )
+        if why_booking_schedule_question:
+            hours_signal = True
+            meta["booking_schedule_question"] = True
     pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
     duration_signal = _has_duration_signal(normalized, message_text, client_slug=client_slug)
     duration_fallback_signal = _signal_pair_match(
@@ -788,6 +797,7 @@ def _build_info_intent_reply(
     client_slug: str | None,
     message_text: str | None = None,
     include_info_bundle: bool = True,
+    requested_info_intents: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> tuple[str | None, dict | None]:
     normalized = normalize_for_matching(message_text) if message_text else ""
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug) if normalized else False
@@ -803,6 +813,11 @@ def _build_info_intent_reply(
     include_info_bundle = include_info_bundle and (
         intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
     )
+    requested_sections = {
+        str(item).strip().casefold()
+        for item in (requested_info_intents or [])
+        if isinstance(item, str) and item.strip()
+    }
 
     def _resolverize(
         meta_payload: dict | None,
@@ -885,7 +900,37 @@ def _build_info_intent_reply(
             fact_intents=[intent],
         )
         return reply, _resolverize(meta)
+    if intent == "parking":
+        if requested_sections == {"parking"}:
+            reply = format_reply_from_truth("parking", client_slug=client_slug)
+            if reply:
+                meta = _build_fact_meta(
+                    fact_source="truth",
+                    fact_intents=["parking"],
+                    info_sections=["parking"],
+                )
+                return reply, _resolverize(meta, resolved_intent="parking")
+        reply, meta = build_info_combined_reply(
+            include_parking=True,
+            include_guest=guest_signal,
+            client_slug=client_slug,
+        )
+        meta = _build_fact_meta(
+            meta=meta,
+            fact_source="truth",
+            fact_intents=[intent],
+        )
+        return reply, _resolverize(meta, resolved_intent="parking")
     if intent == "location":
+        if requested_sections == {"location"}:
+            reply = format_reply_from_truth("location", client_slug=client_slug)
+            if reply:
+                meta = _build_fact_meta(
+                    fact_source="truth",
+                    fact_intents=["location"],
+                    info_sections=["address"],
+                )
+                return reply, _resolverize(meta, resolved_intent="location")
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,

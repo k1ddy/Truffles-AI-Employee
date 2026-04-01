@@ -110,6 +110,7 @@ _MASTER_QUERY_COLLECTION_ACTION = "collect"
 _MASTER_QUERY_FACT_ACTION = "reply"
 _MASTER_QUERY_FACT_INTENT = "master"
 _MASTER_QUERY_SERVICE_CLARIFY_REASON = "missing_service_query"
+_MASTER_QUERY_LONG_HAIR_SERVICE_LABEL = "Женская стрижка на длинные волосы"
 _PACK_QUERY_ENGINE_ID = "pack_query_engine.v2"
 _PACK_QUERY_ENGINE_VERSION = "2026-03-02"
 _PACK_QUERY_MATCH_MIN_SCORE = 0.56
@@ -1066,6 +1067,36 @@ def _normalize_optional_text(value: Any) -> str | None:
     return token or None
 
 
+def _master_long_haircut_signal(
+    text: str | None,
+    *,
+    client_slug: str | None,
+) -> str | None:
+    normalized_message = _normalize_text(text or "")
+    if not normalized_message:
+        return None
+    long_hair_phrases = [
+        _normalize_text(item)
+        for item in get_signal_lexicon_list(client_slug, "master_long_haircut_phrases")
+        if isinstance(item, str) and item.strip()
+    ]
+    if any(phrase and phrase in normalized_message for phrase in long_hair_phrases):
+        return "phrase"
+    message_tokens = [token for token in normalized_message.split() if token]
+    long_hair_anchor_groups = [
+        tuple(part for part in _normalize_text(item).split() if part)
+        for item in get_signal_lexicon_list(client_slug, "master_long_haircut_anchor_groups")
+        if isinstance(item, str) and item.strip()
+    ]
+    for group in long_hair_anchor_groups:
+        if group and all(
+            any(token.startswith(part) for token in message_tokens)
+            for part in group
+        ):
+            return "anchor"
+    return None
+
+
 def _resolve_master_service_query(
     *,
     message_text: str | None,
@@ -1075,16 +1106,23 @@ def _resolve_master_service_query(
 ) -> tuple[str | None, str]:
     explicit_query = _normalize_optional_text(service_query)
     if explicit_query:
+        if _master_long_haircut_signal(explicit_query, client_slug=client_slug):
+            return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "input"
         return explicit_query, "input"
     if isinstance(intent_decomp, dict):
         decomp_query = _normalize_optional_text(intent_decomp.get("service_query"))
         if decomp_query:
+            if _master_long_haircut_signal(decomp_query, client_slug=client_slug):
+                return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "intent_decomp"
             return decomp_query, "intent_decomp"
     if message_text:
         semantic_query = get_pack_service_hint(message_text, client_slug=client_slug)
         semantic_query = _normalize_optional_text(semantic_query)
         if semantic_query:
             return semantic_query, "semantic_match"
+        long_hair_signal = _master_long_haircut_signal(message_text, client_slug=client_slug)
+        if long_hair_signal:
+            return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, f"master_long_haircut_{long_hair_signal}"
     return None, "none"
 
 
@@ -1395,8 +1433,17 @@ def build_master_reply_from_pack(
             meta=meta,
         )
 
+    display_service = resolved_service
+    long_hair_signal = _master_long_haircut_signal(display_service, client_slug=client_slug)
+    if long_hair_signal:
+        display_service = _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL
     canonical_service = get_pack_service_hint(resolved_service, client_slug=client_slug)
-    canonical_service = _normalize_optional_text(canonical_service) or resolved_service
+    canonical_service = _normalize_optional_text(canonical_service)
+    if not canonical_service and long_hair_signal:
+        canonical_service = _normalize_optional_text(
+            get_pack_service_hint(_MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, client_slug=client_slug)
+        )
+    canonical_service = canonical_service or resolved_service
     profiles = _extract_master_profiles(catalog)
     matched_profiles = [
         profile
@@ -1412,7 +1459,7 @@ def build_master_reply_from_pack(
             meta={
                 "master_query_contract": "masters_catalog.v1",
                 "master_reply_mode": "service_not_found",
-                "service_query": canonical_service,
+                "service_query": display_service,
                 "service_query_source": resolution.service_query_source,
                 "clarify_reason": "master_service_not_found",
                 "master_profiles_count": 0,
@@ -1435,7 +1482,7 @@ def build_master_reply_from_pack(
     if not specialist_lines:
         return None
     specialists_text = ", ".join(specialist_lines)
-    reply = reply_template.format(service=canonical_service, specialists=specialists_text)
+    reply = reply_template.format(service=display_service, specialists=specialists_text)
     meta = _build_fact_meta(
         fact_source="truth",
         fact_intents=[_MASTER_QUERY_FACT_INTENT],
@@ -1443,7 +1490,7 @@ def build_master_reply_from_pack(
         meta={
             "master_query_contract": "masters_catalog.v1",
             "master_reply_mode": "service_match",
-            "service_query": canonical_service,
+            "service_query": display_service,
             "service_query_source": resolution.service_query_source,
             "master_profiles_count": len(matched_profiles),
             "master_profiles": [profile.get("name") for profile in visible_profiles],

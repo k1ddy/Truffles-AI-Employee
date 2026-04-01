@@ -1343,14 +1343,16 @@ class ConsultantRuntime:
             question_contract_active = question_contract_active or bool(
                 decision.meta.get("question_contract")
             )
-        if not question_contract_active and self._decision_collects(decision) and pending_question_contract:
-            question_contract_active = True
         if not pending_question_act:
             pending_question_act = pending_question_contract.get("pending_question_act")
         if not pending_question_target:
             pending_question_target = pending_question_contract.get(
                 "pending_question_target"
             ) or decision.interaction.target
+        if not question_contract_active and pending_question_contract:
+            question_contract_active = self._decision_collects(decision) or bool(
+                pending_question_act and expected_reply_type
+            )
         if pending_question_target:
             trace_event["pending_question_target"] = pending_question_target
         if active_question_relation:

@@ -1,6 +1,6 @@
 # TP-2026-04-01-consultant-core-block-a-interrupt-arbitration-and-continuation-law-a922
 
-- Status: `in_progress`
+- Status: `completed`
 - Owner: `Hands`
 - Date: `2026-04-01`
 - Work mode: `implementation`
@@ -211,6 +211,25 @@
 - one fresh interruption-only replay bundle under `/tmp/booking_quality/<run-id>/`
 - replay command + surfaced first-fail classification
 - `STATE.md` / active-governance sync deferred until the block is actually proven
+
+### Closure evidence
+- Code:
+  - `truffles-api/app/services/intent_service.py`
+  - `truffles-api/app/core/dialog_state_service.py`
+  - `truffles-api/app/core/consultant_runtime.py`
+  - `truffles-api/tests/test_intent.py`
+  - `truffles-api/tests/test_consultant_core_runtime_contracts.py`
+- Focused deterministic checks:
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_intent.py -k "active_media or master_query_time_collect or master_query_consult_tool_action or master_query_carryover_mismatch or generic_info_interrupt or consult_media or specialist_query"` → `8 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_consultant_core_runtime_contracts.py -k "consult_media or generic_info_interrupt or specialist or refreshes_core_trace or fact_interrupt_with_preserved_resume"` → `6 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_collect_interrupt_arbitration"` → `9 passed`
+  - `git diff --check`
+- Focused replay proof:
+  - run: `/tmp/booking_quality/a922-block-a-replay-20260401l`
+  - result: `infra_valid=true`, `semantic_valid=true`, `manual_audit_status=done`, `human_semantic_valid=true`
+  - key proof:
+    - `block-a-1` turn 3 now lands on `intent=master_query`, `action=fact`, `info_sections=["master"]`, `expected_reply_type=time`, `pending_question_target=time`, `active_question_relation=generic_info_interrupt`
+    - `block-a-2` turn 2 remains on the consult/media path for actual media fulfillment
 
 ## Rollback
 - Revert only the Block A file set above.

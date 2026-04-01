@@ -4454,6 +4454,75 @@ def test_consultant_runtime_trace_emits_question_contract_for_collect_pending_co
     assert decision_meta.get("question_contract") is True
 
 
+def test_consultant_runtime_trace_emits_question_contract_for_fact_interrupt_with_preserved_resume() -> None:
+    runtime = ConsultantRuntime()
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["master"],
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "goal": "booking",
+            "reason": "info_interrupt_preserve_resume_pending_question_contract",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+    dialog_state = DialogState.model_validate(
+        {
+            "pending_question_contract": {
+                "expected_reply_type": "time",
+                "reason": "info_interrupt_preserve_resume_pending_question_contract",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "generic_info_interrupt",
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+            },
+            "projections": {
+                "expected_reply_type": "time",
+                "expected_reply_reason": "info_interrupt_preserve_resume_pending_question_contract",
+            },
+            "meta": {"current_goal": "booking"},
+        }
+    )
+    conversation = SimpleNamespace(context={}, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(tool_action="info", tool_decision="master", meta={})
+    turn_result = SimpleNamespace(dialog_state=dialog_state, reply=SimpleNamespace(reply_kind="fact"))
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "pending_question_interaction"
+        and entry.get("expected_reply_type") == "time"
+        and entry.get("active_question_relation") == "generic_info_interrupt"
+        for entry in trace
+    )
+    assert any(
+        entry.get("stage") == "question_contract"
+        and entry.get("expected_reply_type") == "time"
+        and entry.get("active_question_relation") == "generic_info_interrupt"
+        and entry.get("pending_question_contract", {}).get("next_question") == "datetime"
+        for entry in trace
+    )
+
+
 def test_consultant_runtime_trace_emits_reason_code_for_controlled_degrade() -> None:
     runtime = ConsultantRuntime()
     decision = TurnPlanner().build_controlled_degrade(

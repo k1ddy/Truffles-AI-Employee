@@ -38,8 +38,8 @@ def test_dead_surface_registry_marks_touched_envelope_adapter_and_unreachable_su
     registry = _load_registry()
     entries = {item["surface_path"]: item for item in registry["entries"]}
 
-    assert registry["status"] == "machine_readable_legacy_drain_closure_base"
-    assert registry["active_block"] == "Consultant Core Legacy Drain And Proof Closure"
+    assert registry["status"] == "machine_readable_system_reproof_base"
+    assert registry["active_block"] == "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof"
     assert registry["caller_proof_law"]["adapter_only_for_touched_envelope"] == [
         "truffles-api/app/routers/webhook/http.py",
         "truffles-api/app/routers/webhook/session_memory.py",

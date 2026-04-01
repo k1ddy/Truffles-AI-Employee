@@ -3945,12 +3945,19 @@ def _llm_quality_parse_actions(value):
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
+
+def _llm_quality_generate_unique_jid(idx, run_id=None, salt=None):
+    base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
+    token = f"{run_id or 'llm_quality'}:{idx}:{salt or 'default'}".encode("utf-8")
+    suffix = int(hashlib.sha256(token).hexdigest()[:8], 16) % 90000000
+    return f"{base + suffix}@s.whatsapp.net"
+
+
 def _llm_quality_pick_jid(jids, idx, rng, mode, run_id=None):
     if mode == "unique":
-        base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
-        token = f"{run_id or 'llm_quality'}:{idx}".encode("utf-8")
-        suffix = int(hashlib.sha256(token).hexdigest()[:8], 16) % 90000000
-        return f"{base + suffix}@s.whatsapp.net"
+        if jids:
+            return jids[idx % len(jids)]
+        return _llm_quality_generate_unique_jid(idx, run_id=run_id)
     if not jids:
         return None
     if mode == "random":
@@ -3965,6 +3972,40 @@ def _llm_quality_resolve_jid_mode(args):
     if getattr(args, "skip_outbox", False):
         return "unique"
     return "round_robin"
+
+
+def _llm_quality_select_fallback_jid(
+    current_jid,
+    jids,
+    idx,
+    *,
+    run_id=None,
+    tried_jids=None,
+    skip_outbox=False,
+    allow_non_allowlist=False,
+):
+    tried = set(tried_jids or ())
+    ordered_jids = [jid for jid in (jids or []) if isinstance(jid, str) and jid]
+
+    if ordered_jids and not skip_outbox:
+        start_idx = idx % len(ordered_jids)
+        if current_jid in ordered_jids:
+            start_idx = ordered_jids.index(current_jid)
+        for candidate in ordered_jids[start_idx + 1 :]:
+            if candidate == current_jid or candidate in tried:
+                continue
+            return candidate
+
+    if not allow_non_allowlist:
+        return None
+
+    salt_suffix = 0
+    while True:
+        salt = "fresh-dialog" if salt_suffix == 0 else f"fresh-dialog-{salt_suffix}"
+        candidate = _llm_quality_generate_unique_jid(idx, run_id=run_id, salt=salt)
+        if candidate != current_jid and candidate not in tried:
+            return candidate
+        salt_suffix += 1
 
 def _llm_quality_extract_turn_tags(turn):
     tags = []
@@ -5003,7 +5044,24 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
         for tag in (turn_tags or [])
         if isinstance(tag, str) and tag.strip()
     }
+    expected_reply_reason = (
+        _llm_quality_normalize_tool_token((meta or {}).get("expected_reply_reason"))
+        if isinstance(meta, dict)
+        else ""
+    )
+    clarify_reason = (
+        _llm_quality_normalize_tool_token((meta or {}).get("clarify_reason"))
+        if isinstance(meta, dict)
+        else ""
+    )
     if _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
+        return True
+    if (
+        booking_active
+        and meta_action == "check_booking_prompt"
+        and effective_intent in {"check_booking", "check_record"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
+    ):
         return True
     if (
         booking_active
@@ -5023,9 +5081,16 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     if (
         booking_active
         and meta_action == "booking_prompt"
-        and "media" in normalized_tags
         and expected_reply_type_value in {"service_choice", "time", "name"}
         and _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value)
+    ):
+        return True
+    if (
+        booking_active
+        and meta_action == "reply"
+        and effective_intent == "master_query"
+        and expected_reply_type_value == "service_choice"
+        and {clarify_reason, expected_reply_reason} & {"master_service_not_found"}
     ):
         return True
 
@@ -5586,6 +5651,51 @@ def _llm_quality_extract_expectations(turn):
         compiled = compiler(normalized)
         if isinstance(compiled, dict):
             normalized = compiled
+    booking_reply_types = globals().get(
+        "CHAOS_BOOKING_REPLY_TYPES",
+        {"service_choice", "time", "name"},
+    )
+    if (
+        "booking" in tag_set
+        and not tag_set & {"handoff", "human", "pending", "cancel", "reschedule", "check_booking", "confirm"}
+        and normalized.get("reply_type") == "service_choice"
+        and normalized.get("reply_type") in booking_reply_types
+        and normalized.get("state") not in {"pending", "manager_active"}
+    ):
+        normalized["action"] = "booking_prompt"
+        normalized["expected_reply"] = True
+
+        meta = dict(normalized.get("meta") or {})
+        meta["action"] = "booking_prompt"
+        meta["source"] = "llm_policy_core"
+        meta["tool_action"] = "collect"
+        meta["expected_reply_type"] = "service_choice"
+        meta["expected_reply_reason"] = "booking_prompt"
+        normalized["meta"] = meta
+
+        meta_any = dict(normalized.get("meta_any") or {})
+        meta_any["action"] = ["booking_prompt"]
+        meta_any["source"] = ["llm_policy_core"]
+        meta_any["tool_action"] = ["collect"]
+        meta_any["expected_reply_type"] = ["service_choice"]
+        meta_any["expected_reply_reason"] = ["booking_prompt"]
+        normalized["meta_any"] = meta_any
+
+        trace_contains = []
+        for entry in list(normalized.get("trace_contains") or []):
+            normalized_entry = dict(entry)
+            if normalized_entry.get("stage") == "question_contract":
+                normalized_entry["expected_reply_type"] = "service_choice"
+                normalized_entry["reason"] = "booking_prompt"
+            trace_contains.append(normalized_entry)
+        question_contract_trace = {
+            "stage": "question_contract",
+            "expected_reply_type": "service_choice",
+            "reason": "booking_prompt",
+        }
+        if question_contract_trace not in trace_contains:
+            trace_contains.append(question_contract_trace)
+        normalized["trace_contains"] = trace_contains
     return normalized
 
 
@@ -5928,25 +6038,32 @@ def _llm_quality_should_infer_info_tags_from_text(
 ):
     if expected_info_sections:
         return False
-    if expected_reply_matched is not True:
-        return True
     normalized_tags = {
         str(tag).strip().lower()
         for tag in (turn_tags or [])
         if isinstance(tag, str) and tag.strip()
     }
-    if normalized_tags.intersection(LLM_QUALITY_INFO_TAGS):
-        return True
-    if "consult" in normalized_tags:
-        return True
     normalized_reply_type = _llm_quality_normalize_expect_token(expected_reply_type)
-    if normalized_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
-        return True
-    return not _llm_quality_has_pending_question_interaction_contract(
+    has_booking_pending_contract = _llm_quality_has_pending_question_interaction_contract(
         meta=meta,
         trace_entries=trace_entries,
         actual_expected_reply_type=normalized_reply_type,
     )
+    if expected_reply_matched is not True:
+        if (
+            normalized_reply_type in CHAOS_BOOKING_REPLY_TYPES
+            and normalized_reply_type in normalized_tags
+            and has_booking_pending_contract
+        ):
+            return False
+        return True
+    if normalized_tags.intersection(LLM_QUALITY_INFO_TAGS):
+        return True
+    if "consult" in normalized_tags:
+        return True
+    if normalized_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
+        return True
+    return not has_booking_pending_contract
 
 def _llm_quality_detect_language(text: str | None) -> str:
     if not text:
@@ -11719,18 +11836,43 @@ def _llm_quality_judge_cache_key(model: str, base_url: str, prompt: str) -> str:
 def _llm_quality_build_judge_prompt(payload: dict) -> str:
     reasons = ", ".join(sorted(LLM_QUALITY_JUDGE_REASONS.keys()))
     compact_payload = _llm_quality_compact_for_judge_payload(payload)
+    decision_meta = compact_payload.get("decision_meta")
+    conversation_state = str(compact_payload.get("conversation_state") or "").strip().lower()
+    allow_status_ack = conversation_state in {"pending", "manager_active"}
+    if isinstance(decision_meta, dict):
+        tool_action = str(decision_meta.get("tool_action") or "").strip().lower()
+        tool_decision = str(decision_meta.get("tool_decision") or "").strip().lower()
+        if tool_action == "calendar.get_booking" and tool_decision in {"ok", "not_found", "time_mismatch"}:
+            allow_status_ack = True
+    boundary_rules = (
+        "An explicit handoff or status acknowledgement is valid for pending/manager_active "
+        "or booking lookup status turns; do not require bot silence in those cases. "
+        if allow_status_ack
+        else (
+            "If conversation_state is pending/manager_active, any bot reply is wrong. "
+            "If expected_reply is false but the bot replied, mark fail. "
+        )
+    )
     return (
         "You are a QA judge for a salon booking consultant. "
         "Use only the provided context (pack_truth / consult_playbook). "
         "Do not assume missing facts. "
-        "If conversation_state is pending/manager_active, any bot reply is wrong. "
-        "If expected_reply is false but the bot replied, mark fail. "
+        f"{boundary_rules}"
         "If expected_info_sections are present, the reply must address them or ask for clarification. "
         "Return JSON only with keys: verdict, score, reasons, summary. "
         f"verdict must be one of: {sorted(LLM_QUALITY_JUDGE_VERDICTS)}. "
         f"reasons must be from: [{reasons}].\\n\\n"
         f"Context JSON:\\n{json.dumps(compact_payload, ensure_ascii=False)}"
     )
+
+
+def _llm_quality_apply_openai_token_limit(payload: dict, *, model: str, max_tokens: int) -> None:
+    token_limit = int(max_tokens)
+    if str(model or "").strip().lower().startswith("gpt-5"):
+        payload["max_completion_tokens"] = token_limit
+    else:
+        payload["max_tokens"] = token_limit
+
 
 def _llm_quality_call_judge(
     *,
@@ -11748,8 +11890,8 @@ def _llm_quality_call_judge(
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": max(128, int(max_tokens)),
     }
+    _llm_quality_apply_openai_token_limit(payload, model=model, max_tokens=max(128, int(max_tokens)))
     endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
     body = None
     payload_json = json.dumps(payload, ensure_ascii=False)
@@ -11895,8 +12037,8 @@ def _llm_quality_openai_key_preflight_attempt(
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
     }
+    _llm_quality_apply_openai_token_limit(payload, model=model, max_tokens=max(16, 1))
     req = urllib.request.Request(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -12968,6 +13110,26 @@ def _llm_quality_last_trace_stage(trace_entries):
         if isinstance(entry, dict) and entry.get("stage"):
             return entry.get("stage")
     return None
+
+
+def _llm_quality_root_trace_failure(trace_entries, reasons):
+    for entry in trace_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        stage = str(entry.get("stage") or "").strip() or None
+        reason_code = str(entry.get("reason_code") or "").strip() or None
+        if stage and reason_code:
+            return {"stage": stage, "reason_code": reason_code}
+    last_stage = _llm_quality_last_trace_stage(trace_entries)
+    for reason in reasons or []:
+        token = str(reason or "").strip() or None
+        if token:
+            if last_stage:
+                return {"stage": last_stage, "reason": token}
+            return {"reason": token}
+    if last_stage:
+        return {"stage": last_stage}
+    return {}
 
 def _llm_quality_extract_booking_slots(meta, conv_meta):
     slots = {}
@@ -20042,16 +20204,35 @@ def _run_llm_quality(args):
             if isinstance(resume_remote_jid_by_dialog, dict):
                 resume_remote_jid_by_dialog[str(dialog_idx)] = remote_jid
             if args.reset_before_dialog and not dialog_partial_resume:
-                preflight = _reset_dialog_state(remote_jid)
-                if preflight:
-                    print(json.dumps(preflight, ensure_ascii=False))
-                    state_before = preflight.get("state_before")
-                    cleared = bool(preflight.get("cleared"))
-                    if state_before in {"pending", "manager_active"} and not cleared:
-                        raise SystemExit(
-                            "llm-quality: contaminated preflight (state_before="
-                            f"{state_before}, cleared=false); restart with --jid-mode unique"
-                        )
+                tried_fallback_jids = {remote_jid}
+                contaminated = True
+                while contaminated:
+                    contaminated = False
+                    preflight = _reset_dialog_state(remote_jid)
+                    if preflight:
+                        print(json.dumps(preflight, ensure_ascii=False))
+                        state_before = preflight.get("state_before")
+                        cleared = bool(preflight.get("cleared"))
+                        if state_before in {"pending", "manager_active"} and not cleared:
+                            fallback_jid = _llm_quality_select_fallback_jid(
+                                remote_jid,
+                                allowlist_jids,
+                                dialog_idx - 1,
+                                run_id=run_id,
+                                tried_jids=tried_fallback_jids,
+                                skip_outbox=bool(args.skip_outbox),
+                                allow_non_allowlist=bool(args.allow_non_allowlist),
+                            )
+                            if not fallback_jid:
+                                raise SystemExit(
+                                    "llm-quality: contaminated preflight (state_before="
+                                    f"{state_before}, cleared=false); restart with --jid-mode unique"
+                                )
+                            tried_fallback_jids.add(fallback_jid)
+                            remote_jid = fallback_jid
+                            if isinstance(resume_remote_jid_by_dialog, dict):
+                                resume_remote_jid_by_dialog[str(dialog_idx)] = remote_jid
+                            contaminated = True
             elif dialog_partial_resume:
                 _emit_progress_heartbeat(
                     "dialog_resume_continue",

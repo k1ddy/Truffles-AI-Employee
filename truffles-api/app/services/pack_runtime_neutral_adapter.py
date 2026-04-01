@@ -179,6 +179,13 @@ def get_signal_lexicon_list(client_slug: str | None, key: str) -> list[str]:
     payload_values = _flatten_lexicon_values(signals.get(key) if isinstance(signals, dict) else None)
     if payload_values:
         return payload_values
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    signal_lexicons = domain_pack.get("signal_lexicons") if isinstance(domain_pack, dict) else None
+    payload_values = _flatten_lexicon_values(
+        signal_lexicons.get(key) if isinstance(signal_lexicons, dict) else None
+    )
+    if payload_values:
+        return payload_values
     return get_system_lexicon_list(key)
 
 
@@ -271,6 +278,17 @@ def _has_price_signal(
         stem_terms={"цена": "цен", "стоимость": "стоимост"},
     ):
         return True
+    if text and "во сколько" not in text:
+        colloquial_price_patterns = (
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+это\s+будет\b",
+            r"\bскольк\w*(?:\s+\w+){0,2}\s+это\s+сто(?:ит|ят)\b",
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+обойд",
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+выйдет\b",
+        )
+        if any(re.search(pattern, text) for pattern in colloquial_price_patterns):
+            return True
+    if raw_text and re.search(r"[₸$€₽]", raw_text):
+        return True
     return any(pattern.search(text) for pattern in _PRICE_QUESTION_PATTERNS)
 
 
@@ -282,6 +300,8 @@ def _has_duration_signal(
 ) -> bool:
     text = normalized or _normalize_text(message or "")
     if _contains_any(text, get_signal_lexicon_list(client_slug, "duration_keywords")):
+        return True
+    if "по времени" in text and "скольк" in text:
         return True
     if any(pattern.search(text) for pattern in _DURATION_QUESTION_PATTERNS):
         return True
@@ -337,25 +357,58 @@ def _service_entries(truth: dict | None) -> list[dict[str, Any]]:
     return []
 
 
+def _token_matches(token: str, message_tokens: list[str]) -> bool:
+    for msg in message_tokens:
+        if msg == token:
+            return True
+        if len(token) >= 4 and len(msg) >= 4 and (msg.startswith(token) or token.startswith(msg)):
+            return True
+        if len(token) >= 6 and len(msg) >= 6:
+            common = 0
+            for left, right in zip(token, msg):
+                if left != right:
+                    break
+                common += 1
+            if common >= 5:
+                return True
+    return False
+
+
+def _service_alias_token_groups(entry: dict[str, Any]) -> list[tuple[str, ...]]:
+    values: list[str] = []
+    name = entry.get("name")
+    if isinstance(name, str) and name.strip():
+        values.append(name)
+    aliases = entry.get("aliases")
+    if isinstance(aliases, list):
+        values.extend(str(item) for item in aliases if isinstance(item, str) and item.strip())
+    groups: list[tuple[str, ...]] = []
+    for value in values:
+        tokens = tuple(token for token in _normalize_text(value).split() if token)
+        if tokens:
+            groups.append(tokens)
+    return groups
+
+
 def _match_service(normalized: str, client_slug: str) -> dict | None:
     truth = load_yaml_truth(client_slug)
     if not normalized:
         return None
-    query_tokens = set(normalized.split())
-    if not query_tokens:
+    message_tokens = [token for token in normalized.split() if token]
+    if not message_tokens:
         return None
-    best: tuple[int, dict[str, Any]] | None = None
+    best: dict[str, Any] | None = None
+    best_score: tuple[int, int] | None = None
     for item in _service_entries(truth):
-        name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        name_tokens = set(_normalize_text(name).split())
-        overlap = len(query_tokens & name_tokens)
-        if overlap <= 0:
-            continue
-        if best is None or overlap > best[0]:
-            best = (overlap, item)
-    return best[1] if best else None
+        for alias_tokens in _service_alias_token_groups(item):
+            if not alias_tokens:
+                continue
+            if all(_token_matches(token, message_tokens) for token in alias_tokens):
+                score = (len(alias_tokens), sum(len(token) for token in alias_tokens))
+                if best_score is None or score > best_score:
+                    best = item
+                    best_score = score
+    return best
 
 
 def _build_fact_meta(

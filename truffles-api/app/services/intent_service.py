@@ -680,41 +680,48 @@ def _policy_core_is_master_query_time_collect(
     )
 
 
+def _policy_core_is_active_followup_master_query_shape(
+    *,
+    intent: str | None,
+    next_question: str | None,
+    open_questions: Iterable[str],
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    if intent != "master_query":
+        return False
+    if not _policy_core_has_active_media_resume(normalized_memory_profile):
+        return False
+    normalized_open_questions = {
+        item.strip().casefold()
+        for item in open_questions
+        if isinstance(item, str) and item.strip()
+    }
+    if next_question == "service" or "service" in normalized_open_questions:
+        return False
+    return True
+
+
 def _policy_core_schema_requires_master_query_reclassification(
     *,
     payload: Mapping[str, Any] | None,
     schema_error: str | None,
     normalized_memory_profile: Mapping[str, Any] | None,
 ) -> bool:
-    if not isinstance(schema_error, str) or "master_query_collect_tool_action_invalid" not in schema_error:
+    if not isinstance(schema_error, str):
         return False
-    if not _policy_core_has_active_media_resume(normalized_memory_profile):
+    normalized_schema_error = schema_error.casefold()
+    if "master_query" not in normalized_schema_error or "tool_action_invalid" not in normalized_schema_error:
         return False
     if not isinstance(payload, Mapping):
         return False
     intent = _policy_core_payload_token(payload.get("intent"))
-    action = _policy_core_payload_token(payload.get("action"))
-    if intent != "master_query" or action != "collect":
-        return False
-    tool_action = _policy_core_payload_token(
-        payload.get("tool_action_hint") or payload.get("tool_action")
-    )
-    if tool_action not in {"calendar.list_slots", "collect"}:
-        return False
     next_question = _policy_core_payload_token(payload.get("next_question"))
-    open_questions = set(_policy_core_payload_string_list(payload.get("open_questions")))
-    if next_question == "service" or "service" in open_questions:
-        return False
-    capability = _policy_core_payload_token(payload.get("capability"))
-    resolution_mode = _policy_core_payload_token(payload.get("resolution_mode"))
-    expected_reply_type = _policy_core_payload_token(payload.get("expected_reply_type"))
-    pending_question_target = _policy_core_payload_token(payload.get("pending_question_target"))
-    return bool(
-        expected_reply_type == "time"
-        or next_question == "datetime"
-        or capability == "live_availability"
-        or resolution_mode == "live_calendar"
-        or pending_question_target == "time"
+    open_questions = _policy_core_payload_string_list(payload.get("open_questions"))
+    return _policy_core_is_active_followup_master_query_shape(
+        intent=intent,
+        next_question=next_question,
+        open_questions=open_questions,
+        normalized_memory_profile=normalized_memory_profile,
     )
 
 
@@ -801,19 +808,47 @@ def _validate_policy_core_runtime_contract(
         and isinstance(carry_next_question, str)
         and carry_next_question.strip()
     ):
+        active_followup_master_query = _policy_core_is_active_followup_master_query_shape(
+            intent=contract.intent,
+            next_question=contract.next_question,
+            open_questions=list(contract.open_questions or []),
+            normalized_memory_profile=normalized_memory_profile,
+        )
         expected_open_questions = _policy_core_expected_open_questions(carry_contract)
         if contract.expected_reply_type != carry_reply_type:
-            return "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
+            )
         if contract.next_question != carry_next_question:
-            return "llm_policy_core_error:generic_info_interrupt_next_question_invalid"
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_next_question_invalid"
+            )
         if list(contract.open_questions or []) != expected_open_questions:
-            return "llm_policy_core_error:generic_info_interrupt_open_questions_invalid"
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_open_questions_invalid"
+            )
         expected_pending_act = carry_contract.get("pending_question_act")
         if expected_pending_act and contract.pending_question_act != expected_pending_act:
-            return "llm_policy_core_error:generic_info_interrupt_pending_act_invalid"
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_pending_act_invalid"
+            )
         expected_pending_target = carry_contract.get("pending_question_target")
         if expected_pending_target and contract.pending_question_target != expected_pending_target:
-            return "llm_policy_core_error:generic_info_interrupt_pending_target_invalid"
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_pending_target_invalid"
+            )
+        if active_followup_master_query and contract.active_question_relation != "generic_info_interrupt":
+            return "llm_policy_core_error:active_followup_master_query_reclassification_required"
 
     if (
         _policy_core_has_active_media_resume(normalized_memory_profile)

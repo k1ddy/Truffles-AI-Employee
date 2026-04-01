@@ -13,6 +13,7 @@ removed_runtime_shadows:
     runtime_path: truffles-api/app/webhook.py
     support_path: truffles-api/tests/support_legacy_webhook_shadow.py
     support_test_importers:
+      - truffles-api/tests/test_booking_chaos_dialogs.py
       - truffles-api/tests/test_message_endpoint.py
 router_shadow_contract:
   decision_path: truffles-api/app/routers/webhook/decision.py

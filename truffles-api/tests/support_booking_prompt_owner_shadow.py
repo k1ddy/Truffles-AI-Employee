@@ -304,6 +304,12 @@ def resolve_llm_booking_prompt_candidate(
         dialog_state_service._pending_question_from_frame(semantic_frame),
         expected_reply_type=reply_slot,
     ) or {}
+    canonical_runtime_memory = (
+        context.get("consultant_runtime")
+        if isinstance(context, dict)
+        else None
+    )
+    has_canonical_runtime_memory = isinstance(canonical_runtime_memory, dict)
 
     policy_memory_profile = None
     active_slots = decision_router._collect_policy_active_slots(
@@ -323,7 +329,7 @@ def resolve_llm_booking_prompt_candidate(
             decision_router.EXPECTED_REPLY_NAME,
         }:
             policy_memory_profile["expected_reply_type"] = reply_slot
-        if active_slots:
+        if active_slots and not has_canonical_runtime_memory:
             policy_memory_profile["active_slots"] = active_slots
         if runtime_current_referents:
             policy_memory_profile["current_referents"] = runtime_current_referents

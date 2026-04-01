@@ -1130,9 +1130,42 @@ def build_scenario_contract_status(
     include_media: bool = False,
     acceptance_contract: bool = False,
 ) -> dict[str, Any]:
+    pending_question_context_preserve_tags = {
+        "info",
+        "media",
+        "price",
+        "location",
+        "hours",
+        "promo",
+        "duration",
+        "parking",
+        "master",
+        "wrong_slot",
+        "interrupt",
+    }
+
     def _normalized_reply_type(expectations: dict[str, Any]) -> str | None:
         value = str((expectations or {}).get("reply_type") or "").strip().casefold()
         return value or None
+
+    def _collect_optional_labels(*sources: Any, field_names: tuple[str, ...]) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+            for field_name in field_names:
+                value = source.get(field_name)
+                values = value if isinstance(value, list) else [value]
+                for item in values:
+                    if not isinstance(item, str):
+                        continue
+                    token = item.strip()
+                    if not token or token in seen:
+                        continue
+                    seen.add(token)
+                    labels.append(token)
+        return sorted(labels)
 
     coverage_tokens = parse_coverage_tokens(scenario_coverage)
     required_tags_by_coverage = {
@@ -1147,6 +1180,12 @@ def build_scenario_contract_status(
     reply_type_coverage_turns = 0
     action_coverage_turns = 0
     info_coverage_turns = 0
+    mechanism_metadata_turns = 0
+    product_contract_turns = 0
+    product_outcome_turns = 0
+    mechanism_labels: dict[str, int] = {}
+    product_contracts: dict[str, int] = {}
+    product_outcomes: dict[str, int] = {}
     reasons: list[str] = []
 
     for dialog in dialogs or []:
@@ -1163,8 +1202,11 @@ def build_scenario_contract_status(
             if not isinstance(turn, Mapping):
                 continue
             turn_count += 1
+            raw_expect = turn.get("expect")
+            if not isinstance(raw_expect, Mapping):
+                raw_expect = {}
             expectations = extract_expectations(turn)
-            if is_weak_oracle_expectation(expectations):
+            if is_weak_oracle_expectation(expectations) and not raw_expect:
                 weak_expectation_turns += 1
             if expectations.get("reply_type"):
                 reply_type_coverage_turns += 1
@@ -1172,6 +1214,36 @@ def build_scenario_contract_status(
                 action_coverage_turns += 1
             if expectations.get("info_sections"):
                 info_coverage_turns += 1
+            turn_mechanisms = _collect_optional_labels(
+                turn,
+                raw_expect,
+                expectations,
+                field_names=("mechanism", "mechanisms", "shared_mechanism", "mechanism_hint"),
+            )
+            if turn_mechanisms:
+                mechanism_metadata_turns += 1
+                for label in turn_mechanisms:
+                    mechanism_labels[label] = mechanism_labels.get(label, 0) + 1
+            turn_product_contracts = _collect_optional_labels(
+                turn,
+                raw_expect,
+                expectations,
+                field_names=("product_contract", "product_contracts", "expected_product_contract"),
+            )
+            if turn_product_contracts:
+                product_contract_turns += 1
+                for label in turn_product_contracts:
+                    product_contracts[label] = product_contracts.get(label, 0) + 1
+            turn_product_outcomes = _collect_optional_labels(
+                turn,
+                raw_expect,
+                expectations,
+                field_names=("product_outcome", "product_outcomes", "expected_product_outcome"),
+            )
+            if turn_product_outcomes:
+                product_outcome_turns += 1
+                for label in turn_product_outcomes:
+                    product_outcomes[label] = product_outcomes.get(label, 0) + 1
             raw_tags = turn.get("tags")
             if not isinstance(raw_tags, list):
                 continue
@@ -1198,7 +1270,7 @@ def build_scenario_contract_status(
             reply_type = _normalized_reply_type(expectations)
             if reply_type:
                 active_reply_type = reply_type
-            elif any(tag in _PENDING_QUESTION_CONTEXT_PRESERVE_TAGS for tag in tags):
+            elif any(tag in pending_question_context_preserve_tags for tag in tags):
                 pass
             else:
                 active_reply_type = None
@@ -1234,6 +1306,9 @@ def build_scenario_contract_status(
     reply_type_coverage_ratio = round(reply_type_coverage_turns / max(turn_count, 1), 4) if turn_count else 0.0
     action_coverage_ratio = round(action_coverage_turns / max(turn_count, 1), 4) if turn_count else 0.0
     info_coverage_ratio = round(info_coverage_turns / max(turn_count, 1), 4) if turn_count else 0.0
+    mechanism_metadata_ratio = round(mechanism_metadata_turns / max(turn_count, 1), 4) if turn_count else 0.0
+    product_contract_ratio = round(product_contract_turns / max(turn_count, 1), 4) if turn_count else 0.0
+    product_outcome_ratio = round(product_outcome_turns / max(turn_count, 1), 4) if turn_count else 0.0
 
     return {
         "valid": not reasons,
@@ -1248,6 +1323,15 @@ def build_scenario_contract_status(
         "reply_type_coverage": reply_type_coverage_ratio,
         "action_coverage": action_coverage_ratio,
         "info_coverage": info_coverage_ratio,
+        "mechanism_metadata_coverage": mechanism_metadata_ratio,
+        "product_contract_coverage": product_contract_ratio,
+        "product_outcome_coverage": product_outcome_ratio,
+        "mechanism_metadata_turns": mechanism_metadata_turns,
+        "product_contract_turns": product_contract_turns,
+        "product_outcome_turns": product_outcome_turns,
+        "mechanism_labels": mechanism_labels,
+        "product_contracts": product_contracts,
+        "product_outcomes": product_outcomes,
         "allow_weak_oracle": bool(allow_weak_oracle),
     }
 
