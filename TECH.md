@@ -389,15 +389,18 @@ schemathesis --config-file contracts/console_api/schemathesis.toml run contracts
 checks. If the IDs go stale, update them with a real handover + conversation from the same client as the
 console token.
 
-**k6 (manual load smoke):**
+**k6 (smoke modes):**
 ```bash
 CONSOLE_API_URL=https://api.truffles.kz/console/v1 \
 CONSOLE_API_TOKEN="<bearer token>" \
 k6 run ops/k6/console_smoke.js
 ```
-- **Когда запускать:** перед релизом после изменений в Console API/фильтрах/пагинации/индексах; перед подключением крупного клиента; при подозрении на деградацию.
+- **PR non-prod smoke:** `console-k6-pr` в `.github/workflows/ci.yml`; запускается на PR при console-related diff и использует только явный non-prod target через `CONSOLE_K6_PR_*` secrets. Если target/secrets не настроены, job честно skip'ается с причиной.
+- **Live manual smoke:** workflow `Console k6` через `workflow_dispatch`; использовать перед релизом после изменений в Console API/фильтрах/пагинации/индексах, перед подключением крупного клиента, при подозрении на деградацию.
+- **Nightly live smoke:** workflow `Console k6` по `schedule`; нужен для drift/latency observability вне PR CI.
 - **Когда обновлять сценарий:** появился новый “горячий” эндпоинт или изменились параметры фильтров; изменились SLO/пороговые значения.
-- **Режим:** только read‑only; low VU/iterations; предпочтительно staging.
+- **Режим:** только read‑only; low VU/iterations. PR lane не должен указывать на prod; live/manual и nightly используют live API.
+- **Selection headers:** при multi-tenant selection можно передать `CONSOLE_API_COMPANY_ID`, `CONSOLE_API_CLIENT_ID`, `CONSOLE_API_BRANCH_ID`.
 
 ---
 
@@ -413,7 +416,9 @@ k6 run ops/k6/console_smoke.js
 ### Console gates
 - `console-e2e` (Playwright smoke) — запускается при изменениях в `console-web/**` или CI.
 - `console-contract` (Schemathesis GET-only) — запускается при изменениях в `contracts/console_api/**` или console API.
-- `console-k6` — ручной запуск через `workflow_dispatch` (input `run_k6=true`).
+- `console-k6-pr` — автоматический read-only smoke для console-related PR diff; использует только `CONSOLE_K6_PR_*` secrets и non-prod target.
+- `Console k6 / console-k6-live` — ручной live smoke через отдельный workflow `.github/workflows/console-k6.yml`.
+- `Console k6 / console-k6-nightly` — scheduled live drift check через `.github/workflows/console-k6.yml`.
 
 ### Console E2E (локально, чтобы воспроизвести CI)
 - Креды: `/home/zhan/secrets/console-e2e.env` (не коммитить).
@@ -424,7 +429,8 @@ k6 run ops/k6/console_smoke.js
 ### Console secrets (источник истины)
 - CI secrets: GitHub Actions (`CONSOLE_E2E_USERNAME`, `CONSOLE_E2E_PASSWORD`, `CONSOLE_KEYCLOAK_CLIENT_SECRET`, `CONSOLE_API_TOKEN`).
 - Prod host: `/home/zhan/secrets/console-e2e.env` (E2E login + Keycloak client secret).
-- Contract/k6: `/home/zhan/secrets/console-contract.env` (token or Keycloak user creds).
+- Contract/k6 live: `/home/zhan/secrets/console-contract.env` (token or Keycloak user creds).
+- PR non-prod k6: GitHub Secrets `CONSOLE_K6_PR_API_URL`, `CONSOLE_K6_PR_API_TOKEN` or preview Keycloak creds `CONSOLE_K6_PR_KEYCLOAK_*`.
 - `CONSOLE_API_TOKEN` не хранится в репозитории: получать через Keycloak token endpoint и использовать локально.
 - Шаблон переменных: `console-web/.env.e2e.example`.
 

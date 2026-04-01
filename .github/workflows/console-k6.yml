@@ -1,0 +1,154 @@
+name: Console k6
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"
+
+concurrency:
+  group: console-k6-${{ github.workflow }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  console-k6-live:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONSOLE_API_URL: https://api.truffles.kz/console/v1
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
+      CONSOLE_API_COMPANY_ID: ${{ secrets.CONSOLE_K6_COMPANY_ID }}
+      CONSOLE_API_CLIENT_ID: ${{ secrets.CONSOLE_K6_CLIENT_ID }}
+      CONSOLE_API_BRANCH_ID: ${{ secrets.CONSOLE_K6_BRANCH_ID }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard live console k6 auth
+        run: |
+          if [ -n "${CONSOLE_API_TOKEN}" ]; then
+            exit 0
+          fi
+          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            exit 0
+          fi
+          echo "Missing console live k6 auth secrets." >&2
+          exit 1
+
+      - name: Use pre-provisioned token
+        if: env.CONSOLE_API_TOKEN != ''
+        run: echo "CONSOLE_API_TOKEN=${CONSOLE_API_TOKEN}" >> "$GITHUB_ENV"
+
+      - name: Fetch console token
+        if: env.CONSOLE_API_TOKEN == ''
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          data = urllib.parse.urlencode({
+              "grant_type": "password",
+              "client_id": os.environ["KEYCLOAK_CLIENT_ID"],
+              "client_secret": os.environ["KEYCLOAK_CLIENT_SECRET"],
+              "username": os.environ["KEYCLOAK_USERNAME"],
+              "password": os.environ["KEYCLOAK_PASSWORD"],
+              "scope": "openid",
+          }).encode()
+
+          req = urllib.request.Request(os.environ["KEYCLOAK_TOKEN_URL"], data=data, method="POST")
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["access_token"]
+          print(f"::add-mask::{token}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"CONSOLE_API_TOKEN={token}\n")
+          PY
+
+      - name: k6 console smoke
+        uses: grafana/k6-action@v0.3.0
+        with:
+          filename: ops/k6/console_smoke.js
+        env:
+          CONSOLE_API_URL: ${{ env.CONSOLE_API_URL }}
+          CONSOLE_API_TOKEN: ${{ env.CONSOLE_API_TOKEN }}
+          CONSOLE_API_COMPANY_ID: ${{ env.CONSOLE_API_COMPANY_ID }}
+          CONSOLE_API_CLIENT_ID: ${{ env.CONSOLE_API_CLIENT_ID }}
+          CONSOLE_API_BRANCH_ID: ${{ env.CONSOLE_API_BRANCH_ID }}
+
+  console-k6-nightly:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONSOLE_API_URL: https://api.truffles.kz/console/v1
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
+      CONSOLE_API_COMPANY_ID: ${{ secrets.CONSOLE_K6_COMPANY_ID }}
+      CONSOLE_API_CLIENT_ID: ${{ secrets.CONSOLE_K6_CLIENT_ID }}
+      CONSOLE_API_BRANCH_ID: ${{ secrets.CONSOLE_K6_BRANCH_ID }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard nightly console k6 auth
+        run: |
+          if [ -n "${CONSOLE_API_TOKEN}" ]; then
+            exit 0
+          fi
+          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            exit 0
+          fi
+          echo "Missing console live k6 auth secrets for nightly run." >&2
+          exit 1
+
+      - name: Use pre-provisioned token
+        if: env.CONSOLE_API_TOKEN != ''
+        run: echo "CONSOLE_API_TOKEN=${CONSOLE_API_TOKEN}" >> "$GITHUB_ENV"
+
+      - name: Fetch console token
+        if: env.CONSOLE_API_TOKEN == ''
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          data = urllib.parse.urlencode({
+              "grant_type": "password",
+              "client_id": os.environ["KEYCLOAK_CLIENT_ID"],
+              "client_secret": os.environ["KEYCLOAK_CLIENT_SECRET"],
+              "username": os.environ["KEYCLOAK_USERNAME"],
+              "password": os.environ["KEYCLOAK_PASSWORD"],
+              "scope": "openid",
+          }).encode()
+
+          req = urllib.request.Request(os.environ["KEYCLOAK_TOKEN_URL"], data=data, method="POST")
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["access_token"]
+          print(f"::add-mask::{token}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"CONSOLE_API_TOKEN={token}\n")
+          PY
+
+      - name: k6 console smoke
+        uses: grafana/k6-action@v0.3.0
+        with:
+          filename: ops/k6/console_smoke.js
+        env:
+          CONSOLE_API_URL: ${{ env.CONSOLE_API_URL }}
+          CONSOLE_API_TOKEN: ${{ env.CONSOLE_API_TOKEN }}
+          CONSOLE_API_COMPANY_ID: ${{ env.CONSOLE_API_COMPANY_ID }}
+          CONSOLE_API_CLIENT_ID: ${{ env.CONSOLE_API_CLIENT_ID }}
+          CONSOLE_API_BRANCH_ID: ${{ env.CONSOLE_API_BRANCH_ID }}
