@@ -151,6 +151,7 @@ def test_demo_salon_eval_records_canonical_service_projection() -> None:
 def test_llm_guard_records_trace_and_meta() -> None:
     conversation = SimpleNamespace(
         id=uuid4(),
+        client_id=uuid4(),
         state=ConversationState.BOT_ACTIVE.value,
         context={},
     )
@@ -165,22 +166,22 @@ def test_llm_guard_records_trace_and_meta() -> None:
         "app.services.ai_service.rewrite_query_for_retrieval",
         return_value={"rewrite_used": False, "rewrite_text": "", "reason": "disabled"},
     ), patch(
-        "app.routers.webhook._legacy.generate_bot_response",
+        "app.routers.webhook.response.generate_bot_response",
         return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("плохой ответ", "high")),
     ), patch(
-        "app.routers.webhook._legacy._detect_llm_guard_topics",
+        "app.routers.webhook.response._detect_llm_guard_topics",
         return_value=["hard_law"],
     ), patch(
-        "app.routers.webhook._legacy._reuse_active_handover",
+        "app.routers.webhook.response._reuse_active_handover",
         return_value=(None, False, False),
     ), patch(
-        "app.routers.webhook._legacy.escalate_to_pending",
+        "app.routers.webhook.response.escalate_to_pending",
         return_value=SimpleNamespace(ok=True, value=SimpleNamespace()),
     ), patch(
-        "app.routers.webhook._legacy.send_telegram_notification",
+        "app.routers.webhook.response.send_telegram_notification",
         return_value=True,
     ), patch(
-        "app.routers.webhook._legacy._reset_low_confidence_retry",
+        "app.routers.webhook.response._reset_low_confidence_retry",
         return_value=None,
     ):
         webhook_response._handle_llm_primary(
