@@ -752,7 +752,7 @@ async def _handle_enqueue_only_accept(
                 else:
                     forward_result = telegram.send_message(
                         chat_id=chat_id,
-                        text=f"👤 <b>Клиент:</b> {message_text}",
+                        text=f"👤 <b>Клиент:</b> {message_text}",  # hardcode-gate: allow notification formatting
                         message_thread_id=conversation.telegram_topic_id,
                     )
                 if forward_result and forward_result.get("ok"):
