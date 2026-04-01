@@ -1,4 +1,4 @@
-"""Legacy webhook adapter: re-export decision orchestrator symbols."""
+"""Governed legacy webhook adapter: explicit compatibility exports only."""
 
 from __future__ import annotations
 
@@ -33,8 +33,281 @@ from app.routers.webhook.runtime_primitives import (
     ConversationState,
 )
 from app.services.chatflow_service import send_bot_response
+from app.services.handover_owner_service import (
+    _create_pending_escalation_with_notification as _handover_owner_create_pending_escalation_with_notification,
+)
+from app.services.handover_owner_service import (
+    _reuse_active_handover as _handover_owner_reuse_active_handover,
+)
+from app.services.handover_owner_service import (
+    escalate_to_pending as _handover_owner_escalate_to_pending,
+)
+from app.services.handover_owner_service import (
+    get_active_handover as _handover_owner_get_active_handover,
+)
+from app.services.handover_owner_service import (
+    manager_reassign as _handover_owner_manager_reassign,
+)
+from app.services.handover_owner_service import (
+    manager_reopen as _handover_owner_manager_reopen,
+)
+from app.services.handover_owner_service import (
+    manager_resolve as _handover_owner_manager_resolve,
+)
+from app.services.handover_owner_service import (
+    manager_return as _handover_owner_manager_return,
+)
+from app.services.handover_owner_service import (
+    manager_take as _handover_owner_manager_take,
+)
+from app.services.handover_owner_service import (
+    resolve_active_handover_rejection as _handover_owner_resolve_active_handover_rejection,
+)
 
 from . import decision as _decision
+
+# Explicit temporary surface for current repo consumers; do not widen without TP evidence.
+_DECISION_EXPORTS = (
+    "ACKNOWLEDGEMENT_RESPONSE",
+    "ASR_LOW_CONFIDENCE_MIN_CHARS",
+    "ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS",
+    "ASR_LOW_CONFIDENCE_MIN_WORDS",
+    "ASR_LOW_CONFIDENCE_NON_LETTER_RATIO",
+    "AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB",
+    "BOOKING_INFO_QUESTION_TYPES",
+    "CLARIFY_MAX_ATTEMPTS",
+    "CLASS_CARRYOVER_KEY",
+    "CONSULT_CONTEXT_KEY",
+    "CONSULT_CONTEXT_TTL_MESSAGES",
+    "CONSULT_INTERRUPT_INTENTS",
+    "CONTROLLER_CONFIDENCE_THRESHOLD",
+    "DecisionSignals",
+    "DomainIntent",
+    "EVENING_GREETING_KEY",
+    "EVENING_GREETING_TTL_HOURS",
+    "GREETING_RESPONSE",
+    "LOW_CONFIDENCE_MAX_RETRIES",
+    "MEDIA_MAX_DEFAULT_MB",
+    "MEDIA_RATE_LIMIT_DEFAULTS",
+    "MEDIA_STORAGE_DEFAULT_DIR",
+    "MEDIA_STORAGE_MAX_BYTES",
+    "MEDIA_TYPE_ALIASES",
+    "MSG_BOOKING_ASK_ALL",
+    "MSG_BOOKING_ASK_PHONE",
+    "MSG_BOOKING_CANCELLED",
+    "MSG_BOOKING_REENGAGE",
+    "MSG_BOOKING_SLOT_LOCK_STUB",
+    "MSG_ESCALATED",
+    "MSG_FACT_GUARD_CLARIFY",
+    "MSG_HANDOVER_CONFIRM",
+    "MSG_LOW_CONFIDENCE_RETRY",
+    "MSG_MEDIA_RATE_LIMIT",
+    "MSG_MEDIA_TOO_LARGE",
+    "MSG_MEDIA_UNSUPPORTED",
+    "MSG_PENDING_ESCALATION",
+    "MSG_PENDING_LOW_CONFIDENCE",
+    "MSG_STYLE_REFERENCE_NEED_MEDIA",
+    "NAME_NOISE_TOKENS",
+    "NAME_PATTERN",
+    "OUT_OF_DOMAIN_RESPONSE",
+    "QUIET_HOURS_NOTICE_KEY",
+    "QUIET_HOURS_NOTICE_TTL_MINUTES",
+    "REENGAGE_CONFIRM_WINDOW_MINUTES",
+    "ROUTING_MATRIX",
+    "SERVICE_CARRYOVER_INTENTS",
+    "SERVICE_CARRYOVER_KEY",
+    "SERVICE_HINT_AT_KEY",
+    "SERVICE_HINT_KEY",
+    "SERVICE_HINT_WINDOW_MINUTES",
+    "SESSION_MEMORY_KEY",
+    "SESSION_MEMORY_RESET_PHRASES",
+    "SESSION_MEMORY_TTL_HOURS",
+    "SHIELD_CONTEXT_KEY",
+    "SHIELD_LAST_TEXT_KEY",
+    "SHIELD_MAX_MESSAGE_LENGTH",
+    "SHIELD_MEANINGFUL_PATTERN",
+    "SHIELD_RECENT_KEY",
+    "SHIELD_SHORT_MESSAGE_LEN",
+    "SHIELD_SPAM_MAX_MESSAGES",
+    "SHIELD_SPAM_WINDOW_SECONDS",
+    "SHIELD_TOXIC_PATTERNS",
+    "STYLE_REFERENCE_HINT_TOKENS",
+    "STYLE_REFERENCE_PATTERNS",
+    "THANKS_RESPONSE",
+    "TIME_HOUR_PATTERN",
+    "TIME_PATTERN",
+    "TOOL_VERIFIER_SLOT_BY_FIELD",
+    "_POLICY_HANDLERS",
+    "_append_followup",
+    "_apply_expected_reply_slot",
+    "_booking_clarify_guard_reason",
+    "_booking_prompt_for_expected_reply_type",
+    "_build_consult_return_prompt",
+    "_build_controller_meta_output",
+    "_clear_service_hint",
+    "_clear_session_memory_expected_reply",
+    "_combine_sidecar",
+    "_compact_signal_snapshot",
+    "_compose_fact_response",
+    "_contains_any",
+    "_controller_meta_updates_from_class_router",
+    "_current_openai_api_key",
+    "_derive_booking_followup_prompt",
+    "_derive_rag_status",
+    "_deserialize_media_decision",
+    "_detect_fast_intent",
+    "_detect_info_class_intents",
+    "_detect_intent_signals",
+    "_detect_llm_guard_topics",
+    "_ensure_controller_output_meta",
+    "_ensure_rag_meta_defaults",
+    "_evaluate_booking_signal",
+    "_evaluate_media_decision",
+    "_expected_reply_for_booking_question",
+    "_extract_datetime",
+    "_extract_service_hint",
+    "_find_message_by_conversation_created_at",
+    "_find_message_by_message_id",
+    "_format_discounts_reply_for_message",
+    "_format_service_not_found_reply",
+    "_get_booking_context",
+    "_get_canonical_dialog_state",
+    "_get_clarify_attempt_state",
+    "_get_class_carryover",
+    "_get_consult_context",
+    "_get_context_manager",
+    "_get_conversation_context",
+    "_get_debounce_redis",
+    "_get_expected_reply_reason",
+    "_get_expected_reply_type",
+    "_get_intent_queue",
+    "_get_low_confidence_retry_count",
+    "_get_policy_handler",
+    "_get_recent_service_hint",
+    "_get_routing_policy",
+    "_get_service_carryover",
+    "_get_session_memory",
+    "_get_user_branch_preference",
+    "_handle_clarify_limit_escalation",
+    "_handle_truth_gate_fallback",
+    "_has_booking_signal",
+    "_has_duration_signal",
+    "_has_explicit_service_signal",
+    "_has_price_signal",
+    "_has_timeout_slot_question_info_lock_surface",
+    "_is_booking_cancel",
+    "_is_booking_related_message",
+    "_is_booking_request",
+    "_is_booking_slot_signal",
+    "_is_booking_time_service_decision",
+    "_is_booking_verification_handoff_intent",
+    "_is_env_enabled",
+    "_is_hygiene_context_text",
+    "_is_re_entry_required",
+    "_is_reengage_confirmation_active",
+    "_is_refusal_flag_active",
+    "_is_session_memory_expired",
+    "_is_short_reply",
+    "_is_style_reference_request",
+    "_is_timeout_pending_time_slot_question",
+    "_llm_first_firebreak_semantic_reasons",
+    "_looks_like_booking_verification_request",
+    "_looks_like_carryover_followup",
+    "_looks_like_hours_followup",
+    "_looks_like_info_query",
+    "_looks_like_policy_topic",
+    "_looks_like_promo_code_request",
+    "_looks_like_time_only_request",
+    "_match_expected_reply_candidates",
+    "_match_service",
+    "_matches_guest_policy_lexicon",
+    "_maybe_store_class_carryover",
+    "_maybe_store_service_carryover",
+    "_merge_rag_scores",
+    "_next_booking_prompt",
+    "_normalize_class_name",
+    "_normalize_controller_fallback_reason",
+    "_normalize_service_text",
+    "_normalize_text",
+    "_plan_has_complete_booking_slots",
+    "_preflight_booking_block",
+    "_record_context_manager_decision",
+    "_record_decision_trace",
+    "_record_knowledge_backlog",
+    "_record_message_decision_meta",
+    "_record_session_memory_update",
+    "_register_clarify_attempt",
+    "_reset_low_confidence_retry",
+    "_resolve_action",
+    "_resolve_backlog_language",
+    "_resolve_class_router_result",
+    "_resolve_controller_signal_class",
+    "_resolve_current_goal",
+    "_resolve_policy_collect_interrupt_arbitration",
+    "_router_observability_updates_from_class_router",
+    "_run_class_router_stage",
+    "_run_intent_decomposition",
+    "_select_expected_reply_message",
+    "_select_intent_from_queue",
+    "_set_booking_context",
+    "_set_class_carryover",
+    "_set_consult_context",
+    "_set_context_manager",
+    "_set_conversation_context",
+    "_set_expected_reply_context",
+    "_set_expected_reply_type",
+    "_set_handover_confirmation",
+    "_set_intent_queue",
+    "_set_low_confidence_retry_count",
+    "_set_re_entry_required",
+    "_set_router_observability",
+    "_set_service_hint",
+    "_set_user_branch_preference",
+    "_should_block_expected_reply_by_info",
+    "_should_escalate_for_clarify",
+    "_should_escalate_to_pending",
+    "_should_preserve_active_name_time_availability_followup_owner",
+    "_should_preserve_specialist_availability_followup_owner",
+    "_should_run_booking_flow",
+    "_should_run_demo_truth_gate",
+    "_sync_canonical_dialog_state",
+    "_update_booking_from_messages",
+    "_update_compact_summary",
+    "_update_message_decision_metadata",
+    "_update_message_signal_snapshot",
+    "_update_router_sla",
+    "_update_session_memory_goal",
+    "_update_session_memory_on_answer",
+    "_validate_datetime_slot",
+    "_validate_name_slot",
+    "_verify_policy_tool_args_contract",
+    "classify_domain_with_scores",
+    "classify_intent",
+    "detect_multi_intent",
+    "detect_refusal_flags",
+    "generate_bot_response",
+    "interpret_expected_reply",
+    "is_acknowledgement_message",
+    "is_bot_status_question",
+    "is_frustration_message",
+    "is_greeting_message",
+    "is_human_request_message",
+    "is_low_signal_message",
+    "is_opt_out_message",
+    "is_rejection",
+    "is_thanks_message",
+    "load_yaml_truth",
+    "logger",
+    "normalize_for_matching",
+    "rewrite_for_service_match",
+    "route_dialogue_controller",
+    "semantic_question_type",
+    "semantic_service_match",
+    "send_telegram_notification",
+    "should_escalate",
+    "should_offer_low_confidence_retry",
+    "transition_state",
+)
 
 _SHARED_EXPORTS = {
     "BOOKING_CTA_SERVICE_INTENTS": BOOKING_CTA_SERVICE_INTENTS,
@@ -65,14 +338,54 @@ _SHARED_EXPORTS = {
     "SESSION_MEMORY_SHORT_TOKENS": SESSION_MEMORY_SHORT_TOKENS,
 }
 
-globals().update(_SHARED_EXPORTS)
+_DIRECT_EXPORTS = {
+    "_apply_consult_return": _apply_consult_return,
+    "_apply_quiet_hours_notice": _apply_quiet_hours_notice,
+    "_maybe_append_booking_cta": _maybe_append_booking_cta,
+    "send_bot_response": send_bot_response,
+}
 
-for _name, _value in _decision.__dict__.items():
-    if _name.startswith("__") or _name in _SHARED_EXPORTS:
-        continue
-    globals()[_name] = _value
+globals().update(_SHARED_EXPORTS)
+globals().update(_DIRECT_EXPORTS)
+for _name in _DECISION_EXPORTS:
+    globals()[_name] = getattr(_decision, _name)
+
+globals().update(
+    {
+        "get_active_handover": _handover_owner_get_active_handover,
+        "_reuse_active_handover": _handover_owner_reuse_active_handover,
+        "_create_pending_escalation_with_notification": (
+            _handover_owner_create_pending_escalation_with_notification
+        ),
+        "escalate_to_pending": _handover_owner_escalate_to_pending,
+        "manager_take": _handover_owner_manager_take,
+        "manager_reassign": _handover_owner_manager_reassign,
+        "manager_resolve": _handover_owner_manager_resolve,
+        "manager_return": _handover_owner_manager_return,
+        "manager_reopen": _handover_owner_manager_reopen,
+        "resolve_active_handover_rejection": _handover_owner_resolve_active_handover_rejection,
+    }
+)
+
+__all__ = sorted(
+    set(_SHARED_EXPORTS)
+    | set(_DIRECT_EXPORTS)
+    | set(_DECISION_EXPORTS)
+    | {
+        "get_active_handover",
+        "_reuse_active_handover",
+        "_create_pending_escalation_with_notification",
+        "escalate_to_pending",
+        "manager_take",
+        "manager_reassign",
+        "manager_resolve",
+        "manager_return",
+        "manager_reopen",
+        "resolve_active_handover_rejection",
+    }
+)
 
 del _decision
+del _DIRECT_EXPORTS
 del _SHARED_EXPORTS
-
-__all__ = [name for name in globals() if not name.startswith("__")]
+del _name

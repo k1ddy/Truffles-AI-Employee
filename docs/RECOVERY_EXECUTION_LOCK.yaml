@@ -1,0 +1,72 @@
+version: 2026-03-31.v1
+summary: Whole-system consultant-core architecture closure execution lock. This file outranks active derived docs when they drift.
+authority_precedence:
+- explicit_user_or_owner_instruction
+- docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md
+- docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md
+- docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md
+- docs/SOURCE_OF_TRUTH.yaml
+- docs/ACTIVE_CANON.md
+- docs/ACTIVE_PROGRAM.md
+- docs/_generated/AGENT_PACKET.md
+root_first_context:
+  external_packet_status: ready_for_external_handoff
+  current_practical_truth: r35f
+  current_practical_report: docs/REPORTS/2026-03-30-consultant-core-r35f-human-semantic-audit-a922.md
+  runtime_implementation_status: broader_live_code_reproof_block_closed_repo_side_acceptance_is_next
+  active_block: Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof
+  active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md
+  current_non_negotiable_next_move: run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim
+  historical_residue_rule: later_r36_star_and_invalidated_whole_system_closure_claims_remain_non_governing_history_while_the_live_code_reproof_block_is_active
+root_first_order:
+- governing_decision_freeze
+- authority_freeze
+- fact_contract_schema
+- narrow_fact_family_cutover
+- continuity_state_normalization
+- post_owner_semantic_constriction
+- boundary_constriction
+- pack_runtime_separation_completion
+- legacy_mesh_drain
+- shadow_lane_elimination
+- operational_entrypoint_dedupe
+- closure_claim_truth_correction_and_semantic_owner_reopen
+- semantic_owner_and_post_owner_reconstruction_reopen
+- continuity_boundary_pack_runtime_legacy_and_operational_reproof
+- replay_and_human_audit_acceptance
+allowed_work_classes:
+- governing_decision_docs
+- machine_readable_registries
+- packet_generation
+- guard_scripts
+- architecture_tests
+- report_state_structure_sync_after_full_block_completion
+forbidden_work_classes:
+- replay_or_human_audit_lane
+- symptom_family_rca
+- phase_advance_without_explicit_waiver
+- practical_truth_relabel_without_explicit_waiver
+- runtime_change_outside_active_block_mechanism_envelope
+- canon_or_state_updates_after_micro_fix_inside_unfinished_block
+phase_advance:
+  requires_explicit_owner_or_architect_waiver: true
+  waiver_file: docs/RECOVERY_PHASE_WAIVER.yaml
+  blocked_until:
+  - continuity_boundary_pack_runtime_legacy_and_operational_reproof_is_accepted
+  - replay_and_human_audit_acceptance_is_completed
+  - practical_or_product_closure_claims_remain_blocked_until_acceptance_passes
+conflict_resolution:
+  rule: if_active_docs_conflict_with_higher_precedence_governing_sources_stop_and_reconcile_to_the_higher_precedence_source
+  stop_the_line_if:
+  - active_block_tp_differs_from_lock
+  - current_practical_truth_differs_from_lock
+  - product_or_practical_closure_is_claimed_before_acceptance_passes
+  - generated_packet_claims_done_or_green_before_acceptance
+  - current_non_negotiable_next_move_drifts_away_from_replay_and_human_audit_acceptance
+  - state_or_canon_is_updated_after_micro_fix_inside_an_unfinished_block
+required_derived_docs:
+- docs/SOURCE_OF_TRUTH.yaml
+- docs/ACTIVE_CANON.md
+- docs/ACTIVE_PROGRAM.md
+- docs/_generated/AGENT_PACKET.md
+- docs/_generated/AGENT_PACKET.json

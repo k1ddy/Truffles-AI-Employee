@@ -22,6 +22,14 @@ from app.services.pack_runtime_types import PackDecision
 _KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _DEFAULT_CLIENT_SLUG = "generic"
 _PROMO_MARKERS = ("акци", "скидк", "промо", "бонус", "special offer")
+_PRICE_QUESTION_PATTERNS = (
+    re.compile(r"\bскольк\w*(?:\s+\w+){0,2}\s+сто(?:ит|ят)\b"),
+    re.compile(r"\bкак(?:ая|ова)?\s+цен\w*\b"),
+)
+_DURATION_QUESTION_PATTERNS = (
+    re.compile(r"\bскольк\w*(?:\s+\w+){0,3}\s+(?:длит|заним)\w*\b"),
+    re.compile(r"\bкак(?:\s+\w+){0,2}\s+долг\w*\b"),
+)
 
 
 @dataclass(frozen=True)
@@ -171,6 +179,13 @@ def get_signal_lexicon_list(client_slug: str | None, key: str) -> list[str]:
     payload_values = _flatten_lexicon_values(signals.get(key) if isinstance(signals, dict) else None)
     if payload_values:
         return payload_values
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    signal_lexicons = domain_pack.get("signal_lexicons") if isinstance(domain_pack, dict) else None
+    payload_values = _flatten_lexicon_values(
+        signal_lexicons.get(key) if isinstance(signal_lexicons, dict) else None
+    )
+    if payload_values:
+        return payload_values
     return get_system_lexicon_list(key)
 
 
@@ -211,6 +226,44 @@ def _contains_any(text: str, tokens: list[str]) -> bool:
     return any(token and token in text for token in tokens)
 
 
+def _contains_word(text: str, token: str) -> bool:
+    return re.search(rf"\b{re.escape(token)}\b", text) is not None
+
+
+def _contains_any_terms(
+    text: str,
+    tokens: list[str],
+    *,
+    exact_terms: set[str] | None = None,
+    stem_terms: dict[str, str] | None = None,
+) -> bool:
+    if not text:
+        return False
+    words = [token for token in text.split() if token]
+    exact_terms = {term.casefold() for term in (exact_terms or set()) if term}
+    stem_terms = {
+        str(term).casefold(): str(stem).casefold()
+        for term, stem in (stem_terms or {}).items()
+        if term and stem
+    }
+    for token in tokens:
+        candidate = str(token or "").strip().casefold()
+        if not candidate:
+            continue
+        if any(char.isspace() for char in candidate):
+            if candidate in text:
+                return True
+            continue
+        if candidate in exact_terms:
+            if any(word == candidate for word in words):
+                return True
+            continue
+        stem = stem_terms.get(candidate, candidate)
+        if any(word.startswith(stem) for word in words):
+            return True
+    return False
+
+
 def _has_price_signal(
     normalized: str,
     raw_text: str | None = None,
@@ -218,7 +271,25 @@ def _has_price_signal(
     client_slug: str | None = None,
 ) -> bool:
     text = normalized or _normalize_text(raw_text or "")
-    return _contains_any(text, get_signal_lexicon_list(client_slug, "price_keywords"))
+    if _contains_any_terms(
+        text,
+        get_signal_lexicon_list(client_slug, "price_keywords"),
+        exact_terms={"почем", "скок", "скока"},
+        stem_terms={"цена": "цен", "стоимость": "стоимост"},
+    ):
+        return True
+    if text and "во сколько" not in text:
+        colloquial_price_patterns = (
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+это\s+будет\b",
+            r"\bскольк\w*(?:\s+\w+){0,2}\s+это\s+сто(?:ит|ят)\b",
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+обойд",
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+выйдет\b",
+        )
+        if any(re.search(pattern, text) for pattern in colloquial_price_patterns):
+            return True
+    if raw_text and re.search(r"[₸$€₽]", raw_text):
+        return True
+    return any(pattern.search(text) for pattern in _PRICE_QUESTION_PATTERNS)
 
 
 def _has_duration_signal(
@@ -228,7 +299,15 @@ def _has_duration_signal(
     client_slug: str | None = None,
 ) -> bool:
     text = normalized or _normalize_text(message or "")
-    return _contains_any(text, get_signal_lexicon_list(client_slug, "duration_keywords"))
+    if _contains_any(text, get_signal_lexicon_list(client_slug, "duration_keywords")):
+        return True
+    if "по времени" in text and "скольк" in text:
+        return True
+    if any(pattern.search(text) for pattern in _DURATION_QUESTION_PATTERNS):
+        return True
+    if "время на" in text and get_pack_service_hint(message or "", client_slug=client_slug):
+        return True
+    return False
 
 
 def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> bool:
@@ -278,25 +357,58 @@ def _service_entries(truth: dict | None) -> list[dict[str, Any]]:
     return []
 
 
+def _token_matches(token: str, message_tokens: list[str]) -> bool:
+    for msg in message_tokens:
+        if msg == token:
+            return True
+        if len(token) >= 4 and len(msg) >= 4 and (msg.startswith(token) or token.startswith(msg)):
+            return True
+        if len(token) >= 6 and len(msg) >= 6:
+            common = 0
+            for left, right in zip(token, msg):
+                if left != right:
+                    break
+                common += 1
+            if common >= 5:
+                return True
+    return False
+
+
+def _service_alias_token_groups(entry: dict[str, Any]) -> list[tuple[str, ...]]:
+    values: list[str] = []
+    name = entry.get("name")
+    if isinstance(name, str) and name.strip():
+        values.append(name)
+    aliases = entry.get("aliases")
+    if isinstance(aliases, list):
+        values.extend(str(item) for item in aliases if isinstance(item, str) and item.strip())
+    groups: list[tuple[str, ...]] = []
+    for value in values:
+        tokens = tuple(token for token in _normalize_text(value).split() if token)
+        if tokens:
+            groups.append(tokens)
+    return groups
+
+
 def _match_service(normalized: str, client_slug: str) -> dict | None:
     truth = load_yaml_truth(client_slug)
     if not normalized:
         return None
-    query_tokens = set(normalized.split())
-    if not query_tokens:
+    message_tokens = [token for token in normalized.split() if token]
+    if not message_tokens:
         return None
-    best: tuple[int, dict[str, Any]] | None = None
+    best: dict[str, Any] | None = None
+    best_score: tuple[int, int] | None = None
     for item in _service_entries(truth):
-        name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        name_tokens = set(_normalize_text(name).split())
-        overlap = len(query_tokens & name_tokens)
-        if overlap <= 0:
-            continue
-        if best is None or overlap > best[0]:
-            best = (overlap, item)
-    return best[1] if best else None
+        for alias_tokens in _service_alias_token_groups(item):
+            if not alias_tokens:
+                continue
+            if all(_token_matches(token, message_tokens) for token in alias_tokens):
+                score = (len(alias_tokens), sum(len(token) for token in alias_tokens))
+                if best_score is None or score > best_score:
+                    best = item
+                    best_score = score
+    return best
 
 
 def _build_fact_meta(
@@ -341,6 +453,71 @@ def _format_hours_line(salon: dict[str, Any]) -> str | None:
     return None
 
 
+def _format_location_line(salon: dict[str, Any]) -> str | None:
+    address = salon.get("address")
+    if isinstance(address, str) and address.strip():
+        return address.strip()
+    if not isinstance(address, dict):
+        return None
+    full = address.get("full")
+    entrance = address.get("entrance")
+    parts = [str(full).strip()] if isinstance(full, str) and full.strip() else []
+    if isinstance(entrance, str) and entrance.strip():
+        parts.append(entrance.strip())
+    if not parts:
+        return None
+    return " ".join(f"Адрес: {parts[0]}." if i == 0 else part for i, part in enumerate(parts))
+
+
+def _format_parking_line(salon: dict[str, Any]) -> str | None:
+    parking = salon.get("parking")
+    if isinstance(parking, str) and parking.strip():
+        return parking.strip()
+    if isinstance(parking, dict):
+        details = parking.get("details")
+        if isinstance(details, str) and details.strip():
+            return details.strip()
+    return None
+
+
+def _format_promotions_line(source_truth: dict[str, Any]) -> str | None:
+    promotions = source_truth.get("promotions")
+    if isinstance(promotions, str) and promotions.strip():
+        return promotions.strip()
+    if isinstance(promotions, dict):
+        for key in ("reply", "summary", "text"):
+            value = promotions.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        items = promotions.get("items")
+        parts: list[str] = []
+        if isinstance(items, list):
+            for row in items[:3]:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "").strip()
+                percent = row.get("discount_percent")
+                eligibility = str(row.get("eligibility") or "").strip()
+                detail_parts = []
+                if name:
+                    detail_parts.append(name)
+                if isinstance(percent, (int, float)):
+                    detail_parts.append(f"{int(percent) if float(percent).is_integer() else percent}%")
+                if eligibility:
+                    detail_parts.append(f"({eligibility})")
+                if detail_parts:
+                    parts.append(" ".join(detail_parts))
+        stacking = str(promotions.get("stacking") or "").strip()
+        stacking_notes = str(promotions.get("stacking_notes") or "").strip()
+        if stacking:
+            parts.append(stacking)
+        if stacking_notes:
+            parts.append(stacking_notes)
+        if parts:
+            return ". ".join(parts).strip(". ") + "."
+    return None
+
+
 def format_reply_from_truth(
     intent: str,
     slots: dict | None = None,
@@ -359,15 +536,11 @@ def format_reply_from_truth(
         else {}
     )
     if normalized_intent == "location":
-        address = salon.get("address")
-        return address.strip() if isinstance(address, str) and address.strip() else None
+        return _format_location_line(salon)
     if normalized_intent == "hours":
         return _format_hours_line(salon)
     if normalized_intent == "parking":
-        parking = salon.get("parking")
-        if isinstance(parking, str) and parking.strip():
-            return parking.strip()
-        return None
+        return _format_parking_line(salon)
     if normalized_intent == "services_overview":
         summary = salon.get("services_summary")
         if isinstance(summary, str) and summary.strip():
@@ -399,15 +572,7 @@ def format_reply_from_truth(
                 return text.strip()
         return "Подскажите услугу, и я уточню цену и длительность."
     if normalized_intent == "promotions":
-        promotions = source_truth.get("promotions")
-        if isinstance(promotions, str) and promotions.strip():
-            return promotions.strip()
-        if isinstance(promotions, dict):
-            for key in ("reply", "summary", "text"):
-                value = promotions.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-        return None
+        return _format_promotions_line(source_truth)
     if normalized_intent == "off_topic":
         reply = system_messages.get("off_topic")
         if isinstance(reply, str) and reply.strip():

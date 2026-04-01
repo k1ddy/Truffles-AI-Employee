@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/semantic_decision.v1.jsonschema",
+  "title": "SemanticDecision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "requested_outcome",
+    "intent",
+    "semantic_slots",
+    "missing_information",
+    "grounding_requirements",
+    "needs_human",
+    "risk_signals"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "semantic_decision.v1"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "turn_id": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "conversation_id": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "requested_outcome": {
+      "type": "string",
+      "enum": ["fact", "collect", "handoff"]
+    },
+    "intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_id": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "tool_action_hint": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "semantic_slots": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "missing_information": {
+      "$ref": "#/$defs/missingInformation"
+    },
+    "grounding_requirements": {
+      "$ref": "#/$defs/groundingRequirements"
+    },
+    "needs_human": {
+      "type": "boolean"
+    },
+    "degrade_reason_code": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "handoff_reason_code": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "decision_summary": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "goal": {
+      "$ref": "#/$defs/nullableToken"
+    },
+    "confidence_band": {
+      "type": ["string", "null"],
+      "enum": ["high", "medium", "low", null]
+    },
+    "risk_signals": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "language": {
+      "$ref": "#/$defs/nullableToken"
+    }
+  },
+  "$defs": {
+    "nullableToken": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "missingInformation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_reply_type",
+        "reason",
+        "pending_question_act",
+        "pending_question_target",
+        "active_question_relation",
+        "next_question",
+        "open_questions"
+      ],
+      "properties": {
+        "expected_reply_type": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "reason": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "pending_question_act": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "pending_question_target": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "active_question_relation": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "next_question": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "groundingRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pack_refs",
+        "entity_refs",
+        "referents"
+      ],
+      "properties": {
+        "pack_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "entity_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "referents": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "subject_kind": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "temporal_scope": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "resolution_mode": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "resolver_id": {
+          "$ref": "#/$defs/nullableToken"
+        },
+        "resolver_version": {
+          "$ref": "#/$defs/nullableToken"
+        }
+      }
+    }
+  }
+}

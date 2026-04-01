@@ -49,6 +49,7 @@ def _load_quality_helpers():
         "LLM_QUALITY_PROGRESS_SKIP_TAGS",
         "LLM_QUALITY_REQUIRED_RUN_ARTIFACTS",
         "LLM_QUALITY_EVIDENCE_HANDOFF_REQUIRED_ARTIFACTS",
+        "LLM_QUALITY_MANUAL_AUDIT_AUX_ARTIFACTS",
         "LLM_QUALITY_SCENARIO_GOVERNANCE_REGISTRY",
         "LLM_QUALITY_SCENARIO_GOVERNANCE_SCHEMA_VERSION",
         "LLM_QUALITY_SCENARIO_REALISM_POLICY_VERSION",
@@ -137,6 +138,7 @@ def _load_quality_helpers():
         "_llm_quality_collect_hq1_classes",
         "_llm_quality_should_expect_booking_progress",
         "_llm_quality_should_promote_judge_fail",
+        "_llm_quality_collect_human_semantic_strict_reasons",
     }
 
     selected_nodes = []
@@ -161,6 +163,39 @@ def _load_quality_helpers():
     }
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace
+
+
+def _write_manual_audit_aux_artifacts(run_dir: Path):
+    (run_dir / "manual_audit_workspace.md").write_text("# workspace", encoding="utf-8")
+    (run_dir / "manual_audit_workspace.json").write_text("{}", encoding="utf-8")
+    (run_dir / "family_registry.json").write_text("{}", encoding="utf-8")
+    (run_dir / "judge_conflicts.jsonl").write_text("", encoding="utf-8")
+
+
+def _done_manual_audit_payload(run_dir: Path, run_id: str, **overrides):
+    payload = {
+        "status": "done",
+        "run_id": run_id,
+        "analyst": "a1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "analyst_root_causes": ["contract_validated"],
+        "analyst_next_steps": ["promote_next_chain_step"],
+        "findings": [],
+        "oracle_arbitration": {
+            "conflict_count": 0,
+            "judge_alignment": "not_applicable",
+            "winner": "contract",
+            "resolution_summary": "manual audit completed",
+        },
+        "artifacts": {
+            "manual_audit_workspace_markdown": str(run_dir / "manual_audit_workspace.md"),
+            "manual_audit_workspace_json": str(run_dir / "manual_audit_workspace.json"),
+            "family_registry_json": str(run_dir / "family_registry.json"),
+            "judge_conflicts_jsonl": str(run_dir / "judge_conflicts.jsonl"),
+        },
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_webhook_secret_preflight_enforces_branch_secret_match():
@@ -2030,6 +2065,60 @@ def test_judge_fail_not_promoted_on_delivery_waiver_only():
     )
 
 
+def test_human_semantic_strict_reasons_promote_required_info_miss():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_human_semantic_strict_reasons"]
+
+    reasons = collect(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        meta={"action": "fact", "intent": "pricing", "tool_action": "catalog.service_query"},
+        turn_tags=["price"],
+        expected_info_sections=["pricing", "price"],
+        actual_info_sections=["promotions"],
+        actual_info_intents=["pricing"],
+        expected_reply_type="time",
+        actual_expected_reply_type="time",
+    )
+
+    assert "human_semantic_required_info_miss" in reasons
+
+
+def test_human_semantic_strict_reasons_promote_media_consult_miss():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_human_semantic_strict_reasons"]
+
+    reasons = collect(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        meta={"action": "collect", "intent": "consult", "tool_action": "collect"},
+        turn_tags=["media"],
+        expected_info_sections=[],
+        actual_info_sections=[],
+        actual_info_intents=[],
+        expected_reply_type=None,
+        actual_expected_reply_type=None,
+    )
+
+    assert reasons == ["human_semantic_media_cue_miss"]
+
+
+def test_human_semantic_strict_reasons_promote_check_booking_recovery_miss():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_human_semantic_strict_reasons"]
+
+    reasons = collect(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        meta={"action": "fact", "intent": "check_booking", "tool_action": "calendar.get_booking"},
+        turn_tags=["confirm"],
+        expected_info_sections=[],
+        actual_info_sections=[],
+        actual_info_intents=[],
+        expected_reply_type="time",
+        actual_expected_reply_type="name",
+    )
+
+    assert reasons == ["human_semantic_check_booking_recovery_miss"]
+
+
 def test_collect_blocking_reasons_merges_hq1_counts():
     ns = _load_quality_helpers()
     collect = ns["_llm_quality_collect_blocking_reasons"]
@@ -2094,6 +2183,7 @@ def test_evidence_handoff_status_accepts_complete_bundle_with_done_manual_audit(
 
     run_dir = tmp_path / "run-complete"
     run_dir.mkdir(parents=True, exist_ok=True)
+    _write_manual_audit_aux_artifacts(run_dir)
     for artifact in (
         "summary.json",
         "brief.md",
@@ -2121,29 +2211,7 @@ def test_evidence_handoff_status_accepts_complete_bundle_with_done_manual_audit(
         encoding="utf-8",
     )
     (run_dir / "manual_audit.json").write_text(
-        json.dumps(
-            {
-                "status": "done",
-                "run_id": "run-complete",
-                "analyst": "a1",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "analyst_root_causes": ["contract_validated"],
-                "analyst_next_steps": ["promote_next_chain_step"],
-                "judge_alignment": "not_applicable",
-                "winner": "contract",
-                "resolution_summary": "manual audit completed",
-                "findings": [],
-                "oracle_arbitration": {
-                    "conflict_count": 0,
-                    "judge_alignment": "not_applicable",
-                    "winner": "contract",
-                    "resolution_summary": "manual audit completed",
-                },
-                "finding_count": 0,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        json.dumps(_done_manual_audit_payload(run_dir, "run-complete"), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -2213,6 +2281,7 @@ def test_governance_closure_status_valid_for_complete_runtime_evidence(tmp_path)
 
     run_dir = tmp_path / "run-governance-ok"
     run_dir.mkdir(parents=True, exist_ok=True)
+    _write_manual_audit_aux_artifacts(run_dir)
     for artifact in (
         "summary.json",
         "brief.md",
@@ -2246,29 +2315,7 @@ def test_governance_closure_status_valid_for_complete_runtime_evidence(tmp_path)
         encoding="utf-8",
     )
     (run_dir / "manual_audit.json").write_text(
-        json.dumps(
-            {
-                "status": "done",
-                "run_id": "run-governance-ok",
-                "analyst": "a1",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "analyst_root_causes": ["contract_validated"],
-                "analyst_next_steps": ["promote_next_chain_step"],
-                "judge_alignment": "not_applicable",
-                "winner": "contract",
-                "resolution_summary": "manual audit completed",
-                "findings": [],
-                "oracle_arbitration": {
-                    "conflict_count": 0,
-                    "judge_alignment": "not_applicable",
-                    "winner": "contract",
-                    "resolution_summary": "manual audit completed",
-                },
-                "finding_count": 0,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        json.dumps(_done_manual_audit_payload(run_dir, "run-governance-ok"), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -2639,6 +2686,7 @@ def test_manual_audit_gate_passes_when_pending_run_has_done_audit(tmp_path):
 
     run_dir = tmp_path / "run-audited"
     run_dir.mkdir()
+    _write_manual_audit_aux_artifacts(run_dir)
     summary = {
         "run_id": "run-audited",
         "quality_status": {"manual_audit_required": True},
@@ -2654,7 +2702,7 @@ def test_manual_audit_gate_passes_when_pending_run_has_done_audit(tmp_path):
         encoding="utf-8",
     )
     (run_dir / "manual_audit.json").write_text(
-        json.dumps({"status": "done"}, ensure_ascii=False, indent=2),
+        json.dumps(_done_manual_audit_payload(run_dir, "run-audited"), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -2671,6 +2719,7 @@ def test_manual_audit_sync_updates_summary_and_quality_status(tmp_path):
 
     run_dir = tmp_path / "run-audit-sync"
     run_dir.mkdir()
+    _write_manual_audit_aux_artifacts(run_dir)
     summary_path = run_dir / "summary.json"
     summary_payload = {
         "run_id": "run-audit-sync",
@@ -2690,6 +2739,10 @@ def test_manual_audit_sync_updates_summary_and_quality_status(tmp_path):
     }
     summary_path.write_text(
         json.dumps(summary_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(_done_manual_audit_payload(run_dir, "run-audit-sync"), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -2713,6 +2766,7 @@ def test_manual_audit_sync_refreshes_stale_evidence_handoff(tmp_path):
 
     run_dir = tmp_path / "run-audit-refresh"
     run_dir.mkdir()
+    _write_manual_audit_aux_artifacts(run_dir)
     summary_path = run_dir / "summary.json"
     for artifact in (
         "brief.md",
@@ -2762,29 +2816,7 @@ def test_manual_audit_sync_refreshes_stale_evidence_handoff(tmp_path):
         encoding="utf-8",
     )
     (run_dir / "manual_audit.json").write_text(
-        json.dumps(
-            {
-                "status": "done",
-                "run_id": "run-audit-refresh",
-                "analyst": "a1",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "analyst_root_causes": ["contract_validated"],
-                "analyst_next_steps": ["promote_next_chain_step"],
-                "judge_alignment": "not_applicable",
-                "winner": "contract",
-                "resolution_summary": "manual audit completed",
-                "findings": [],
-                "oracle_arbitration": {
-                    "conflict_count": 0,
-                    "judge_alignment": "not_applicable",
-                    "winner": "contract",
-                    "resolution_summary": "manual audit completed",
-                },
-                "finding_count": 0,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        json.dumps(_done_manual_audit_payload(run_dir, "run-audit-refresh"), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -2805,7 +2837,86 @@ def test_manual_audit_sync_refreshes_stale_evidence_handoff(tmp_path):
     assert updated["quality_status"]["evidence_handoff_reasons"] == []
 
 
+def test_manual_audit_sync_copies_human_semantic_verdict_into_summary(tmp_path):
+    ns = _load_quality_helpers()
+    sync_summary = ns["_llm_quality_sync_manual_audit_summary"]
+
+    run_dir = tmp_path / "run-human-semantic-sync"
+    run_dir.mkdir()
+    _write_manual_audit_aux_artifacts(run_dir)
+    summary_path = run_dir / "summary.json"
+    summary_payload = {
+        "run_id": "run-human-semantic-sync",
+        "infra_valid": True,
+        "semantic_valid": True,
+        "manual_audit": {
+            "required": True,
+            "status": "pending",
+            "path": str(run_dir / "manual_audit.md"),
+            "json_path": str(run_dir / "manual_audit.json"),
+        },
+        "quality_status": {
+            "infra_valid": True,
+            "semantic_valid": True,
+            "run_integrity_valid": True,
+            "manual_audit_required": True,
+            "manual_audit_status": "pending",
+            "manual_audit_path": str(run_dir / "manual_audit.md"),
+        },
+    }
+    summary_path.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (run_dir / "brief.md").write_text("brief", encoding="utf-8")
+    (run_dir / "scenarios.json").write_text("{\"dialogs\": []}", encoding="utf-8")
+    (run_dir / "responses.jsonl").write_text("", encoding="utf-8")
+    (run_dir / "trace_bundle.jsonl").write_text("", encoding="utf-8")
+    (run_dir / "run_manifest.json").write_text("{}", encoding="utf-8")
+    (run_dir / "manual_audit.json").write_text(
+        json.dumps(
+            _done_manual_audit_payload(
+                run_dir,
+                "run-human-semantic-sync",
+                analyst="a922",
+                analyst_root_causes=["oracle_false_green"],
+                analyst_next_steps=["strengthen_oracle"],
+                oracle_arbitration={
+                    "conflict_count": 0,
+                    "judge_alignment": "corroborated",
+                    "winner": "contract",
+                    "resolution_summary": "manual audit completed",
+                },
+                human_semantic={
+                    "valid": False,
+                    "summary": "contract-green but human-semantic red",
+                },
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    changed = sync_summary(
+        run_dir=str(run_dir),
+        status="done",
+        manual_audit_path=str(run_dir / "manual_audit.md"),
+        manual_audit_json_path=str(run_dir / "manual_audit.json"),
+    )
+
+    assert changed is True
+    updated = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert updated["contract_valid"] is True
+    assert updated["human_semantic_valid"] is False
+    assert updated["human_semantic_summary"] == "contract-green but human-semantic red"
+    assert updated["product_quality_valid"] is False
+    assert updated["quality_status"]["contract_valid"] is True
+    assert updated["quality_status"]["human_semantic_valid"] is False
+    assert updated["quality_status"]["human_semantic_summary"] == "contract-green but human-semantic red"
+    assert updated["quality_status"]["product_quality_valid"] is False
+
+
 def _write_run_summary(run_dir, run_id, *, chain_id=None):
+    _write_manual_audit_aux_artifacts(run_dir)
+    (run_dir / "manual_audit.md").write_text("# audit", encoding="utf-8")
     summary = {
         "run_id": run_id,
         "quality_status": {"manual_audit_required": True},
@@ -2833,15 +2944,12 @@ def test_forensic_sla_gate_blocks_incomplete_manual_audit_payload(tmp_path):
     _write_run_summary(run_dir, "run-audit-incomplete", chain_id="chain-a")
     (run_dir / "manual_audit.json").write_text(
         json.dumps(
-            {
-                "run_id": "run-audit-incomplete",
-                "status": "done",
-                "generated_at": "2026-02-28T10:00:00Z",
-                "analyst": "a1",
-                "analyst_root_causes": ["reason"],
-                "analyst_next_steps": ["step"],
-                "findings": [],
-            },
+            _done_manual_audit_payload(
+                run_dir,
+                "run-audit-incomplete",
+                generated_at="2026-02-28T10:00:00Z",
+                oracle_arbitration=None,
+            ),
             ensure_ascii=False,
             indent=2,
         ),
@@ -2868,21 +2976,20 @@ def test_oracle_conflict_gate_blocks_when_conflict_winner_is_not_contract(tmp_pa
     _write_run_summary(run_dir, "run-oracle-conflict", chain_id="chain-a")
     (run_dir / "manual_audit.json").write_text(
         json.dumps(
-            {
-                "run_id": "run-oracle-conflict",
-                "status": "done",
-                "generated_at": "2026-02-28T10:00:00Z",
-                "analyst": "a1",
-                "analyst_root_causes": ["judge mismatch"],
-                "analyst_next_steps": ["fix rubric"],
-                "findings": [{"id": "judge_eval_conflict", "severity": "medium"}],
-                "oracle_arbitration": {
+            _done_manual_audit_payload(
+                run_dir,
+                "run-oracle-conflict",
+                generated_at="2026-02-28T10:00:00Z",
+                analyst_root_causes=["judge mismatch"],
+                analyst_next_steps=["fix rubric"],
+                findings=[{"id": "judge_eval_conflict", "severity": "medium"}],
+                oracle_arbitration={
                     "judge_alignment": "conflicted",
                     "winner": "judge",
                     "conflict_count": 1,
                     "resolution_summary": "picked judge verdict",
                 },
-            },
+            ),
             ensure_ascii=False,
             indent=2,
         ),
@@ -2909,21 +3016,19 @@ def test_forensic_sla_gate_filters_latest_run_by_chain_id(tmp_path):
     _write_run_summary(run_chain, "run-chain-a", chain_id="chain-a")
     (run_chain / "manual_audit.json").write_text(
         json.dumps(
-            {
-                "run_id": "run-chain-a",
-                "status": "done",
-                "generated_at": "2026-03-01T08:00:00Z",
-                "analyst": "a1",
-                "analyst_root_causes": ["stable"],
-                "analyst_next_steps": ["continue"],
-                "findings": [],
-                "oracle_arbitration": {
+            _done_manual_audit_payload(
+                run_chain,
+                "run-chain-a",
+                generated_at="2026-03-01T08:00:00Z",
+                analyst_root_causes=["stable"],
+                analyst_next_steps=["continue"],
+                oracle_arbitration={
                     "judge_alignment": "corroborated",
                     "winner": "contract",
                     "conflict_count": 0,
                     "resolution_summary": "aligned",
                 },
-            },
+            ),
             ensure_ascii=False,
             indent=2,
         ),
@@ -2935,15 +3040,15 @@ def test_forensic_sla_gate_filters_latest_run_by_chain_id(tmp_path):
     _write_run_summary(run_other, "run-chain-b-invalid", chain_id="chain-b")
     (run_other / "manual_audit.json").write_text(
         json.dumps(
-            {
-                "run_id": "run-chain-b-invalid",
-                "status": "done",
-                "generated_at": "2026-03-01T08:00:01Z",
-                "analyst": "a2",
-                "analyst_root_causes": ["missing arbitration"],
-                "analyst_next_steps": ["fix"],
-                "findings": [],
-            },
+            _done_manual_audit_payload(
+                run_other,
+                "run-chain-b-invalid",
+                generated_at="2026-03-01T08:00:01Z",
+                analyst="a2",
+                analyst_root_causes=["missing arbitration"],
+                analyst_next_steps=["fix"],
+                oracle_arbitration=None,
+            ),
             ensure_ascii=False,
             indent=2,
         ),
@@ -2986,21 +3091,19 @@ def test_oracle_conflict_gate_filters_latest_run_by_chain_id(tmp_path):
     _write_run_summary(run_chain, "run-oracle-chain-a", chain_id="chain-a")
     (run_chain / "manual_audit.json").write_text(
         json.dumps(
-            {
-                "run_id": "run-oracle-chain-a",
-                "status": "done",
-                "generated_at": "2026-03-01T08:10:00Z",
-                "analyst": "a1",
-                "analyst_root_causes": ["none"],
-                "analyst_next_steps": ["continue"],
-                "findings": [],
-                "oracle_arbitration": {
+            _done_manual_audit_payload(
+                run_chain,
+                "run-oracle-chain-a",
+                generated_at="2026-03-01T08:10:00Z",
+                analyst_root_causes=["none"],
+                analyst_next_steps=["continue"],
+                oracle_arbitration={
                     "judge_alignment": "corroborated",
                     "winner": "contract",
                     "conflict_count": 0,
                     "resolution_summary": "aligned",
                 },
-            },
+            ),
             ensure_ascii=False,
             indent=2,
         ),
@@ -3012,21 +3115,21 @@ def test_oracle_conflict_gate_filters_latest_run_by_chain_id(tmp_path):
     _write_run_summary(run_other, "run-oracle-chain-b-conflict", chain_id="chain-b")
     (run_other / "manual_audit.json").write_text(
         json.dumps(
-            {
-                "run_id": "run-oracle-chain-b-conflict",
-                "status": "done",
-                "generated_at": "2026-03-01T08:10:01Z",
-                "analyst": "a2",
-                "analyst_root_causes": ["judge mismatch"],
-                "analyst_next_steps": ["fix rubric"],
-                "findings": [{"id": "judge_eval_conflict", "severity": "medium"}],
-                "oracle_arbitration": {
+            _done_manual_audit_payload(
+                run_other,
+                "run-oracle-chain-b-conflict",
+                generated_at="2026-03-01T08:10:01Z",
+                analyst="a2",
+                analyst_root_causes=["judge mismatch"],
+                analyst_next_steps=["fix rubric"],
+                findings=[{"id": "judge_eval_conflict", "severity": "medium"}],
+                oracle_arbitration={
                     "judge_alignment": "conflicted",
                     "winner": "judge",
                     "conflict_count": 1,
                     "resolution_summary": "picked judge",
                 },
-            },
+            ),
             ensure_ascii=False,
             indent=2,
         ),

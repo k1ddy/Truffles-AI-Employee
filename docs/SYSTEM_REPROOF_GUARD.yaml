@@ -1,0 +1,74 @@
+version: 2026-03-31.v1
+hotspots:
+  - path: truffles-api/app/core/dialog_state_service.py
+    required_function_defs:
+      - project_context_manager_pending_question_contract
+      - restore_pending_resume_payload
+      - derive_pending_resume_reason
+      - derive_pending_booking_resume_boundary_payload
+  - path: truffles-api/app/services/state_service.py
+    required_function_defs:
+      - _prepare_pending_handoff_resume_boundary_restore
+      - _prepare_resolved_handoff_resume_boundary_restore
+  - path: truffles-api/app/services/outbox_runtime_service.py
+    required_function_defs:
+      - run_canonical_outbox_process
+      - run_default_outbox_process
+      - run_scoped_outbox_process
+      - run_outbox_worker_cycle
+function_call_contracts:
+  - path: truffles-api/app/core/dialog_state_service.py
+    function_name: restore_pending_resume_payload
+    required_calls:
+      - build_context_manager_compatibility_snapshot
+      - project_context_manager_pending_question_contract
+    forbidden_calls:
+      - project_context_pending_question_contract
+  - path: truffles-api/app/core/dialog_state_service.py
+    function_name: derive_pending_resume_reason
+    required_calls:
+      - project_context_manager_pending_question_contract
+    forbidden_calls:
+      - project_context_pending_question_contract
+  - path: truffles-api/app/core/dialog_state_service.py
+    function_name: derive_pending_booking_resume_boundary_payload
+    required_calls:
+      - project_context_manager_pending_question_contract
+    forbidden_calls:
+      - project_context_pending_question_contract
+  - path: truffles-api/app/services/state_service.py
+    function_name: _prepare_pending_handoff_resume_boundary_restore
+    required_calls:
+      - project_context_manager_pending_question_contract
+    forbidden_calls:
+      - _derive_pending_resume_reason
+  - path: truffles-api/app/services/state_service.py
+    function_name: _prepare_resolved_handoff_resume_boundary_restore
+    required_calls:
+      - project_context_manager_pending_question_contract
+    forbidden_calls:
+      - _derive_pending_resume_reason
+  - path: truffles-api/app/services/outbox_runtime_service.py
+    function_name: run_default_outbox_process
+    required_calls:
+      - run_canonical_outbox_process
+  - path: truffles-api/app/services/outbox_runtime_service.py
+    function_name: run_scoped_outbox_process
+    required_calls:
+      - run_canonical_outbox_process
+  - path: truffles-api/app/services/outbox_runtime_service.py
+    function_name: run_outbox_worker_cycle
+    required_calls:
+      - run_canonical_outbox_process
+function_source_contracts:
+  - path: truffles-api/app/services/state_service.py
+    function_name: _prepare_pending_handoff_resume_boundary_restore
+    forbidden_substrings:
+      - 'boundary_payload.get("expected_reply_type")'
+  - path: truffles-api/app/services/state_service.py
+    function_name: _prepare_resolved_handoff_resume_boundary_restore
+    forbidden_substrings:
+      - 'boundary_payload.get("expected_reply_type")'
+      - 'canonical_reason or _derive_pending_resume_reason(context)'
+required_checks:
+  - python3 scripts/system_reproof_guard.py

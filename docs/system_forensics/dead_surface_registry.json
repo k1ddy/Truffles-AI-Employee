@@ -1,0 +1,807 @@
+{
+  "schema_version": "v4",
+  "status": "machine_readable_system_reproof_base",
+  "current_practical_truth": "r35f",
+  "external_packet_status": "ready_for_external_handoff",
+  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "caller_proof_law": {
+    "policy": "No legacy mesh surface may be treated as adapter-only, shadow-only, unmounted, or delete-ready without exact caller proof from live code while the live-code reproof block is active and acceptance remains pending.",
+    "behavior_owning_surfaces": [
+      "truffles-api/app/routers/webhook/http.py",
+      "truffles-api/app/routers/webhook/session_memory.py"
+    ],
+    "shadow_only_surfaces": [
+      "truffles-api/app/routers/webhook/_legacy.py",
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/tests/support_booking_prompt_owner_shadow.py",
+      "truffles-api/tests/support_reasoning_core_shadow.py",
+      "truffles-api/tests/support_legacy_webhook_shadow.py"
+    ],
+    "evidence": [
+      "docs/DECISIONS/DEC-2026-03-30-consultant-core-architecture-recovery-governing-decision.md",
+      "docs/REPORTS/2026-03-30-consultant-core-adapter-only-legacy-mesh-and-caller-proof-a922.md",
+      "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+      "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+      "scripts/legacy_mesh_caller_guard.py",
+      "truffles-api/app/core/consultant_runtime.py",
+      "truffles-api/app/routers/webhook/http.py",
+      "truffles-api/app/routers/webhook/session_memory.py",
+      "truffles-api/tests/architecture/test_legacy_mesh_caller_proof.py",
+      "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+      "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+      "scripts/legacy_drain_closure_guard.py",
+      "truffles-api/tests/architecture/test_legacy_drain_closure_guard.py",
+      "truffles-api/app/routers/webhook/__init__.py",
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/system_forensics/legacy_caller_surface.json",
+      "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+      "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+      "scripts/shadow_lane_elimination_guard.py",
+      "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py",
+      "docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml",
+      "docs/REPORTS/2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md",
+      "scripts/operational_entrypoint_dedupe_guard.py",
+      "truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py"
+    ],
+    "mounted_ingress_surfaces": [
+      "truffles-api/app/main.py",
+      "truffles-api/app/routers/webhook/__init__.py",
+      "truffles-api/app/routers/webhook/http.py"
+    ],
+    "observer_only_surfaces": [
+      "truffles-api/app/routers/webhook/trace.py"
+    ],
+    "unmounted_surfaces": [
+      "truffles-api/app/routers/webhook/booking.py",
+      "truffles-api/app/routers/webhook/context_manager.py",
+      "truffles-api/app/routers/webhook/dedup.py",
+      "truffles-api/app/routers/webhook/guards.py",
+      "truffles-api/app/routers/webhook/info.py",
+      "truffles-api/app/routers/webhook/pending.py",
+      "truffles-api/app/routers/webhook/policy.py",
+      "truffles-api/app/routers/webhook/response.py"
+    ],
+    "removed_surfaces": [
+      "truffles-api/app/core/booking_prompt_owner.py",
+      "truffles-api/app/services/reasoning_core.py",
+      "truffles-api/app/webhook.py"
+    ],
+    "adapter_only_for_touched_envelope": [
+      "truffles-api/app/routers/webhook/http.py",
+      "truffles-api/app/routers/webhook/session_memory.py"
+    ],
+    "startup_load_drained_from_package_root": [
+      "truffles-api/app/routers/webhook/booking.py",
+      "truffles-api/app/routers/webhook/context_manager.py",
+      "truffles-api/app/routers/webhook/dedup.py",
+      "truffles-api/app/routers/webhook/response.py"
+    ],
+    "unreachable_for_touched_envelope": [
+      "truffles-api/app/routers/webhook/_legacy.py",
+      "truffles-api/app/routers/webhook/booking.py",
+      "truffles-api/app/routers/webhook/context_manager.py",
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/app/routers/webhook/dedup.py",
+      "truffles-api/app/routers/webhook/guards.py",
+      "truffles-api/app/routers/webhook/info.py",
+      "truffles-api/app/routers/webhook/pending.py",
+      "truffles-api/app/routers/webhook/policy.py",
+      "truffles-api/app/routers/webhook/response.py"
+    ]
+  },
+  "entries": [
+    {
+      "surface_path": "truffles-api/app/core/booking_prompt_owner.py",
+      "path_exists_expected": false,
+      "static_app_importers": [],
+      "test_only_importers": [],
+      "confidence": "high",
+      "surface_id": "booking_prompt_owner_runtime_file",
+      "surface_kind": "runtime_owner_surface",
+      "classification": "removed_runtime_owner_surface",
+      "current_role": "removed runtime owner lane that no longer exists in app/core",
+      "authority_mode": "removed",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep removed",
+      "evidence": [
+        "truffles-api/tests/architecture/test_legacy_freeze_guard.py"
+      ]
+    },
+    {
+      "surface_path": "truffles-api/app/main.py",
+      "path_exists_expected": true,
+      "static_app_importers": [],
+      "test_only_importers": [
+        "truffles-api/tests/test_admin_health_cache.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_provider_gateway_inbound.py",
+        "truffles-api/tests/test_provider_gateway_outbound.py"
+      ],
+      "confidence": "high",
+      "surface_id": "fastapi_composition_root",
+      "surface_kind": "composition_root",
+      "classification": "mounted_live_composition_root",
+      "current_role": "mounted FastAPI composition root that includes the webhook package router",
+      "authority_mode": "composition_root_only",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [
+        "truffles-api/app/main.py"
+      ],
+      "hot_path_reachable": true,
+      "target_fate": "remain mounted until a different ingress composition root is explicitly adopted",
+      "evidence": [
+        "truffles-api/app/main.py",
+        "docs/system_forensics/authority_registry.json"
+      ]
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/__init__.py",
+      "path_exists_expected": true,
+      "static_app_importers": [],
+      "test_only_importers": [],
+      "confidence": "high",
+      "surface_id": "webhook_package_surface",
+      "surface_kind": "package_surface",
+      "classification": "mounted_live_package_surface",
+      "current_role": "live package export surface that exposes the mounted webhook router and startup-loaded compatibility helpers",
+      "authority_mode": "package_export_only",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [
+        "truffles-api/app/main.py"
+      ],
+      "route_registration_paths": [
+        "truffles-api/app/main.py",
+        "truffles-api/app/routers/webhook/__init__.py"
+      ],
+      "hot_path_reachable": true,
+      "target_fate": "remain live while the modular webhook package stays canonical",
+      "evidence": [
+        "truffles-api/app/main.py",
+        "truffles-api/app/routers/webhook/__init__.py"
+      ]
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/_legacy.py",
+      "path_exists_expected": true,
+      "static_app_importers": [],
+      "test_only_importers": [
+        "truffles-api/tests/test_booking_appointments.py",
+        "truffles-api/tests/test_booking_info_interrupt_contract.py",
+        "truffles-api/tests/test_consult_followup_guard.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_policy_handler_runtime.py",
+        "truffles-api/tests/test_state_service.py",
+        "truffles-api/tests/test_webhook_response.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_adapter_bus",
+      "surface_kind": "frozen_legacy_adapter_module",
+      "classification": "shadow_only_test_compatibility_bus",
+      "current_role": "compatibility adapter bus retained for tests and explicit shadow residue only; no app-runtime importers remain",
+      "authority_mode": "shadow_only_test_bus",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep shadow-only until tests migrate off the adapter bus, then delete",
+      "evidence": [
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "truffles-api/tests/architecture/test_legacy_freeze_guard.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/booking.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/booking_signal_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/expected_reply_interrupt_runtime.py",
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/__init__.py",
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "truffles-api/tests/test_booking_appointments.py",
+        "truffles-api/tests/test_booking_prompt_leak_guard.py",
+        "truffles-api/tests/test_capabilities_runtime.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_webhook_booking.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_booking_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "lazy_export_only_unmounted_legacy_helper",
+      "current_role": "legacy helper reachable only through lazy compatibility export or sibling legacy imports; no eager startup load on the mounted package root",
+      "authority_mode": "lazy_export_legacy_helper",
+      "caller_proof_status": "startup_drain_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "delete or shadow-only once sibling legacy callers are drained; startup load is already removed from the mounted package root",
+      "evidence": [
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "startup_load_mode": "lazy_export_only",
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/context_manager.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/branch_selection.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/policy.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/routers/webhook/shield.py",
+        "truffles-api/app/routers/webhook/trace.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/__init__.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_context_manager_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "lazy_export_only_unmounted_legacy_helper",
+      "current_role": "legacy helper reachable only through lazy compatibility export or sibling legacy imports; no eager startup load on the mounted package root",
+      "authority_mode": "lazy_export_legacy_helper",
+      "caller_proof_status": "startup_drain_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "delete or shadow-only once sibling legacy callers are drained; startup load is already removed from the mounted package root",
+      "evidence": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "startup_load_mode": "lazy_export_only",
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/decision.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/_legacy.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/__init__.py",
+        "truffles-api/tests/support_booking_prompt_owner_shadow.py",
+        "truffles-api/tests/test_booking_info_interrupt_contract.py",
+        "truffles-api/tests/test_booking_prompt_leak_guard.py",
+        "truffles-api/tests/test_booking_relative_date_resolution.py",
+        "truffles-api/tests/test_knowledge_safe_mode_gate.py",
+        "truffles-api/tests/test_llm_policy_core.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_pending_pack_lexicons.py",
+        "truffles-api/tests/test_reasoning_core.py",
+        "truffles-api/tests/test_safe_mode_gate.py",
+        "truffles-api/tests/test_state_service.py",
+        "truffles-api/tests/test_webhook_dedup.py",
+        "truffles-api/tests/test_webhook_marketing_reply_context.py"
+      ],
+      "confidence": "high",
+      "surface_id": "decision_router_surface",
+      "surface_kind": "frozen_legacy_router_module",
+      "classification": "shadow_only_test_compatibility_surface",
+      "current_role": "frozen compatibility reservoir no longer on the mounted ingress path; reachable only through lazy package export or shadow importers",
+      "authority_mode": "shadow_only_test_router",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep frozen until every lazy or shadow caller is drained, then delete or collapse to zero-logic adapters",
+      "evidence": [
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/dedup.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/decision.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "truffles-api/tests/test_reasoning_core.py",
+        "truffles-api/tests/test_state_service.py",
+        "truffles-api/tests/test_webhook_dedup.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_dedup_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "lazy_export_only_unmounted_legacy_helper",
+      "current_role": "legacy helper reachable only through lazy compatibility export or sibling legacy imports; no eager startup load on the mounted package root",
+      "authority_mode": "lazy_export_legacy_helper",
+      "caller_proof_status": "startup_drain_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "delete or shadow-only once sibling legacy callers are drained; startup load is already removed from the mounted package root",
+      "evidence": [
+        "truffles-api/app/routers/webhook/dedup.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "startup_load_mode": "lazy_export_only",
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/guards.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/dedup.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/__init__.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_webhook_dedup.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_guard_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "unmounted_legacy_helper_surface",
+      "current_role": "legacy guard helper surface imported only by sibling legacy modules in app code",
+      "authority_mode": "legacy_sibling_helper",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "demote to adapter-only or shadow-only after sibling legacy callers are drained",
+      "evidence": [
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/http.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/__init__.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/support_legacy_webhook_shadow.py",
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "truffles-api/tests/test_branch_routing_instance.py",
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "confidence": "high",
+      "surface_id": "webhook_http_router",
+      "surface_kind": "router_module",
+      "classification": "mounted_live_ingress_router",
+      "current_role": "actual mounted webhook ingress handlers plus the explicit preflight bridge; adapter-only for the touched canary envelope",
+      "authority_mode": "behavior_owning_legacy_boundary",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "route_registration_paths": [
+        "truffles-api/app/routers/webhook/__init__.py",
+        "truffles-api/app/main.py"
+      ],
+      "hot_path_reachable": true,
+      "target_fate": "remain only until ingress preflight is reduced to a dedicated boundary adapter or replaced entirely",
+      "evidence": [
+        "truffles-api/app/routers/webhook/http.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "adapter_only_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/info.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/booking_signal_runtime.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/expected_reply_interrupt_runtime.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "truffles-api/tests/test_booking_info_interrupt_contract.py",
+        "truffles-api/tests/test_cross_domain_signal_contract_suite.py",
+        "truffles-api/tests/test_info_master_long_hair.py",
+        "truffles-api/tests/test_master_info_flow.py",
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_info_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "unmounted_legacy_helper_surface",
+      "current_role": "legacy info helper surface with only sibling legacy and shadow importers in app code",
+      "authority_mode": "legacy_sibling_helper",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "demote to adapter-only or shadow-only after sibling legacy callers are drained",
+      "evidence": [
+        "truffles-api/app/routers/webhook/info.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/pending.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/decision.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/test_pending_pack_lexicons.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_pending_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "unmounted_legacy_helper_surface",
+      "current_role": "legacy pending helper surface imported only by frozen sibling decision residue in app code",
+      "authority_mode": "legacy_sibling_helper",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "demote to shadow-only and delete once decision residue is drained",
+      "evidence": [
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/policy.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/booking_runtime.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_policy_handler_runtime.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_policy_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "unmounted_legacy_helper_surface",
+      "current_role": "legacy policy helper surface with only sibling legacy and shadow importers in app code",
+      "authority_mode": "legacy_sibling_helper",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "demote to adapter-only or shadow-only after sibling legacy callers are drained",
+      "evidence": [
+        "truffles-api/app/routers/webhook/policy.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/response.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/routers/webhook/_legacy.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/info.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/test_consult_followup_guard.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_message_endpoint.py",
+        "truffles-api/tests/test_webhook_response.py"
+      ],
+      "confidence": "high",
+      "surface_id": "legacy_response_helpers",
+      "surface_kind": "frozen_legacy_helper_module",
+      "classification": "lazy_export_only_unmounted_legacy_helper",
+      "current_role": "legacy helper reachable only through lazy compatibility export or sibling legacy imports; no eager startup load on the mounted package root",
+      "authority_mode": "lazy_export_legacy_helper",
+      "caller_proof_status": "startup_drain_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "delete or shadow-only once sibling legacy callers are drained; startup load is already removed from the mounted package root",
+      "evidence": [
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "startup_load_mode": "lazy_export_only",
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/session_memory.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "confidence": "high",
+      "surface_id": "webhook_session_memory",
+      "surface_kind": "legacy_helper_module",
+      "classification": "live_legacy_control_turn_helper",
+      "current_role": "legacy session-memory helper now limited to reset-only control-turn and observability support; adapter-only for the touched canary envelope",
+      "authority_mode": "behavior_owning_legacy_control_helper",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "route_registration_paths": [],
+      "hot_path_reachable": true,
+      "target_fate": "remain only until reset/control semantics move behind a dedicated canonical boundary adapter",
+      "evidence": [
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/__init__.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "scripts/legacy_drain_closure_guard.py",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
+      ],
+      "family_envelope_status": "adapter_only_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/routers/webhook/trace.py",
+      "path_exists_expected": true,
+      "static_app_importers": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/branch_selection.py",
+        "truffles-api/app/routers/webhook/class_router_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/dedup.py",
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/policy.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/app/routers/webhook/shield.py",
+        "truffles-api/app/services/console_consultant_verification.py",
+        "truffles-api/app/services/outbox_runtime_service.py"
+      ],
+      "test_only_importers": [
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "truffles-api/tests/test_demo_salon_eval.py",
+        "truffles-api/tests/test_reasoning_core.py",
+        "truffles-api/tests/test_shield_trace_contract.py",
+        "truffles-api/tests/test_webhook_marketing_reply_context.py"
+      ],
+      "confidence": "high",
+      "surface_id": "webhook_trace_helpers",
+      "surface_kind": "legacy_helper_module",
+      "classification": "live_legacy_observer_adapter",
+      "current_role": "trace/meta helper surface still imported by live runtime and outbox paths but not used as semantic authority",
+      "authority_mode": "adapter_only_observer",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/services/outbox_runtime_service.py",
+        "truffles-api/app/services/console_consultant_verification.py"
+      ],
+      "route_registration_paths": [],
+      "hot_path_reachable": true,
+      "target_fate": "keep only as observer adapter until trace/meta ownership is fully detached from webhook-era modules",
+      "evidence": [
+        "truffles-api/app/routers/webhook/trace.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/services/outbox_runtime_service.py"
+      ]
+    },
+    {
+      "surface_path": "truffles-api/app/services/reasoning_core.py",
+      "path_exists_expected": false,
+      "static_app_importers": [],
+      "test_only_importers": [],
+      "confidence": "high",
+      "surface_id": "reasoning_core_shadow_delegate",
+      "surface_kind": "legacy_runtime_shim",
+      "classification": "removed_runtime_shadow_wrapper",
+      "current_role": "removed runtime wrapper lane whose former contract now survives only in test shadow support",
+      "authority_mode": "removed",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep removed",
+      "evidence": [
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "scripts/shadow_lane_elimination_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/app/webhook.py",
+      "path_exists_expected": false,
+      "static_app_importers": [],
+      "test_only_importers": [],
+      "confidence": "high",
+      "surface_id": "legacy_root_webhook_wrapper",
+      "surface_kind": "legacy_wrapper",
+      "classification": "removed_runtime_shadow_wrapper",
+      "current_role": "removed runtime wrapper lane whose former contract now survives only in test shadow support",
+      "authority_mode": "removed",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep removed",
+      "evidence": [
+        "truffles-api/tests/support_legacy_webhook_shadow.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "scripts/shadow_lane_elimination_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py"
+      ],
+      "family_envelope_status": "unreachable_for_touched_envelope"
+    },
+    {
+      "surface_path": "truffles-api/tests/support_booking_prompt_owner_shadow.py",
+      "path_exists_expected": true,
+      "static_app_importers": [],
+      "test_only_importers": [
+        "truffles-api/tests/test_reasoning_core.py"
+      ],
+      "confidence": "high",
+      "surface_id": "booking_prompt_owner_shadow_support",
+      "surface_kind": "test_shadow_support",
+      "classification": "shadow_only_test_residue",
+      "current_role": "shadow-only test helper that documents the removed booking prompt owner path",
+      "authority_mode": "shadow_only_test_support",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep shadow-only until tests no longer need the residue contract",
+      "evidence": [
+        "truffles-api/tests/support_booking_prompt_owner_shadow.py",
+        "truffles-api/tests/test_reasoning_core.py"
+      ]
+    },
+    {
+      "surface_path": "truffles-api/tests/support_legacy_webhook_shadow.py",
+      "path_exists_expected": true,
+      "static_app_importers": [],
+      "test_only_importers": [
+        "truffles-api/tests/test_booking_chaos_dialogs.py",
+        "truffles-api/tests/test_message_endpoint.py"
+      ],
+      "confidence": "high",
+      "surface_id": "support_legacy_webhook_shadow",
+      "surface_kind": "test_shadow_support",
+      "classification": "shadow_only_test_residue",
+      "current_role": "test-only shadow support preserving the removed runtime wrapper contract",
+      "authority_mode": "shadow_only_test_support",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep shadow-only until deterministic tests no longer need the residue contract",
+      "evidence": [
+        "truffles-api/tests/support_legacy_webhook_shadow.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "scripts/shadow_lane_elimination_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py"
+      ]
+    },
+    {
+      "surface_path": "truffles-api/tests/support_reasoning_core_shadow.py",
+      "path_exists_expected": true,
+      "static_app_importers": [],
+      "test_only_importers": [
+        "truffles-api/tests/test_outbox_payload_contract.py",
+        "truffles-api/tests/test_reasoning_core.py"
+      ],
+      "confidence": "high",
+      "surface_id": "support_reasoning_core_shadow",
+      "surface_kind": "test_shadow_support",
+      "classification": "shadow_only_test_residue",
+      "current_role": "test-only shadow support preserving the removed runtime wrapper contract",
+      "authority_mode": "shadow_only_test_support",
+      "caller_proof_status": "live_code_verified",
+      "live_runtime_callers": [],
+      "route_registration_paths": [],
+      "hot_path_reachable": false,
+      "target_fate": "keep shadow-only until deterministic tests no longer need the residue contract",
+      "evidence": [
+        "truffles-api/tests/support_reasoning_core_shadow.py",
+        "docs/SHADOW_LANE_ELIMINATION_GUARD.yaml",
+        "scripts/shadow_lane_elimination_guard.py",
+        "docs/REPORTS/2026-03-31-consultant-core-shadow-lane-elimination-a922.md",
+        "truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py"
+      ]
+    }
+  ],
+  "scope_note": "Whole-system Governance Closure is active. Runtime shadow wrapper files remain removed, router shadow surfaces remain outside live app runtime, and operational entry surfaces remain deduped on shared runtime owners.",
+  "authority_freeze_scope": {
+    "policy": "Frozen legacy surfaces may only transport, adapt, shadow, or remain unmounted while caller proof is completed; they may not regain semantic, continuity, fact, or boundary authority.",
+    "frozen_adapter_only_modules": [
+      "truffles-api/app/routers/webhook/info.py",
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/app/routers/webhook/response.py",
+      "truffles-api/app/routers/webhook/context_manager.py"
+    ],
+    "shadow_or_wrapper_candidates": [],
+    "delete_or_drain_candidates": [
+      "truffles-api/app/routers/webhook/info.py",
+      "truffles-api/app/routers/webhook/decision.py",
+      "truffles-api/app/routers/webhook/response.py",
+      "truffles-api/app/routers/webhook/context_manager.py"
+    ],
+    "evidence": [
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/system_forensics/legacy_caller_surface.json",
+      "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md",
+      "docs/system_forensics/RUNTIME_ARCHITECTURE.md"
+    ]
+  }
+}

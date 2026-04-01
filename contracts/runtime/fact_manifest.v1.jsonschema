@@ -1,0 +1,148 @@
+{
+  "$defs": {
+    "FactCompanionGroupV1": {
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "members": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "requested_ref_policies": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Requested Ref Policies",
+          "type": "object"
+        },
+        "composition_mode": {
+          "default": "companion_allowed",
+          "enum": [
+            "single_only",
+            "companion_allowed",
+            "bundle_required"
+          ],
+          "title": "Composition Mode",
+          "type": "string"
+        },
+        "renderer_id": {
+          "title": "Renderer Id",
+          "type": "string"
+        },
+        "provenance_sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Provenance Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "group_id",
+        "renderer_id"
+      ],
+      "title": "FactCompanionGroupV1",
+      "type": "object"
+    },
+    "FactManifestEntryV1": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_ref": {
+          "title": "Canonical Ref",
+          "type": "string"
+        },
+        "scope_namespace": {
+          "title": "Scope Namespace",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "resolver_id": {
+          "title": "Resolver Id",
+          "type": "string"
+        },
+        "renderer_id": {
+          "title": "Renderer Id",
+          "type": "string"
+        },
+        "provenance_sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Provenance Sources",
+          "type": "array"
+        },
+        "companion_group_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Companion Group Id"
+        }
+      },
+      "required": [
+        "canonical_ref",
+        "scope_namespace",
+        "resolver_id",
+        "renderer_id"
+      ],
+      "title": "FactManifestEntryV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "fact_manifest.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "manifest_id": {
+      "default": "default_fact_manifest.v1",
+      "title": "Manifest Id",
+      "type": "string"
+    },
+    "namespace": {
+      "default": "consultant_core",
+      "title": "Namespace",
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/FactManifestEntryV1"
+      },
+      "title": "Entries",
+      "type": "array"
+    },
+    "companion_groups": {
+      "items": {
+        "$ref": "#/$defs/FactCompanionGroupV1"
+      },
+      "title": "Companion Groups",
+      "type": "array"
+    }
+  },
+  "title": "FactManifestV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/fact_manifest.v1.jsonschema"
+}

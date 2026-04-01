@@ -1,0 +1,1118 @@
+{
+  "schema_version": "v3",
+  "status": "machine_readable_system_reproof_base",
+  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "current_practical_truth": "r35f",
+  "external_packet_status": "ready_for_external_handoff",
+  "canonical_owner_paths": [
+    "truffles-api/app/core/dialog_state_service.py",
+    "truffles-api/app/core/consultant_runtime.py"
+  ],
+  "freeze_guard": {
+    "policy": "No new compatibility-carrier writers may be introduced while live-code reproof closeout is active and acceptance remains blocked pending replay and human semantic audit.",
+    "allowed_new_writer_paths": [
+      "truffles-api/app/core/dialog_state_service.py"
+    ],
+    "guarded_context_tokens": [
+      "consultant_runtime",
+      "canonical_dialog_state",
+      "booking",
+      "expected_reply_type",
+      "expected_reply_reason",
+      "current_goal",
+      "service_carryover",
+      "consult_context",
+      "class_carryover",
+      "session_memory",
+      "pending_resume",
+      "intent_queue",
+      "last_service_hint",
+      "last_service_hint_at",
+      "re_entry_required",
+      "handover_confirmation",
+      "reengage_confirmation",
+      "asr_confirm_pending",
+      "asr_inflight",
+      "style_reference_pending",
+      "memory_profile",
+      "memory_pending"
+    ],
+    "evidence": [
+      "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+      "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+      "truffles-api/app/core/dialog_state_service.py",
+      "truffles-api/app/routers/webhook/context_manager.py",
+      "truffles-api/app/services/state_service.py",
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md"
+    ]
+  },
+  "reader_precedence_law": {
+    "default_order": [
+      "Read canonical runtime state first: consultant_runtime.dialog_state and consultant_runtime.booking_payload.",
+      "Use consultant_runtime.conversation_projection and consultant_runtime.turn_journal only as derived read models.",
+      "Use pending_resume only for controlled suspend/restore and boundary recovery flows.",
+      "Treat top-level compatibility carriers as migration shadows or adapters; they may not override canonical runtime truth."
+    ],
+    "evidence": [
+      "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+      "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+      "truffles-api/app/core/dialog_state_service.py"
+    ]
+  },
+  "carriers": [
+    {
+      "carrier_id": "consultant_runtime.dialog_state",
+      "carrier_layer": "canonical_runtime_state",
+      "covered_fields": [
+        "semantic_state.materialized_frame",
+        "pending_question_contract",
+        "interaction_state",
+        "meta.current_goal",
+        "meta.semantic_contract",
+        "meta.class_carryover"
+      ],
+      "current_truth_rank": "canonical_mutable_source",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the canonical mutable writer.",
+        "No new continuity writes may be added outside DialogStateService."
+      ],
+      "reader_precedence": [
+        "Read before any compatibility carrier.",
+        "Compatibility projections may shadow it but may not override it."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "consultant_runtime"
+      ],
+      "target_fate": "retain_as_canonical",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "retain as canonical runtime state through full recovery",
+      "evidence": [
+        "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "docs/system_forensics/files/app_core_dialog_state_service.md",
+        "docs/TOUCHED_SLICE_CONTINUITY_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-touched-slice-continuity-normalization-a922.md",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/tests/architecture/test_legacy_drain_closure_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "consultant_runtime.booking_payload",
+      "carrier_layer": "canonical_runtime_state",
+      "covered_fields": [
+        "booking.active",
+        "booking.service",
+        "booking.specialist_name",
+        "booking.datetime",
+        "booking.last_question",
+        "booking.appointment_id"
+      ],
+      "current_truth_rank": "canonical_mutable_source",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService writes normalized runtime booking payload.",
+        "Top-level booking context is compatibility only and may not regain primacy."
+      ],
+      "reader_precedence": [
+        "Read runtime booking payload before top-level context.booking.",
+        "Use compatibility booking only as migration fallback or restore source."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "consultant_runtime"
+      ],
+      "target_fate": "retain_as_canonical",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "retain as canonical booking payload through full recovery",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "consultant_runtime.conversation_projection",
+      "carrier_layer": "compatibility_projection",
+      "covered_fields": [
+        "semantic_frame",
+        "semantic_contract",
+        "pending_question_contract",
+        "current_goal",
+        "booking_state",
+        "compatibility_view_refs"
+      ],
+      "current_truth_rank": "competing",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/core/conversation_projection.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "writer_precedence": [
+        "Projection is derived from canonical runtime state.",
+        "No direct continuity ownership may be added outside canonical projection build."
+      ],
+      "reader_precedence": [
+        "Read only after canonical dialog_state and canonical booking payload.",
+        "Use as derived view, not as first-class truth."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "consultant_runtime"
+      ],
+      "target_fate": "projection_only",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "must become clearly derived-only before phase advance past truth-carrier freeze",
+      "evidence": [
+        "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/core/conversation_projection.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "consultant_runtime.turn_journal",
+      "carrier_layer": "journal_projection",
+      "covered_fields": [
+        "TurnJournalV1.events",
+        "TurnJournalEventV1.payload.projection_state"
+      ],
+      "current_truth_rank": "derived_but_influential",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/core/turn_journal.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/runtime_trace_contract.py"
+      ],
+      "writer_precedence": [
+        "Journal is append-only output of canonical runtime handling.",
+        "No new mutable continuity logic may be written into journal flows."
+      ],
+      "reader_precedence": [
+        "Use only as event history or replay evidence.",
+        "Do not treat journal as a competing mutable continuity source."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/core/turn_journal.py"
+      ],
+      "guarded_context_tokens": [],
+      "target_fate": "observer_only",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "must stay append-only and observer-scoped through recovery",
+      "evidence": [
+        "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+        "truffles-api/app/core/turn_journal.py",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "runtime_trace_contract.state_transition",
+      "carrier_layer": "observability_shadow",
+      "covered_fields": [
+        "current_goal",
+        "pending_question_contract",
+        "semantic_contract",
+        "semantic_state_before",
+        "semantic_state_after"
+      ],
+      "current_truth_rank": "observer_shadow",
+      "known_writer_paths": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/runtime_trace_contract.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "writer_precedence": [
+        "Trace contract is observer output, not continuity ownership.",
+        "No new continuity recovery logic may be authored in trace payload builders."
+      ],
+      "reader_precedence": [
+        "Use for observability only.",
+        "Never prefer over runtime state or compatibility projections."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/core/runtime_trace_contract.py"
+      ],
+      "guarded_context_tokens": [],
+      "target_fate": "observer_only",
+      "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "must stay black-box observability only through recovery",
+      "evidence": [
+        "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+        "truffles-api/app/core/runtime_trace_contract.py",
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context_manager.canonical_dialog_state",
+      "carrier_layer": "compatibility_canonical_shadow",
+      "covered_fields": [
+        "current_referents",
+        "pending_question_contract",
+        "interaction_state",
+        "consult_state",
+        "meta.class_carryover"
+      ],
+      "current_truth_rank": "derived_projection",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService may project canonical_dialog_state during migration.",
+        "Context manager may not gain new authoring responsibilities for canonical_dialog_state."
+      ],
+      "reader_precedence": [
+        "Use canonical runtime state first.",
+        "Treat context_manager canonical_dialog_state as migration shadow only."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "canonical_dialog_state"
+      ],
+      "target_fate": "derived_only_compatibility_snapshot_then_remove",
+      "full_closure_phase": "legacy_mesh_drain",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after canonical runtime projection fully replaces legacy context-manager continuity reads",
+      "evidence": [
+        "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+        "docs/system_forensics/files/app_core_dialog_state_service.md",
+        "docs/system_forensics/files/app_routers_webhook_context_manager.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "scripts/continuity_state_normalization_guard.py",
+        "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context.booking",
+      "carrier_layer": "top_level_compatibility",
+      "covered_fields": [
+        "booking.active",
+        "booking.service",
+        "booking.specialist_name",
+        "booking.datetime",
+        "booking.last_question",
+        "booking.appointment_id"
+      ],
+      "current_truth_rank": "competing",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "writer_precedence": [
+        "Runtime booking payload is canonical.",
+        "Top-level booking may persist only as migration compatibility carrier."
+      ],
+      "reader_precedence": [
+        "Read consultant_runtime.booking_payload first.",
+        "Use context.booking only as controlled fallback or adapter input."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "booking"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after runtime booking payload fully owns touched family continuity",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context.expected_reply_fields",
+      "carrier_layer": "top_level_compatibility",
+      "covered_fields": [
+        "expected_reply_type",
+        "expected_reply_reason",
+        "pending_question_contract shadow accessors"
+      ],
+      "current_truth_rank": "cleared_projection_shadow",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/consultant_runtime.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/pending.py",
+        "truffles-api/app/routers/webhook/guards.py"
+      ],
+      "writer_precedence": [
+        "Pending-question contract in runtime state is canonical.",
+        "Top-level expected_reply fields may exist only as compatibility projection."
+      ],
+      "reader_precedence": [
+        "Read runtime pending_question_contract first.",
+        "Use expected_reply fields only as compatibility mirror."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "expected_reply_type",
+        "expected_reply_reason"
+      ],
+      "target_fate": "derived_only_or_removed",
+      "full_closure_phase": "legacy_mesh_drain",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after canonical runtime writes and restore flows no longer need top-level expected reply shadows",
+      "evidence": [
+        "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+        "docs/system_forensics/files/app_routers_webhook_context_manager.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "scripts/continuity_state_normalization_guard.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context.current_goal",
+      "carrier_layer": "top_level_compatibility",
+      "covered_fields": [
+        "current_goal"
+      ],
+      "current_truth_rank": "derived_projection",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/consultant_runtime.py"
+      ],
+      "writer_precedence": [
+        "DialogState meta/current runtime goal is canonical.",
+        "Top-level current_goal may not gain new semantic authoring uses."
+      ],
+      "reader_precedence": [
+        "Read canonical runtime goal first.",
+        "Treat top-level current_goal as compatibility shadow."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "current_goal"
+      ],
+      "target_fate": "derived_only_or_removed",
+      "full_closure_phase": "legacy_mesh_drain",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after canonical runtime projection fully replaces top-level current_goal reads",
+      "evidence": [
+        "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "scripts/continuity_state_normalization_guard.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context.service_carryover",
+      "carrier_layer": "legacy_carryover",
+      "covered_fields": [
+        "service_carryover"
+      ],
+      "current_truth_rank": "competing",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/info.py"
+      ],
+      "writer_precedence": [
+        "Canonical referents and booking/runtime state are primary.",
+        "Service carryover may remain only as legacy adapter signal."
+      ],
+      "reader_precedence": [
+        "Read canonical referents first.",
+        "Use service_carryover only as migration carryover helper."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "service_carryover"
+      ],
+      "target_fate": "derived_adapter_then_remove",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after touched families stop consulting legacy carryover helpers",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context.consult_context",
+      "carrier_layer": "legacy_carryover",
+      "covered_fields": [
+        "consult_context"
+      ],
+      "current_truth_rank": "competing",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "writer_precedence": [
+        "Canonical runtime continuity is primary.",
+        "consult_context may remain only as legacy adapter-side carryover."
+      ],
+      "reader_precedence": [
+        "Do not read before canonical runtime continuity.",
+        "Use only as migration helper on legacy consult paths."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "consult_context"
+      ],
+      "target_fate": "derived_adapter_then_remove",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after consult legacy paths are adapter-only",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "context.class_carryover",
+      "carrier_layer": "legacy_carryover",
+      "covered_fields": [
+        "class_carryover",
+        "class_router_result sidecar continuity"
+      ],
+      "current_truth_rank": "competing",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/booking.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/response.py"
+      ],
+      "writer_precedence": [
+        "Canonical runtime DialogState meta.class_carryover is the primary touched-slice source.",
+        "Top-level class_carryover may remain only as a derived legacy class-router adapter surface for the touched slice."
+      ],
+      "reader_precedence": [
+        "Read canonical runtime carryover first for the touched slice.",
+        "Use top-level class_carryover only where the legacy class-router adapter still exists and only as a derived mirror.",
+        "Mounted webhook package root no longer eagerly imports context_manager helpers for the touched canary envelope."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "class_carryover"
+      ],
+      "target_fate": "derived_adapter_then_remove",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove after class-router legacy mesh is adapter-only and the touched slice no longer needs the compatibility mirror",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "docs/TOUCHED_SLICE_CONTINUITY_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-touched-slice-continuity-normalization-a922.md",
+        "scripts/touched_slice_continuity_guard.py",
+        "truffles-api/tests/architecture/test_touched_slice_continuity_guard.py",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/tests/architecture/test_legacy_drain_closure_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "session_memory",
+      "carrier_layer": "session_memory",
+      "covered_fields": [
+        "pending_question_contract",
+        "last_question_type",
+        "unanswered_questions",
+        "pending_slots",
+        "active_goal",
+        "interaction_state"
+      ],
+      "current_truth_rank": "derived_reset_adapter",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/session_memory.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "Legacy session_memory helpers may not gain new write logic."
+      ],
+      "reader_precedence": [
+        "Read runtime pending-question and interaction state first.",
+        "Use session_memory only as migration continuity shadow or restore payload.",
+        "ConsultantRuntime uses session_memory only for reset-only control-turn and observability support on the mounted canary path.",
+        "Mounted webhook package root no longer startup-loads session-memory-adjacent legacy helper writers for the touched canary envelope."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "session_memory"
+      ],
+      "target_fate": "adapter_only_reset_control_helper_then_remove",
+      "full_closure_phase": "legacy_mesh_drain",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or fully demote once reset/control semantics move behind a canonical boundary adapter",
+      "evidence": [
+        "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+        "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
+        "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "scripts/continuity_state_normalization_guard.py",
+        "scripts/legacy_drain_closure_guard.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/session_memory.py",
+        "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py",
+        "truffles-api/tests/architecture/test_legacy_drain_closure_guard.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "pending_resume",
+      "carrier_layer": "resume_transport",
+      "covered_fields": [
+        "expected_reply_type",
+        "expected_reply_reason",
+        "context_manager",
+        "intent_queue",
+        "booking",
+        "session_memory",
+        "last_service_hint",
+        "last_service_hint_at"
+      ],
+      "current_truth_rank": "canonical_restore_snapshot",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/services/handover_owner_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService defines the canonical pending_resume payload shape.",
+        "StateService and handover flows may transport it but may not create new competing semantics."
+      ],
+      "reader_precedence": [
+        "Use only for controlled suspend/restore and boundary recovery.",
+        "Do not treat pending_resume as peer canonical state during normal runtime reads."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "pending_resume"
+      ],
+      "target_fate": "canonical_restore_only_or_remove",
+      "full_closure_phase": "legacy_mesh_drain",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "must remain canonical-restore-only until pending/legacy drain closes",
+      "evidence": [
+        "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+        "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+        "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "docs/system_forensics/ledgers/TRUTH_CARRIER_MATRIX.md",
+        "scripts/continuity_state_normalization_guard.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/services/handover_owner_service.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py",
+        "truffles-api/tests/test_dialog_state_service.py",
+        "truffles-api/tests/test_state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "intent_queue_and_service_hints",
+      "carrier_layer": "auxiliary_queue",
+      "covered_fields": [
+        "intent_queue",
+        "last_service_hint",
+        "last_service_hint_at",
+        "re_entry_required"
+      ],
+      "current_truth_rank": "competing",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/policy_validation_boundary_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/booking.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer for queue/hint/re-entry continuity.",
+        "Legacy booking/info/decision/context-manager paths may not gain new queue or service-hint writes."
+      ],
+      "reader_precedence": [
+        "Canonical runtime continuity and pending-question contract come first.",
+        "Use queue/service hints/re-entry only as frozen migration helpers."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "intent_queue",
+        "last_service_hint",
+        "last_service_hint_at",
+        "re_entry_required"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or fully adapterize before legacy guard/router cutover",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "docs/system_forensics/ledgers/TRUTH_CARRIER_MATRIX.md",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/decision.py",
+        "truffles-api/app/routers/webhook/guards.py",
+        "truffles-api/app/routers/webhook/booking.py",
+        "truffles-api/app/routers/webhook/info.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/policy_validation_boundary_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "handover_confirmation",
+      "carrier_layer": "auxiliary_gate",
+      "covered_fields": [
+        "handover_confirmation"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer for handover confirmation payloads.",
+        "Legacy response/pending flows may not gain new confirmation write logic."
+      ],
+      "reader_precedence": [
+        "Treat as bounded auxiliary gate only.",
+        "Do not let it become peer continuity truth."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "handover_confirmation"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or fully adapterize before pending/legacy mesh closure",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/response.py",
+        "truffles-api/app/services/state_service.py",
+        "truffles-api/app/routers/webhook/pending.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "reengage_confirmation",
+      "carrier_layer": "auxiliary_gate",
+      "covered_fields": [
+        "reengage_confirmation"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/guards.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/routers/webhook/guards.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "Legacy guard flows may not gain new confirmation write logic."
+      ],
+      "reader_precedence": [
+        "Treat as auxiliary gate only.",
+        "Do not treat as canonical continuity state."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "reengage_confirmation"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or fully adapterize before guard-path cutover",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/guards.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "asr_confirm_pending",
+      "carrier_layer": "auxiliary_gate",
+      "covered_fields": [
+        "asr_confirm_pending"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "ASR confirmation payloads may remain only as bounded auxiliary gate state."
+      ],
+      "reader_precedence": [
+        "Treat as auxiliary gate only.",
+        "Do not let ASR confirmation become general continuity truth."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "asr_confirm_pending"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or isolate before auxiliary legacy drain",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "asr_inflight",
+      "carrier_layer": "auxiliary_gate",
+      "covered_fields": [
+        "asr_inflight"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "Inflight ASR state may remain only as bounded transport-side auxiliary state."
+      ],
+      "reader_precedence": [
+        "Treat as auxiliary gate only.",
+        "Do not treat as canonical continuity state."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "asr_inflight"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or isolate before auxiliary legacy drain",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "style_reference_pending",
+      "carrier_layer": "auxiliary_gate",
+      "covered_fields": [
+        "style_reference_pending"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/policy_timeout_recovery_boundary_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/handover_owner_service.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "Boundary recovery may transport existing payloads but may not define new competing style-reference state semantics."
+      ],
+      "reader_precedence": [
+        "Treat as auxiliary gate only.",
+        "Do not let it become peer continuity truth."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "style_reference_pending"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or isolate before boundary and legacy mesh closure",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/services/policy_timeout_recovery_boundary_service.py",
+        "truffles-api/app/services/handover_owner_service.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "memory_profile",
+      "carrier_layer": "compatibility_aux",
+      "covered_fields": [
+        "memory_profile"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "Legacy context reset and adapter paths may not gain new memory_profile authoring logic."
+      ],
+      "reader_precedence": [
+        "Treat as auxiliary compatibility surface only.",
+        "Do not read before canonical runtime continuity."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "memory_profile"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or isolate before auxiliary legacy drain",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    },
+    {
+      "carrier_id": "memory_pending",
+      "carrier_layer": "compatibility_aux",
+      "covered_fields": [
+        "memory_pending"
+      ],
+      "current_truth_rank": "compatibility_aux",
+      "known_writer_paths": [
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "known_reader_paths": [
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "writer_precedence": [
+        "DialogStateService is the only allowed future writer.",
+        "Legacy context reset and adapter paths may not gain new memory_pending authoring logic."
+      ],
+      "reader_precedence": [
+        "Treat as auxiliary compatibility surface only.",
+        "Do not read before canonical runtime continuity."
+      ],
+      "allowed_future_write_paths": [
+        "truffles-api/app/core/dialog_state_service.py"
+      ],
+      "guarded_context_tokens": [
+        "memory_pending"
+      ],
+      "target_fate": "derived_or_removed",
+      "full_closure_phase": "continuity_state_normalization",
+      "fate_owner": "Brain / Top Architect",
+      "expiry_trigger": "remove or isolate before auxiliary legacy drain",
+      "evidence": [
+        "docs/system_forensics/ledgers/STATE_SURFACE_INVENTORY.md",
+        "truffles-api/app/routers/webhook/context_runtime.py",
+        "truffles-api/app/routers/webhook/context_manager.py",
+        "truffles-api/app/core/dialog_state_service.py",
+        "truffles-api/app/services/state_service.py"
+      ],
+      "confidence": "high"
+    }
+  ],
+  "scope_note": "Live-code reproof is complete repo-side for the continuity envelope. Canonical runtime continuity and boundary resume restore now reuse only canonical pending-question contracts; acceptance remains separate.",
+  "authority_freeze_scope": {
+    "policy": "Only dialog_state_service may add new continuity writes; every other carrier remains frozen pending continuity/state normalization.",
+    "frozen_competing_carriers": [
+      "context.booking",
+      "context.class_carryover",
+      "context.current_goal",
+      "context.expected_reply_fields",
+      "context_manager.canonical_dialog_state",
+      "intent_queue_and_service_hints",
+      "pending_resume",
+      "session_memory"
+    ],
+    "evidence": [
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/REPORTS/2026-03-31-consultant-core-authority-freeze-a922.md",
+      "docs/system_forensics/STATE_AND_TRUTH_CARRIERS_AUDIT.md",
+      "docs/system_forensics/ledgers/TRUTH_CARRIER_MATRIX.md",
+      "docs/system_forensics/files/app_core_dialog_state_service.md"
+    ]
+  },
+  "continuity_normalization_scope": {
+    "canonical_runtime_projection_rule": "If canonical runtime state exists, context_manager, session_memory, pending_resume, and top-level expected-reply/current-goal compatibility carriers must be reprojected from it or cleared.",
+    "active_slice_evidence": [
+      "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
+      "docs/REPORTS/2026-03-31-consultant-core-continuity-state-normalization-a922.md",
+      "scripts/continuity_state_normalization_guard.py",
+      "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py"
+    ]
+  }
+}

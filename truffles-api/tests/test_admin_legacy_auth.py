@@ -75,6 +75,28 @@ def test_heal_accepts_valid_token(client, monkeypatch):
     assert response.json() == {"fixed": 1, "errors": []}
 
 
+def test_admin_outbox_process_requires_token(client, monkeypatch):
+    monkeypatch.setenv("ALERTS_ADMIN_TOKEN", "secret-token")
+    response = client.post("/admin/outbox/process")
+    assert response.status_code == 401
+
+
+def test_admin_outbox_process_accepts_valid_token(client, monkeypatch):
+    monkeypatch.setenv("ALERTS_ADMIN_TOKEN", "secret-token")
+    async def _fake_run_default_outbox_process(_db, include_reminders=False):
+        assert include_reminders is False
+        return {"processed": 0, "results": {"processed": 0, "failed": 0}}
+
+    monkeypatch.setattr(
+        admin_router,
+        "run_default_outbox_process",
+        _fake_run_default_outbox_process,
+    )
+    response = client.post("/admin/outbox/process", headers={"X-Admin-Token": "secret-token"})
+    assert response.status_code == 200
+    assert response.json() == {"processed": 0, "results": {"processed": 0, "failed": 0}}
+
+
 def test_health_and_version_remain_public(client, monkeypatch):
     monkeypatch.setenv("ALERTS_ADMIN_TOKEN", "secret-token")
     health_response = client.get("/admin/health")

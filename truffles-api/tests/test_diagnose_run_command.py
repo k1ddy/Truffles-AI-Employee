@@ -103,7 +103,7 @@ def test_llm_quality_generate_batch_uses_scenario_timeout(monkeypatch):
         branch_slug="almaty-center",
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -160,7 +160,7 @@ def test_llm_quality_generate_batch_enables_progress_stderr_for_generated_llm_by
         scenarios_file=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -210,7 +210,7 @@ def test_llm_quality_generate_batch_expands_timeout_budget_for_llm(monkeypatch):
         branch_slug=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -259,7 +259,7 @@ def test_llm_quality_generate_batch_uses_bounded_inner_retry_default(monkeypatch
         scenarios_file=None,
         scenario_coverage="booking,info,interrupt,handoff",
         include_media=True,
-        llm_model="gpt-4o-mini",
+        llm_model="gpt-5.4-nano-2026-03-17",
         llm_base_url="https://api.openai.com",
         llm_api_key="test-key",
         scenario_llm_batch_size=2,
@@ -363,6 +363,120 @@ def test_llm_quality_structured_meta_expectation_is_strong_oracle():
     assert expectations["meta"]["expected_reply_type"] == "time"
     assert expectations["trace_contains"][0]["stage"] == "question_contract"
     assert _module._llm_quality_is_weak_oracle_expectation(expectations) is False
+
+
+def test_llm_quality_service_choice_booking_prompt_contract_catches_wrong_handoff_path():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["booking"],
+            "expect": {
+                "action": None,
+                "info_sections": [],
+                "reply_type": "service_choice",
+                "state": "bot_active",
+                "expected_reply": True,
+                "allow_booking_stall": False,
+            },
+        }
+    )
+
+    good_reasons = _module._llm_quality_evaluate_turn(
+        meta={
+            "action": "booking_prompt",
+            "source": "llm_policy_core",
+            "tool_action": "collect",
+            "expected_reply_type": "service_choice",
+            "expected_reply_reason": "booking_prompt",
+        },
+        trace_entries=[
+            {
+                "stage": "question_contract",
+                "decision": "set",
+                "expected_reply_type": "service_choice",
+                "reason": "booking_prompt",
+            }
+        ],
+        trace_error=None,
+        state="bot_active",
+        conv_meta={},
+        handover_meta=None,
+        bot_response=True,
+        expected_response=True,
+        expected_action=expectations.get("action"),
+        expected_info_sections=expectations.get("info_sections"),
+        expected_reply_type=expectations.get("reply_type"),
+        expected_state=expectations.get("state"),
+        expected_reply=expectations.get("expected_reply"),
+        actual_expected_reply_type="service_choice",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=expectations.get("allow_booking_stall"),
+        outbox_text="На какую услугу хотите записаться?",
+        outbox_payload=None,
+        tool_signals={},
+        outbox_summary={"count": 1, "status": "sent"},
+        outbox_payload_status="sent",
+        bot_response_inferred_duplicate_ack=False,
+        meta_error=None,
+        webhook_error=None,
+        expected_meta=expectations.get("meta"),
+        expected_meta_any=expectations.get("meta_any"),
+        expected_meta_contains=expectations.get("meta_contains"),
+        expected_trace_contains=expectations.get("trace_contains"),
+    )
+    assert good_reasons == []
+
+    wrong_reasons = _module._llm_quality_evaluate_turn(
+        meta={
+            "action": "escalate",
+            "source": "consultant_core_runtime",
+            "tool_action": "handoff",
+        },
+        trace_entries=[
+            {
+                "stage": "turn_planner_safe_explicit_handoff_owner",
+                "decision": "reply",
+                "tool_action": "handoff",
+            }
+        ],
+        trace_error=None,
+        state="pending",
+        conv_meta={},
+        handover_meta={"status": "pending"},
+        bot_response=False,
+        expected_response=True,
+        expected_action=expectations.get("action"),
+        expected_info_sections=expectations.get("info_sections"),
+        expected_reply_type=expectations.get("reply_type"),
+        expected_state=expectations.get("state"),
+        expected_reply=expectations.get("expected_reply"),
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=expectations.get("allow_booking_stall"),
+        outbox_text=None,
+        outbox_payload=None,
+        tool_signals={},
+        outbox_summary={"count": 0, "status": None},
+        outbox_payload_status=None,
+        bot_response_inferred_duplicate_ack=False,
+        meta_error=None,
+        webhook_error=None,
+        expected_meta=expectations.get("meta"),
+        expected_meta_any=expectations.get("meta_any"),
+        expected_meta_contains=expectations.get("meta_contains"),
+        expected_trace_contains=expectations.get("trace_contains"),
+    )
+
+    assert "expected_action_mismatch" in wrong_reasons
+    assert "expected_reply_type_mismatch" in wrong_reasons
+    assert "missing_bot_reply" in wrong_reasons
 
 
 def test_llm_quality_build_scenario_context_merges_pack_and_capabilities(monkeypatch):
@@ -617,6 +731,7 @@ def test_llm_quality_build_failure_family_report_groups_same_root_cause():
     failure_families = {}
     record = {
         "type": "turn",
+        "root_trace_stage": "policy_core_guard",
         "last_trace_stage": "policy_core_guard",
         "conversation_state": "bot_active",
         "message_id": "m1",
@@ -639,6 +754,18 @@ def test_llm_quality_build_failure_family_report_groups_same_root_cause():
     assert family["reason"] == "fact_without_evidence"
     assert family["trace_stage"] == "policy_core_guard"
     assert family["state"] == "bot_active"
+
+
+def test_llm_quality_root_trace_failure_prefers_earliest_reasoned_stage():
+    result = _module._llm_quality_root_trace_failure(
+        [
+            {"stage": "policy_core_guard", "reason_code": "invalid_schema"},
+            {"stage": "consultant_runtime", "decision": "handoff"},
+        ],
+        ["expected_reply_mismatch"],
+    )
+
+    assert result == {"stage": "policy_core_guard", "reason_code": "invalid_schema"}
 
 
 def test_llm_quality_has_fact_without_evidence_ignores_service_clarify_collect():

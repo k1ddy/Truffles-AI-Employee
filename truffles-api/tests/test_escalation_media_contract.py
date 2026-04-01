@@ -4,9 +4,9 @@ from unittest.mock import Mock, patch
 from app.services.escalation_service import send_telegram_notification
 
 
-@patch("app.services.escalation_service._refresh_handover_media_contract")
-@patch("app.services.escalation_service.get_or_create_topic")
-@patch("app.services.escalation_service.TelegramService")
+@patch("app.services.handover_owner_service._refresh_handover_media_contract")
+@patch("app.services.handover_owner_service.get_or_create_topic")
+@patch("app.services.handover_owner_service.TelegramService")
 def test_send_telegram_notification_forwards_handover_media_refs(
     mock_telegram_class,
     mock_get_or_create_topic,
@@ -67,8 +67,8 @@ def test_send_telegram_notification_forwards_handover_media_refs(
     assert telegram_delivery.get("sent_count") == 1
 
 
-@patch("app.services.escalation_service._refresh_handover_media_contract")
-@patch("app.services.escalation_service.TelegramService")
+@patch("app.services.handover_owner_service._refresh_handover_media_contract")
+@patch("app.services.handover_owner_service.TelegramService")
 def test_send_telegram_notification_fails_when_required_media_refs_missing(
     mock_telegram_class,
     mock_refresh_contract,
@@ -117,10 +117,10 @@ def test_send_telegram_notification_fails_when_required_media_refs_missing(
     assert isinstance(telegram_delivery.get("updated_at"), str)
 
 
-@patch("app.services.escalation_service._refresh_handover_media_contract")
-@patch("app.services.escalation_service._download_remote_media_to_tempfile")
-@patch("app.services.escalation_service.get_or_create_topic")
-@patch("app.services.escalation_service.TelegramService")
+@patch("app.services.handover_owner_service._refresh_handover_media_contract")
+@patch("app.services.handover_owner_service._download_remote_media_to_tempfile")
+@patch("app.services.handover_owner_service.get_or_create_topic")
+@patch("app.services.handover_owner_service.TelegramService")
 def test_send_telegram_notification_retries_media_as_local_upload(
     mock_telegram_class,
     mock_get_or_create_topic,
@@ -192,9 +192,9 @@ def test_send_telegram_notification_retries_media_as_local_upload(
     assert telegram_delivery.get("sent_count") == 1
 
 
-@patch("app.services.escalation_service._refresh_handover_media_contract")
-@patch("app.services.escalation_service.get_or_create_topic")
-@patch("app.services.escalation_service.TelegramService")
+@patch("app.services.handover_owner_service._refresh_handover_media_contract")
+@patch("app.services.handover_owner_service.get_or_create_topic")
+@patch("app.services.handover_owner_service.TelegramService")
 def test_send_telegram_notification_includes_context_summary(
     mock_telegram_class,
     mock_get_or_create_topic,

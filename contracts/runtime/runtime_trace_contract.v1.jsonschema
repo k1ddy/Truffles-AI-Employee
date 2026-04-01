@@ -1,0 +1,466 @@
+{
+  "$defs": {
+    "RuntimeTraceActionTransitionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_action": {
+          "title": "Contract Action",
+          "type": "string"
+        },
+        "runtime_entrypoint": {
+          "title": "Runtime Entrypoint",
+          "type": "string"
+        },
+        "semantic_runtime_path": {
+          "title": "Semantic Runtime Path",
+          "type": "string"
+        },
+        "reply_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reply Kind"
+        },
+        "delivered": {
+          "default": false,
+          "title": "Delivered",
+          "type": "boolean"
+        },
+        "execution_tool_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Tool Action"
+        },
+        "execution_tool_decision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Tool Decision"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "earliest_failed_stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Earliest Failed Stage"
+        },
+        "root_reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Reason Code"
+        }
+      },
+      "required": [
+        "contract_action",
+        "runtime_entrypoint",
+        "semantic_runtime_path"
+      ],
+      "title": "RuntimeTraceActionTransitionV1",
+      "type": "object"
+    },
+    "RuntimeTraceBindingTransitionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Id"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "binding_outcome_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Binding Outcome Type"
+        },
+        "capability_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Id"
+        },
+        "selected_tool_or_workflow_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Tool Or Workflow Ref"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idempotency Key"
+        },
+        "resolved_args": {
+          "title": "Resolved Args",
+          "type": "object"
+        },
+        "authz_scope": {
+          "title": "Authz Scope",
+          "type": "object"
+        },
+        "timeout_policy": {
+          "title": "Timeout Policy",
+          "type": "object"
+        },
+        "retry_policy": {
+          "title": "Retry Policy",
+          "type": "object"
+        },
+        "boundary_reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Boundary Reason Code"
+        }
+      },
+      "required": [
+        "decision_id"
+      ],
+      "title": "RuntimeTraceBindingTransitionV1",
+      "type": "object"
+    },
+    "RuntimeTraceOwnerTransitionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "requested_outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Outcome"
+        },
+        "intent": {
+          "title": "Intent",
+          "type": "string"
+        },
+        "capability_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability Id"
+        },
+        "interaction_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interaction Owner"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "tool_action_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Action Hint"
+        },
+        "needs_human": {
+          "default": false,
+          "title": "Needs Human",
+          "type": "boolean"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Goal"
+        }
+      },
+      "required": [
+        "decision_id",
+        "intent"
+      ],
+      "title": "RuntimeTraceOwnerTransitionV1",
+      "type": "object"
+    },
+    "RuntimeTraceStateTransitionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "current_semantic_decision_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Semantic Decision Ref"
+        },
+        "active_capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Capability"
+        },
+        "active_workflow_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Workflow Ref"
+        },
+        "current_goal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Goal"
+        },
+        "pending_question_contract": {
+          "title": "Pending Question Contract",
+          "type": "object"
+        },
+        "semantic_contract": {
+          "title": "Semantic Contract",
+          "type": "object"
+        },
+        "semantic_state_before": {
+          "title": "Semantic State Before",
+          "type": "object"
+        },
+        "semantic_state_after": {
+          "title": "Semantic State After",
+          "type": "object"
+        },
+        "journal_last_turn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Journal Last Turn Id"
+        },
+        "journal_event_types": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Journal Event Types",
+          "type": "array"
+        },
+        "last_reply_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Reply Ref"
+        }
+      },
+      "required": [
+        "turn_id"
+      ],
+      "title": "RuntimeTraceStateTransitionV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "runtime_trace_contract.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "trace_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trace Id"
+    },
+    "owner_transition": {
+      "$ref": "#/$defs/RuntimeTraceOwnerTransitionV1"
+    },
+    "binding_transition": {
+      "$ref": "#/$defs/RuntimeTraceBindingTransitionV1"
+    },
+    "action_transition": {
+      "$ref": "#/$defs/RuntimeTraceActionTransitionV1"
+    },
+    "state_transition": {
+      "$ref": "#/$defs/RuntimeTraceStateTransitionV1"
+    }
+  },
+  "required": [
+    "owner_transition",
+    "binding_transition",
+    "action_transition",
+    "state_transition"
+  ],
+  "title": "RuntimeTraceContractV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/runtime_trace_contract.v1.jsonschema"
+}

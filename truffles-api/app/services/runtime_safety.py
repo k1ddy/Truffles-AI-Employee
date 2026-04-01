@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from app.config import settings
+from app.services.runtime_mode_service import (
+    get_eval_mode,
+    get_outbound_allowlist,
+    get_outbox_worker_mode,
+    get_transport_send_mode,
+    is_legacy_test_mode_enabled,
+    is_outbox_worker_enabled,
+)
 
 LOCAL_DB_HOSTS = {
     "",
@@ -32,6 +40,9 @@ def _parse_allowlist(raw: str | None) -> list[str]:
 
 @dataclass(frozen=True)
 class RuntimeSafetySnapshot:
+    eval_mode: str
+    transport_send_mode: str
+    outbox_worker_mode: str
     test_mode_enabled: bool
     outbox_worker_enabled: bool
     provider_gateway_outbound_enabled: bool
@@ -54,6 +65,9 @@ class RuntimeSafetySnapshot:
     def to_dict(self) -> dict[str, object]:
         return {
             "status": self.status,
+            "eval_mode": self.eval_mode,
+            "transport_send_mode": self.transport_send_mode,
+            "outbox_worker_mode": self.outbox_worker_mode,
             "test_mode_enabled": self.test_mode_enabled,
             "outbox_worker_enabled": self.outbox_worker_enabled,
             "provider_gateway_outbound_enabled": self.provider_gateway_outbound_enabled,
@@ -87,8 +101,11 @@ def build_runtime_safety_snapshot(
     database_url: str | None = None,
 ) -> RuntimeSafetySnapshot:
     source_env = env if env is not None else os.environ
-    test_mode_enabled = _is_env_enabled(source_env.get("TEST_MODE"), default=False)
-    outbox_worker_enabled = _is_env_enabled(source_env.get("OUTBOX_WORKER_ENABLED"), default=True)
+    eval_mode = get_eval_mode(source_env)
+    transport_send_mode = get_transport_send_mode(source_env)
+    outbox_worker_mode = get_outbox_worker_mode(source_env)
+    test_mode_enabled = is_legacy_test_mode_enabled(source_env)
+    outbox_worker_enabled = is_outbox_worker_enabled(source_env)
     provider_gateway_outbound_enabled = _is_env_enabled(
         source_env.get("PROVIDER_GATEWAY_OUTBOUND_ENABLED"),
         default=False,
@@ -98,7 +115,7 @@ def build_runtime_safety_snapshot(
         source_env.get("INTEGRATION_WATCHDOG_ENABLED"),
         default=True,
     )
-    allowlist = _parse_allowlist(source_env.get("OUTBOUND_ALLOWLIST_JIDS"))
+    allowlist = sorted(get_outbound_allowlist(source_env))
 
     resolved_database_url = database_url if database_url is not None else source_env.get("DATABASE_URL")
     if resolved_database_url is None:
@@ -108,16 +125,25 @@ def build_runtime_safety_snapshot(
     danger_flags: list[str] = []
     warning_flags: list[str] = []
 
-    if test_mode_enabled and outbox_worker_enabled and not database_is_local:
+    if outbox_worker_mode == "local_debug" and not database_is_local:
         danger_flags.append("test_mode_outbox_worker_on_nonlocal_db")
 
-    if test_mode_enabled and outbox_worker_enabled and not allowlist:
+    if outbox_worker_mode == "local_debug" and not allowlist:
         danger_flags.append("test_mode_outbox_worker_without_allowlist")
+
+    if eval_mode != "prod" and outbox_worker_mode == "prod":
+        danger_flags.append("outbox_prod_mode_in_nonprod_eval")
+
+    if eval_mode != "prod" and transport_send_mode == "prod":
+        warning_flags.append("transport_prod_mode_in_nonprod_eval")
 
     if provider_gateway_outbound_enabled and not callback_url:
         warning_flags.append("provider_gateway_outbound_missing_status_callback")
 
     return RuntimeSafetySnapshot(
+        eval_mode=eval_mode,
+        transport_send_mode=transport_send_mode,
+        outbox_worker_mode=outbox_worker_mode,
         test_mode_enabled=test_mode_enabled,
         outbox_worker_enabled=outbox_worker_enabled,
         provider_gateway_outbound_enabled=provider_gateway_outbound_enabled,

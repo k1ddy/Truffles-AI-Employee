@@ -340,6 +340,12 @@ def resolve_tool_expected_reply_contract(
                 reason="calendar_book_slot_committed",
                 clear_expected_reply=True,
             )
+        if normalized_decision == "branch_missing":
+            return ExpectedReplyContractDecision(
+                reason="calendar_book_slot_branch_missing_handoff",
+                requires_handoff=True,
+                clear_expected_reply=True,
+            )
         if normalized_decision == "specialist_missing":
             return ExpectedReplyContractDecision(
                 expected_reply_type=EXPECTED_REPLY_NAME,

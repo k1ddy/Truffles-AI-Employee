@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -30,10 +31,21 @@ _debounce_redis_client = None
 _debounce_redis_url = None
 
 
-def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
-    from . import _legacy as legacy
+@dataclass(frozen=True)
+class DuplicateMessageProbe:
+    duplicate: bool
+    backend: str
+    fallback_reason: str | None = None
 
-    enabled = legacy._is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+
+def _is_env_enabled(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
+    enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
     inactivity_seconds = float(os.environ.get("DEBOUNCE_INACTIVITY_SECONDS", "1.5"))
     ttl_seconds = int(float(os.environ.get("DEBOUNCE_TTL_SECONDS", "30")))
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
@@ -42,9 +54,7 @@ def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
 
 
 def _get_message_buffer_settings() -> tuple[bool, int]:
-    from . import _legacy as legacy
-
-    enabled = legacy._is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+    enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
     max_messages = int(float(os.environ.get("DEBOUNCE_MAX_BUFFER_MESSAGES", "8")))
     return enabled, max_messages
 
@@ -57,10 +67,8 @@ def _get_dedup_settings() -> tuple[int, str, float]:
 
 
 def _is_fast_dedup_bypass_enabled() -> bool:
-    from . import _legacy as legacy
-
-    test_mode = legacy._is_env_enabled(os.environ.get("TEST_MODE"), default=False)
-    fast_dedup = legacy._is_env_enabled(os.environ.get("LLM_QUALITY_FAST_DEDUP"), default=False)
+    test_mode = _is_env_enabled(os.environ.get("TEST_MODE"), default=False)
+    fast_dedup = _is_env_enabled(os.environ.get("LLM_QUALITY_FAST_DEDUP"), default=False)
     return bool(test_mode and fast_dedup)
 
 
@@ -159,6 +167,129 @@ async def _drain_buffered_messages(*, redis_client, client_id: str, remote_jid: 
         if text_value:
             cleaned.append(text_value)
     return cleaned
+
+
+def _merge_duplicate_fallback_reason(current: str | None, addition: str) -> str:
+    if not current:
+        return addition
+    return f"{current}+{addition}"
+
+
+def _lookup_duplicate_message_in_messages_table(
+    db: Session,
+    *,
+    client_id,
+    message_id: str,
+) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(
+            Message.client_id == client_id,
+            Message.role == "user",
+            or_(
+                Message.message_metadata["message_id"].astext == message_id,
+                Message.message_metadata["messageId"].astext == message_id,
+            ),
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+
+def _lookup_preexisting_duplicate_message(
+    db: Session,
+    *,
+    client_id,
+    message_id: str | None,
+) -> DuplicateMessageProbe:
+    if _is_fast_dedup_bypass_enabled():
+        return DuplicateMessageProbe(
+            duplicate=False,
+            backend="fast_test_bypass",
+            fallback_reason="test_mode_fast_dedup",
+        )
+    if client_id is None or not message_id:
+        return DuplicateMessageProbe(duplicate=False, backend="message_dedup")
+
+    fallback_reason = None
+    try:
+        existing_dedup = db.execute(
+            text(
+                """
+                SELECT 1
+                FROM message_dedup
+                WHERE client_id = :client_id AND message_id = :message_id
+                LIMIT 1
+                """
+            ),
+            {"client_id": client_id, "message_id": message_id},
+        ).first()
+        if existing_dedup is not None:
+            return DuplicateMessageProbe(
+                duplicate=True,
+                backend="message_dedup",
+            )
+    except Exception as exc:
+        fallback_reason = _merge_duplicate_fallback_reason(
+            fallback_reason,
+            "message_dedup_lookup_error",
+        )
+        logger.warning(
+            "Dedup owner message_dedup lookup failed, falling back to messages table",
+            extra={
+                "context": {
+                    "client_id": str(client_id),
+                    "message_id": message_id,
+                    "error": str(exc),
+                }
+            },
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    try:
+        duplicate = _lookup_duplicate_message_in_messages_table(
+            db,
+            client_id=client_id,
+            message_id=message_id,
+        )
+    except Exception as exc:
+        fallback_reason = _merge_duplicate_fallback_reason(
+            fallback_reason,
+            "messages_lookup_error",
+        )
+        logger.warning(
+            "Dedup owner messages-table fallback lookup failed",
+            extra={
+                "context": {
+                    "client_id": str(client_id),
+                    "message_id": message_id,
+                    "error": str(exc),
+                }
+            },
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return DuplicateMessageProbe(
+            duplicate=False,
+            backend="messages_table",
+            fallback_reason=fallback_reason,
+        )
+    if duplicate is not None:
+        return DuplicateMessageProbe(
+            duplicate=True,
+            backend="messages_table",
+            fallback_reason=fallback_reason,
+        )
+    return DuplicateMessageProbe(
+        duplicate=False,
+        backend="message_dedup" if fallback_reason is None else "messages_table",
+        fallback_reason=fallback_reason,
+    )
 
 
 async def is_duplicate_message_id(
@@ -282,13 +413,10 @@ async def is_duplicate_message_id(
         )
 
     messages_started = time.monotonic()
-    duplicate = (
-        db.query(Message)
-        .filter(
-            Message.client_id == client_id,
-            Message.message_metadata["message_id"].astext == message_id,
-        )
-        .first()
+    duplicate = _lookup_duplicate_message_in_messages_table(
+        db,
+        client_id=client_id,
+        message_id=message_id,
     )
     messages_latency_ms = (time.monotonic() - messages_started) * 1000
     if duplicate:
@@ -410,7 +538,8 @@ async def _handle_debounce_gate(
 ) -> tuple[WebhookResponse | None, str, list[str] | None, bool, datetime]:
     append_user_message = True
     if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value] and not batch_messages_provided:
-        from . import _legacy as legacy
+        from .guards import _handle_post_debounce_muted_state_gate
+        from .trace import _record_decision_trace
 
         db.commit()
 
@@ -439,7 +568,7 @@ async def _handle_debounce_gate(
                 "Debounced intermediate message",
                 extra={"context": {"remote_jid": remote_jid, "message_id": message_id}},
             )
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "debounce",
@@ -481,13 +610,15 @@ async def _handle_debounce_gate(
                 )
                 message_text = " ".join(buffered_messages)
                 if not batch_messages_provided:
-                    batch_messages = legacy._coerce_batch_messages(message_text, buffered_messages)
+                    batch_messages = [message.strip() for message in buffered_messages if message and message.strip()]
+                    if not batch_messages and message_text.strip():
+                        batch_messages = [message_text.strip()]
                 append_user_message = False
 
         db.refresh(conversation)
         now = datetime.now(timezone.utc)
         if conversation.state == ConversationState.MANAGER_ACTIVE.value:
-            legacy._record_decision_trace(
+            _record_decision_trace(
                 conversation,
                 {
                     "stage": "debounce",
@@ -509,56 +640,27 @@ async def _handle_debounce_gate(
                 append_user_message,
                 now,
             )
-        if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
-            signal_messages = legacy._coerce_batch_messages(message_text, batch_messages)
-            opt_out_in_batch = any(legacy.is_opt_out_message(msg) for msg in signal_messages)
-            booking_signal, booking_block_meta = legacy._evaluate_booking_signal(
-                signal_messages,
-                client_slug=payload_client_slug,
-                message_text=message_text,
+        muted_state_response = _handle_post_debounce_muted_state_gate(
+            conversation=conversation,
+            message_text=message_text,
+            batch_messages=batch_messages,
+            client_slug=payload_client_slug,
+            now=now,
+        )
+        if muted_state_response is not None:
+            return (
+                muted_state_response,
+                message_text,
+                batch_messages,
+                append_user_message,
+                now,
             )
-            context = legacy._get_conversation_context(conversation)
-            booking_active = bool(legacy._get_booking_context(context).get("active"))
-            reengage_confirmation = legacy._get_reengage_confirmation(context)
-            if reengage_confirmation and legacy._is_reengage_confirmation_active(reengage_confirmation, now):
-                conversation.bot_status = "active"
-                conversation.bot_muted_until = None
-                conversation.no_count = 0
-            elif (booking_signal or booking_active) and not opt_out_in_batch:
-                conversation.bot_status = "active"
-                conversation.bot_muted_until = None
-                conversation.no_count = 0
-            else:
-                legacy._record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "routing",
-                        "decision": "muted_skip_after_debounce",
-                        "state": conversation.state,
-                        "booking_signal": booking_signal,
-                        "booking_active": booking_active,
-                        "opt_out_in_batch": opt_out_in_batch,
-                    },
-                )
-                return (
-                    WebhookResponse(
-                        success=True,
-                        message="Bot muted (after debounce), forwarded to topic"
-                        if conversation.telegram_topic_id
-                        else "Bot muted (after debounce)",
-                        conversation_id=conversation.id,
-                        bot_response=None,
-                    ),
-                    message_text,
-                    batch_messages,
-                    append_user_message,
-                    now,
-                )
 
     return None, message_text, batch_messages, append_user_message, now
 
 
 __all__ = [
+    "DuplicateMessageProbe",
     "_buffer_user_message",
     "_drain_buffered_messages",
     "_get_debounce_redis",
@@ -567,6 +669,7 @@ __all__ = [
     "_get_message_buffer_settings",
     "_handle_debounce_gate",
     "_handle_dedup_gate",
+    "_lookup_preexisting_duplicate_message",
     "is_duplicate_message_id",
     "should_process_debounced_message",
 ]

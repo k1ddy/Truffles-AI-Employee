@@ -28,13 +28,13 @@ _module = _load_module()
 
 def test_default_judge_cache_file_includes_worktree_namespace():
     path = _module._llm_quality_default_judge_cache_file(
-        "gpt-4o-mini", "https://api.openai.com/v1"
+        "gpt-5.4-nano-2026-03-17", "https://api.openai.com/v1"
     )
     namespace = _module._llm_quality_worktree_namespace()
     assert "/tmp/booking_quality/_judge_cache/" in path
     assert namespace in path
     assert "api.openai.com" in path
-    assert "gpt-4o-mini" in path
+    assert "gpt-5.4-nano-2026-03-17" in path
 
 
 def test_save_and_load_judge_cache_trimmed(tmp_path):
@@ -53,12 +53,12 @@ def test_save_and_load_judge_cache_trimmed(tmp_path):
 
 def test_judge_cache_key_changes_with_prompt():
     k1 = _module._llm_quality_judge_cache_key(
-        "gpt-4o-mini",
+        "gpt-5.4-nano-2026-03-17",
         "https://api.openai.com",
         "prompt-1",
     )
     k2 = _module._llm_quality_judge_cache_key(
-        "gpt-4o-mini",
+        "gpt-5.4-nano-2026-03-17",
         "https://api.openai.com",
         "prompt-2",
     )

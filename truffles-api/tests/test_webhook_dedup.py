@@ -1,10 +1,13 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from app.routers import webhook
+from app.routers.webhook import decision as decision_router
 from app.routers.webhook import dedup as dedup_module
+from app.routers.webhook import guards as guards_module
 
 
 class FakeRedisBuffer:
@@ -121,16 +124,16 @@ async def test_is_duplicate_message_id_short_circuits_on_redis():
 
 
 @pytest.mark.asyncio
-async def test_is_duplicate_message_id_reports_db_fallback_on_redis_error():
+async def test_is_duplicate_message_id_reports_db_fallback_on_redis_error(monkeypatch):
     db = Mock()
     insert_result = Mock()
     insert_result.rowcount = 1
     db.execute.return_value = insert_result
-    query = Mock()
-    filtered = Mock()
-    filtered.first.return_value = None
-    query.filter.return_value = filtered
-    db.query.return_value = query
+    monkeypatch.setattr(
+        dedup_module,
+        "_lookup_duplicate_message_in_messages_table",
+        lambda *args, **kwargs: None,
+    )
     diagnostics = {}
 
     result = await webhook.is_duplicate_message_id(
@@ -206,3 +209,71 @@ async def test_handle_dedup_gate_fast_test_bypass(monkeypatch):
     assert diagnostics["dedup_backend"] == "fast_test_bypass"
     assert diagnostics["dedup_fallback_reason"] == "test_mode_fast_dedup"
     assert diagnostics["dedup_duplicate"] is False
+
+
+def test_lookup_preexisting_duplicate_message_falls_back_to_messages_table_on_owner_db_error(
+    monkeypatch,
+):
+    db = Mock()
+    db.execute.side_effect = RuntimeError("message_dedup unavailable")
+    duplicate_row = Mock()
+
+    monkeypatch.setattr(
+        dedup_module,
+        "_lookup_duplicate_message_in_messages_table",
+        lambda *args, **kwargs: duplicate_row,
+    )
+
+    probe = dedup_module._lookup_preexisting_duplicate_message(
+        db,
+        client_id="client-1",
+        message_id="msg-fallback-1",
+    )
+
+    assert probe == dedup_module.DuplicateMessageProbe(
+        duplicate=True,
+        backend="messages_table",
+        fallback_reason="message_dedup_lookup_error",
+    )
+    db.rollback.assert_called_once()
+
+
+def test_handle_post_debounce_muted_state_gate_skips_muted_without_booking_signal(monkeypatch):
+    captured_trace: dict[str, object] = {}
+
+    monkeypatch.setattr(decision_router, "_coerce_batch_messages", lambda text, batch: [text])
+    monkeypatch.setattr(guards_module, "is_opt_out_message", lambda _text: False)
+    monkeypatch.setattr(decision_router, "_evaluate_booking_signal", lambda *args, **kwargs: (False, None))
+    monkeypatch.setattr(guards_module, "_get_conversation_context", lambda conversation: {})
+    monkeypatch.setattr(guards_module, "_get_booking_context", lambda context: {})
+    monkeypatch.setattr(guards_module, "_get_reengage_confirmation", lambda context: None)
+    monkeypatch.setattr(
+        guards_module,
+        "_record_decision_trace",
+        lambda conversation, payload: captured_trace.update(payload),
+    )
+
+    conversation = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000031",
+        state="bot_active",
+        bot_status="muted",
+        bot_muted_until=None,
+        no_count=3,
+        telegram_topic_id=None,
+    )
+
+    response = guards_module._handle_post_debounce_muted_state_gate(
+        conversation=conversation,
+        message_text="просто спасибо",
+        batch_messages=None,
+        client_slug="demo_salon",
+        now=datetime(2026, 3, 18, tzinfo=timezone.utc),
+    )
+
+    assert response is not None
+    assert response.success is True
+    assert response.message == "Bot muted (after debounce)"
+    assert str(response.conversation_id) == "00000000-0000-0000-0000-000000000031"
+    assert captured_trace["decision"] == "muted_skip_after_debounce"
+    assert captured_trace["booking_signal"] is False
+    assert captured_trace["booking_active"] is False

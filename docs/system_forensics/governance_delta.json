@@ -1,0 +1,42 @@
+{
+  "schema_version": "v1",
+  "status": "machine_readable_system_reproof_delta",
+  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "current_practical_truth": "r35f",
+  "block_tp": "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+  "delta_summary": "Reproved continuity, boundary restore, pack/runtime, legacy, and operational closure claims against live code and converged live outbox execution surfaces on one canonical runtime helper.",
+  "locked_mechanisms": [
+    "semantic_turn_meaning",
+    "post_owner_semantic_reconstruction",
+    "continuity_state",
+    "boundary_and_degrade",
+    "fact_scope",
+    "legacy_behavior_authority"
+  ],
+  "frozen_modules": [
+    "truffles-api/app/routers/webhook/info.py",
+    "truffles-api/app/routers/webhook/decision.py",
+    "truffles-api/app/routers/webhook/_legacy.py",
+    "truffles-api/app/routers/webhook/response.py",
+    "truffles-api/app/routers/webhook/context_manager.py"
+  ],
+  "new_machine_readable_artifacts": [
+    "docs/SYSTEM_REPROOF_GUARD.yaml"
+  ],
+  "deferred_next_blocks": [
+    "replay_and_human_audit_acceptance"
+  ],
+  "evidence": [
+    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
+    "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
+    "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
+    "scripts/semantic_owner_reopen_guard.py",
+    "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py",
+    "docs/system_forensics/authority_registry.json",
+    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+    "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+    "docs/SYSTEM_REPROOF_GUARD.yaml",
+    "scripts/system_reproof_guard.py",
+    "truffles-api/tests/architecture/test_system_reproof_guard.py"
+  ]
+}

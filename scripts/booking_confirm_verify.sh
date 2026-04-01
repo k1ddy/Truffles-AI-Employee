@@ -26,7 +26,7 @@ Options:
 
 Notes:
   - DB writes require --apply. For non-local base-url, set ALLOW_NON_LOCAL=1.
-  - Livecheck requires TEST_MODE=1 and allowlist JIDs in truffles-api env.
+  - Livecheck requires `TRANSPORT_SEND_MODE=allowlist` (or `EVAL_MODE=livecheck`) and allowlist JIDs in truffles-api env.
 EOF
 }
 
@@ -273,9 +273,10 @@ fi
 } | tee "${EVIDENCE_DIR}/jids.txt" >/dev/null
 
 if [[ "$NO_LIVECHECK" -eq 0 ]]; then
-  test_mode="$(docker exec "$API_CONTAINER" /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"' || true)"
-  if [[ "$test_mode" != "1" && "$test_mode" != "true" ]]; then
-    die "TEST_MODE not enabled in ${API_CONTAINER}"
+  transport_send_mode="$(docker exec "$API_CONTAINER" /bin/sh -lc 'printf "%s" "${TRANSPORT_SEND_MODE:-}"' || true)"
+  eval_mode="$(docker exec "$API_CONTAINER" /bin/sh -lc 'printf "%s" "${EVAL_MODE:-}"' || true)"
+  if [[ "$transport_send_mode" != "allowlist" && "$eval_mode" != "livecheck" ]]; then
+    die "TRANSPORT_SEND_MODE must be allowlist (or EVAL_MODE=livecheck) in ${API_CONTAINER}"
   fi
   admin_token="$(docker exec "$API_CONTAINER" /bin/sh -lc 'printf "%s" "${ALERTS_ADMIN_TOKEN:-}"' || true)"
   if [[ -z "$admin_token" ]]; then
@@ -395,7 +396,7 @@ finally:
 PY
 
 if [[ "$NO_LIVECHECK" -eq 0 ]]; then
-  TEST_MODE=1 INSTANCE_ID="$INSTANCE_ID" python3 ops/diagnose.py livecheck-auto \
+  EVAL_MODE=livecheck TRANSPORT_SEND_MODE=allowlist OUTBOX_WORKER_MODE=off INSTANCE_ID="$INSTANCE_ID" python3 ops/diagnose.py livecheck-auto \
     --suite ca05-booking-commit \
     --client-slug "$CLIENT_SLUG" \
     --branch-slug "$BRANCH_SLUG" \
@@ -406,7 +407,7 @@ if [[ "$NO_LIVECHECK" -eq 0 ]]; then
     --remote-jid "$JID_COMMIT" \
     --reset-before-suite | tee "${EVIDENCE_DIR}/livecheck_ca05_booking_commit.jsonl"
 
-  TEST_MODE=1 INSTANCE_ID="$INSTANCE_ID" python3 ops/diagnose.py livecheck-auto \
+  EVAL_MODE=livecheck TRANSPORT_SEND_MODE=allowlist OUTBOX_WORKER_MODE=off INSTANCE_ID="$INSTANCE_ID" python3 ops/diagnose.py livecheck-auto \
     --suite ca12-booking-full \
     --client-slug "$CLIENT_SLUG" \
     --branch-slug "$BRANCH_SLUG" \

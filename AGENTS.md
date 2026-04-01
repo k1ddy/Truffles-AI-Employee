@@ -74,6 +74,9 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Canon Sync Gate:** `/home/zhan/AGENTS.md` и `truffles-main/AGENTS.md` не должны расходиться по каноническим правилам (формула, quality contract, stop-the-line, fitness). Расхождение = GAP, запуск сессии/CI блокируется до синхронизации.
 - **Context Integrity Gate:** каждая новая сессия должна иметь `context_integrity_gate: required`; Task Package без секций `Residual architecture debt (mandatory)` и `Next-block contract (mandatory)` блокируется `session_check/session_gate`.
 - **Quality Validity Gate:** quality-run считается валидным только при `infra_valid=true` и `semantic_valid=true`.
+- **Human Semantic Audit Gate:** `semantic_valid=true` означает только `contract-green`; product-quality claim допустим только после полного turn-by-turn human semantic audit (`turn verdicts`, `dialog verdicts`, `failure families`) и согласованного `human_semantic_valid` / `human_semantic_summary`.
+- **Structural vs Practical Closure Gate:** `structural_complete` / `contract_complete` не равны `practical_behavior_complete` / `human_semantic_complete`; общий `done` или `green` запрещён без явного указания слоя закрытия.
+- **Behavioral Done Gate:** любой behavioral/workstream closeout требует оба слоя evidence: deterministic/contract proof и свежий practical replay + полный human semantic audit.
 - **Hard Preflight Gate:** при невалидном preflight (`webhook_secret`/branch/env/judge key) run = `INVALID`; сравнение метрик и baseline для такого run запрещены.
 - **Baseline Integrity Gate:** canonical baseline обновляется только если `infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`.
 - **Quality Constant Gate:** ограничения по времени/токенам/бюджету не могут снижать продуктовые и архитектурные требования (LAW/safety/invariants/acceptance thresholds/обязательные проверки). Если требуемый контур недоступен, статус = `BLOCKED`, а не "упрощенный pass".
@@ -84,6 +87,11 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - **Open-World Proof Gate:** claim про `business-agnostic`/`multilingual` robustness допустим только если есть оба слоя evidence: `deterministic metamorphic expansion` и `LLM stress synthesis` как минимум на нескольких `pack/capability` envelope; surface-mutation генератор сам по себе не закрывает proof.
 - **Open-World Closure Artifact Gate:** финальное закрытие `P6` допускается только при machine-readable closure evidence от `python3 ops/diagnose.py llm-quality-open-world-closure ...`; narrative summary без closure artifact = `BLOCKED`.
 - **Failure Family Gate:** дорогие quality-run handoff/acceptance решения должны опираться на `failure families` (invariant/root-cause clusters), а не только на список отдельных bad turns.
+- **Full Path RCA Gate:** для каждого surfaced family до кода обязателен exact path map: `input -> owner output -> validator/guard -> fallback/degrade -> final response -> trace/meta evidence -> layer classification`.
+- **Mechanism-First RCA Gate:** surfaced failure family — это evidence label, а не implementation unit. До кода каждый family обязан быть переведён в `broken invariant + shared mechanism + why this family belongs to that mechanism + open-world envelope expected to improve`.
+- **Debug Evidence Gate:** любой behavioral handoff/claim без `summary.json`, `responses.jsonl`, `trace_bundle.jsonl`, `manual_audit.md/json`, `manual_audit_workspace.md/json`, `family_registry.json`, `judge_conflicts.jsonl`, exact command, `broken invariant`, `shared mechanism` и layer classification считается неполным.
+- **No Scenario Patch Gate:** запрещено лечить отдельный `dialog/turn` как самостоятельную цель; допустимы только repeatable failure families с общим root cause, переведённые в shared mechanism.
+- **Domain Label Is Not Mechanism Gate:** `check-booking`, `parking`, конкретные услуги/формулировки и иные domain labels допустимы только как evidence surfaces; core/runtime не должен получать semantic control branches вида `if check_booking ...`, `if parking ...`, `if manicure ...`.
 - **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
 - **Semantic Ownership Gate:** post-hoc semantic rewrite вне whitelist reason-codes считается нарушением контракта.
 - **Boundary Determinism Gate:** детерминированные ветки не подменяют semantic-owner решение; они только валидируют/блокируют/деградируют контрактно.
@@ -195,14 +203,20 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 ### 5.2 Root Cause Gate (обязательно)
 - Фиксы по поведению/надежности начинаются с root-cause, а не с симптома.
+- Behavioral RCA обязана явно отделять: `owner_error`, `boundary_fallback_error`, `fact_composition_error`, `oracle_or_evaluator_error`, `infra_or_runtime_failure`.
 - В Task Package обязательна секция `Root cause (mandatory)`:
   - symptom,
   - minimal reproduction,
   - evidence,
   - Five Whys (или эквивалентная структурированная RCA),
+  - broken invariant,
+  - shared mechanism,
+  - why the surfaced family belongs to that mechanism,
+  - open-world envelope expected to improve after the fix,
   - root cause statement,
   - fix mechanism.
 - Если root cause не доказан, статус блока = `BLOCKED` до фиксации гипотез и плана проверки.
+- Для behavioral блоков root-cause считается доказанным только вместе с exact live-path reconstruction по artifact bundle или `dialog-report`.
 
 ### 5.3 Reuse-First Gate (обязательно)
 - По умолчанию стратегия: **reuse -> integrate -> configure -> build**.
@@ -322,7 +336,11 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 **Что делаем (как):**
 1) **Lock-run (один раз):** фиксируем baseline с неизменными параметрами; принимаем только валидный run (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`); сохраняем `scenarios.json`, `summary.json`, `brief.md`.
 2) **Replay-run (на каждую правку):** запускаем только по lock-сценариям (`--scenarios-file`) и сравниваем только с lock-summary (`--baseline-summary`), с fail-fast (`--max-failures`) для скорости; обязательно `--reset-before-dialog`, чтобы не тянуть state/trace из прошлых прогонов.
-3) **Handoff:** в session/STATE кладём `summary.json` + `brief.md` + top-failures + replay command.
+3) **Human semantic audit (обязательно для любых quality claims):** после каждого run, который используется как behavioral evidence, делается полный turn-by-turn audit по смыслу и продуктовому поведению, а не только artifact/integrity review. Аудит обязан явно разделять `contract-green` и `human-semantic green/red`; human-semantic fail блокирует product-quality closure even when `semantic_valid=true`.
+4) **Handoff:** в session/STATE кладём `summary.json` + `brief.md` + top-failures + replay command.
+   - Completed audit artifacts now also include `manual_audit_workspace.md/json`, `family_registry.json`, and `judge_conflicts.jsonl`.
+   - Before the next product RCA block, run cross-run comparison with `python3 ops/diagnose.py llm-quality-trends --run-dir <prev> --run-dir <current> ...`.
+5) **Family RCA before code:** каждый surfaced blocker сначала получает exact path map и layer classification; только после этого разрешён новый runtime fix.
 
 **Короткая памятка (не нарушать):**
 - Нельзя сравнивать прогоны с разными сценариями/seed/параметрами.
@@ -331,6 +349,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Нельзя начинать новый фикс без `brief.md` от предыдущего прогона.
 - Нельзя использовать `INVALID` run (`infra_valid=false`) для сравнения и baseline.
 - Если реплей хуже baseline — stop-the-line, сначала root cause, потом новый фикс.
+- Нельзя объявлять run общим `green`, если пройден только contract oracle, но turn-by-turn human semantic audit ещё не сделан или дал `red`.
 - Перед каждым новым run обязателен индекс артефактов и блокировка повторов:
   - все quality-прогоны фиксируются в `run_manifest.json` и индексе `/tmp/booking_quality/_index` (по часу и по типу `lock/replay/full`),
   - новый run запрещён, если предыдущий в том же режиме `incomplete/invalid/failed` или `manual_audit != done`,
@@ -344,6 +363,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - direct `python3 ops/diagnose.py llm-quality ...` разрешён только для `dev/forensic` и не является acceptance-evidence.
 - отчёт по артефактам: `scripts/quality_artifact_report.py --hours 24 --show-commands`
 - подробный SOP/quickstart (`lock/replay/full/resume/guard blocks`): `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` (section `Guarded llm-quality quickstart (single entrypoint)`).
+- manual audit по run dir не считается полным, если он ограничился только artifact integrity / oracle conflict review без явного turn-by-turn human semantic verdict.
 
 **Локальные тесты:**
 - локально запускаются в первую очередь и определяют качество поведения.

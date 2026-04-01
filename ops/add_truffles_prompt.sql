@@ -41,7 +41,7 @@ isInCooldown: {{ $json.isInCooldown }}
 ## SOURCE (обязательно указать)
 - faq.md, objections.md, cases.md, examples.md, slang.md
 - none — если нет источника',
-  'gpt-4o',
+  'gpt-5.4-nano-2026-03-17',
   0.7,
   true
 )

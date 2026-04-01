@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/boundary_override.v1.jsonschema",
+  "title": "BoundaryOverride v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision",
+    "reason_code",
+    "preserve_fields",
+    "public_message",
+    "trace_message",
+    "replan_hints",
+    "meta"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "boundary_override.v1"
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "block", "degrade", "request_replan"]
+    },
+    "reason_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "preserve_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "outcome",
+          "interaction_owner",
+          "interaction_target",
+          "interaction_relation",
+          "pending_question_contract"
+        ]
+      }
+    },
+    "public_message": {
+      "type": ["string", "null"]
+    },
+    "trace_message": {
+      "type": ["string", "null"]
+    },
+    "replan_hints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

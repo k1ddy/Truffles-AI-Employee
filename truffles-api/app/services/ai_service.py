@@ -220,8 +220,8 @@ BOT_STATUS_KEYWORDS = {
 }
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-FAST_MODEL = os.environ.get("FAST_MODEL", "gpt-5-mini")
-SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
+FAST_MODEL = os.environ.get("FAST_MODEL", "gpt-5.4-nano-2026-03-17")
+SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5.4-nano-2026-03-17")
 FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
 INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
@@ -2070,6 +2070,15 @@ def _extract_branch_filter(timing_context: dict | None) -> tuple[str | None, str
     return branch_id, knowledge_tag
 
 
+def _extract_dense_retrieval_meta(timing_context: dict | None) -> dict | None:
+    if not isinstance(timing_context, dict):
+        return None
+    dense_meta = timing_context.get("rag_dense")
+    if not isinstance(dense_meta, dict):
+        return None
+    return dict(dense_meta)
+
+
 def _record_rag_trace(
     *,
     timing_context: dict | None,
@@ -2200,6 +2209,7 @@ def get_rag_confidence(
             limit=3,
             branch_id=branch_id,
             knowledge_tag=knowledge_tag,
+            dense_meta=_extract_dense_retrieval_meta(timing_context),
         )
         _log_timing(
             "rag_ms",
@@ -2257,6 +2267,7 @@ def get_rag_confidence(
                         limit=3,
                         branch_id=branch_id,
                         knowledge_tag=knowledge_tag,
+                        dense_meta=_extract_dense_retrieval_meta(timing_context),
                     )
                     _log_timing(
                         "rag_ms",
@@ -2379,6 +2390,7 @@ def generate_ai_response(
                 limit=3,
                 branch_id=branch_id,
                 knowledge_tag=knowledge_tag,
+                dense_meta=_extract_dense_retrieval_meta(timing_context),
             )
             _log_timing(
                 "rag_ms",
@@ -2442,6 +2454,7 @@ def generate_ai_response(
                             limit=3,
                             branch_id=branch_id,
                             knowledge_tag=knowledge_tag,
+                            dense_meta=_extract_dense_retrieval_meta(timing_context),
                         )
                         _log_timing(
                             "rag_ms",

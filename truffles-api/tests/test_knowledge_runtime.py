@@ -4,7 +4,13 @@ from uuid import uuid4
 
 from app.services import knowledge_runtime
 from app.services.demo_salon_knowledge import load_yaml_truth
-from app.services.knowledge_runtime import RuntimeTruth, set_runtime_truth
+from app.services.knowledge_runtime import (
+    RuntimeTruth,
+    get_runtime_truth,
+    get_runtime_truth_override,
+    set_runtime_truth,
+    use_runtime_truth_override,
+)
 
 
 def test_build_runtime_truth_missing_branch():
@@ -124,3 +130,41 @@ def test_should_allow_truth_fallback_allows_debug_with_explicit_flag(monkeypatch
     monkeypatch.setenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", "1")
 
     assert knowledge_runtime.should_allow_truth_fallback() is True
+
+
+def test_build_runtime_truth_uses_override_for_matching_branch():
+    runtime_truth = RuntimeTruth(
+        truth={"salon": {"name": "Override"}},
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        source="override",
+        allow_fallback=False,
+    )
+
+    with use_runtime_truth_override(runtime_truth):
+        resolved = knowledge_runtime.build_runtime_truth(
+            db=Mock(),
+            client_slug="demo_salon",
+            client_id=uuid4(),
+            branch_id=runtime_truth.branch_id,
+            allow_fallback=False,
+        )
+
+    assert resolved is runtime_truth
+
+
+def test_use_runtime_truth_override_resets_context():
+    runtime_truth = RuntimeTruth(
+        truth={"salon": {"name": "Override"}},
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        source="override",
+        allow_fallback=False,
+    )
+
+    with use_runtime_truth_override(runtime_truth):
+        assert get_runtime_truth() is runtime_truth
+        assert get_runtime_truth_override() is runtime_truth
+
+    assert get_runtime_truth() is None
+    assert get_runtime_truth_override() is None

@@ -1,0 +1,18 @@
+version: 2026-03-31.v1
+family_id: location_hours_parking
+target_family_fact_refs:
+  - location
+  - hours
+  - parking
+expected_runtime_tool_action: catalog.location
+expected_bundle_policy: location_base_bundle
+expected_mixed_scope_reason: first_fact_family_mixed_scope_unresolved
+expected_hours_allowed_fact_refs:
+  - hours
+expected_parking_allowed_fact_refs:
+  - parking
+guard_contracts:
+  - "targeted `location / hours / parking` turns reroute through `catalog.location` on the live fact-plane hot path even when stale binding still points elsewhere"
+  - "targeted family turns may not fall back to direct-truth or pack-runtime sibling replies when `catalog.location` does not resolve"
+  - "mixed turns that include targeted family refs may not escape to direct-truth or pack-runtime sibling replies outside the governed family cutover"
+  - "`catalog.location` may not re-infer `parking` from message text when binding-authorized `allowed_fact_refs` exclude it"

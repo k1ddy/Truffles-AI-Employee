@@ -83,7 +83,7 @@ def test_collect_openai_preflight_result_reuses_identical_transport(monkeypatch)
     first, first_reused = _module._llm_quality_collect_openai_preflight_result(
         purpose="llm",
         api_key="same-key",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         timeout=8.0,
         cache=cache,
@@ -91,7 +91,7 @@ def test_collect_openai_preflight_result_reuses_identical_transport(monkeypatch)
     second, second_reused = _module._llm_quality_collect_openai_preflight_result(
         purpose="judge",
         api_key="same-key",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         timeout=25.0,
         cache=cache,
@@ -127,7 +127,7 @@ def test_collect_openai_preflight_result_does_not_reuse_different_transport(monk
     _module._llm_quality_collect_openai_preflight_result(
         purpose="llm",
         api_key="same-key",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         timeout=8.0,
         cache=cache,
@@ -135,7 +135,7 @@ def test_collect_openai_preflight_result_does_not_reuse_different_transport(monk
     _module._llm_quality_collect_openai_preflight_result(
         purpose="judge",
         api_key="same-key",
-        model="gpt-4.1-mini",
+        model="other-model",
         base_url="https://api.openai.com",
         timeout=25.0,
         cache=cache,
@@ -174,7 +174,7 @@ def test_openai_key_preflight_retries_single_timeout_and_recovers(monkeypatch):
     result = _module._llm_quality_openai_key_preflight(
         purpose="llm",
         api_key="same-key",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         timeout=8.0,
     )
@@ -191,6 +191,93 @@ def test_openai_key_preflight_retries_single_timeout_and_recovers(monkeypatch):
     assert result["retry_reasons"] == [
         {"attempt": 1, "reason": "probe_error:TimeoutError", "status": None, "timeout_s": 8.0}
     ]
+
+
+def test_openai_key_preflight_attempt_uses_gpt5_compatible_token_field(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "pong"}}]}).encode("utf-8")
+
+    def _fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeResponse()
+
+    monkeypatch.setattr(_module.urllib.request, "urlopen", _fake_urlopen)
+
+    result = _module._llm_quality_openai_key_preflight_attempt(
+        purpose="llm",
+        api_key="same-key",
+        model="gpt-5.4-nano-2026-03-17",
+        base_url="https://api.openai.com",
+        timeout=8.0,
+        effective_timeout=8.0,
+    )
+
+    assert result["valid"] is True
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["timeout"] == 8.0
+    assert captured["body"]["max_completion_tokens"] == 16
+    assert "max_tokens" not in captured["body"]
+
+
+def test_llm_quality_call_judge_uses_gpt5_compatible_token_field(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            payload = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"verdict":"pass","score":1.0,"reasons":[],"summary":"ok"}'
+                        }
+                    }
+                ]
+            }
+            return json.dumps(payload).encode("utf-8")
+
+    def _fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeResponse()
+
+    monkeypatch.setattr(_module.urllib.request, "urlopen", _fake_urlopen)
+
+    result = _module._llm_quality_call_judge(
+        api_key="same-key",
+        model="gpt-5.4-nano-2026-03-17",
+        base_url="https://api.openai.com",
+        prompt="ping",
+        timeout=12.0,
+        max_tokens=320,
+    )
+
+    assert result["verdict"] == "pass"
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["timeout"] == 12.0
+    assert captured["body"]["max_completion_tokens"] == 320
+    assert "max_tokens" not in captured["body"]
 
 
 def test_openai_key_preflight_retries_retryable_url_error_once(monkeypatch):
@@ -223,7 +310,7 @@ def test_openai_key_preflight_retries_retryable_url_error_once(monkeypatch):
     result = _module._llm_quality_openai_key_preflight(
         purpose="llm",
         api_key="same-key",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         timeout=8.0,
     )
@@ -265,7 +352,7 @@ def test_openai_key_preflight_does_not_retry_rate_limit_http_error(monkeypatch):
     result = _module._llm_quality_openai_key_preflight(
         purpose="llm",
         api_key="same-key",
-        model="gpt-4o-mini",
+        model="gpt-5.4-nano-2026-03-17",
         base_url="https://api.openai.com",
         timeout=8.0,
     )

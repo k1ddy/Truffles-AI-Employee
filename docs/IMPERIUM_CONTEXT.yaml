@@ -300,7 +300,7 @@ knowledge_pipeline:
     endpoint_default: "http://bge-m3:80/embed"
     vector_dim: 1024
     evidence:
-      - "ops/start_bge_m3.sh:2-8"
+      - "ops/start_bge_m3.sh:1-38"
       - "truffles-api/app/services/knowledge_service.py:11-20"
       - "docker run --rm --network truffles_internal-net -e QDRANT__SERVICE__API_KEY curlimages/curl:8.5.0 -s -H \"api-key: $QDRANT__SERVICE__API_KEY\" http://qdrant:6333/collections/truffles_knowledge (size=1024) (2025-12-21)"
   chunking_strategy:

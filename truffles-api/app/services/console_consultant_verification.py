@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.session import Session as SASession
 
+from app.core import consultant_core_v2
 from app.models import (
     Branch,
     Client,
@@ -59,7 +60,6 @@ from app.schemas.console import (
     ConsoleConsultantVerificationTurnRecord,
 )
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookTenantContext
-from app.services import reasoning_core
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities_layers, validate_capabilities_payload
 from app.services.chatflow_service import get_instance_id
@@ -89,6 +89,7 @@ _KNOWLEDGE_STALE_HOURS_WARN = 24 * 7
 _CONSULTANT_VERIFICATION_SOURCE = "console_consultant_verification"
 _CONSULTANT_VERIFICATION_CHANNEL = "whatsapp"
 _RUNTIME_SNAPSHOT_VERSION = 1
+consultant_runtime = consultant_core_v2
 _FINDING_FAMILY_LABELS = {
     "knowledge_gap": "Не хватает данных или фактов",
     "policy_boundary": "Нужна граница или человек",
@@ -2042,7 +2043,7 @@ async def _run_consultant_verification_simulation(
             instance_id=instance_id,
         )
         set_runtime_truth_override(runtime_truth_override)
-        response = await reasoning_core.handle_webhook_payload(
+        response = await consultant_core_v2.handle_webhook_payload(
             payload,
             runtime_db,
             provided_secret=None,

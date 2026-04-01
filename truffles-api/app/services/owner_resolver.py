@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from app.services.interaction_owner_matrix_service import load_interaction_owner_matrix
 
 _TIMEOUT_BOUNDARY_EXPECTED_REPLY_TYPES = frozenset({"service", "time", "name", "phone"})
+_SEMANTIC_ENTITY_TYPES_SPECIALIST = frozenset({"specialist", "master"})
+_SEMANTIC_EXPECTED_REPLY_TIME = "time"
+_SEMANTIC_EXPECTED_REPLY_NAME = "name"
+_SEMANTIC_EXPECTED_REPLY_SERVICE = "service_choice"
 
 
 def _clean_text(value: Any) -> str | None:
@@ -130,6 +135,302 @@ class TimeoutOwnerBoundaryResolution:
     booking_state: dict[str, Any]
     filled_slots: tuple[str, ...]
     missing_slot: str | None
+
+
+@dataclass(frozen=True)
+class SemanticContractView:
+    subject_kind: str | None
+    capability: str | None
+    temporal_scope: str | None
+    resolution_mode: str | None
+    pending_question_act: str | None
+    pending_question_target: str | None
+    active_question_relation: str | None
+    specialist_name: str | None
+    specialist_id: str | None
+
+
+def _normalize_semantic_entity_refs(values: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(values, list):
+        return ()
+    cleaned: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        entity_id = _clean_text(item.get("entity_id") or item.get("id"))
+        entity_type = _normalize_token(item.get("entity_type") or item.get("type"))
+        entity_value = _clean_text(item.get("value") or item.get("label"))
+        source_ref = _normalize_token(item.get("source_ref"))
+        confidence = item.get("confidence")
+        row: dict[str, Any] = {}
+        if entity_id:
+            row["entity_id"] = entity_id
+        if entity_type:
+            row["entity_type"] = entity_type
+        if entity_value:
+            row["value"] = entity_value
+        if source_ref:
+            row["source_ref"] = source_ref
+        if isinstance(confidence, (int, float)):
+            row["confidence"] = max(0.0, min(float(confidence), 1.0))
+        if not row:
+            continue
+        fingerprint = (
+            str(row.get("entity_id") or ""),
+            str(row.get("entity_type") or ""),
+            str(row.get("value") or ""),
+            str(row.get("source_ref") or ""),
+        )
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        cleaned.append(row)
+    return tuple(cleaned)
+
+
+def _coerce_uuid_text(value: Any) -> str | None:
+    cleaned = _clean_text(value)
+    if not cleaned:
+        return None
+    try:
+        return str(UUID(cleaned))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_specialist_from_entity_refs(entity_refs: tuple[dict[str, Any], ...]) -> tuple[str | None, str | None]:
+    for row in entity_refs:
+        entity_type = _normalize_token(row.get("entity_type"))
+        if entity_type not in _SEMANTIC_ENTITY_TYPES_SPECIALIST:
+            continue
+        specialist_name = _clean_text(row.get("value"))
+        entity_id = _clean_text(row.get("entity_id"))
+        specialist_id = _coerce_uuid_text(entity_id)
+        if specialist_name:
+            return specialist_name, specialist_id
+        if specialist_id:
+            return None, specialist_id
+        if entity_id:
+            return entity_id, None
+    return None, None
+
+
+def _extract_specialist_from_semantic_contract(
+    semantic_contract: dict[str, Any] | None,
+    *,
+    entity_refs: tuple[dict[str, Any], ...],
+) -> tuple[str | None, str | None]:
+    if not isinstance(semantic_contract, dict):
+        return _extract_specialist_from_entity_refs(entity_refs)
+    referents = semantic_contract.get("referents")
+    if isinstance(referents, dict):
+        specialist_payload = referents.get("specialist")
+        if isinstance(specialist_payload, dict):
+            specialist_name = _clean_text(specialist_payload.get("value"))
+            entity_id = _clean_text(specialist_payload.get("entity_id"))
+            specialist_id = _coerce_uuid_text(entity_id)
+            if specialist_name:
+                return specialist_name, specialist_id
+            if specialist_id:
+                return None, specialist_id
+            if entity_id:
+                return entity_id, None
+    return _extract_specialist_from_entity_refs(entity_refs)
+
+
+def extract_specialist_preference(
+    *,
+    semantic_contract: dict[str, Any] | None = None,
+    tool_args: dict[str, Any] | None = None,
+    entity_refs: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+) -> tuple[str | None, str | None]:
+    if isinstance(tool_args, dict):
+        specialist_name = _clean_text(tool_args.get("specialist_name"))
+        raw_specialist_id = _clean_text(tool_args.get("specialist_id"))
+        specialist_id = _coerce_uuid_text(raw_specialist_id)
+        if specialist_name:
+            return specialist_name, specialist_id
+        if specialist_id:
+            return None, specialist_id
+        if raw_specialist_id:
+            return raw_specialist_id, None
+    normalized_refs = _normalize_semantic_entity_refs(list(entity_refs or ()))
+    return _extract_specialist_from_semantic_contract(
+        semantic_contract,
+        entity_refs=normalized_refs,
+    )
+
+
+def build_semantic_contract_view(
+    *,
+    semantic_contract: dict[str, Any] | None = None,
+    tool_args: dict[str, Any] | None = None,
+    entity_refs: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+    subject_kind: str | None = None,
+    capability: str | None = None,
+    temporal_scope: str | None = None,
+    resolution_mode: str | None = None,
+    pending_question_act: str | None = None,
+    pending_question_target: str | None = None,
+    active_question_relation: str | None = None,
+) -> SemanticContractView:
+    contract = dict(semantic_contract) if isinstance(semantic_contract, dict) else {}
+    normalized_refs = _normalize_semantic_entity_refs(
+        contract.get("entity_refs") or list(entity_refs or ())
+    )
+    specialist_name, specialist_id = _extract_specialist_from_semantic_contract(
+        contract,
+        entity_refs=normalized_refs,
+    )
+    if specialist_name is None and specialist_id is None:
+        specialist_name, specialist_id = extract_specialist_preference(
+            tool_args=tool_args,
+            entity_refs=normalized_refs,
+        )
+    return SemanticContractView(
+        subject_kind=_normalize_token(contract.get("subject_kind")) or _normalize_token(subject_kind),
+        capability=_normalize_token(contract.get("capability")) or _normalize_token(capability),
+        temporal_scope=_normalize_token(contract.get("temporal_scope")) or _normalize_token(temporal_scope),
+        resolution_mode=_normalize_token(contract.get("resolution_mode")) or _normalize_token(resolution_mode),
+        pending_question_act=_normalize_token(contract.get("pending_question_act"))
+        or _normalize_token(pending_question_act),
+        pending_question_target=_normalize_token(contract.get("pending_question_target"))
+        or _normalize_token(pending_question_target),
+        active_question_relation=_normalize_token(contract.get("active_question_relation"))
+        or _normalize_token(active_question_relation),
+        specialist_name=specialist_name,
+        specialist_id=specialist_id,
+    )
+
+
+def should_preserve_specialist_followup_owner(
+    *,
+    semantic_view: SemanticContractView,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    expected_reply_type: str | None,
+) -> bool:
+    normalized_goal = _normalize_token(policy_goal)
+    normalized_collect_slot = _normalize_token(policy_collect_slot)
+    if normalized_goal != "booking":
+        return False
+    relation_token = semantic_view.active_question_relation
+    if relation_token not in {None, "referent_followup"}:
+        return False
+    if semantic_view.pending_question_target == "specialist":
+        if semantic_view.specialist_name or semantic_view.specialist_id:
+            return True
+        if normalized_collect_slot not in {None, "datetime"}:
+            return False
+        if expected_reply_type != _SEMANTIC_EXPECTED_REPLY_TIME:
+            return False
+        return semantic_view.resolution_mode == "referent_followup"
+    if semantic_view.pending_question_target is not None:
+        return False
+    if normalized_collect_slot not in {None, "datetime"}:
+        return False
+    if expected_reply_type != _SEMANTIC_EXPECTED_REPLY_TIME:
+        return False
+    if semantic_view.subject_kind != "specialist" or semantic_view.capability != "bookability":
+        return False
+    return bool(semantic_view.specialist_name or semantic_view.specialist_id)
+
+
+def should_preserve_specialist_availability_followup_owner(
+    *,
+    semantic_view: SemanticContractView,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+) -> bool:
+    normalized_goal = _normalize_token(policy_goal)
+    normalized_collect_slot = _normalize_token(policy_collect_slot)
+    if normalized_goal != "booking":
+        return False
+    if normalized_collect_slot == "name":
+        if semantic_view.temporal_scope not in {"specific_time", "day", "weekday", "weekend"}:
+            return False
+    elif normalized_collect_slot not in {None, "datetime"}:
+        return False
+    if semantic_view.pending_question_target != "specialist":
+        return False
+    if semantic_view.subject_kind not in {None, "specialist"}:
+        return False
+    if semantic_view.capability not in {None, "live_availability", "bookability"}:
+        return False
+    if semantic_view.temporal_scope not in {
+        "specific_time",
+        "day",
+        "weekday",
+        "weekend",
+        "date_range",
+    }:
+        return False
+    return semantic_view.active_question_relation == "specialist_availability_followup"
+
+
+def should_preserve_service_choice_specialist_availability_followup_owner(
+    *,
+    semantic_view: SemanticContractView,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    expected_reply_type: str | None,
+) -> bool:
+    normalized_goal = _normalize_token(policy_goal)
+    normalized_collect_slot = _normalize_token(policy_collect_slot)
+    if normalized_goal != "info":
+        return False
+    if normalized_collect_slot != "datetime":
+        return False
+    if expected_reply_type != _SEMANTIC_EXPECTED_REPLY_SERVICE:
+        return False
+    if semantic_view.pending_question_act != "ask_about_requested_slot":
+        return False
+    if semantic_view.pending_question_target != "specialist":
+        return False
+    if semantic_view.subject_kind not in {None, "specialist"}:
+        return False
+    if semantic_view.capability != "live_availability":
+        return False
+    if semantic_view.temporal_scope not in {"specific_time", "day", "weekday", "weekend"}:
+        return False
+    if semantic_view.active_question_relation not in {None, "ask_about_requested_slot"}:
+        return False
+    return semantic_view.resolution_mode == "clarify_missing_time"
+
+
+def should_preserve_active_name_time_availability_followup_owner(
+    *,
+    semantic_view: SemanticContractView,
+    policy_goal: str | None,
+    policy_collect_slot: str | None,
+    expected_reply_type: str | None,
+) -> bool:
+    normalized_goal = _normalize_token(policy_goal)
+    normalized_collect_slot = _normalize_token(policy_collect_slot)
+    if normalized_goal != "booking" or normalized_collect_slot != "name":
+        return False
+    if expected_reply_type != _SEMANTIC_EXPECTED_REPLY_NAME:
+        return False
+    if semantic_view.subject_kind not in {None, "time", "booking"}:
+        return False
+    if semantic_view.capability not in {None, "live_availability", "bookability"}:
+        return False
+    if semantic_view.temporal_scope != "specific_time":
+        return False
+    if (
+        semantic_view.pending_question_act == "ask_about_requested_slot"
+        and semantic_view.pending_question_target == "time"
+    ):
+        return semantic_view.active_question_relation in {None, "ask_about_requested_slot"}
+    if (
+        semantic_view.pending_question_act is not None
+        or semantic_view.pending_question_target is not None
+    ):
+        return False
+    if semantic_view.active_question_relation not in {None, "ask_about_requested_slot"}:
+        return False
+    return semantic_view.resolution_mode == "referent_followup"
 
 
 def _match_runtime_contract(
@@ -366,9 +667,16 @@ def build_owner_resolution_input(
 __all__ = [
     "OwnerResolution",
     "OwnerResolutionInput",
+    "SemanticContractView",
     "TimeoutOwnerBoundaryInput",
     "TimeoutOwnerBoundaryResolution",
+    "build_semantic_contract_view",
     "build_owner_resolution_input",
+    "extract_specialist_preference",
     "resolve_interaction_owner",
     "resolve_timeout_owner_boundary",
+    "should_preserve_active_name_time_availability_followup_owner",
+    "should_preserve_service_choice_specialist_availability_followup_owner",
+    "should_preserve_specialist_availability_followup_owner",
+    "should_preserve_specialist_followup_owner",
 ]

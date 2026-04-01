@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 
 
 def _load_module():
@@ -28,7 +29,7 @@ def _load_module():
 _module = _load_module()
 _TARGET_TEST_REF = (
     "truffles-api/tests/test_message_endpoint.py::"
-    "test_llm_policy_core_info_lateness_signal_uses_lateness_reply"
+    "test_llm_policy_core_booking_expected_reply_turn_skips_intent_decomp"
 )
 
 
@@ -38,6 +39,13 @@ def _chain_controller_script() -> Path:
     if not script_path.exists():
         pytest.skip("scripts/quality_chain_controller.sh not present", allow_module_level=True)
     return script_path
+
+
+def _load_schema(relative_path: str) -> Draft202012Validator:
+    repo_root = Path(__file__).resolve().parents[2]
+    schema_path = repo_root / relative_path
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
 def _write_l2_summary(
@@ -1428,6 +1436,75 @@ def test_chain_controller_canary_failure_executes_rollback(tmp_path):
     assert payload.get("next_command") is None
     assert (canary_output_dir / "rollback.json").exists()
     assert (chain_root / f"{chain_id}-rollback.json").exists()
+    release_gate_path = canary_output_dir / "release_gate.json"
+    chain_release_gate_path = chain_root / f"{chain_id}-release_gate.json"
+    assert release_gate_path.exists()
+    assert chain_release_gate_path.exists()
+    release_gate = json.loads(release_gate_path.read_text(encoding="utf-8"))
+    _load_schema("contracts/runtime/release_gate_evidence.v1.jsonschema").validate(release_gate)
+    assert release_gate["mode"] == "canary"
+    assert release_gate["decision"] == "rollback_executed"
+    assert release_gate["chain_status"] == "blocked"
+    assert release_gate["blocked_reason"] == "canary_rollback_executed"
+    assert release_gate["quality_snapshot"]["semantic_valid"] is False
+    assert release_gate["evidence"]["summary_path"] == str(canary_summary_path.resolve())
+    assert release_gate["evidence"]["rollback_path"] == str((canary_output_dir / "rollback.json").resolve())
+
+
+def test_chain_controller_full_canonical_writes_release_gate(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "quality_chain_controller.sh"
+    if not script_path.exists():
+        pytest.skip("quality_chain_controller.sh not present")
+
+    chain_id = "chain-release-gate-full"
+    chain_root = tmp_path / "chain"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_ROOT"] = str(chain_root)
+
+    run_id = f"booking-full-{chain_id}"
+    output_dir = tmp_path / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / "summary.json"
+    _write_l2_summary(summary_path, run_id=run_id, lane="acceptance")
+
+    bootstrap = subprocess.run(
+        [
+            str(script_path),
+            "bootstrap",
+            "--mode",
+            "full",
+            "--run-id",
+            run_id,
+            "--chain-id",
+            chain_id,
+            "--output-dir",
+            str(output_dir),
+            "--summary-path",
+            str(summary_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+    )
+    assert bootstrap.returncode == 0, bootstrap.stderr
+
+    release_gate_path = output_dir / "release_gate.json"
+    chain_release_gate_path = chain_root / f"{chain_id}-release_gate.json"
+    assert release_gate_path.exists()
+    assert chain_release_gate_path.exists()
+    release_gate = json.loads(release_gate_path.read_text(encoding="utf-8"))
+    _load_schema("contracts/runtime/release_gate_evidence.v1.jsonschema").validate(release_gate)
+    assert release_gate["mode"] == "full"
+    assert release_gate["decision"] == "accept"
+    assert release_gate["step_status"] == "canonical"
+    assert release_gate["chain_status"] == "canonical_closed"
+    assert release_gate["quality_snapshot"]["infra_valid"] is True
+    assert release_gate["quality_snapshot"]["semantic_valid"] is True
+    assert release_gate["quality_snapshot"]["evidence_handoff_valid"] is True
+    assert release_gate["evidence"]["summary_path"] == str(summary_path.resolve())
+    assert release_gate["evidence"]["chain_state_path"] == str((chain_root / f"{chain_id}.json").resolve())
 
 
 def test_chain_controller_manual_rollback_command(tmp_path):

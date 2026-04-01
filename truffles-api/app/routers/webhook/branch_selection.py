@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Branch, Conversation, User
 from app.routers.webhook.context_manager import _get_conversation_context, _set_conversation_context
 from app.routers.webhook.instance_routing import resolve_active_branch_by_instance
+from app.routers.webhook.trace import _record_decision_trace
 from app.schemas.webhook import WebhookResponse
 from app.services.state_machine import ConversationState
 
@@ -87,14 +89,21 @@ def _build_branch_selection(branches: list[Branch], now: datetime) -> dict:
     }
 
 
+def _normalize_branch_text(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.strip().casefold()
+    normalized = re.sub(r"[^\w\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
 def _match_branch_choice(
     message_text: str,
     branches: list[Branch],
     selection: dict | None,
 ) -> tuple[Branch | None, bool]:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_branch_text(message_text)
     if not normalized:
         return None, False
 
@@ -111,8 +120,8 @@ def _match_branch_choice(
             return branches[index - 1], True
 
     for branch in branches:
-        name_norm = legacy._normalize_text(branch.name or "")
-        slug_norm = legacy._normalize_text(branch.slug or "")
+        name_norm = _normalize_branch_text(branch.name or "")
+        slug_norm = _normalize_branch_text(branch.slug or "")
         if name_norm and name_norm in normalized:
             return branch, False
         if slug_norm and slug_norm in normalized:
@@ -121,16 +130,14 @@ def _match_branch_choice(
 
 
 def _is_branch_only_message(message_text: str, branch: Branch, selected_by_index: bool) -> bool:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
+    normalized = _normalize_branch_text(message_text)
     if not normalized:
         return False
     if selected_by_index and normalized.isdigit():
         return True
-    if branch.name and normalized == legacy._normalize_text(branch.name):
+    if branch.name and normalized == _normalize_branch_text(branch.name):
         return True
-    if branch.slug and normalized == legacy._normalize_text(branch.slug):
+    if branch.slug and normalized == _normalize_branch_text(branch.slug):
         return True
     return False
 
@@ -164,8 +171,6 @@ def _handle_branch_selection_gate(
     now: datetime,
     send_and_save,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
-
     branch_mode = settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
     remember_branch = (
         settings.remember_branch_preference
@@ -175,7 +180,7 @@ def _handle_branch_selection_gate(
     context = _get_conversation_context(conversation)
     branch_id = conversation.branch_id or _coerce_uuid(context.get(BRANCH_CONTEXT_KEY))
     if not branch_id and remember_branch:
-        branch_id = legacy._get_user_branch_preference(user)
+        branch_id = _get_user_branch_preference(user)
 
     instance_id = metadata.instanceId if metadata else None
     if branch_mode in {"by_instance", "hybrid"} and instance_id:
@@ -202,8 +207,8 @@ def _handle_branch_selection_gate(
         if context.get(BRANCH_CONTEXT_KEY) != str(branch_id):
             context[BRANCH_CONTEXT_KEY] = str(branch_id)
             _set_conversation_context(conversation, context)
-        if remember_branch and legacy._get_user_branch_preference(user) != branch_id:
-            legacy._set_user_branch_preference(user, branch_id)
+        if remember_branch and _get_user_branch_preference(user) != branch_id:
+            _set_user_branch_preference(user, branch_id)
         return None
 
     if not conversation.branch_id and branch_mode in {"ask_user", "hybrid"}:
@@ -235,7 +240,7 @@ def _handle_branch_selection_gate(
                         bot_response = MSG_BRANCH_SELECTED.format(
                             branch_name=matched_branch.name or matched_branch.slug or "филиал"
                         )
-                        legacy._record_decision_trace(
+                        _record_decision_trace(
                             conversation,
                             {
                                 "stage": "branch_selection",
@@ -259,7 +264,7 @@ def _handle_branch_selection_gate(
                     prompt = _build_branch_prompt(branches)
                     context = _set_branch_selection(context, _build_branch_selection(branches, now))
                     _set_conversation_context(conversation, context)
-                    legacy._record_decision_trace(
+                    _record_decision_trace(
                         conversation,
                         {
                             "stage": "branch_selection",
@@ -285,7 +290,7 @@ def _handle_branch_selection_gate(
                 prompt = _build_branch_prompt(branches)
                 context = _set_branch_selection(context, _build_branch_selection(branches, now))
                 _set_conversation_context(conversation, context)
-                legacy._record_decision_trace(
+                _record_decision_trace(
                     conversation,
                     {
                         "stage": "branch_selection",

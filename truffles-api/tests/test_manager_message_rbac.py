@@ -137,3 +137,42 @@ def test_process_manager_message_sets_first_response_on_real_reply(monkeypatch):
     assert handover.assigned_to_name == "Agent"
     assert handover.first_response_at is not None
     assert handover.first_response_at >= before
+
+
+def test_notify_client_manager_status_sends_before_persisting_message(monkeypatch):
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        user_id=uuid4(),
+    )
+    handover = SimpleNamespace(id=uuid4())
+    calls = []
+    saved_payload = {}
+
+    monkeypatch.setattr(service, "get_user_remote_jid", lambda *_args, **_kwargs: "777@s.whatsapp.net")
+    monkeypatch.setattr(service, "is_probably_whatsapp_jid", lambda *_args, **_kwargs: True)
+
+    def fake_send_bot_response(**kwargs):
+        calls.append("send")
+        return False
+
+    def fake_save_message(**kwargs):
+        calls.append("save")
+        saved_payload.update(kwargs)
+
+    monkeypatch.setattr(service, "send_bot_response", fake_send_bot_response)
+    monkeypatch.setattr(service, "save_message", fake_save_message)
+
+    ok, detail = service.notify_client_manager_status(
+        Mock(),
+        conversation=conversation,
+        handover=handover,
+        status="connected",
+        manager_name="Bob",
+    )
+
+    assert calls == ["send", "save"]
+    assert ok is False
+    assert detail == "chatflow_failed"
+    assert saved_payload["message_metadata"]["delivery_ok"] is False

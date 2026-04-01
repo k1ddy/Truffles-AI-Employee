@@ -44,11 +44,41 @@ def test_pack_query_engine_contract_emits_fact_bundle_and_provenance():
     assert contract.get("intent_class") == "hours"
     assert contract.get("confidence") == 0.91
 
+    entity_refs = meta.get("entity_refs")
+    assert entity_refs == [
+        {
+            "entity_id": entity_refs[0]["entity_id"],
+            "entity_type": "service",
+            "value": "Маникюр",
+            "source_ref": "semantic_match",
+            "confidence": 0.91,
+        }
+    ]
+    assert str(entity_refs[0]["entity_id"]).startswith("service:")
+    assert meta.get("referents") == {
+        "service": {
+            "value": "Маникюр",
+            "entity_id": entity_refs[0]["entity_id"],
+            "entity_type": "service",
+            "source_ref": "semantic_match",
+        }
+    }
+    semantic_grounding = meta.get("semantic_grounding")
+    assert isinstance(semantic_grounding, dict)
+    assert semantic_grounding.get("contract_version") == "semantic_contract.v1"
+    assert semantic_grounding.get("entity_refs") == meta.get("entity_refs")
+    assert semantic_grounding.get("referents") == meta.get("referents")
+
     fact_bundle = meta.get("fact_bundle")
     assert isinstance(fact_bundle, dict)
     assert fact_bundle.get("pack_id") == "demo_salon"
     assert fact_bundle.get("source_ref") == "truth:hours"
     assert fact_bundle.get("action_class") == "FACT"
+
+    grounding_provenance = meta.get("grounding_provenance")
+    assert isinstance(grounding_provenance, dict)
+    assert grounding_provenance.get("pack_id") == "demo_salon"
+    assert grounding_provenance.get("source_ref") == "truth:hours"
 
     provenance = meta.get("provenance")
     assert isinstance(provenance, dict)
@@ -134,3 +164,12 @@ def test_pack_query_engine_contract_hybrid_meta_propagates_to_resolver_contract(
     assert isinstance(contract, dict)
     assert isinstance(contract.get("retrieval"), dict)
     assert contract.get("retrieval", {}).get("best_candidate") == "УЗИ брюшной полости"
+    grounding_provenance = meta.get("grounding_provenance")
+    assert isinstance(grounding_provenance, dict)
+    assert isinstance(grounding_provenance.get("retrieval"), dict)
+    assert grounding_provenance.get("retrieval", {}).get("best_candidate") == "УЗИ брюшной полости"
+    semantic_grounding = meta.get("semantic_grounding")
+    assert isinstance(semantic_grounding, dict)
+    assert semantic_grounding.get("grounding_provenance", {}).get("retrieval", {}).get(
+        "best_candidate"
+    ) == "УЗИ брюшной полости"

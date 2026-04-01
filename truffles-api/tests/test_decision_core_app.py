@@ -60,7 +60,7 @@ def test_decision_core_accepts_payload(client, monkeypatch):
     monkeypatch.setenv("DECISION_CORE_ENABLED", "1")
     monkeypatch.delenv("DECISION_CORE_TOKEN", raising=False)
     with patch(
-        "app.routers.decision_core.reasoning_core.handle_webhook_payload",
+        "app.routers.decision_core.handle_public_webhook_payload",
         new=AsyncMock(return_value=WebhookResponse(success=True, message="ok")),
     ) as mock_handle:
         response = client.post("/decision/handle", json=_build_payload())

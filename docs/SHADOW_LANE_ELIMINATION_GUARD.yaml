@@ -1,0 +1,32 @@
+version: 2026-03-31.v1
+active_block: Consultant Core Shadow Lane Elimination
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-shadow-lane-elimination-a922.md
+next_move: complete_operational_entrypoint_dedupe_before_whole_system_governance_closure_or_replay
+removed_runtime_shadows:
+  app.services.reasoning_core:
+    runtime_path: truffles-api/app/services/reasoning_core.py
+    support_path: truffles-api/tests/support_reasoning_core_shadow.py
+    support_test_importers:
+      - truffles-api/tests/test_outbox_payload_contract.py
+      - truffles-api/tests/test_reasoning_core.py
+  app.webhook:
+    runtime_path: truffles-api/app/webhook.py
+    support_path: truffles-api/tests/support_legacy_webhook_shadow.py
+    support_test_importers:
+      - truffles-api/tests/test_booking_chaos_dialogs.py
+      - truffles-api/tests/test_message_endpoint.py
+router_shadow_contract:
+  decision_path: truffles-api/app/routers/webhook/decision.py
+  legacy_path: truffles-api/app/routers/webhook/_legacy.py
+  decision_importers:
+    - truffles-api/app/routers/webhook/_legacy.py
+  legacy_bus_importers: []
+registry_contract:
+  required_status: machine_readable_shadow_lane_elimination_base
+  next_phase_required: operational_entrypoint_dedupe
+required_checks:
+  - python3 scripts/recovery_execution_guard.py
+  - python3 scripts/shadow_lane_elimination_guard.py
+  - python3 scripts/arch_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_shadow_lane_elimination_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_legacy_mesh_caller_proof.py

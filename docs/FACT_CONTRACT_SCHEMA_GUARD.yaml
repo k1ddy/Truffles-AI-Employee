@@ -1,0 +1,22 @@
+version: v1
+required_target_contract: FactManifest / FactRequestV1 / FactPlanV1 / FactResultV1 / FactContractV1
+required_next_phase: narrow_fact_family_cutover
+required_schema_files:
+  - contracts/runtime/fact_manifest.v1.jsonschema
+  - contracts/runtime/fact_request.v1.jsonschema
+  - contracts/runtime/fact_plan.v1.jsonschema
+  - contracts/runtime/fact_result.v1.jsonschema
+  - contracts/runtime/fact_contract.v1.jsonschema
+required_fact_models:
+  - FactManifestV1
+  - FactRequestV1
+  - FactPlanV1
+  - FactResultV1
+  - FactContractV1
+required_meta_keys:
+  - fact_manifest_id
+  - fact_requested_refs
+  - fact_allowed_refs
+  - fact_allowed_sets
+  - fact_emitted_refs
+  - fact_contract

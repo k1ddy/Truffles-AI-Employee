@@ -1,14 +1,21 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class MessageRequest(BaseModel):
     client_id: UUID
     remote_jid: str
-    content: str
+    content: str = Field(..., min_length=1)
     channel: str = "whatsapp"
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _normalize_content(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class MessageResponse(BaseModel):

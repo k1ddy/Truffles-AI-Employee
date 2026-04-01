@@ -39,46 +39,54 @@ def _runtime_truth(payload: dict, *, slug: str, branch_id=None):
         set_runtime_truth(None)
 
 
-def test_pack_runtime_service_reexports_default_adapter() -> None:
+def test_pack_runtime_service_keeps_active_public_surface_off_default_adapter_dispatch() -> None:
     assert runtime.get_pack_decision is not default_runtime.get_pack_decision
     assert runtime.get_pack_service_decision is not default_runtime.get_pack_service_decision
-    assert runtime.get_pack_adapter is default_runtime.get_pack_adapter
-    assert runtime.get_pack_price_reply is default_runtime.get_pack_price_reply
-    assert runtime.get_pack_price_item is default_runtime.get_pack_price_item
+    assert not hasattr(runtime, "get_pack_adapter")
+    assert runtime.get_pack_price_reply is not default_runtime.get_pack_price_reply
+    assert runtime.get_pack_price_item is not default_runtime.get_pack_price_item
     assert runtime.get_pack_service_hint is not default_runtime.get_pack_service_hint
     assert runtime.semantic_service_match is not default_runtime.semantic_service_match
 
 
-def test_get_pack_decision_enriches_resolver_contract(monkeypatch) -> None:
-    base_decision = PackDecision(
-        action="reply",
-        response="Цена 10000 тг.",
-        intent="price_query",
-        meta={
-            "fact_source": "truth",
-            "service_query": "Маникюр",
-            "service_query_source": "semantic_match",
-            "service_query_score": 0.88,
-        },
-    )
-    monkeypatch.setattr(runtime, "_runtime_get_pack_decision", lambda *_args, **_kwargs: base_decision)
-
+def test_get_pack_decision_enriches_resolver_contract() -> None:
     decision = runtime.get_pack_decision("Сколько стоит маникюр?", client_slug="demo_salon")
 
     assert isinstance(decision, PackDecision)
-    assert decision is not base_decision
     meta = decision.meta or {}
     assert meta.get("resolver_id") == "pack_runtime.truth_gate"
     assert meta.get("resolver_version")
     assert meta.get("intent_class") == "price_query"
     assert meta.get("action_class") == "FACT"
-    assert meta.get("resolver_confidence") == 0.88
+    assert meta.get("resolver_confidence") and meta.get("resolver_confidence") >= 0.56
     assert isinstance(meta.get("resolver_candidates"), list) and meta.get("resolver_candidates")
     assert isinstance(meta.get("resolver_contract"), dict)
+    assert meta.get("resolver_contract", {}).get("entity_refs") == meta.get("entity_refs")
+    assert meta.get("resolver_candidates") == meta.get("entity_refs")
+    entity_refs = meta.get("entity_refs")
+    assert entity_refs == meta.get("semantic_grounding", {}).get("entity_refs")
+    assert entity_refs[0]["entity_type"] == "service"
+    assert entity_refs[0]["value"] == "Маникюр"
+    assert str(entity_refs[0]["entity_id"]).startswith("service:")
+    assert any(row.get("entity_type") == "price_item" for row in entity_refs)
+    assert meta.get("referents") == {
+        "service": {
+            "value": "Маникюр",
+            "entity_id": entity_refs[0]["entity_id"],
+            "entity_type": "service",
+            "source_ref": meta.get("service_query_source"),
+        }
+    }
+    semantic_grounding = meta.get("semantic_grounding")
+    assert isinstance(semantic_grounding, dict)
+    assert semantic_grounding.get("contract_version") == "semantic_contract.v1"
+    assert semantic_grounding.get("entity_refs") == meta.get("entity_refs")
+    assert semantic_grounding.get("referents") == meta.get("referents")
     fact_bundle = meta.get("fact_bundle")
     assert isinstance(fact_bundle, dict)
     assert fact_bundle.get("pack_id") == "demo_salon"
     assert fact_bundle.get("source_ref") == "truth"
+    assert meta.get("grounding_provenance", {}).get("pack_id") == "demo_salon"
     assert isinstance(meta.get("provenance"), dict)
     assert meta.get("provenance", {}).get("pack_id") == "demo_salon"
 
@@ -112,12 +120,10 @@ def test_has_consult_recommendation_signal_prefers_contract_meta() -> None:
         intent="service_match",
         meta={
             "consult_recommendation": True,
-            "resolver_contract": {
-                "intent_class": "service_match",
-                "action_class": "FACT",
-                "confidence": 0.9,
-                "abstain_reason": None,
-            },
+            "intent_class": "service_match",
+            "action_class": "FACT",
+            "resolver_confidence": 0.9,
+            "abstain_reason": None,
         },
     )
     assert runtime.has_consult_recommendation_signal(decision) is True
@@ -129,12 +135,10 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
         response="Салон работает с 9:00 до 21:00.",
         intent="hours",
         meta={
-            "resolver_contract": {
-                "intent_class": "hours",
-                "action_class": "FACT",
-                "confidence": 0.83,
-                "abstain_reason": None,
-            }
+            "intent_class": "hours",
+            "action_class": "FACT",
+            "resolver_confidence": 0.83,
+            "abstain_reason": None,
         },
     )
     assert runtime.is_timeout_fact_fallback_candidate(fact_decision, min_confidence=0.6) is True
@@ -144,12 +148,10 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
         response="Нужно уточнение.",
         intent="hours",
         meta={
-            "resolver_contract": {
-                "intent_class": "hours",
-                "action_class": "FACT",
-                "confidence": 0.91,
-                "abstain_reason": "low_confidence_collect",
-            }
+            "intent_class": "hours",
+            "action_class": "FACT",
+            "resolver_confidence": 0.91,
+            "abstain_reason": "low_confidence_collect",
         },
     )
     assert runtime.is_timeout_fact_fallback_candidate(abstain_decision, min_confidence=0.6) is False
@@ -159,12 +161,10 @@ def test_is_timeout_fact_fallback_candidate_requires_fact_confidence_margin() ->
         response="Возможно, это по прайсу.",
         intent="pricing",
         meta={
-            "resolver_contract": {
-                "intent_class": "pricing",
-                "action_class": "FACT",
-                "confidence": 0.41,
-                "abstain_reason": None,
-            }
+            "intent_class": "pricing",
+            "action_class": "FACT",
+            "resolver_confidence": 0.41,
+            "abstain_reason": None,
         },
     )
     assert runtime.is_timeout_fact_fallback_candidate(low_conf_decision, min_confidence=0.6) is False
@@ -221,6 +221,25 @@ def test_pack_runtime_default_routes_demo_slug_to_explicit_adapter() -> None:
 
     default_adapter = default_runtime._resolve_adapter("non_existing_slug")
     assert default_adapter.__name__ == "app.services.pack_runtime_generic_adapter"
+
+
+def test_pack_runtime_service_hint_can_fallback_to_price_catalog_name() -> None:
+    assert runtime.get_pack_service_hint(
+        "Сколько времени занимает укладка?",
+        client_slug="demo_salon",
+    ) == "Укладка феном"
+
+
+def test_build_runtime_service_duration_reply_prefers_message_over_stale_service_label() -> None:
+    reply = runtime.build_runtime_service_duration_reply(
+        message="Сколько времени занимает укладка?",
+        service_label="Маникюр",
+        client_slug="demo_salon",
+    )
+
+    assert isinstance(reply, str)
+    assert "укладка" in reply.lower()
+    assert "маникюр" not in reply.lower()
 
 
 def test_pack_runtime_service_semantic_match_returns_hybrid_meta() -> None:

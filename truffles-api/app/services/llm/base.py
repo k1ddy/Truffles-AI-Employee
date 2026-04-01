@@ -18,10 +18,11 @@ class LLMProvider(ABC):
         self,
         messages: List[dict],
         model: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: Optional[float] = 0.7,
         max_tokens: int = 1000,
         timeout_seconds: Optional[float] = None,
         response_format: Optional[dict[str, Any]] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> LLMResponse:
         """Generate response from LLM."""
         pass

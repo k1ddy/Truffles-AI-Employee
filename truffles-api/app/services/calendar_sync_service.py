@@ -22,8 +22,9 @@ from app.models.conversation import Conversation
 from app.models.google_calendar_token import GoogleCalendarToken
 from app.models.specialist import Specialist
 from app.services.google_calendar_service import GoogleCalendarService
+from app.services.handover_owner_service import escalate_to_pending
 from app.services.outbox_service import enqueue_outbox_message
-from app.services.state_service import ConversationState, escalate_to_pending
+from app.services.state_machine import ConversationState
 
 logger = get_logger(__name__)
 

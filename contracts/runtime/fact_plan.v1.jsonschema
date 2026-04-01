@@ -1,0 +1,158 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "fact_plan.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "manifest_id": {
+      "title": "Manifest Id",
+      "type": "string"
+    },
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "binding_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Binding Id"
+    },
+    "selected_tool_or_workflow_ref": {
+      "title": "Selected Tool Or Workflow Ref",
+      "type": "string"
+    },
+    "selected_resolver": {
+      "title": "Selected Resolver",
+      "type": "string"
+    },
+    "renderer_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Renderer Id"
+    },
+    "scope_namespace": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope Namespace"
+    },
+    "requested_fact_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Fact Refs",
+      "type": "array"
+    },
+    "requested_scopes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Scopes",
+      "type": "array"
+    },
+    "composition_mode": {
+      "default": "single_only",
+      "enum": [
+        "single_only",
+        "companion_allowed",
+        "bundle_required"
+      ],
+      "title": "Composition Mode",
+      "type": "string"
+    },
+    "allowed_emitted_sets": {
+      "items": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Allowed Emitted Sets",
+      "type": "array"
+    },
+    "allowed_emitted_fact_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Emitted Fact Refs",
+      "type": "array"
+    },
+    "allowed_emitted_scopes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Emitted Scopes",
+      "type": "array"
+    },
+    "blocked_scopes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Blocked Scopes",
+      "type": "array"
+    },
+    "bundle_policy": {
+      "default": "requested_only",
+      "title": "Bundle Policy",
+      "type": "string"
+    },
+    "scope_policy_source": {
+      "default": "default",
+      "title": "Scope Policy Source",
+      "type": "string"
+    },
+    "fallback_policy": {
+      "default": "deny_out_of_plan",
+      "title": "Fallback Policy",
+      "type": "string"
+    },
+    "provenance_sources": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Provenance Sources",
+      "type": "array"
+    }
+  },
+  "required": [
+    "manifest_id",
+    "request_id",
+    "decision_id",
+    "selected_tool_or_workflow_ref",
+    "selected_resolver"
+  ],
+  "title": "FactPlanV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/fact_plan.v1.jsonschema"
+}

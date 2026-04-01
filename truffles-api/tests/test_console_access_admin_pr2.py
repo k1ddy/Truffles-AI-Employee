@@ -1881,8 +1881,14 @@ async def test_list_onboarding_blueprints_returns_catalog(monkeypatch):
         db=Mock(),
     )
 
-    assert len(response.items) >= 4
-    assert {item.domain_slug for item in response.items} >= {"beauty", "clinic", "legal", "ecom"}
+    assert len(response.items) >= 5
+    assert {item.domain_slug for item in response.items} >= {
+        "beauty",
+        "clinic",
+        "generic",
+        "legal",
+        "ecom",
+    }
     assert all(item.question_templates for item in response.items)
     assert all(item.required_fields_profile.fields for item in response.items)
     assert all(item.required_fields_profile.checksum for item in response.items)

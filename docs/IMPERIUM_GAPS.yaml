@@ -230,16 +230,16 @@ gaps:
 
   - id: "GAP-019"
     title: "Ops docs mark critical scripts as disposable; Qdrant scripts conflict on vector size"
-    status: "NOT_IMPLEMENTED"
+    status: "PARTIAL"
     why_it_matters: "Operators may delete or misuse critical scripts; wrong vector size can break production RAG."
     evidence:
-      - "STRUCTURE.md:337 (ops/*.sh marked one-off)"
+      - "STRUCTURE.md:1318-1327 (`start_bge_m3.sh` now kept; backup scripts still not listed under canonical keep)"
       - "ops/backup_postgres.sh:2-3 (daily backup)"
       - "ops/backup_qdrant.sh:2-3 (weekly backup)"
-      - "ops/start_bge_m3.sh:1-7 (embedding service startup)"
+      - "ops/start_bge_m3.sh:1-38 (canonical BGE compose entrypoint)"
       - "ops/create_collection.py:7-9 (vector size 1536)"
       - "ops/recreate_collection.py:16-22 (vector size 1024)"
-    proposed_fix_mvp: "Update STRUCTURE.md to list required ops scripts and consolidate Qdrant collection creation to one size."
+    proposed_fix_mvp: "Keep canonical ops scripts explicitly in STRUCTURE.md and consolidate Qdrant collection creation to one size."
     acceptance_tests:
       - "STRUCTURE.md lists backup and BGE scripts under keep"
       - "Only one Qdrant collection script defines the vector size used in prod"

@@ -1,0 +1,165 @@
+{
+  "schema_version": "v1",
+  "current_practical_truth": "r35f",
+  "paths": [
+    {
+      "path_id": "consultant_turn_primary",
+      "path_type": "hot_path",
+      "status": "live_primary_runtime_spine",
+      "current_flow": [
+        "consultant_core_v2",
+        "consultant_runtime",
+        "turn_planner",
+        "intent_service",
+        "turn_executor",
+        "dialog_state_service"
+      ],
+      "semantic_owner": "intent_service / policy-core owner output",
+      "main_risks": [
+        "hot path narrower than before but not yet singular",
+        "downstream layers still carry residual semantic/state authority"
+      ],
+      "target_flow": [
+        "semantic kernel",
+        "binding boundary",
+        "canonical state layer"
+      ],
+      "evidence": [
+        "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+        "docs/system_forensics/TARGET_ARCHITECTURE.md"
+      ]
+    },
+    {
+      "path_id": "legacy_webhook_mesh",
+      "path_type": "compatibility_mesh",
+      "status": "live_mixed_authority_mesh",
+      "current_flow": [
+        "decision.py",
+        "_legacy.py",
+        "context_manager.py",
+        "response.py",
+        "booking.py",
+        "info.py",
+        "pending.py",
+        "policy.py",
+        "guards.py",
+        "dedup.py"
+      ],
+      "semantic_owner": "mixed / not singular",
+      "main_risks": [
+        "legacy modules still host real product behavior",
+        "mixed authority invites local patch-loop behavior"
+      ],
+      "target_flow": [
+        "bounded adapters only",
+        "delete candidates for dead compatibility surfaces"
+      ],
+      "evidence": [
+        "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md"
+      ]
+    },
+    {
+      "path_id": "info_fact_reply_path",
+      "path_type": "product_path",
+      "status": "live_with_fact_side_contract_gap",
+      "current_flow": [
+        "owner decides requested fact refs",
+        "webhook/info.py combined reply helpers",
+        "pack knowledge helpers",
+        "final rendered info reply"
+      ],
+      "semantic_owner": "owner on request scope, but downstream fact scope can widen",
+      "main_risks": [
+        "single-fact requests may widen into sibling facts",
+        "pack/runtime behavior still mixed"
+      ],
+      "target_flow": [
+        "fact manifest",
+        "fact resolver",
+        "fact renderer",
+        "emitted fact scope contract"
+      ],
+      "evidence": [
+        "docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md",
+        "docs/system_forensics/PACK_RUNTIME_SEPARATION_AUDIT.md"
+      ]
+    },
+    {
+      "path_id": "booking_collect_and_verify_path",
+      "path_type": "product_path",
+      "status": "improved_but_still_degrade_sensitive",
+      "current_flow": [
+        "owner booking collect decision",
+        "turn executor binding/execution",
+        "dialog_state_service projection",
+        "booking prompt owner and legacy booking helpers",
+        "final collect/verify reply"
+      ],
+      "semantic_owner": "owner with boundary/degrade continuity sensitivity",
+      "main_risks": [
+        "degrade-time continuity drift",
+        "legacy booking helpers still stay on the path"
+      ],
+      "target_flow": [
+        "semantic kernel",
+        "binding boundary",
+        "canonical booking continuity state"
+      ],
+      "evidence": [
+        "docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md",
+        "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md"
+      ]
+    },
+    {
+      "path_id": "handoff_pending_path",
+      "path_type": "product_path",
+      "status": "live_pending_transport_surface",
+      "current_flow": [
+        "owner decides handoff or pending continuation",
+        "pending.py and response/policy helpers transport the state",
+        "final pending or manager-active reply"
+      ],
+      "semantic_owner": "owner with legacy continuity carriers in transport",
+      "main_risks": [
+        "pending continuity spread across several helpers",
+        "handoff transport still not fully canonicalized"
+      ],
+      "target_flow": [
+        "canonical state layer",
+        "bounded pending transport adapter"
+      ],
+      "evidence": [
+        "docs/system_forensics/files/app_routers_webhook_pending.md",
+        "docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md"
+      ]
+    },
+    {
+      "path_id": "outbox_operational_dispatch",
+      "path_type": "operational_path",
+      "status": "live_duplicate_caller_surface",
+      "current_flow": [
+        "outbox_service.py",
+        "admin.py",
+        "workers/outbox.py",
+        "console.py",
+        "webhook._process_outbox_rows"
+      ],
+      "semantic_owner": "not a semantic path; operational control path",
+      "main_risks": [
+        "duplicated operational entrypoints",
+        "weak visible contract coverage on some live callers"
+      ],
+      "target_flow": [
+        "single bounded operational seam with explicit callers"
+      ],
+      "evidence": [
+        "docs/system_forensics/files/app_routers_outbox_service.md",
+        "docs/system_forensics/files/app_routers_admin.md",
+        "docs/system_forensics/files/app_workers_outbox.md",
+        "docs/system_forensics/files/app_routers_console.md"
+      ]
+    }
+  ],
+  "packet_status": "ready_for_external_handoff"
+}

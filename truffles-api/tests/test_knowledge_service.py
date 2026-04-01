@@ -83,6 +83,29 @@ class TestGetEmbedding:
 
 
 class TestSearchKnowledge:
+    @patch("app.services.knowledge_service.httpx.Client")
+    @patch("app.services.knowledge_service.get_embedding")
+    def test_embedding_failure_fails_open_and_records_dense_reason(
+        self,
+        mock_embedding,
+        mock_client_class,
+    ):
+        mock_embedding.side_effect = RuntimeError("Failed to resolve bge-m3")
+
+        trace_context = {}
+        result = search_knowledge(
+            "test query",
+            "test-client",
+            branch_id="branch-123",
+            trace_context=trace_context,
+        )
+
+        assert result == []
+        mock_client_class.assert_not_called()
+        assert trace_context["rag_dense"]["status"] == "unavailable"
+        assert trace_context["rag_dense"]["available"] is False
+        assert trace_context["rag_dense"]["unavailable_reason"] == "bge_dns_failure"
+
     @patch("app.services.knowledge_service.alert_warning")
     @patch("app.services.knowledge_service.get_embedding")
     @patch("app.services.knowledge_service.httpx.Client")
@@ -97,10 +120,18 @@ class TestSearchKnowledge:
         mock_response.text = "Qdrant error"
         mock_client.post.return_value = mock_response
 
-        result = search_knowledge("test query", "test-client", branch_id="branch-123")
+        trace_context = {}
+        result = search_knowledge(
+            "test query",
+            "test-client",
+            branch_id="branch-123",
+            trace_context=trace_context,
+        )
 
         assert result == []
         mock_alert.assert_called_once()
+        assert trace_context["rag_dense"]["status"] == "unavailable"
+        assert trace_context["rag_dense"]["unavailable_reason"] == "qdrant_search_error"
 
     @patch("app.services.knowledge_service.get_embedding")
     @patch("app.services.knowledge_service.httpx.Client")

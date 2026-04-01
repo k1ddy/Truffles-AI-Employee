@@ -2,25 +2,77 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from functools import partial
 
 from sqlalchemy.orm import Session
 
+from app.logging_config import get_logger
 from app.models import Conversation, Message, User
-from app.schemas.webhook import WebhookResponse
-from app.services.pack_runtime_service import get_system_lexicon_list
-from app.services.sla_runtime_service import (
-    SLA_RUNTIME_CONTEXT_KEY,
-    build_collect_only_runtime_context,
-    resolve_pending_sla_violation,
+from app.routers.webhook.context_manager import (
+    _get_conversation_context,
+    _get_handover_confirmation,
+    _is_handover_confirmation_active,
+    _reset_low_confidence_retry,
+    _set_conversation_context,
+    _set_handover_confirmation,
 )
+from app.routers.webhook.guard_runtime import MSG_MUTED_TEMP
+from app.routers.webhook.media import (
+    _build_media_caption,
+    _is_voice_note,
+    _send_telegram_media,
+    _update_message_media_metadata,
+)
+from app.routers.webhook.pending_runtime import (
+    MSG_HANDOVER_DECLINED,
+    MSG_PENDING_ACK,
+    MSG_PENDING_SLA_PING,
+    MSG_PENDING_STATUS,
+    MSG_PENDING_WAIT,
+    PENDING_SLA_PING_MINUTES,
+    PENDING_SLA_PING_SENT_KEY,
+    is_handover_status_question,
+)
+from app.routers.webhook.runtime_primitives import MSG_AI_ERROR, MSG_ESCALATED
+from app.routers.webhook.trace import (
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _set_router_observability,
+    _update_message_decision_metadata,
+)
+from app.schemas.webhook import WebhookResponse
+from app.services.ai_service import classify_confirmation, normalize_for_matching
+from app.services.escalation_service import get_telegram_credentials
+from app.services.handover_owner_service import (
+    _reuse_active_handover,
+    escalate_to_pending,
+    get_active_handover,
+    manager_resolve,
+    send_telegram_notification,
+)
+from app.services.intent_service import is_opt_out_message
+from app.services.pack_runtime_service import get_system_lexicon_list
+from app.services.sla_runtime_service import resolve_pending_sla_violation
 from app.services.state_machine import ConversationState
+from app.services.state_service import (
+    ContinuityTransportDecision,
+    HandoverConfirmationRuntimeHooks,
+    PendingContinuityRuntimeHooks,
+    _handle_handover_confirmation_runtime,
+    _handle_pending_sla_runtime,
+    _resolve_pending_ack,
+    _resolve_pending_close,
+    _resolve_pending_no_handover_reset,
+    transition_state,
+)
+from app.services.telegram_service import TelegramService
+
+logger = get_logger("webhook")
 
 
 def _normalize_pending_text(text: str) -> str:
-    from . import _legacy as legacy
-
-    normalized = legacy.normalize_for_matching(text)
+    normalized = normalize_for_matching(text)
     if not normalized:
         return ""
     return normalized.replace("ё", "е")
@@ -72,113 +124,29 @@ def _is_pending_wait(text: str) -> bool:
     return _matches_lexicon_any(text, "pending_wait_phrases")
 
 
-def _get_pending_sla(context: dict) -> dict:
-    from . import _legacy as legacy
-
-    payload = context.get(legacy.PENDING_SLA_CONTEXT_KEY) if isinstance(context, dict) else None
-    return payload if isinstance(payload, dict) else {}
-
-
-def _set_pending_sla(context: dict, payload: dict) -> dict:
-    from . import _legacy as legacy
-
-    if not isinstance(context, dict):
-        context = {}
-    context[legacy.PENDING_SLA_CONTEXT_KEY] = payload
-    return context
-
-
-def _get_pending_resume(context: dict) -> dict | None:
-    from . import _legacy as legacy
-
-    payload = context.get(legacy.PENDING_RESUME_KEY) if isinstance(context, dict) else None
-    if isinstance(payload, dict):
-        return dict(payload)
-    return None
-
-
-def _set_pending_resume(context: dict, payload: dict | None) -> dict:
-    from . import _legacy as legacy
-
-    context = dict(context)
-    if payload:
-        context[legacy.PENDING_RESUME_KEY] = payload
-    else:
-        context.pop(legacy.PENDING_RESUME_KEY, None)
-    return context
-
-
-def _build_pending_resume_snapshot(
+def _build_transport_webhook_response(
     *,
-    context: dict,
-    context_manager: dict,
-    expected_reply_type: str | None,
-    expected_reply_reason: str | None,
-    intent_queue: list[str] | None,
-    booking_context: dict | None,
-    session_memory: dict,
-) -> dict:
-    from . import _legacy as legacy
+    db: Session,
+    conversation: Conversation,
+    decision: ContinuityTransportDecision,
+    send_and_save,
+) -> WebhookResponse | None:
+    if not decision.handled:
+        return None
 
-    service_hint = context.get(legacy.SERVICE_HINT_KEY) if isinstance(context, dict) else None
-    service_hint_at = context.get(legacy.SERVICE_HINT_AT_KEY) if isinstance(context, dict) else None
-    return {
-        "context_manager": dict(context_manager) if isinstance(context_manager, dict) else {},
-        "expected_reply_type": expected_reply_type,
-        "expected_reply_reason": expected_reply_reason,
-        "intent_queue": list(intent_queue) if isinstance(intent_queue, list) else [],
-        "booking": dict(booking_context) if isinstance(booking_context, dict) else {"active": False},
-        "session_memory": dict(session_memory) if isinstance(session_memory, dict) else {},
-        "service_hint": service_hint,
-        "service_hint_at": service_hint_at,
-    }
+    bot_response = None
+    result_message = decision.success_message or "Handled"
+    if isinstance(decision.bot_response, str):
+        bot_response, sent = send_and_save(decision.bot_response)
+        result_message = decision.success_message if sent else decision.failure_message or result_message
 
-
-def _restore_pending_resume(
-    *,
-    context: dict,
-    pending_resume: dict,
-    now: datetime,
-) -> dict:
-    from . import _legacy as legacy
-
-    context = _set_pending_resume(context, None)
-    context = _set_pending_sla(context, {})
-    context.pop("handover_confirmation", None)
-    context = legacy._set_context_manager(
-        context,
-        pending_resume.get("context_manager") if isinstance(pending_resume, dict) else {},
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message=result_message,
+        conversation_id=conversation.id,
+        bot_response=bot_response,
     )
-    context = legacy._set_expected_reply_type(
-        context,
-        pending_resume.get("expected_reply_type") if isinstance(pending_resume, dict) else None,
-    )
-    expected_reply_reason = pending_resume.get("expected_reply_reason") if isinstance(
-        pending_resume, dict
-    ) else None
-    if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
-        context[legacy.EXPECTED_REPLY_REASON_KEY] = expected_reply_reason.strip()
-    context = legacy._set_intent_queue(
-        context,
-        pending_resume.get("intent_queue") if isinstance(pending_resume, dict) else [],
-    )
-    booking_context = pending_resume.get("booking") if isinstance(pending_resume, dict) else None
-    if isinstance(booking_context, dict):
-        context = legacy._set_booking_context(context, booking_context)
-    else:
-        context = legacy._set_booking_context(context, {"active": False})
-    session_memory = pending_resume.get("session_memory") if isinstance(pending_resume, dict) else None
-    if isinstance(session_memory, dict) and session_memory:
-        session_memory["last_updated_at"] = now.isoformat()
-        context = legacy._set_session_memory(context, session_memory)
-    else:
-        context = legacy._set_session_memory(context, None)
-    service_hint = pending_resume.get("service_hint") if isinstance(pending_resume, dict) else None
-    if isinstance(service_hint, str) and service_hint.strip():
-        context = legacy._set_service_hint(context, service_hint.strip(), now)
-    else:
-        context = legacy._clear_service_hint(context)
-    return context
 
 
 def _handle_handover_confirmation_gate(
@@ -191,128 +159,36 @@ def _handle_handover_confirmation_gate(
     send_and_save,
     record_escalation_metric,
 ) -> WebhookResponse | None:
-    from app.routers.webhook.context_manager import (
-        _get_conversation_context,
-        _get_handover_confirmation,
-        _is_handover_confirmation_active,
-        _reset_low_confidence_retry,
-        _set_conversation_context,
-        _set_handover_confirmation,
+    decision = _handle_handover_confirmation_runtime(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message_text=message_text,
+        now=now,
+        hooks=HandoverConfirmationRuntimeHooks(
+            get_conversation_context=_get_conversation_context,
+            get_handover_confirmation=_get_handover_confirmation,
+            is_handover_confirmation_active=_is_handover_confirmation_active,
+            set_handover_confirmation=_set_handover_confirmation,
+            set_conversation_context=_set_conversation_context,
+            reset_low_confidence_retry=_reset_low_confidence_retry,
+            classify_confirmation=classify_confirmation,
+            reuse_active_handover=_reuse_active_handover,
+            escalate_to_pending=escalate_to_pending,
+            send_telegram_notification=send_telegram_notification,
+            record_escalation_metric=record_escalation_metric,
+            record_decision_trace=_record_decision_trace,
+            msg_escalated=MSG_ESCALATED,
+            msg_ai_error=MSG_AI_ERROR,
+            msg_handover_declined=MSG_HANDOVER_DECLINED,
+        ),
     )
-    from app.services.ai_service import classify_confirmation
-
-    from . import _legacy as legacy
-
-    if conversation.state != ConversationState.BOT_ACTIVE.value:
-        return None
-
-    context = _get_conversation_context(conversation)
-    confirmation = _get_handover_confirmation(context)
-    if not confirmation:
-        return None
-
-    if not _is_handover_confirmation_active(confirmation, now):
-        context = _set_handover_confirmation(context, None)
-        _set_conversation_context(conversation, context)
-        return None
-
-    decision = classify_confirmation(message_text)
-    if decision == "yes":
-        context = _set_handover_confirmation(context, None)
-        _set_conversation_context(conversation, context)
-        _reset_low_confidence_retry(conversation)
-
-        escalation_message = confirmation.get("user_message") or message_text
-        _, reused, telegram_sent = legacy._reuse_active_handover(
-            db=db,
-            conversation=conversation,
-            user=user,
-            message=escalation_message,
-            source="handover_confirmation",
-            intent="low_confidence",
-        )
-
-        if reused:
-            bot_response = legacy.MSG_ESCALATED
-            result_message = (
-                f"Handover confirmed (reused), telegram={'sent' if telegram_sent else 'failed'}"
-            )
-        else:
-            record_escalation_metric("intent")
-            esc_result = legacy.escalate_to_pending(
-                db=db,
-                conversation=conversation,
-                user_message=escalation_message,
-                trigger_type="intent",
-                trigger_value="low_confidence",
-            )
-
-            if esc_result.ok:
-                handover = esc_result.value
-                telegram_sent = legacy.send_telegram_notification(
-                    db=db,
-                    handover=handover,
-                    conversation=conversation,
-                    user=user,
-                    message=escalation_message,
-                )
-                bot_response = legacy.MSG_ESCALATED
-                result_message = f"Handover confirmed, telegram={'sent' if telegram_sent else 'failed'}"
-            else:
-                bot_response = legacy.MSG_AI_ERROR
-                result_message = f"Handover confirm escalation failed: {esc_result.error}"
-
-        legacy._record_decision_trace(
-            conversation,
-            {
-                "stage": "handover_confirmation",
-                "decision": "confirmed",
-                "reason": "user_confirmed",
-                "state": conversation.state,
-                "reused": reused,
-            },
-        )
-        bot_response, sent = send_and_save(bot_response)
-        if not sent:
-            result_message = f"{result_message}; response_send=failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
-
-    if decision == "no":
-        context = _set_handover_confirmation(context, None)
-        _set_conversation_context(conversation, context)
-        _reset_low_confidence_retry(conversation)
-
-        bot_response = legacy.MSG_HANDOVER_DECLINED
-        legacy._record_decision_trace(
-            conversation,
-            {
-                "stage": "handover_confirmation",
-                "decision": "declined",
-                "reason": "user_declined",
-                "state": conversation.state,
-            },
-        )
-        bot_response, sent = send_and_save(bot_response)
-        result_message = (
-            "Handover declined, asked for salon details" if sent else "Handover decline send failed"
-        )
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
-
-    context = _set_handover_confirmation(context, None)
-    _set_conversation_context(conversation, context)
-    return None
+    return _build_transport_webhook_response(
+        db=db,
+        conversation=conversation,
+        decision=decision,
+        send_and_save=send_and_save,
+    )
 
 
 def _forward_pending_to_telegram(
@@ -329,8 +205,6 @@ def _forward_pending_to_telegram(
     saved_message: Message | None,
     transcript: str | None,
 ) -> None:
-    from . import _legacy as legacy
-
     forwarded_to_telegram = bool(metadata.forwarded_to_telegram) if metadata else False
 
     if (
@@ -339,9 +213,9 @@ def _forward_pending_to_telegram(
         and not forwarded_to_telegram
     ):
         if conversation.telegram_topic_id:
-            bot_token, chat_id = legacy.get_telegram_credentials(db, client_id)
+            bot_token, chat_id = get_telegram_credentials(db, client_id)
             if bot_token and chat_id:
-                telegram = legacy.TelegramService(bot_token)
+                telegram = TelegramService(bot_token)
                 forward_result = None
                 caption = None
                 if (
@@ -356,8 +230,8 @@ def _forward_pending_to_telegram(
                         stored_path = (saved_message.message_metadata.get("media") or {}).get(
                             "storage_path"
                         )
-                    caption = legacy._build_media_caption(message_text, media_info)
-                    forward_result = legacy._send_telegram_media(
+                    caption = _build_media_caption(message_text, media_info)
+                    forward_result = _send_telegram_media(
                         telegram=telegram,
                         chat_id=chat_id,
                         topic_id=conversation.telegram_topic_id,
@@ -377,15 +251,15 @@ def _forward_pending_to_telegram(
                     if (
                         transcript
                         and caption
-                        and legacy._is_voice_note(media_info)
+                        and _is_voice_note(media_info)
                         and saved_message
                         and transcript.strip() == caption.strip()
                     ):
-                        legacy._update_message_media_metadata(
+                        _update_message_media_metadata(
                             saved_message, {"transcript_forwarded": True}
                         )
                 elif forward_result:
-                    legacy.logger.warning(
+                    logger.warning(
                         "Forward to Telegram failed",
                         extra={
                             "context": {
@@ -400,7 +274,7 @@ def _forward_pending_to_telegram(
     if (
         transcript
         and media_info
-        and legacy._is_voice_note(media_info)
+        and _is_voice_note(media_info)
         and conversation.state
         in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
         and conversation.telegram_topic_id
@@ -410,20 +284,20 @@ def _forward_pending_to_telegram(
             media_meta = saved_message.message_metadata.get("media") or {}
             already_forwarded = bool(media_meta.get("transcript_forwarded"))
         if not already_forwarded:
-            bot_token, chat_id = legacy.get_telegram_credentials(db, client_id)
+            bot_token, chat_id = get_telegram_credentials(db, client_id)
             if bot_token and chat_id:
-                telegram = legacy.TelegramService(bot_token)
+                telegram = TelegramService(bot_token)
                 forward_result = telegram.send_message(
                     chat_id=chat_id,
                     text=f"📝 <b>Транскрипт:</b> {transcript}",
                     message_thread_id=conversation.telegram_topic_id,
                 )
                 if forward_result and forward_result.get("ok") and saved_message:
-                    legacy._update_message_media_metadata(
+                    _update_message_media_metadata(
                         saved_message, {"transcript_forwarded": True}
                     )
                 elif forward_result:
-                    legacy.logger.warning(
+                    logger.warning(
                         "Transcript forward to Telegram failed",
                         extra={
                             "context": {
@@ -442,12 +316,10 @@ def _handle_manager_active_gate(
     conversation: Conversation,
     saved_message: Message | None,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
-
     if conversation.state != ConversationState.MANAGER_ACTIVE.value:
         return None
 
-    router_pending_meta = legacy._set_router_observability(
+    router_pending_meta = _set_router_observability(
         saved_message,
         eligible=False,
         reason="pending",
@@ -458,7 +330,7 @@ def _handle_manager_active_gate(
         "state": conversation.state,
     }
     trace_payload.update(router_pending_meta)
-    legacy._record_decision_trace(conversation, trace_payload)
+    _record_decision_trace(conversation, trace_payload)
     db.commit()
     return WebhookResponse(
         success=True,
@@ -479,61 +351,47 @@ def _handle_pending_gate(
     in_domain_signal: bool = False,
     send_and_save,
 ) -> WebhookResponse | None:
-    from . import _legacy as legacy
-
     if conversation.state != ConversationState.PENDING.value:
         return None
 
-    router_pending_meta = legacy._set_router_observability(
+    router_pending_meta = _set_router_observability(
         saved_message,
         eligible=False,
         reason="pending",
     )
+    continuity_hooks = PendingContinuityRuntimeHooks(
+        get_conversation_context=_get_conversation_context,
+        set_conversation_context=_set_conversation_context,
+        transition_state=transition_state,
+        manager_resolve=partial(manager_resolve, db),
+        record_decision_trace=_record_decision_trace,
+        update_message_decision_metadata=_update_message_decision_metadata,
+    )
     guard_only_skip = bool(guard_only and in_domain_signal)
-    handover = legacy.get_active_handover(db, conversation.id)
+    handover = get_active_handover(db, conversation.id)
     if not handover:
-        context = legacy._get_conversation_context(conversation)
-        context = _set_pending_resume(context, None)
-        context = _set_pending_sla(context, {})
-        context.pop("handover_confirmation", None)
-        legacy._set_conversation_context(conversation, context)
-        legacy.transition_state(
-            conversation,
-            ConversationState.BOT_ACTIVE,
-            allow_same=False,
-            enforce=True,
+        _resolve_pending_no_handover_reset(
+            conversation=conversation,
+            saved_message=saved_message,
+            router_pending_meta=router_pending_meta,
+            hooks=continuity_hooks,
         )
-        trace_payload = {
-            "stage": "pending_guard",
-            "decision": "reset_no_handover",
-            "state": conversation.state,
-        }
-        trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "pending_action": "pending_guard_reset",
-                    "pending_guard": "no_handover",
-                },
-            )
         return None
 
-    if legacy.is_opt_out_message(message_text):
+    if is_opt_out_message(message_text):
         if handover:
-            legacy.manager_resolve(
+            manager_resolve(
                 db, conversation, handover, manager_id="system", manager_name="system"
             )
-        bot_response = legacy.MSG_MUTED_TEMP
+        bot_response = MSG_MUTED_TEMP
         trace_payload = {
             "stage": "rejection",
             "decision": "cancel_handover",
             "state": conversation.state,
         }
         trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        legacy._record_message_decision_meta(
+        _record_decision_trace(conversation, trace_payload)
+        _record_message_decision_meta(
             saved_message,
             action="rejection",
             intent="opt_out",
@@ -551,120 +409,37 @@ def _handle_pending_gate(
         )
 
     if _is_pending_close(message_text):
-        handover = legacy.get_active_handover(db, conversation.id)
-        if handover:
-            legacy.manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
-        conversation.bot_status = "muted"
-        conversation.bot_muted_until = None
-        trace_payload = {
-            "stage": "pending_sla",
-            "decision": "pending_close",
-            "state": conversation.state,
-        }
-        trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "pending_action": "pending_close",
-                },
-            )
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message="Pending closed by user",
-            conversation_id=conversation.id,
-            bot_response=None,
+        return _build_transport_webhook_response(
+            db=db,
+            conversation=conversation,
+            decision=_resolve_pending_close(
+                conversation=conversation,
+                handover=handover,
+                saved_message=saved_message,
+                router_pending_meta=router_pending_meta,
+                hooks=continuity_hooks,
+            ),
+            send_and_save=send_and_save,
         )
 
     if _is_pending_ack(message_text):
-        handover = legacy.get_active_handover(db, conversation.id)
-        if handover:
-            legacy.manager_resolve(
-                db,
-                conversation,
-                handover,
-                manager_id="system",
-                manager_name="system",
-                preserve_context=True,
-            )
-        else:
-            legacy.transition_state(
-                conversation,
-                ConversationState.BOT_ACTIVE,
-                allow_same=False,
-                enforce=True,
-            )
-            if not isinstance(conversation.context, dict):
-                conversation.context = {}
-        conversation.bot_status = "active"
-        pending_resume = _get_pending_resume(legacy._get_conversation_context(conversation))
-        if pending_resume:
-            restored_context = _restore_pending_resume(
-                context=legacy._get_conversation_context(conversation),
-                pending_resume=pending_resume,
+        return _build_transport_webhook_response(
+            db=db,
+            conversation=conversation,
+            decision=_resolve_pending_ack(
+                conversation=conversation,
+                handover=handover,
+                saved_message=saved_message,
                 now=now,
-            )
-            restored_context = legacy._set_re_entry_required(
-                restored_context,
-                reason="pending_resume",
-                now=now,
-            )
-            legacy._set_conversation_context(conversation, restored_context)
-            legacy._record_decision_trace(
-                conversation,
-                {
-                    "stage": "pending_resume",
-                    "decision": "restore",
-                    "reason": "pending_ack",
-                },
-            )
-            legacy._record_decision_trace(
-                conversation,
-                {
-                    "stage": "re_entry",
-                    "decision": "required",
-                    "reason": "pending_resume",
-                },
-            )
-        elif not handover:
-            legacy._record_decision_trace(
-                conversation,
-                {
-                    "stage": "pending_resume",
-                    "decision": "resume",
-                    "reason": "pending_ack_no_handover",
-                },
-            )
-        trace_payload = {
-            "stage": "pending_sla",
-            "decision": "pending_ack",
-            "state": conversation.state,
-        }
-        trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "pending_action": "pending_ack",
-                    "pending_resume_restored": bool(pending_resume),
-                },
-            )
-        bot_response = legacy.MSG_PENDING_ACK
-        bot_response, sent = send_and_save(bot_response)
-        result_message = "Pending ack response sent" if sent else "Pending ack send failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
+                router_pending_meta=router_pending_meta,
+                msg_pending_ack=MSG_PENDING_ACK,
+                hooks=continuity_hooks,
+            ),
+            send_and_save=send_and_save,
         )
 
     pending_intent = getattr(handover, "trigger_value", None)
-    if legacy.is_handover_status_question(message_text) and not (
+    if is_handover_status_question(message_text) and not (
         isinstance(pending_intent, str) and pending_intent.strip() == "procedure_combo"
     ):
         if guard_only_skip:
@@ -674,9 +449,9 @@ def _handle_pending_gate(
                 "state": conversation.state,
             }
             trace_payload.update(router_pending_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "pending_action": "pending_status_guard_only",
@@ -684,16 +459,16 @@ def _handle_pending_gate(
                     },
                 )
             return None
-        bot_response = legacy.MSG_PENDING_STATUS
+        bot_response = MSG_PENDING_STATUS
         trace_payload = {
             "stage": "pending_status",
             "decision": "status_reply",
             "state": conversation.state,
         }
         trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
+        _record_decision_trace(conversation, trace_payload)
         if saved_message:
-            legacy._update_message_decision_metadata(
+            _update_message_decision_metadata(
                 saved_message,
                 {
                     "pending_action": "pending_status",
@@ -717,9 +492,9 @@ def _handle_pending_gate(
                 "state": conversation.state,
             }
             trace_payload.update(router_pending_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
-                legacy._update_message_decision_metadata(
+                _update_message_decision_metadata(
                     saved_message,
                     {
                         "pending_action": "pending_wait_guard_only",
@@ -727,16 +502,16 @@ def _handle_pending_gate(
                     },
                 )
             return None
-        bot_response = legacy.MSG_PENDING_WAIT
+        bot_response = MSG_PENDING_WAIT
         trace_payload = {
             "stage": "pending_wait",
             "decision": "pending_wait",
             "state": conversation.state,
         }
         trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
+        _record_decision_trace(conversation, trace_payload)
         if saved_message:
-            legacy._update_message_decision_metadata(
+            _update_message_decision_metadata(
                 saved_message,
                 {
                     "pending_action": "pending_wait",
@@ -752,188 +527,26 @@ def _handle_pending_gate(
             bot_response=bot_response,
         )
 
-    context = legacy._get_conversation_context(conversation)
-    pending_sla = _get_pending_sla(context)
-    ping_sent_at = pending_sla.get(legacy.PENDING_SLA_PING_SENT_KEY)
-    sla_violation = resolve_pending_sla_violation(
-        db,
+    sla_decision = _handle_pending_sla_runtime(
+        db=db,
         conversation=conversation,
+        saved_message=saved_message,
         now=now,
+        guard_only_skip=guard_only_skip,
+        router_pending_meta=router_pending_meta,
+        pending_sla_ping_minutes=PENDING_SLA_PING_MINUTES,
+        pending_sla_ping_sent_key=PENDING_SLA_PING_SENT_KEY,
+        msg_pending_wait=MSG_PENDING_WAIT,
+        msg_pending_sla_ping=MSG_PENDING_SLA_PING,
+        resolve_pending_sla_violation_fn=resolve_pending_sla_violation,
+        hooks=continuity_hooks,
     )
-    if sla_violation and saved_message:
-        legacy._update_message_decision_metadata(
-            saved_message,
-            {
-                "sla_violation_severity": sla_violation.severity,
-                "sla_violation_action": sla_violation.action,
-                "sla_violation_reason": sla_violation.reason_code,
-                "sla_elapsed_minutes": sla_violation.elapsed_minutes,
-                "sla_threshold_minutes": sla_violation.threshold_minutes,
-                "sla_profile_id": str(sla_violation.profile_id) if sla_violation.profile_id else None,
-                "sla_profile_version": sla_violation.profile_version,
-                "sla_profile_scope": sla_violation.profile_scope,
-                "sla_domain_key": sla_violation.domain_key,
-            },
-        )
-
-    if sla_violation and sla_violation.severity != "none" and sla_violation.action == "collect_only":
-        if guard_only_skip:
-            trace_payload = {
-                "stage": "pending_sla",
-                "decision": "guard_only",
-                "state": conversation.state,
-                "sla_severity": sla_violation.severity,
-                "sla_action": sla_violation.action,
-                "sla_reason": sla_violation.reason_code,
-            }
-            trace_payload.update(router_pending_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
-            if saved_message:
-                legacy._update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_action": "pending_sla_collect_only_guard_only",
-                        "pending_guard_only": True,
-                    },
-                )
-            return None
-
-        pending_sla[legacy.PENDING_SLA_PING_SENT_KEY] = now.isoformat()
-        pending_sla["collect_only_at"] = now.isoformat()
-        context = _set_pending_sla(context, pending_sla)
-        context[SLA_RUNTIME_CONTEXT_KEY] = build_collect_only_runtime_context(
-            decision=sla_violation,
-            now=now,
-        )
-        legacy._set_conversation_context(conversation, context)
-        trace_payload = {
-            "stage": "pending_sla",
-            "decision": "collect_only",
-            "state": conversation.state,
-            "sla_severity": sla_violation.severity,
-            "sla_action": sla_violation.action,
-            "sla_reason": sla_violation.reason_code,
-            "sla_elapsed_minutes": sla_violation.elapsed_minutes,
-            "sla_threshold_minutes": sla_violation.threshold_minutes,
-        }
-        trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "pending_action": "pending_sla_collect_only",
-                    "sla_collect_only": True,
-                },
-            )
-        bot_response = legacy.MSG_PENDING_WAIT
-        bot_response, sent = send_and_save(bot_response)
-        result_message = "Pending SLA collect_only response sent" if sent else "Pending SLA collect_only send failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
-
-    escalated_at = conversation.escalated_at
-    if escalated_at and escalated_at.tzinfo is None:
-        escalated_at = escalated_at.replace(tzinfo=timezone.utc)
-    if sla_violation:
-        ping_due = bool(
-            sla_violation.severity in {"breach", "severe_breach"}
-            and sla_violation.action in {"notify_manager", "escalate"}
-            and not ping_sent_at
-        )
-    else:
-        ping_due = bool(
-            escalated_at
-            and not ping_sent_at
-            and now - escalated_at >= timedelta(minutes=legacy.PENDING_SLA_PING_MINUTES)
-        )
-
-    if ping_due:
-        if guard_only_skip:
-            trace_payload = {
-                "stage": "pending_sla",
-                "decision": "guard_only",
-                "state": conversation.state,
-            }
-            if sla_violation:
-                trace_payload["sla_severity"] = sla_violation.severity
-                trace_payload["sla_action"] = sla_violation.action
-                trace_payload["sla_reason"] = sla_violation.reason_code
-            trace_payload.update(router_pending_meta)
-            legacy._record_decision_trace(conversation, trace_payload)
-            if saved_message:
-                legacy._update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_action": (
-                            "pending_sla_escalate_guard_only"
-                            if sla_violation and sla_violation.action == "escalate"
-                            else "pending_sla_notify_manager_guard_only"
-                            if sla_violation and sla_violation.action == "notify_manager"
-                            else "pending_sla_guard_only"
-                        ),
-                        "pending_guard_only": True,
-                    },
-                )
-            return None
-        pending_sla[legacy.PENDING_SLA_PING_SENT_KEY] = now.isoformat()
-        context = _set_pending_sla(context, pending_sla)
-        legacy._set_conversation_context(conversation, context)
-        trace_payload = {
-            "stage": "pending_sla",
-            "decision": (
-                "escalate"
-                if sla_violation and sla_violation.action == "escalate"
-                else "notify_manager"
-                if sla_violation and sla_violation.action == "notify_manager"
-                else "ping"
-            ),
-            "state": conversation.state,
-        }
-        if sla_violation:
-            trace_payload["sla_severity"] = sla_violation.severity
-            trace_payload["sla_action"] = sla_violation.action
-            trace_payload["sla_reason"] = sla_violation.reason_code
-            trace_payload["sla_elapsed_minutes"] = sla_violation.elapsed_minutes
-            trace_payload["sla_threshold_minutes"] = sla_violation.threshold_minutes
-        trace_payload.update(router_pending_meta)
-        legacy._record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            legacy._update_message_decision_metadata(
-                saved_message,
-                {
-                    "pending_sla_ping": True,
-                    "pending_action": (
-                        "pending_sla_escalate"
-                        if sla_violation and sla_violation.action == "escalate"
-                        else "pending_sla_notify_manager"
-                        if sla_violation and sla_violation.action == "notify_manager"
-                        else "pending_sla_ping"
-                    ),
-                },
-            )
-        bot_response = legacy.MSG_PENDING_SLA_PING
-        bot_response, sent = send_and_save(bot_response)
-        result_message = (
-            "Pending SLA escalation sent"
-            if sla_violation and sla_violation.action == "escalate" and sent
-            else "Pending SLA notify sent"
-            if sla_violation and sla_violation.action == "notify_manager" and sent
-            else "Pending SLA ping sent"
-            if sent
-            else "Pending SLA ping send failed"
-        )
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
+    if sla_decision is not None:
+        return _build_transport_webhook_response(
+            db=db,
+            conversation=conversation,
+            decision=sla_decision,
+            send_and_save=send_and_save,
         )
 
     trace_payload = {
@@ -944,9 +557,9 @@ def _handle_pending_gate(
     if isinstance(pending_intent, str) and pending_intent.strip():
         trace_payload["pending_intent"] = pending_intent.strip()
     trace_payload.update(router_pending_meta)
-    legacy._record_decision_trace(conversation, trace_payload)
+    _record_decision_trace(conversation, trace_payload)
     if saved_message:
-        legacy._update_message_decision_metadata(
+        _update_message_decision_metadata(
             saved_message,
             {
                 "pending_action": "pending_pass",

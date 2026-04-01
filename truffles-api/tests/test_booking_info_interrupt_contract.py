@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import decision as decision_router
 from app.routers.webhook import info as info_router
+from app.services import pack_runtime_neutral_adapter as neutral_adapter
 
 
 def _detect_info_calls(source_path: Path) -> list[ast.Call]:
@@ -94,6 +95,86 @@ def test_expected_reply_contract_keeps_info_block_for_promotions(monkeypatch):
     assert state.expected_reply_shortcircuit is False
 
 
+def test_info_detect_ignores_price_false_positive_inside_pochemu():
+    text = "Почему я не могу записаться на выходные?"
+    normalized = legacy.normalize_for_matching(text)
+
+    assert legacy._has_price_signal(normalized, text, client_slug="demo_salon") is False
+
+    intents, meta = info_router._detect_info_class_intents(
+        text,
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+        service_query="Дизайн ногтей",
+    )
+
+    assert "pricing" not in intents
+    assert "hours" in intents
+    assert meta.get("question_type") != "pricing"
+
+
+def test_pack_runtime_neutral_price_signal_ignores_price_false_positive_inside_pochemu():
+    false_positive_text = "Почему я не могу записаться на выходные?"
+    normalized_false_positive = neutral_adapter._normalize_text(false_positive_text)
+
+    assert (
+        neutral_adapter._has_price_signal(
+            normalized_false_positive,
+            false_positive_text,
+            client_slug="demo_salon",
+        )
+        is False
+    )
+
+    true_positive_text = "Почем маникюр?"
+    normalized_true_positive = neutral_adapter._normalize_text(true_positive_text)
+
+    assert (
+        neutral_adapter._has_price_signal(
+            normalized_true_positive,
+            true_positive_text,
+            client_slug="demo_salon",
+        )
+        is True
+    )
+
+
+def test_pack_runtime_neutral_price_signal_accepts_skolko_eto_stoit_phrase():
+    text = "А сколько это стоит?"
+    normalized = neutral_adapter._normalize_text(text)
+
+    assert neutral_adapter._has_price_signal(
+        normalized,
+        text,
+        client_slug="demo_salon",
+    )
+
+
+def test_pack_runtime_neutral_duration_signal_accepts_vremya_na_service_phrase():
+    text = "Как вы оцениваете время на наращивание полигелем?"
+    normalized = neutral_adapter._normalize_text(text)
+
+    assert neutral_adapter._has_duration_signal(
+        normalized,
+        text,
+        client_slug="demo_salon",
+    )
+
+
+def test_services_overview_signal_accepts_info_about_services_phrase():
+    assert info_router._looks_like_services_overview_message(
+        "Могу я получить информацию о ваших услугах?",
+        client_slug="demo_salon",
+    )
+
+
+def test_promotions_signal_accepts_generic_statement():
+    assert info_router._looks_like_promotions_policy_message(
+        "Я слышал, что у вас есть акции на маникюр.",
+        client_slug="demo_salon",
+    )
+
+
 def test_decision_detect_info_calls_pass_client_slug():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
@@ -114,14 +195,13 @@ def test_booking_detect_info_calls_pass_client_slug():
     assert all(_call_has_keyword(call, "client_slug") for call in calls)
 
 
-def test_decision_recomputes_batch_non_booking_message_after_debounce():
+def test_decision_no_longer_recomputes_batch_non_booking_message_after_debounce():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
     )
     calls = _named_calls(source_path, "_select_last_non_booking_message")
 
-    assert len(calls) >= 2
-    assert any(getattr(call, "lineno", 0) >= 6338 for call in calls)
+    assert calls == []
 
 
 def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
@@ -189,11 +269,10 @@ def test_info_classifier_detects_location_question_where_salon_phrase():
     assert isinstance(signals, dict) and signals.get("location") is True
 
 
-def test_decision_recomputes_expected_reply_block_after_debounce():
+def test_decision_expected_reply_block_check_is_localized_to_single_contract_site():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
     )
     calls = _named_calls(source_path, "_should_block_expected_reply_by_info")
 
-    assert calls
-    assert any(getattr(call, "lineno", 0) >= 6338 for call in calls)
+    assert len(calls) == 1

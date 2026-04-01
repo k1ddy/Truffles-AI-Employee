@@ -9,9 +9,8 @@ import pytest
 from app.contracts import Err, ErrorCodes, IntegrationError, Ok
 from app.models import Conversation, OutboxMessage
 from app.ports.messaging import MessageSent
-from app.routers.webhook import _legacy as legacy
-from app.routers.webhook import outbox as outbox_router
 from app.schemas.provider_gateway import ProviderStatus
+from app.services import outbox_runtime_service as outbox_runtime
 from app.services.provider_gateway_service import update_outbox_status_from_provider
 
 
@@ -175,13 +174,17 @@ async def test_outbox_gateway_uses_provider_from_payload(monkeypatch):
         captured["channel"] = options.extra.get("channel")
         return Ok(MessageSent(remote_jid=to, message_id="mock-1", provider_response={"ok": True}))
 
-    monkeypatch.setattr(outbox_router.ProviderGatewayAdapter, "send_text", _send_text)
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *args, **kwargs: None)
-    monkeypatch.setattr(outbox_router, "record_outbox_latency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime.ProviderGatewayAdapter, "send_text", _send_text)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "record_outbox_latency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: None,
+    )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 1
     assert captured["provider"] == "mockflow"
@@ -237,17 +240,17 @@ async def test_outbox_rows_skip_conversation_fallback_when_inbound_id_present(mo
     def _send_text(self, to, text, options):
         return Ok(MessageSent(remote_jid=to, message_id="mock-2", provider_response={"ok": True}))
 
-    monkeypatch.setattr(outbox_router.ProviderGatewayAdapter, "send_text", _send_text)
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *args, **kwargs: None)
-    monkeypatch.setattr(outbox_router, "record_outbox_latency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime.ProviderGatewayAdapter, "send_text", _send_text)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "record_outbox_latency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        legacy,
+        outbox_runtime,
         "_find_message_by_conversation_created_at",
         lambda *args, **kwargs: fallback_calls.append((args, kwargs)) or None,
     )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 1
     assert not fallback_calls
@@ -300,13 +303,17 @@ async def test_outbox_rows_reject_tenant_context_client_mismatch(monkeypatch, cl
 
     statuses = []
 
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
-    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(outbox_router, "alert_error", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_runtime, "record_delivery_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "alert_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: None,
+    )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 0
     assert results["failed"] == 1
@@ -363,13 +370,17 @@ async def test_outbox_rows_reject_tenant_context_branch_mismatch(monkeypatch, cl
 
     statuses = []
 
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
-    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(outbox_router, "alert_error", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_runtime, "record_delivery_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "alert_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: None,
+    )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 0
     assert results["failed"] == 1
@@ -418,13 +429,17 @@ async def test_outbox_rows_reject_missing_tenant_context(monkeypatch):
 
     statuses = []
 
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
-    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(outbox_router, "alert_error", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_runtime, "record_delivery_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "alert_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: None,
+    )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 0
     assert results["failed"] == 1
@@ -478,13 +493,17 @@ async def test_outbox_rows_reject_invalid_tenant_context_contract(monkeypatch):
 
     statuses = []
 
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
-    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(outbox_router, "alert_error", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_runtime, "record_delivery_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "alert_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: None,
+    )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 0
     assert results["failed"] == 1
@@ -549,15 +568,19 @@ async def test_outbox_rows_fail_fast_on_chatflow_billing_blocked(monkeypatch):
             )
         )
 
-    monkeypatch.setattr(outbox_router.ChatFlowAdapter, "send_text", _billing_blocked_send_text)
-    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
-    monkeypatch.setattr(outbox_router, "record_outbox_latency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *args, **kwargs: None)
-    monkeypatch.setattr(outbox_router, "alert_error", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime.ChatFlowAdapter, "send_text", _billing_blocked_send_text)
+    monkeypatch.setattr(outbox_runtime, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_runtime, "record_outbox_latency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "record_delivery_failure", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "alert_error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *args, **kwargs: None,
+    )
 
-    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=5, retry_backoff_seconds=1.0)
+    results = await outbox_runtime._process_outbox_rows(db, [row], max_attempts=5, retry_backoff_seconds=1.0)
 
     assert results["sent"] == 0
     assert results["failed"] == 1

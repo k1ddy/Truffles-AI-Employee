@@ -10,6 +10,7 @@ from app.models import AlertEvent, ClientSettings, Conversation, Handover, Messa
 from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
+from app.services.handover_owner_service import manager_resolve
 from app.services.message_service import save_message
 from app.services.sla_runtime_service import (
     SLA_RUNTIME_CONTEXT_KEY,
@@ -18,7 +19,7 @@ from app.services.sla_runtime_service import (
     resolve_pending_sla_violation,
 )
 from app.services.state_machine import ConversationState
-from app.services.state_service import force_state, manager_resolve
+from app.services.state_service import force_state
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("reminder_service")

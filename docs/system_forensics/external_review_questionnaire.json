@@ -1,0 +1,165 @@
+{
+  "schema_version": "v1",
+  "questionnaire_id": "consultant-core-external-review-v1",
+  "purpose": "Request decision-ready external architecture review on a shared structure rather than free-form commentary.",
+  "response_contract": {
+    "required_output_sections": [
+      "current_state_diagnosis",
+      "architecture_options",
+      "recommended_target_architecture",
+      "migration_program",
+      "salvage_delete_map",
+      "quality_governance_program",
+      "unknowns_and_risks"
+    ],
+    "cite_question_ids": true,
+    "separate_current_state_from_target_state": true,
+    "separate_low_confidence_claims_from_repo-backed claims": true
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "title": "Current-state diagnosis",
+      "prompt": "What is the simplest accurate architecture description of the system today, including runtime spine, legacy mesh, and main authority seams?",
+      "expected_answer_shape": [
+        "one-paragraph diagnosis",
+        "top three authority seams",
+        "main evidence references"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/SYSTEM_VERDICT.md",
+        "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md"
+      ]
+    },
+    {
+      "id": "Q2",
+      "title": "Semantic ownership assessment",
+      "prompt": "Is the single semantic owner direction viable as the governing architecture, and what exact constraints are needed so deterministic layers do not become a second owner?",
+      "expected_answer_shape": [
+        "viability verdict",
+        "required constraints",
+        "failure modes if constraints are ignored"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/SEMANTIC_OWNERSHIP_AUDIT.md",
+        "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md"
+      ]
+    },
+    {
+      "id": "Q3",
+      "title": "Fact-side architecture",
+      "prompt": "What fact-side architecture object is missing today, and what should replace the current mixed fact selection/composition/rendering behavior?",
+      "expected_answer_shape": [
+        "missing contract diagnosis",
+        "recommended fact-side components",
+        "migration entry slice"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md",
+        "docs/system_forensics/PACK_RUNTIME_SEPARATION_AUDIT.md"
+      ]
+    },
+    {
+      "id": "Q4",
+      "title": "State and truth carriers",
+      "prompt": "How should semantic state, pending-question continuity, and projections be normalized so multiple truth carriers stop fighting each other?",
+      "expected_answer_shape": [
+        "canonical state model",
+        "projection rules",
+        "what to delete or demote"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md",
+        "docs/system_forensics/ledgers/TRUTH_CARRIER_MATRIX.md"
+      ]
+    },
+    {
+      "id": "Q5",
+      "title": "Boundary and degrade authority",
+      "prompt": "What should the deterministic boundary be allowed to do, and what should it be forbidden from doing?",
+      "expected_answer_shape": [
+        "allowed actions",
+        "forbidden actions",
+        "observability requirements"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md",
+        "docs/system_forensics/QUALITY_GOVERNANCE_AUDIT.md"
+      ]
+    },
+    {
+      "id": "Q6",
+      "title": "Module salvage and deletion",
+      "prompt": "Which live modules are salvageable, adapter-only, or delete candidates, and in what order should they be treated?",
+      "expected_answer_shape": [
+        "salvage list",
+        "adapter-only list",
+        "delete-candidate list",
+        "ordering rationale"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/module_inventory.json",
+        "docs/system_forensics/CODE_TOPOLOGY_AUDIT.md"
+      ]
+    },
+    {
+      "id": "Q7",
+      "title": "Migration program critique",
+      "prompt": "Is the current migration order realistic, and what should be reordered, split, or added?",
+      "expected_answer_shape": [
+        "phase critique",
+        "revised ordering if needed",
+        "blocked-by dependencies"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/MIGRATION_PROGRAM.md",
+        "docs/system_forensics/runtime_path_registry.json"
+      ]
+    },
+    {
+      "id": "Q8",
+      "title": "Quality governance",
+      "prompt": "What additional governance, acceptance, or evidence rules are needed so future work does not regress into patch-loop behavior?",
+      "expected_answer_shape": [
+        "missing governance rules",
+        "recommended machine-readable evidence",
+        "review process changes"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/QUALITY_GOVERNANCE_AUDIT.md",
+        "docs/system_forensics/failure_family_registry.json"
+      ]
+    },
+    {
+      "id": "Q9",
+      "title": "Unknowns and research gaps",
+      "prompt": "What important unknowns remain even after reading this packet, and what repo/runtime evidence would reduce them?",
+      "expected_answer_shape": [
+        "unknown list",
+        "why each unknown matters",
+        "best next evidence for each"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/EVIDENCE_MAP.md",
+        "docs/system_forensics/artifact_index.json"
+      ]
+    },
+    {
+      "id": "Q10",
+      "title": "First implementation slice recommendation",
+      "prompt": "Assuming no rewrite fantasy, what should the first architecture-recovery implementation slice be, and what must it prove?",
+      "expected_answer_shape": [
+        "slice choice",
+        "why first",
+        "proof plan",
+        "rollback and risk notes"
+      ],
+      "recommended_inputs": [
+        "docs/system_forensics/TARGET_ARCHITECTURE.md",
+        "docs/system_forensics/MIGRATION_PROGRAM.md",
+        "docs/system_forensics/FACT_ARCHITECTURE_AUDIT.md"
+      ]
+    }
+  ]
+}

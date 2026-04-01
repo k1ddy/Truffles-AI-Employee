@@ -755,6 +755,11 @@ from app.services.console_saved_views import (
 )
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.handover_owner_service import manager_reassign as state_manager_reassign
+from app.services.handover_owner_service import manager_reopen as state_manager_reopen
+from app.services.handover_owner_service import manager_resolve as state_manager_resolve
+from app.services.handover_owner_service import manager_return as state_manager_return
+from app.services.handover_owner_service import manager_take as state_manager_take
 from app.services.health_service import build_knowledge_activation_health_snapshot
 from app.services.human_lock_service import (
     HUMAN_LOCK_SCOPE_CONVERSATION,
@@ -854,6 +859,10 @@ from app.services.onboarding_state import (
     build_onboarding_status,
     ensure_onboarding_step,
 )
+from app.services.outbox_runtime_service import (
+    load_outbox_process_settings,
+    run_scoped_outbox_process,
+)
 from app.services.outbox_service import (
     archive_pending_outbox,
     build_inbound_message_id,
@@ -884,6 +893,7 @@ from app.services.reference_pack_integrity import (
     REFERENCE_PACK_SCHEMA_VERSION,
     build_reference_pack_metadata,
 )
+from app.services.runtime_mode_service import should_use_outbox_send
 from app.services.sla_profile_registry_service import (
     SLA_PROFILE_SCHEMA_VERSION,
     get_latest_profile_version,
@@ -893,11 +903,6 @@ from app.services.sla_profile_registry_service import (
     resolve_effective_profile_version,
     rollback_profile_version,
 )
-from app.services.state_service import manager_reassign as state_manager_reassign
-from app.services.state_service import manager_reopen as state_manager_reopen
-from app.services.state_service import manager_resolve as state_manager_resolve
-from app.services.state_service import manager_return as state_manager_return
-from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 from app.services.tool_certification_service import (
     TOOL_CERTIFICATION_CERTIFIED,
@@ -10489,117 +10494,6 @@ def _build_outbox_archive_preview(
         "newest_created_at": newest_row.created_at.isoformat() if newest_row and newest_row.created_at else None,
     }
 
-
-def _claim_scoped_outbox_rows(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    limit: int,
-    idle_seconds: int,
-    max_wait_seconds: int,
-    include_without_conversation: bool = True,
-) -> list[dict]:
-    now = datetime.now(timezone.utc)
-    idle_cutoff = now - timedelta(seconds=idle_seconds)
-    max_wait_cutoff = now - timedelta(seconds=max_wait_seconds)
-
-    query = (
-        db.query(
-            OutboxMessage.conversation_id.label("conversation_id"),
-            func.max(OutboxMessage.created_at).label("last_created_at"),
-            func.min(OutboxMessage.created_at).label("first_created_at"),
-        )
-        .filter(
-            OutboxMessage.client_id == context.client.id,
-            OutboxMessage.status == "PENDING",
-            OutboxMessage.conversation_id.isnot(None),
-            or_(OutboxMessage.next_attempt_at.is_(None), OutboxMessage.next_attempt_at <= now),
-        )
-        .group_by(OutboxMessage.conversation_id)
-        .order_by(func.max(OutboxMessage.created_at).asc())
-        .limit(limit)
-    )
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            return []
-        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
-
-    batches = query.all()
-    conversation_ids: list[UUID] = []
-    for batch in batches:
-        if not batch.conversation_id:
-            continue
-        is_idle = bool(batch.last_created_at and batch.last_created_at <= idle_cutoff)
-        is_max_wait = bool(max_wait_seconds > 0 and batch.first_created_at and batch.first_created_at <= max_wait_cutoff)
-        if is_idle or is_max_wait:
-            conversation_ids.append(batch.conversation_id)
-
-    single_message_ids: list[UUID] = []
-    remaining_slots = max(0, limit - len(conversation_ids))
-    if include_without_conversation and remaining_slots > 0:
-        age_filters = [OutboxMessage.created_at <= idle_cutoff]
-        if max_wait_seconds > 0:
-            age_filters.append(OutboxMessage.created_at <= max_wait_cutoff)
-        singles_query = (
-            db.query(OutboxMessage.id)
-            .filter(
-                OutboxMessage.client_id == context.client.id,
-                OutboxMessage.status == "PENDING",
-                OutboxMessage.conversation_id.is_(None),
-                or_(OutboxMessage.next_attempt_at.is_(None), OutboxMessage.next_attempt_at <= now),
-                or_(*age_filters),
-            )
-            .order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc())
-            .limit(remaining_slots)
-        )
-        if allowed_branch_ids is not None:
-            singles_query = singles_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
-        single_message_ids = [row.id for row in singles_query.all()]
-
-    if not conversation_ids and not single_message_ids:
-        return []
-
-    filters = []
-    if conversation_ids:
-        filters.append(OutboxMessage.conversation_id.in_(conversation_ids))
-    if single_message_ids:
-        filters.append(OutboxMessage.id.in_(single_message_ids))
-
-    rows_query = (
-        db.query(OutboxMessage)
-        .filter(
-            OutboxMessage.client_id == context.client.id,
-            OutboxMessage.status == "PENDING",
-            or_(*filters),
-        )
-        .order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc())
-    )
-    if allowed_branch_ids is not None:
-        rows_query = rows_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
-    rows = rows_query.all()
-
-    for row in rows:
-        row.status = "PROCESSING"
-        row.attempts = int(row.attempts or 0) + 1
-        row.updated_at = now
-    db.commit()
-
-    return [
-        {
-            "id": row.id,
-            "client_id": row.client_id,
-            "branch_id": row.branch_id,
-            "conversation_id": row.conversation_id,
-            "inbound_message_id": row.inbound_message_id,
-            "payload_json": row.payload_json,
-            "attempts": row.attempts,
-            "created_at": row.created_at,
-        }
-        for row in rows
-    ]
-
-
 def _build_metrics_snapshot_dry_run(
     *,
     context: ConsoleAuthContext,
@@ -10623,24 +10517,25 @@ async def _run_outbox_process_job(
     mode: str,
     params: dict,
 ) -> dict:
+    process_settings = load_outbox_process_settings()
     limit = _parse_ops_job_int_param(
         params,
         name="limit",
-        default=int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10")),
+        default=process_settings.limit,
         min_value=1,
         max_value=200,
     )
     idle_seconds = _parse_ops_job_int_param(
         params,
         name="idle_seconds",
-        default=int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8"))),
+        default=process_settings.idle_seconds,
         min_value=0,
         max_value=3600,
     )
     max_wait_seconds = _parse_ops_job_int_param(
         params,
         name="max_wait_seconds",
-        default=int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10"))),
+        default=process_settings.max_wait_seconds,
         min_value=0,
         max_value=3600,
     )
@@ -10668,8 +10563,6 @@ async def _run_outbox_process_job(
         name="archive_pending_without_conversation_only",
         default=True,
     )
-    max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
-    retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
 
     if mode == "dry_run":
         archive_preview = _build_outbox_archive_preview(
@@ -10689,54 +10582,24 @@ async def _run_outbox_process_job(
             archive_preview=archive_preview,
         )
 
-    archive_result = None
-    if archive_pending_older_than_hours > 0:
-        archive_reason = f"archived_pending:older_than_{archive_pending_older_than_hours}h"
-        archive_result = archive_pending_outbox(
-            db,
-            client_id=context.client.id,
-            older_than_seconds=archive_pending_older_than_hours * 3600,
-            limit=archive_pending_limit,
-            reason=archive_reason,
-            branch_ids=_resolve_branch_scope(context),
-            only_without_conversation=archive_pending_without_conversation_only,
-        )
-
-    claimed_rows = _claim_scoped_outbox_rows(
-        db,
-        context=context,
-        limit=limit,
-        idle_seconds=idle_seconds,
-        max_wait_seconds=max_wait_seconds,
-        include_without_conversation=include_without_conversation,
-    )
-    if not claimed_rows:
-        response = {
-            "mode": "execute",
-            "scope": {"client_id": str(context.client.id)},
-            "processed": 0,
-            "results": {"processed": 0, "failed": 0},
-        }
-        if archive_result is not None:
-            response["archive"] = archive_result
-        return response
-
-    from app.routers.webhook import _process_outbox_rows
-
-    results = await _process_outbox_rows(
-        db,
-        claimed_rows,
-        max_attempts=max_attempts,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
     response = {
         "mode": "execute",
         "scope": {"client_id": str(context.client.id)},
-        "processed": len(claimed_rows),
-        "results": results,
     }
-    if archive_result is not None:
-        response["archive"] = archive_result
+    response.update(
+        await run_scoped_outbox_process(
+            db,
+            client_id=context.client.id,
+            allowed_branch_ids=_resolve_branch_scope(context),
+            limit=limit,
+            idle_seconds=idle_seconds,
+            max_wait_seconds=max_wait_seconds,
+            include_without_conversation=include_without_conversation,
+            archive_pending_older_than_hours=archive_pending_older_than_hours,
+            archive_pending_limit=archive_pending_limit,
+            archive_pending_without_conversation_only=archive_pending_without_conversation_only,
+        )
+    )
     return response
 
 
@@ -14347,7 +14210,7 @@ async def send_manager_message(
             )
             if not instance_id:
                 delivery_error = "instance_id_not_found"
-            elif _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False):
+            elif should_use_outbox_send(os.environ):
                 outbox_idempotency_key = idempotency_key or build_inbound_message_id(
                     None,
                     remote_jid,
@@ -14621,7 +14484,7 @@ async def send_outreach_message(
     now_utc = datetime.now(timezone.utc)
 
     try:
-        if _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False):
+        if should_use_outbox_send(os.environ):
             outbox_idempotency_key = idempotency_key or build_inbound_message_id(
                 None,
                 remote_jid,

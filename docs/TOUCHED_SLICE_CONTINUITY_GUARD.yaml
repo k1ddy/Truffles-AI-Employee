@@ -1,0 +1,10 @@
+family_id: location_hours_parking
+expected_class_name: info_bundle
+expected_message_count: 7
+expected_ttl: 4
+expected_info_sections:
+  - address
+  - hours
+expected_intents:
+  - location
+  - hours

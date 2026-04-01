@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from app.services import tool_certification_service
+from app.services.tool_registry_snapshot_service import list_declared_tool_actions
 
 
 def _entry(
@@ -128,3 +129,9 @@ def test_validate_tool_allow_tokens_for_scope_allows_certified_tools(monkeypatch
 
     assert ok is True
     assert error is None
+
+
+def test_default_tool_registry_matches_snapshot_actions() -> None:
+    registry = tool_certification_service._build_default_registry()
+
+    assert sorted(registry.keys()) == sorted(list_declared_tool_actions())

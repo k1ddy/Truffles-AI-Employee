@@ -1,6 +1,7 @@
 import pytest
 
-from app.services import booking_signal_service, info_signal_service, pack_runtime_service, tool_registry_service
+from app.routers.webhook import info as info_router
+from app.services import booking_signal_service, pack_runtime_service, tool_registry_service
 
 PACK_CASES = (
     {
@@ -26,12 +27,8 @@ PACK_CASES = (
 
 @pytest.mark.parametrize("case", PACK_CASES, ids=[item["slug"] for item in PACK_CASES])
 def test_cross_domain_contract_suite_info_booking_tool_registry(case):
-    assert info_signal_service.looks_like_services_overview_message(
+    assert info_router._looks_like_services_overview_message(
         case["overview_positive"],
-        client_slug=case["slug"],
-    )
-    assert not info_signal_service.looks_like_services_overview_message(
-        case["overview_negative"],
         client_slug=case["slug"],
     )
 

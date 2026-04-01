@@ -9,6 +9,7 @@ EXPECTED_REPLY_ALLOWED_TYPES = {
     "time",
     "name",
     "phone",
+    "media",
     "intent_choice",
 }
 

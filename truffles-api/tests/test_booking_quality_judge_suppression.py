@@ -1,4 +1,5 @@
 import ast
+import json
 from pathlib import Path
 
 
@@ -8,6 +9,8 @@ def _load_suppress_helper():
     tree = ast.parse(source, filename=str(script_path))
 
     wanted_functions = {
+        "_llm_quality_booking_collect_contract",
+        "_llm_quality_booking_collect_prompt_ok",
         "_llm_quality_normalize_expect_token",
         "_llm_quality_normalize_tool_token",
         "_llm_quality_effective_intent",
@@ -24,6 +27,35 @@ def _load_suppress_helper():
     namespace = {}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace["_llm_quality_should_suppress_missed_question_judge_fail"]
+
+
+def _load_judge_prompt_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+
+    wanted_assignments = {
+        "LLM_QUALITY_JUDGE_REASONS",
+        "LLM_QUALITY_JUDGE_VERDICTS",
+        "LLM_QUALITY_JUDGE_PAYLOAD_LIMITS",
+    }
+    wanted_functions = {
+        "_llm_quality_compact_for_judge_payload",
+        "_llm_quality_build_judge_prompt",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if names & wanted_assignments:
+                selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {"json": json}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_build_judge_prompt"]
 
 
 def test_suppresses_missed_question_for_provider_unavailable_booking_reply():
@@ -44,6 +76,29 @@ def test_suppresses_missed_question_for_provider_unavailable_booking_reply():
     )
 
     assert suppress is True
+
+
+def test_judge_prompt_uses_contract_language_for_handoff_and_booking_lookup():
+    build_prompt = _load_judge_prompt_helper()
+
+    prompt = build_prompt(
+        {
+            "conversation_state": "pending",
+            "expected_reply": False,
+            "decision_meta": {
+                "action": "fact",
+                "tool_action": "calendar.get_booking",
+                "tool_decision": "not_found",
+                "expected_reply_type": "name",
+            },
+        }
+    )
+
+    assert "An explicit handoff or status acknowledgement" in prompt
+    assert "do not require bot silence" in prompt
+    assert "calendar.get_booking" in prompt
+    assert "any bot reply is wrong" not in prompt
+    assert "If expected_reply is false but the bot replied, mark fail." not in prompt
 
 
 def test_does_not_suppress_when_judge_reason_is_not_missed_question():
@@ -118,6 +173,70 @@ def test_suppresses_missed_question_when_followup_prompt_is_present():
         booking_active=True,
         turn_tags=["booking"],
         outbox_text="Как вас зовут?",
+    )
+
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_booking_prompt_followup_without_reason_code():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "booking_prompt",
+            "expected_reply_reason": "booking_prompt",
+        },
+        meta_action="booking_prompt",
+        expected_reply_type_value="name",
+        booking_active=True,
+        turn_tags=["reschedule", "booking"],
+        outbox_text="Отлично, время подходит. Как вас зовут?",
+    )
+
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_check_booking_collect_reference_prompt():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "check_booking_prompt",
+            "intent": "check_booking",
+            "expected_reply_reason": "calendar_get_booking_collect_reference",
+        },
+        meta_action="check_booking_prompt",
+        expected_reply_type_value="name",
+        booking_active=True,
+        turn_tags=["confirm", "check_booking"],
+        outbox_text="Чтобы проверить, перенести или отменить запись, подскажите номер телефона и примерную дату/время записи.",
+    )
+
+    assert suppress is True
+
+
+def test_suppresses_missed_question_for_master_service_not_found_collect():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={
+            "action": "reply",
+            "intent": "master_query",
+            "clarify_reason": "master_service_not_found",
+            "expected_reply_reason": "master_service_not_found",
+            "info_sections": ["master"],
+        },
+        meta_action="reply",
+        expected_reply_type_value="service_choice",
+        booking_active=True,
+        turn_tags=["master", "booking"],
+        outbox_text='Po usluge "Маникюр" utochnu dostupnyh masterov u administratora.',
     )
 
     assert suppress is True

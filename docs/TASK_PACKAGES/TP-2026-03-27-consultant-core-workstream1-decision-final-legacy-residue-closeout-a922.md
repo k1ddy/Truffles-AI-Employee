@@ -1,0 +1,28 @@
+
+## Implementation result
+- `Status`: `done`
+- `Changed authority map`:
+  - removed the final active `_legacy.py` imports from `truffles-api/app/routers/webhook/decision.py`
+  - expected-reply fallback, intent decomposition, and explicit-service-signal logic now bind directly to existing owners/local helpers
+  - architecture proof now freezes the no-`_legacy.py` app-runtime boundary
+- `Files touched`:
+  - `truffles-api/app/routers/webhook/decision.py`
+  - `truffles-api/tests/architecture/test_legacy_freeze_guard.py`
+  - `truffles-api/tests/test_message_endpoint.py`
+  - `docs/TASK_PACKAGES/TP-2026-03-27-consultant-core-workstream1-decision-final-legacy-residue-closeout-a922.md`
+  - `STATE.md`
+  - `STRUCTURE.md`
+- `Deterministic checks`:
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/architecture/test_legacy_freeze_guard.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_info_interrupt_contract.py` -> `pass`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py -k "expected_reply or intent_decomposition or class_router"` -> `16 passed, 176 deselected`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_booking_info_interrupt_contract.py` -> `13 passed`
+  - `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_legacy_freeze_guard.py` -> `12 passed`
+  - `git diff --check` -> `pass`
+- `Contract checks`:
+  - `rg -n "from \. import _legacy as legacy|from app\.routers\.webhook\._legacy import|from app\.routers\.webhook import _legacy as legacy|legacy\." truffles-api/app | sed -n '1,120p'` -> no app-runtime `_legacy.py` imports/calls remain
+- `Realistic/local behavior checks`:
+  - not run in this bounded block; no `llm-quality` acceptance run was part of this cut
+- `Authority removed`:
+  - `_legacy.py` has left the app runtime import graph
+- `Residual debt left for next block`:
+  - Workstream 1 still needs the final proof/closeout assessment against its remaining completion criteria

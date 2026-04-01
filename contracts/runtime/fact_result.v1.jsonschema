@@ -1,0 +1,148 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "fact_result.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "result_id": {
+      "title": "Result Id",
+      "type": "string"
+    },
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "selected_tool_or_workflow_ref": {
+      "title": "Selected Tool Or Workflow Ref",
+      "type": "string"
+    },
+    "selected_source": {
+      "title": "Selected Source",
+      "type": "string"
+    },
+    "resolution_source": {
+      "title": "Resolution Source",
+      "type": "string"
+    },
+    "retrieval_mode": {
+      "title": "Retrieval Mode",
+      "type": "string"
+    },
+    "renderer_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Renderer Id"
+    },
+    "scope_namespace": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope Namespace"
+    },
+    "emitted_fact_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Emitted Fact Refs",
+      "type": "array"
+    },
+    "emitted_scopes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Emitted Scopes",
+      "type": "array"
+    },
+    "omitted_fact_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Omitted Fact Refs",
+      "type": "array"
+    },
+    "out_of_scope_fact_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Out Of Scope Fact Refs",
+      "type": "array"
+    },
+    "scope_verdict": {
+      "default": "empty",
+      "enum": [
+        "ok",
+        "empty",
+        "out_of_scope"
+      ],
+      "title": "Scope Verdict",
+      "type": "string"
+    },
+    "response_generated": {
+      "default": false,
+      "title": "Response Generated",
+      "type": "boolean"
+    },
+    "resolution_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolution Reason"
+    },
+    "fallback_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Reason"
+    },
+    "provenance": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Provenance",
+      "type": "array"
+    }
+  },
+  "required": [
+    "plan_id",
+    "decision_id",
+    "selected_tool_or_workflow_ref",
+    "selected_source",
+    "resolution_source",
+    "retrieval_mode"
+  ],
+  "title": "FactResultV1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/fact_result.v1.jsonschema"
+}

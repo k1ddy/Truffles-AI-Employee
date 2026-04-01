@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from fastapi import Request
 
 from app.models import Branch, ClientSettings
@@ -47,9 +49,20 @@ def _get_request_webhook_secret(request: Request) -> str | None:
     return None
 
 
+def _webhook_secrets_match(provided_secret: str | None, expected_secret: str | None) -> bool:
+    provided = _clean_secret(provided_secret)
+    expected = _clean_secret(expected_secret)
+    if expected is None:
+        return provided is None
+    if provided is None:
+        return False
+    return hmac.compare_digest(provided, expected)
+
+
 __all__ = [
     "_get_branch_webhook_secret",
     "_get_client_webhook_secret",
     "_get_request_webhook_secret",
     "_resolve_expected_webhook_secret",
+    "_webhook_secrets_match",
 ]

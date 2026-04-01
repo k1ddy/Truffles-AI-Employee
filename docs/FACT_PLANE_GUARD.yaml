@@ -1,0 +1,44 @@
+version: v1
+hotspots:
+  - path: truffles-api/app/core/fact_plane.py
+    active_waiver: null
+    tracked_function_names:
+      name_patterns:
+        - '^build_from_.*$'
+      exact_allowlist:
+        - build_from_policy_decision
+        - build_from_request
+        - build_from_runtime_payload
+repo_callsite_contracts:
+  - search_roots:
+      - truffles-api/app
+    call_name: FactRequestV1.build_from_policy_decision
+    exact_allowlist:
+      - truffles-api/app/core/turn_executor.py
+  - search_roots:
+      - truffles-api/app
+    call_name: FactPlanV1.build_from_request
+    exact_allowlist:
+      - truffles-api/app/core/turn_executor.py
+  - search_roots:
+      - truffles-api/app
+    call_name: FactResultV1.build_from_runtime_payload
+    exact_allowlist:
+      - truffles-api/app/core/turn_executor.py
+  - search_roots:
+      - truffles-api/app
+    call_name: build_fact_contract_meta
+    exact_allowlist:
+      - truffles-api/app/core/turn_executor.py
+keyword_call_contracts:
+  - search_roots:
+      - truffles-api/app/core
+    call_name: execute_tool_action
+    required_keywords:
+      - allowed_fact_refs
+    exact_allowlist:
+      - truffles-api/app/core/turn_executor.py
+forbidden_text_contracts:
+  - path: truffles-api/app/core/turn_executor.py
+    patterns:
+      - info_sections.append(

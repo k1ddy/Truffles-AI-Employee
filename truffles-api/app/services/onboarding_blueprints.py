@@ -91,6 +91,10 @@ _DOMAIN_QUESTION_OVERRIDES = {
     "clinic": {
         "client_pack.safety.medical_note": "Какой обязательный медицинский дисклеймер должен говорить бот?",
     },
+    "generic": {
+        "client_pack.catalog.summary": "Какие сервисные направления и типовые запросы клиентов поддерживает бизнес?",
+        "client_pack.booking.collect_fields": "Какие поля бот обязан собирать для сервисной заявки/записи?",
+    },
     "legal": {
         "client_pack.catalog.summary": "Какие юридические услуги/направления консультаций доступны?",
         "client_pack.policy.legal": "Опишите юридические ограничения и границы консультаций.",
@@ -137,6 +141,7 @@ _READINESS_WEIGHTS_BY_DOMAIN = {
         ("delivery_health", 20),
         ("traffic_capability_alignment", 15),
     ),
+    "generic": _DEFAULT_READINESS_WEIGHTS,
     "legal": (
         ("go_no_go_contract", 70),
         ("delivery_health", 20),
@@ -247,6 +252,37 @@ def _build_blueprints() -> tuple[OnboardingBlueprint, ...]:
             question_templates=_build_question_templates("clinic"),
             required_fields_profile=_build_required_fields_profile("clinic"),
             readiness_weights=_build_readiness_weights("clinic"),
+        ),
+        OnboardingBlueprint(
+            id="generic",
+            domain_slug="generic",
+            label="Generic Service",
+            summary="Pack-agnostic service profile for message/API-first runtime targets",
+            payload=CapabilitiesPayload.model_validate(
+                {
+                    "domain_slug": "generic",
+                    "channels": {
+                        "whatsapp": False,
+                        "telegram": False,
+                        "instagram": False,
+                    },
+                    "providers": {
+                        "availability_provider": "manual",
+                        "crm_provider": "none",
+                        "calendar_provider": "local",
+                    },
+                    "features": {
+                        "booking_mode": "collect_preferences",
+                        "knowledge_upload": True,
+                        "analytics": True,
+                        "auto_learn": False,
+                    },
+                }
+            ),
+            go_live_blockers_profile=_GO_LIVE_BLOCKERS_CORE + _GO_LIVE_BLOCKERS_BOOKING,
+            question_templates=_build_question_templates("generic"),
+            required_fields_profile=_build_required_fields_profile("generic"),
+            readiness_weights=_build_readiness_weights("generic"),
         ),
         OnboardingBlueprint(
             id="legal",

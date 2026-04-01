@@ -6,12 +6,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Conversation
+from app.routers.public_entrypoint_contract import (
+    PublicEntrypointMaterializationMode,
+    handle_public_webhook_payload,
+)
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
-from app.services import reasoning_core
 from app.services.learning_service import get_client_slug
 
 router = APIRouter()
+
+
 
 @router.post("/message", response_model=MessageResponse)
 async def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
@@ -39,14 +44,22 @@ async def handle_message(request: MessageRequest, db: Session = Depends(get_db))
         },
     )
 
-    response = await reasoning_core.handle_webhook_payload(
+    response = await handle_public_webhook_payload(
         payload,
         db,
+        entrypoint_name="Message",
+        materialization_mode=PublicEntrypointMaterializationMode.REQUIRE_CONVERSATION,
         provided_secret=None,
         enforce_secret=False,
     )
     if not response.conversation_id:
-        raise HTTPException(status_code=500, detail="Missing conversation_id")
+        detail = (response.message or "").strip() or "Message pipeline returned no conversation_id"
+        if not response.success:
+            raise HTTPException(status_code=422, detail=detail)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Message pipeline returned no conversation_id: {detail}",
+        )
 
     conversation = (
         db.query(Conversation)

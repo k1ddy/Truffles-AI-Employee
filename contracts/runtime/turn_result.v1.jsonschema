@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/runtime/turn_result.v1.jsonschema",
+  "title": "TurnResult v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome",
+    "contract_status",
+    "policy_decision",
+    "boundary_override",
+    "reply",
+    "tool_outcomes",
+    "dialog_state",
+    "observability",
+    "trace"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "turn_result.v1"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "FACT",
+        "COLLECT",
+        "HANDOFF"
+      ]
+    },
+    "contract_status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "degraded",
+        "blocked"
+      ]
+    },
+    "policy_decision": {
+      "$ref": "policy_decision.v1.jsonschema"
+    },
+    "boundary_override": {
+      "anyOf": [
+        {
+          "$ref": "boundary_override.v1.jsonschema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reply": {
+      "$ref": "https://truffles.ai/contracts/runtime/turn_result.v1.jsonschema#/$defs/replyEnvelope"
+    },
+    "tool_outcomes": {
+      "type": "array",
+      "items": {
+        "$ref": "https://truffles.ai/contracts/runtime/turn_result.v1.jsonschema#/$defs/toolOutcome"
+      }
+    },
+    "dialog_state": {
+      "$ref": "dialog_state.v1.jsonschema"
+    },
+    "observability": {
+      "$ref": "https://truffles.ai/contracts/runtime/turn_result.v1.jsonschema#/$defs/observability"
+    },
+    "trace": {
+      "$ref": "https://truffles.ai/contracts/runtime/turn_result.v1.jsonschema#/$defs/trace"
+    }
+  },
+  "$defs": {
+    "replyEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel",
+        "reply_kind",
+        "text",
+        "meta"
+      ],
+      "properties": {
+        "channel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reply_kind": {
+          "type": "string",
+          "enum": [
+            "fact",
+            "collect",
+            "handoff",
+            "system"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "toolOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "status",
+        "reason_code",
+        "payload"
+      ],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "degraded",
+            "blocked",
+            "skipped"
+          ]
+        },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason_code",
+        "decision_stage",
+        "meta"
+      ],
+      "properties": {
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision_stage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason_code",
+        "stages"
+      ],
+      "properties": {
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "runtime_trace_contract": {
+          "anyOf": [
+            {
+              "$ref": "https://truffles.ai/contracts/runtime/runtime_trace_contract.v1.jsonschema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

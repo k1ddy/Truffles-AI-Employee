@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 from uuid import UUID
 
 from app.services.knowledge_registry_service import get_active_knowledge_version
 from app.services.pack_compiler_service import extract_compiled_artifacts
+from app.services.runtime_mode_service import is_nonprod_eval_mode
 
 
 @dataclass(frozen=True)
@@ -41,7 +43,7 @@ def _is_env_enabled(value: str | None, default: bool = False) -> bool:
 def _is_dev_or_test_runtime() -> bool:
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return True
-    if _is_env_enabled(os.environ.get("TEST_MODE"), default=False):
+    if is_nonprod_eval_mode(os.environ):
         return True
     if _is_env_enabled(os.environ.get("DEBUG"), default=False):
         return True
@@ -58,20 +60,31 @@ def should_allow_truth_fallback() -> bool:
     return _is_env_enabled(os.environ.get("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK"), default=False)
 
 
-def set_runtime_truth(runtime_truth: RuntimeTruth | None) -> None:
-    _RUNTIME_TRUTH.set(runtime_truth)
+def set_runtime_truth(runtime_truth: RuntimeTruth | None):
+    return _RUNTIME_TRUTH.set(runtime_truth)
 
 
 def get_runtime_truth() -> RuntimeTruth | None:
     return _RUNTIME_TRUTH.get()
 
 
-def set_runtime_truth_override(runtime_truth: RuntimeTruth | None) -> None:
-    _RUNTIME_TRUTH_OVERRIDE.set(runtime_truth)
+def set_runtime_truth_override(runtime_truth: RuntimeTruth | None):
+    return _RUNTIME_TRUTH_OVERRIDE.set(runtime_truth)
 
 
 def get_runtime_truth_override() -> RuntimeTruth | None:
     return _RUNTIME_TRUTH_OVERRIDE.get()
+
+
+@contextmanager
+def use_runtime_truth_override(runtime_truth: RuntimeTruth | None) -> Iterator[None]:
+    override_token = set_runtime_truth_override(runtime_truth)
+    runtime_token = set_runtime_truth(runtime_truth)
+    try:
+        yield
+    finally:
+        _RUNTIME_TRUTH.reset(runtime_token)
+        _RUNTIME_TRUTH_OVERRIDE.reset(override_token)
 
 
 def build_runtime_truth(
@@ -200,4 +213,5 @@ __all__ = [
     "set_runtime_truth",
     "set_runtime_truth_override",
     "should_allow_truth_fallback",
+    "use_runtime_truth_override",
 ]

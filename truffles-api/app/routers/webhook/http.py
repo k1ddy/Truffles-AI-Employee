@@ -4,23 +4,30 @@ from __future__ import annotations
 
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Iterator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.models import Branch, Client, ClientSettings
+from app.models import Branch, Client, ClientSettings, Conversation, Message, User
 from app.routers.webhook.instance_routing import resolve_active_branch_by_instance
 from app.routers.webhook.media import _extract_media_info
 from app.routers.webhook.parsing import _parse_webhook_request
-from app.routers.webhook.secrets import _get_request_webhook_secret, _resolve_expected_webhook_secret
+from app.routers.webhook.secrets import (
+    _get_request_webhook_secret,
+    _resolve_expected_webhook_secret,
+    _webhook_secrets_match,
+)
 from app.schemas.webhook import WebhookRequest, WebhookResponse
-from app.services import reasoning_core
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import verify_signed_media_path
 from app.services.integration_guardrails_service import (
@@ -30,13 +37,30 @@ from app.services.integration_guardrails_service import (
 )
 from app.services.tenant_context_contract import validate_tenant_context_contract
 
-from . import _legacy as legacy
-
 logger = get_logger("webhook")
 router = APIRouter()
+_MEDIA_STORAGE_DEFAULT_DIR = os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media")
+
+
+@dataclass(frozen=True)
+class _PreflightBridgeCacheEntry:
+    payload_id: int
+    db_id: int
+    conversation_id: UUID | None
+    preflight_payload: dict[str, Any]
+
+
+_PREFLIGHT_BRIDGE_CACHE: ContextVar[_PreflightBridgeCacheEntry | None] = ContextVar(
+    "webhook_preflight_bridge_cache",
+    default=None,
+)
+
 
 def _should_enqueue_only() -> bool:
-    return legacy._is_env_enabled(os.environ.get("WEBHOOK_ENQUEUE_ONLY"), default=False)
+    raw = os.environ.get("WEBHOOK_ENQUEUE_ONLY")
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 def _normalize_phone_digits(value: str | None) -> str:
     if not value:
@@ -61,6 +85,137 @@ def _lookup_sender_branch(db: Session, remote_jid: str | None) -> Branch | None:
     return branch
 
 
+def _find_message_by_message_id(
+    db: Session,
+    *,
+    client_id: UUID,
+    message_id: str,
+) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(
+            Message.client_id == client_id,
+            or_(
+                Message.message_metadata["message_id"].astext == message_id,
+                Message.message_metadata["messageId"].astext == message_id,
+            ),
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+
+def _resolve_secret_preflight_trace_conversation(
+    db: Session,
+    *,
+    trace_client: Client | None,
+    trace_conversation_id: UUID | None,
+    trace_message_id: str | None,
+    trace_remote_jid: str | None,
+) -> Conversation | None:
+    if trace_conversation_id:
+        conversation = db.query(Conversation).filter(Conversation.id == trace_conversation_id).first()
+        if conversation:
+            return conversation
+    if trace_client and trace_message_id:
+        saved_message = _find_message_by_message_id(
+            db,
+            client_id=trace_client.id,
+            message_id=trace_message_id,
+        )
+        if saved_message:
+            return (
+                db.query(Conversation)
+                .filter(Conversation.id == saved_message.conversation_id)
+                .first()
+            )
+    if trace_client and trace_remote_jid:
+        user = (
+            db.query(User)
+            .filter(User.client_id == trace_client.id, User.remote_jid == trace_remote_jid)
+            .first()
+        )
+        if user:
+            return (
+                db.query(Conversation)
+                .filter(
+                    Conversation.client_id == trace_client.id,
+                    Conversation.user_id == user.id,
+                    Conversation.status == "active",
+                )
+                .first()
+            )
+    return None
+
+
+def _record_secret_preflight_trace(
+    trace_conversation: Conversation | None,
+    *,
+    stage: str,
+    decision: str,
+    reason: str,
+    meta: dict[str, object] | None = None,
+) -> bool:
+    if not trace_conversation:
+        return False
+    trace_payload: dict[str, object] = {
+        "stage": stage,
+        "decision": decision,
+        "reason": reason,
+    }
+    if meta:
+        trace_payload.update(meta)
+    trace = list((trace_conversation.context or {}).get("decision_trace") or [])
+    trace.append(trace_payload)
+    context = dict(trace_conversation.context or {})
+    context["decision_trace"] = trace[-20:]
+    trace_conversation.context = context
+    return True
+
+
+def _get_preflight_bridge_cache_payload(
+    payload: WebhookRequest,
+    db: Session,
+    *,
+    conversation_id: UUID | None,
+    enforce_secret: bool,
+) -> dict[str, Any] | None:
+    if enforce_secret:
+        return None
+    cached = _PREFLIGHT_BRIDGE_CACHE.get()
+    if cached is None:
+        return None
+    if cached.payload_id != id(payload):
+        return None
+    if cached.db_id != id(db):
+        return None
+    if cached.conversation_id != conversation_id:
+        return None
+    return cached.preflight_payload
+
+
+@contextmanager
+def _use_preflight_bridge_cache(
+    payload: WebhookRequest,
+    db: Session,
+    *,
+    conversation_id: UUID | None,
+    preflight_payload: dict[str, Any],
+) -> Iterator[None]:
+    token = _PREFLIGHT_BRIDGE_CACHE.set(
+        _PreflightBridgeCacheEntry(
+            payload_id=id(payload),
+            db_id=id(db),
+            conversation_id=conversation_id,
+            preflight_payload=preflight_payload,
+        )
+    )
+    try:
+        yield
+    finally:
+        _PREFLIGHT_BRIDGE_CACHE.reset(token)
+
+
 def _run_preflight(
     payload: WebhookRequest,
     db: Session,
@@ -71,6 +226,15 @@ def _run_preflight(
     resolve_trace_conversation,
     record_early_trace,
 ) -> tuple[WebhookResponse | None, dict]:
+    cached_preflight_payload = _get_preflight_bridge_cache_payload(
+        payload,
+        db,
+        conversation_id=conversation_id,
+        enforce_secret=enforce_secret,
+    )
+    if cached_preflight_payload is not None:
+        return None, cached_preflight_payload
+
     def _normalize_phone(value: str | None) -> str | None:
         if not value:
             return None
@@ -133,8 +297,9 @@ def _run_preflight(
             settings=settings,
             branch=None,
         )
-        if client_expected_secret and (
-            not provided_secret or provided_secret != client_expected_secret
+        if client_expected_secret and not _webhook_secrets_match(
+            provided_secret,
+            client_expected_secret,
         ):
             _raise_invalid_secret(
                 branch=None,
@@ -217,27 +382,6 @@ def _run_preflight(
             meta={"error": incoming_tenant_error},
         )
 
-    sender_branch = _lookup_sender_branch(db, remote_jid)
-    if sender_branch:
-        trace_conversation = resolve_trace_conversation(
-            trace_client=client,
-            trace_conversation_id=conversation_id,
-            trace_message_id=message_id,
-            trace_remote_jid=remote_jid,
-        )
-        if record_early_trace(
-            trace_conversation,
-            stage="preflight",
-            decision="ignore",
-            reason="sender_is_branch",
-            meta={
-                "sender_branch_id": str(sender_branch.id),
-                "sender_branch_client_id": str(sender_branch.client_id),
-                "sender_branch_phone": sender_branch.phone,
-            },
-        ):
-            db.commit()
-        return WebhookResponse(success=True, message="Ignored sender (branch number)"), {}
     message_text = body.message or ""
     media_info = _extract_media_info(body)
     if not message_text.strip() and media_info and media_info.caption:
@@ -467,7 +611,7 @@ def _run_preflight(
             branch=resolved_branch,
         )
         if expected_secret:
-            if not provided_secret or provided_secret != expected_secret:
+            if not _webhook_secrets_match(provided_secret, expected_secret):
                 _raise_invalid_secret(
                     branch=resolved_branch,
                     instance_id=instance_id,
@@ -513,7 +657,7 @@ async def serve_media(media_path: str, expires: int, sig: str):
     if not verify_signed_media_path(normalized_path, expires, sig):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired signature")
 
-    base_dir = Path(legacy.MEDIA_STORAGE_DEFAULT_DIR).resolve()
+    base_dir = Path(_MEDIA_STORAGE_DEFAULT_DIR).resolve()
     target_path = (base_dir / normalized_path).resolve()
     if base_dir not in target_path.parents and target_path != base_dir:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid media path")
@@ -526,7 +670,9 @@ async def serve_media(media_path: str, expires: int, sig: str):
 @router.post("/webhook/debug")
 async def debug_webhook(request: Request):
     """Debug endpoint to see raw request."""
-    if not legacy._is_env_enabled(os.environ.get("DEBUG_WEBHOOK_ENABLED"), default=False):
+    raw_debug = os.environ.get("DEBUG_WEBHOOK_ENABLED")
+    debug_enabled = bool(raw_debug and raw_debug.strip().lower() not in {"0", "false", "no", "off"})
+    if not debug_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     admin_token = request.headers.get("X-Admin-Token")
     expected_token = os.environ.get("ALERTS_ADMIN_TOKEN")
@@ -564,7 +710,7 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
         branch=resolved_branch,
     )
     if expected_secret:
-        if not provided_secret or provided_secret != expected_secret:
+        if not _webhook_secrets_match(provided_secret, expected_secret):
             report_integration_incident(
                 db,
                 client=client,
@@ -582,12 +728,35 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
     elif not provided_secret:
         alert_warning("Webhook secret missing", {"client_slug": parsed.client_slug})
 
-    return await reasoning_core.handle_webhook_payload(
+    preflight_response, preflight_payload = _run_preflight(
         parsed,
         db,
         provided_secret=provided_secret,
         enforce_secret=False,
+        conversation_id=None,
+        resolve_trace_conversation=lambda **kwargs: _resolve_secret_preflight_trace_conversation(
+            db,
+            **kwargs,
+        ),
+        record_early_trace=_record_secret_preflight_trace,
+    )
+    if preflight_response is not None:
+        return preflight_response
+
+    from app.routers.public_entrypoint_contract import (
+        PublicEntrypointMaterializationMode,
+        handle_public_webhook_payload,
+    )
+
+    return await handle_public_webhook_payload(
+        parsed,
+        db,
+        entrypoint_name="Webhook direct",
+        materialization_mode=PublicEntrypointMaterializationMode.ALLOW_UNMATERIALIZED,
+        provided_secret=provided_secret,
+        enforce_secret=False,
         enqueue_only=_should_enqueue_only(),
+        preflight_payload=preflight_payload,
     )
 
 
@@ -601,9 +770,16 @@ async def handle_webhook_probe(client_slug: str):
 async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Session = Depends(get_db)):
     """Handle legacy webhook wrapper (same format as ChatFlow webhook)."""
     provided_secret = _get_request_webhook_secret(http_request)
-    return await reasoning_core.handle_webhook_payload(
+    from app.routers.public_entrypoint_contract import (
+        PublicEntrypointMaterializationMode,
+        handle_public_webhook_payload,
+    )
+
+    return await handle_public_webhook_payload(
         payload,
         db,
+        entrypoint_name="Webhook",
+        materialization_mode=PublicEntrypointMaterializationMode.ALLOW_UNMATERIALIZED,
         provided_secret=provided_secret,
         enforce_secret=True,
         enqueue_only=_should_enqueue_only(),

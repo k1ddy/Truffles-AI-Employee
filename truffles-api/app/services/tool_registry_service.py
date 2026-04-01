@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.fact_plane import normalize_fact_ref_list
 from app.models.appointment import Appointment
 from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
@@ -16,6 +17,12 @@ from app.models.branch import Branch
 from app.models.service import Service
 from app.models.specialist import Specialist
 from app.models.specialist_service import SpecialistService
+from app.routers.webhook.runtime_primitives import (
+    EXPECTED_REPLY_SERVICE,
+    EXPECTED_REPLY_TIME,
+    MSG_BOOKING_ASK_DATETIME,
+    MSG_BOOKING_ASK_SERVICE,
+)
 from app.schemas.intent import validate_tool_args_shape
 from app.services.appointment_reminder_service import (
     mark_pending_reminders_failed,
@@ -48,15 +55,6 @@ from app.services.calendar_sync_service import enqueue_appointment_sync, get_pro
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
 from app.services.expected_reply_contract import EXPECTED_REPLY_NAME, EXPECTED_REPLY_PHONE
-from app.services.info_signal_service import (
-    looks_like_booking_verification_message as _looks_like_booking_verification_message,
-)
-from app.services.info_signal_service import (
-    looks_like_services_overview_message as _looks_like_services_overview_message,
-)
-from app.services.info_signal_service import (
-    system_any_match as _system_any_match,
-)
 from app.services.pack_runtime_service import (
     _detect_promotion_intent,
     _has_duration_signal,
@@ -65,27 +63,29 @@ from app.services.pack_runtime_service import (
     _match_service,
     _normalize_text,
     build_info_combined_reply,
+    build_runtime_service_duration_reply,
+    build_runtime_service_not_found_reply,
+    build_runtime_service_presence_reply_for_name,
+    build_runtime_service_truth_reply,
     format_reply_from_truth,
-    get_pack_adapter,
+    get_pack_price_item,
+    get_pack_price_reply,
+    get_system_lexicon_list,
     load_yaml_truth,
 )
 from app.services.tool_certification_service import resolve_tool_certification_decision
+from app.services.tool_registry_snapshot_service import (
+    declared_tool_action_set,
+    resolve_tool_registry_entry,
+)
 
-CALENDAR_TOOL_ACTIONS = {
-    "calendar.list_slots",
-    "calendar.book_slot",
-    "calendar.get_booking",
-    "calendar.reschedule",
-    "calendar.cancel",
-}
-
-CATALOG_TOOL_ACTIONS = {
-    "catalog.service_query",
-    "catalog.location",
-    "catalog.portfolio",
-}
-
-TOOL_ACTIONS = CALENDAR_TOOL_ACTIONS | CATALOG_TOOL_ACTIONS
+TOOL_ACTIONS = declared_tool_action_set()
+CALENDAR_TOOL_ACTIONS = frozenset(
+    action for action in TOOL_ACTIONS if action.startswith("calendar.")
+)
+CATALOG_TOOL_ACTIONS = frozenset(
+    action for action in TOOL_ACTIONS if action.startswith("catalog.")
+)
 
 _CALENDAR_PROVIDER_HARD_FAILURES = {
     "connection_missing",
@@ -120,7 +120,7 @@ BookingCreateBoundaryError = BookingWriteBoundaryError
 
 
 def is_tool_action(action: str | None) -> bool:
-    return bool(action) and action in TOOL_ACTIONS
+    return resolve_tool_registry_entry(action) is not None
 
 
 def _calendar_provider_should_block(reason: str | None) -> bool:
@@ -142,6 +142,10 @@ def _with_provider_health_meta(
     if reason in {"sync_missing", "sync_stale"}:
         decision_meta["provider_health_degraded"] = True
     return decision_meta, trace
+
+
+def _normalize_allowed_fact_ref_set(value: list[str] | None) -> set[str]:
+    return set(normalize_fact_ref_list(value or []))
 
 
 def _normalize_tool_policy_tokens(raw_tokens: Any) -> list[str]:
@@ -430,18 +434,6 @@ def _format_services_overview_reply(
         return None
     return f"Мы предлагаем: {', '.join(names[:8])}. Подскажу по цене и времени любой услуги."
 
-
-def _call_pack_adapter(adapter_slug: str | None, attr_name: str, *args: Any, **kwargs: Any) -> Any:
-    adapter = get_pack_adapter(adapter_slug)
-    handler = getattr(adapter, attr_name, None)
-    if callable(handler):
-        try:
-            return handler(*args, **kwargs)
-        except Exception:
-            return None
-    return None
-
-
 def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | None:
     normalized = str(expected_reply_type or "").strip().casefold()
     if normalized == "name":
@@ -613,6 +605,13 @@ def _is_photo_offer_message(text: str | None) -> bool:
     if not _system_any_match(normalized, "style_reference_media_terms"):
         return False
     return _system_any_match(normalized, "style_reference_send_terms")
+
+
+def _system_any_match(normalized: str, key: str) -> bool:
+    phrases = get_system_lexicon_list(key)
+    return bool(phrases) and any(
+        phrase and phrase in normalized for phrase in phrases if isinstance(phrase, str)
+    )
 
 
 def _resolve_branch(db: Session, branch_id: UUID | None) -> Branch | None:
@@ -1211,17 +1210,24 @@ def _catalog_location(
     *,
     message_text: str | None = None,
     info_sections_hint: list[str] | None = None,
+    allowed_fact_refs: list[str] | None = None,
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     if not client_slug:
         return None, "location_missing", {}
 
-    include_parking = bool(
-        any(
-            isinstance(item, str) and item.strip().lower() == "parking"
-            for item in (info_sections_hint or [])
+    allowed_fact_ref_set = _normalize_allowed_fact_ref_set(allowed_fact_refs)
+    if allowed_fact_ref_set:
+        if not (allowed_fact_ref_set & {"location", "hours", "parking"}):
+            return None, "fact_scope_not_allowed", {}
+        include_parking = "parking" in allowed_fact_ref_set
+    else:
+        include_parking = bool(
+            any(
+                isinstance(item, str) and item.strip().lower() == "parking"
+                for item in (info_sections_hint or [])
+            )
         )
-    )
-    if message_text:
+    if message_text and not allowed_fact_ref_set:
         normalized = _normalize_text(message_text)
         include_parking = bool(
             include_parking
@@ -1229,6 +1235,21 @@ def _catalog_location(
                 normalized and _has_parking_signal(normalized, client_slug=client_slug)
             )
         )
+
+    if allowed_fact_ref_set:
+        exact_sections = [
+            section
+            for section in ("location", "hours", "parking")
+            if section in allowed_fact_ref_set
+        ]
+        if exact_sections:
+            exact_parts: list[str] = []
+            for section in exact_sections:
+                reply_part = format_reply_from_truth(section, client_slug=client_slug)
+                if isinstance(reply_part, str) and reply_part.strip():
+                    exact_parts.append(reply_part.strip())
+            if exact_parts:
+                return " ".join(exact_parts), None, {"info_sections": exact_sections}
 
     reply, meta = build_info_combined_reply(
         include_parking=include_parking,
@@ -1279,7 +1300,19 @@ def execute_tool_action(
     user_phone: str | None = None,
     user_phone_source: str | None = None,
     user_remote_jid: str | None = None,
+    semantic_contract: dict[str, Any] | None = None,
+    allowed_fact_refs: list[str] | None = None,
 ) -> ToolExecutionResult:
+    allowed_fact_ref_set = _normalize_allowed_fact_ref_set(allowed_fact_refs)
+
+    def _fact_allowed(*refs: str) -> bool:
+        if not allowed_fact_ref_set:
+            return True
+        normalized = normalize_fact_ref_list(refs)
+        if not normalized:
+            return False
+        return all(item in allowed_fact_ref_set for item in normalized)
+
     if tool_action not in TOOL_ACTIONS:
         return ToolExecutionResult(
             handled=False,
@@ -1518,13 +1551,11 @@ def execute_tool_action(
             prompt = None
             expected_reply_type = None
             if missing_type == "datetime":
-                from app.routers.webhook import _legacy as legacy
-
-                prompt = legacy.MSG_BOOKING_ASK_DATETIME
+                prompt = MSG_BOOKING_ASK_DATETIME
                 time_token = _extract_time_token(message_text)
                 if time_token:
                     prompt = f"На какую дату вам удобно, если время {time_token}?"
-                expected_reply_type = legacy.EXPECTED_REPLY_TIME
+                expected_reply_type = EXPECTED_REPLY_TIME
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -1929,10 +1960,8 @@ def execute_tool_action(
                 expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         if error:
-            from app.routers.webhook import _legacy as legacy
-
             missing_slot = "datetime" if error == "missing_start_at" else None
-            prompt = legacy.MSG_BOOKING_ASK_DATETIME if missing_slot == "datetime" else None
+            prompt = MSG_BOOKING_ASK_DATETIME if missing_slot == "datetime" else None
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -1949,7 +1978,7 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "missing_slot": missing_slot,
                 },
-                expected_reply_type=legacy.EXPECTED_REPLY_TIME if missing_slot else None,
+                expected_reply_type=EXPECTED_REPLY_TIME if missing_slot else None,
             )
         decision_meta, trace = _with_provider_health_meta(
             {
@@ -2269,22 +2298,21 @@ def execute_tool_action(
             for item in (info_sections_hint or [])
             if isinstance(item, str) and item.strip()
         }
-        duration_hint = bool(hint_set & {"duration", "service_duration"})
-        promo_hint = bool(
+        allow_promotions = _fact_allowed("promotions")
+        allow_duration = _fact_allowed("duration")
+        allow_pricing = _fact_allowed("pricing")
+        allow_services_overview = _fact_allowed("services_overview")
+        duration_hint = allow_duration and bool(hint_set & {"duration", "service_duration"})
+        promo_hint = allow_promotions and bool(
             hint_set & {"promotions", "promo", "promotion", "discount", "discounts"}
         )
-        price_hint = bool(hint_set & {"pricing", "price", "payment", "payment_info"})
+        price_hint = allow_pricing and bool(hint_set & {"pricing", "price", "payment", "payment_info"})
         if not service_query:
-            from app.routers.webhook import _legacy as legacy
-
-            reply = legacy.MSG_BOOKING_ASK_SERVICE
+            reply = MSG_BOOKING_ASK_SERVICE
             info_sections: list[str] = []
             tool_decision = "missing_slot"
-            expected_reply_type = legacy.EXPECTED_REPLY_SERVICE
-            if _looks_like_services_overview_message(
-                message_text,
-                client_slug=client_slug,
-            ):
+            expected_reply_type = EXPECTED_REPLY_SERVICE
+            if allow_services_overview and "services_overview" in hint_set:
                 overview_reply = _format_services_overview_reply(
                     db,
                     branch=branch,
@@ -2300,12 +2328,18 @@ def execute_tool_action(
                 promo_intent = "promotions" if promo_hint else _detect_promotion_intent(
                     normalized, client_slug=client_slug
                 )
+                if promo_intent and not allow_promotions:
+                    promo_intent = None
                 duration_signal = duration_hint or _has_duration_signal(
-                    normalized, raw_text=message_text, client_slug=client_slug
+                    normalized, message=message_text, client_slug=client_slug
                 )
+                if duration_signal and not allow_duration:
+                    duration_signal = False
                 price_signal = price_hint or _has_price_signal(
                     normalized, message_text, client_slug=client_slug
                 )
+                if price_signal and not allow_pricing:
+                    price_signal = False
                 if promo_intent:
                     promo_reply = format_reply_from_truth(
                         "promotions",
@@ -2322,10 +2356,7 @@ def execute_tool_action(
                         "duration_or_price_clarify",
                         client_slug=client_slug,
                     )
-                    duration_reply = _call_pack_adapter(
-                        client_slug,
-                        "_format_service_duration_reply",
-                        None,
+                    duration_reply = build_runtime_service_duration_reply(
                         message=message_text,
                         client_slug=client_slug,
                     )
@@ -2335,10 +2366,7 @@ def execute_tool_action(
                         reply = duration_reply
                     info_sections = ["duration", "pricing"]
                 elif duration_signal:
-                    duration_reply = _call_pack_adapter(
-                        client_slug,
-                        "_format_service_duration_reply",
-                        None,
+                    duration_reply = build_runtime_service_duration_reply(
                         message=message_text,
                         client_slug=client_slug,
                     )
@@ -2350,6 +2378,22 @@ def execute_tool_action(
                     if clarify:
                         reply = clarify
                     info_sections = ["pricing"]
+            if allowed_fact_ref_set and tool_decision == "missing_slot" and not info_sections:
+                return ToolExecutionResult(
+                    handled=True,
+                    ok=False,
+                    response_text=None,
+                    error_code="fact_scope_not_allowed",
+                    decision_meta={
+                        "tool_action": tool_action,
+                        "tool_decision": "fact_scope_not_allowed",
+                    },
+                    trace={
+                        "stage": "tool_registry",
+                        "decision": "fact_scope_not_allowed",
+                        "tool_action": tool_action,
+                    },
+                )
 
             decision_meta = {
                 "tool_action": tool_action,
@@ -2379,11 +2423,9 @@ def execute_tool_action(
         if client_slug and message_text:
             normalized = _normalize_text(message_text)
             message_tokens = set(normalized.split()) if normalized else set()
-            inferred_price_item = _call_pack_adapter(
-                client_slug,
-                "_find_best_price_item",
+            inferred_price_item = get_pack_price_item(
                 message_text,
-                client_slug,
+                client_slug=client_slug,
             )
             inferred_service_name = None
             if isinstance(inferred_price_item, dict):
@@ -2405,6 +2447,8 @@ def execute_tool_action(
                 normalized,
                 client_slug=client_slug,
             )
+            if promo_intent and not allow_promotions:
+                promo_intent = None
             if promo_intent:
                 promo_reply = format_reply_from_truth(
                     "promotions",
@@ -2429,9 +2473,12 @@ def execute_tool_action(
                             "info_sections": ["promotions"],
                         },
                     )
-            if duration_hint or _has_duration_signal(
-                normalized, raw_text=message_text, client_slug=client_slug
-            ):
+            duration_signal = duration_hint or _has_duration_signal(
+                normalized, message=message_text, client_slug=client_slug
+            )
+            if duration_signal and not allow_duration:
+                duration_signal = False
+            if duration_signal:
                 service_match = (
                     _match_service(
                         _normalize_text(service_query),
@@ -2440,10 +2487,7 @@ def execute_tool_action(
                     if service_query
                     else None
                 )
-                duration_reply = _call_pack_adapter(
-                    client_slug,
-                    "_format_service_duration_reply",
-                    service_match,
+                duration_reply = build_runtime_service_duration_reply(
                     message=message_text,
                     service_label=service_query,
                     client_slug=client_slug,
@@ -2467,6 +2511,22 @@ def execute_tool_action(
                         },
                     )
 
+        if allowed_fact_ref_set and not allow_pricing:
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text=None,
+                error_code="fact_scope_not_allowed",
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "fact_scope_not_allowed",
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "fact_scope_not_allowed",
+                    "tool_action": tool_action,
+                },
+            )
         reply, error = _catalog_service_query(
             db,
             branch=branch,
@@ -2486,12 +2546,10 @@ def execute_tool_action(
                     if query_tokens and matched_tokens and not (query_tokens & matched_tokens):
                         service_match = None
             if isinstance(service_match, dict):
-                truth_reply = _call_pack_adapter(
-                    client_slug,
-                    "_format_service_reply",
+                truth_reply = build_runtime_service_truth_reply(
                     service_match,
-                    truth,
-                    client_slug,
+                    truth=truth,
+                    client_slug=client_slug,
                 )
                 if truth_reply:
                     return ToolExecutionResult(
@@ -2513,11 +2571,10 @@ def execute_tool_action(
                     )
                 service_name = service_match.get("name") if isinstance(service_match, dict) else None
                 if isinstance(service_name, str) and service_name.strip():
-                    presence = _call_pack_adapter(
-                        client_slug,
-                        "_format_service_presence_reply_for_name",
+                    presence = build_runtime_service_presence_reply_for_name(
                         service_name,
-                        client_slug,
+                        client_slug=client_slug,
+                        truth=truth,
                     )
                     if presence:
                         return ToolExecutionResult(
@@ -2535,39 +2592,37 @@ def execute_tool_action(
                                 "tool_action": tool_action,
                             },
                         )
-            price_item = _call_pack_adapter(
-                client_slug,
-                "_find_best_price_item",
+            price_item = get_pack_price_item(
                 message_text or service_query or "",
-                client_slug or "generic",
+                client_slug=client_slug,
             )
             if isinstance(price_item, dict):
-                raw_item = price_item.get("item")
-                if isinstance(raw_item, dict):
-                    price_reply = _call_pack_adapter(
-                        client_slug,
-                        "_format_price_reply",
-                        raw_item,
+                price_reply = get_pack_price_reply(
+                    message_text or service_query or "",
+                    client_slug=client_slug,
+                )
+                if price_reply:
+                    return ToolExecutionResult(
+                        handled=True,
+                        ok=True,
+                        response_text=price_reply,
+                        error_code=None,
+                        decision_meta={
+                            "tool_action": tool_action,
+                            "tool_decision": "price_item_fallback",
+                            "info_sections": ["pricing"],
+                        },
+                        trace={
+                            "stage": "tool_registry",
+                            "decision": "price_item_fallback",
+                            "tool_action": tool_action,
+                            "info_sections": ["pricing"],
+                        },
                     )
-                    if price_reply:
-                        return ToolExecutionResult(
-                            handled=True,
-                            ok=True,
-                            response_text=price_reply,
-                            error_code=None,
-                            decision_meta={
-                                "tool_action": tool_action,
-                                "tool_decision": "price_item_fallback",
-                                "info_sections": ["pricing"],
-                            },
-                            trace={
-                                "stage": "tool_registry",
-                                "decision": "price_item_fallback",
-                                "tool_action": tool_action,
-                                "info_sections": ["pricing"],
-                            },
-                        )
-            not_found = _call_pack_adapter(client_slug, "_format_service_not_found_reply", truth)
+            not_found = build_runtime_service_not_found_reply(
+                client_slug=client_slug,
+                truth=truth,
+            )
             if not_found:
                 return ToolExecutionResult(
                     handled=True,
@@ -2618,6 +2673,7 @@ def execute_tool_action(
             client_slug,
             message_text=message_text,
             info_sections_hint=info_sections_hint,
+            allowed_fact_refs=allowed_fact_refs,
         )
         if error:
             return ToolExecutionResult(

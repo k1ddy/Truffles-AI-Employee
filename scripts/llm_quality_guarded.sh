@@ -13,6 +13,7 @@ Usage:
     [--allow-repeat-fingerprint] \
     [--allow-no-owner-delta] \
     [--allow-pending-previous] \
+    [--forensic-override-reason <reason>] \
     -- \
     <llm-quality args>
 
@@ -99,6 +100,7 @@ PG_CHECKLIST_PATH=""
 ALLOW_REPEAT_FINGERPRINT=0
 ALLOW_NO_OWNER_DELTA=0
 ALLOW_PENDING_PREVIOUS=0
+FORENSIC_OVERRIDE_REASON=""
 declare -a OWNER_FILES=()
 declare -a QUICK_CHECKS=()
 declare -a QUALITY_ARGS=()
@@ -109,6 +111,9 @@ FAIL_ON_REGRESSION=0
 UPDATE_BASELINE=0
 HAS_MAX_POST_REWRITE_RATE=0
 HAS_MAX_KEYWORD_OVERRIDE_RATE=0
+HAS_MANUAL_AUDIT_GATE=0
+HAS_FORENSIC_SLA_GATE=0
+HAS_QUALITY_LANE_ARG=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -143,6 +148,10 @@ while [[ $# -gt 0 ]]; do
     --allow-pending-previous)
       ALLOW_PENDING_PREVIOUS=1
       shift
+      ;;
+    --forensic-override-reason)
+      FORENSIC_OVERRIDE_REASON="$(trim "${2:-}")"
+      shift 2
       ;;
     --help|-h)
       usage
@@ -187,6 +196,7 @@ for idx in "${!QUALITY_ARGS[@]}"; do
       fi
       ;;
     --quality-lane)
+      HAS_QUALITY_LANE_ARG=1
       next_idx=$((idx + 1))
       if [[ $next_idx -lt ${#QUALITY_ARGS[@]} ]]; then
         QUALITY_LANE_REQUESTED="$(trim "${QUALITY_ARGS[$next_idx]}")"
@@ -213,6 +223,18 @@ for idx in "${!QUALITY_ARGS[@]}"; do
     --max-keyword-override-rate=*)
       HAS_MAX_KEYWORD_OVERRIDE_RATE=1
       ;;
+    --manual-audit-gate)
+      HAS_MANUAL_AUDIT_GATE=1
+      ;;
+    --manual-audit-gate=*)
+      HAS_MANUAL_AUDIT_GATE=1
+      ;;
+    --forensic-sla-gate)
+      HAS_FORENSIC_SLA_GATE=1
+      ;;
+    --forensic-sla-gate=*)
+      HAS_FORENSIC_SLA_GATE=1
+      ;;
     --chain-id)
       has_chain_id_arg=1
       ;;
@@ -235,6 +257,29 @@ if [[ "$QUALITY_LANE_EFFECTIVE" == "auto" ]]; then
   else
     QUALITY_LANE_EFFECTIVE="dev"
   fi
+fi
+
+if [[ -n "$FORENSIC_OVERRIDE_REASON" ]]; then
+  if [[ "$QUALITY_LANE_EFFECTIVE" == "acceptance" ]]; then
+    die "--forensic-override-reason is dev-only and cannot be used in acceptance lane"
+  fi
+  if [[ "$UPDATE_BASELINE" -eq 1 ]]; then
+    die "--forensic-override-reason cannot be combined with --update-baseline"
+  fi
+  QUALITY_LANE_EFFECTIVE="dev"
+  ALLOW_REPEAT_FINGERPRINT=1
+  ALLOW_NO_OWNER_DELTA=1
+  ALLOW_PENDING_PREVIOUS=1
+  if [[ "$HAS_QUALITY_LANE_ARG" -ne 1 ]]; then
+    QUALITY_ARGS+=(--quality-lane dev)
+  fi
+  if [[ "$HAS_MANUAL_AUDIT_GATE" -ne 1 ]]; then
+    QUALITY_ARGS+=(--manual-audit-gate warn)
+  fi
+  if [[ "$HAS_FORENSIC_SLA_GATE" -ne 1 ]]; then
+    QUALITY_ARGS+=(--forensic-sla-gate warn)
+  fi
+  echo "[guard] forensic override enabled: ${FORENSIC_OVERRIDE_REASON}" >&2
 fi
 
 if [[ "$QUALITY_LANE_EFFECTIVE" == "acceptance" ]]; then
@@ -324,7 +369,11 @@ PY
 EOF
     if [[ "$last_run_id" != "" ]]; then
       if [[ "$last_status" == "incomplete" || "$last_status" == "invalid" || "$last_status" == "failed" ]]; then
-        die "previous run not canonical (mode=$MODE run_id=$last_run_id status=$last_status). Resolve artifacts/manual audit before new run or pass --allow-pending-previous."
+        if [[ "$MODE" == "lock" && "$last_audit" == "done" && "$last_artifacts" != "False" && "$last_artifacts" != "false" ]]; then
+          echo "[guard] latest prior lock is non-canonical but audited/artifact-complete; deferring lock admission to diagnose.py run-economy gate" >&2
+        else
+          die "previous run not canonical (mode=$MODE run_id=$last_run_id status=$last_status). Resolve artifacts/manual audit before new run or pass --allow-pending-previous."
+        fi
       fi
       if [[ "$last_audit" != "" && "$last_audit" != "done" ]]; then
         die "previous run manual audit pending (mode=$MODE run_id=$last_run_id audit=$last_audit). Resolve before new run or pass --allow-pending-previous."

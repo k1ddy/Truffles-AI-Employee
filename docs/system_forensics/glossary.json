@@ -1,0 +1,73 @@
+{
+  "schema_version": "v1",
+  "terms": [
+    {
+      "term": "semantic owner",
+      "definition": "component allowed to decide user-turn meaning such as intent, requested outcome, main slots, and fact/tool grounding"
+    },
+    {
+      "term": "boundary",
+      "definition": "deterministic layer that validates, blocks, or degrades without inventing new business meaning"
+    },
+    {
+      "term": "degrade",
+      "definition": "explicit fallback path with reason code and trace evidence"
+    },
+    {
+      "term": "truth carrier",
+      "definition": "artifact that stores or transports meaning-bearing state"
+    },
+    {
+      "term": "failure family",
+      "definition": "repeatable cluster of bad turns sharing one broken invariant and one root cause"
+    },
+    {
+      "term": "shared mechanism",
+      "definition": "reusable architectural unit that should be repaired instead of patching one scenario"
+    },
+    {
+      "term": "FACT",
+      "definition": "product outcome where the bot answers from packs or trusted data"
+    },
+    {
+      "term": "COLLECT",
+      "definition": "product outcome where the bot gathers missing booking, contact, or preference state"
+    },
+    {
+      "term": "HANDOFF",
+      "definition": "product outcome where the bot transparently transfers to a human workflow"
+    },
+    {
+      "term": "interaction architecture",
+      "definition": "contracts governing per-turn meaning, pending-question continuity, and semantic state"
+    },
+    {
+      "term": "fact architecture",
+      "definition": "contracts governing fact selection, composition, rendering, and emitted fact scope"
+    },
+    {
+      "term": "pack",
+      "definition": "tenant or domain data layer that should supply truth as data rather than code branching"
+    },
+    {
+      "term": "executive packet",
+      "definition": "top-level self-contained docs for outside readers"
+    },
+    {
+      "term": "machine-readable companion",
+      "definition": "JSON artifacts and review questionnaire that let outside researchers consume the corpus without chat archaeology"
+    },
+    {
+      "term": "evidence archive",
+      "definition": "deeper files, ledgers, and final docs backing executive claims"
+    },
+    {
+      "term": "anti-repeat rule",
+      "definition": "explicit rule added because earlier truthful analysis still allowed bad implementations"
+    },
+    {
+      "term": "external review questionnaire",
+      "definition": "structured set of questions and response expectations for outside architecture reviewers"
+    }
+  ]
+}

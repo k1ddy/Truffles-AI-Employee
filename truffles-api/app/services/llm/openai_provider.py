@@ -11,7 +11,7 @@ logger = get_logger("llm.openai")
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider."""
 
-    def __init__(self, api_key: str, default_model: str = "gpt-5-mini"):
+    def __init__(self, api_key: str, default_model: str = "gpt-5.4-nano-2026-03-17"):
         self.api_key = api_key
         self.default_model = default_model
         self.base_url = "https://api.openai.com/v1/chat/completions"
@@ -21,10 +21,11 @@ class OpenAIProvider(LLMProvider):
         self,
         messages: List[dict],
         model: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: Optional[float] = 0.7,
         max_tokens: int = 1000,
         timeout_seconds: Optional[float] = None,
         response_format: Optional[dict[str, Any]] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> LLMResponse:
         """Generate response from OpenAI."""
 
@@ -35,11 +36,14 @@ class OpenAIProvider(LLMProvider):
             payload = {
                 "model": model,
                 "messages": messages,
-                "temperature": temperature,
                 "max_completion_tokens": max_tokens,
             }
+            if temperature is not None:
+                payload["temperature"] = temperature
             if isinstance(response_format, dict) and response_format:
                 payload["response_format"] = response_format
+            if isinstance(reasoning_effort, str) and reasoning_effort.strip():
+                payload["reasoning_effort"] = reasoning_effort.strip()
             logger.debug(f"OpenAI request: model={model}, messages_count={len(messages)}")
 
             response = client.post(

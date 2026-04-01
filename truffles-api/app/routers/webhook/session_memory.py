@@ -3,294 +3,59 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-from pydantic import ValidationError
-
+from app.core import DialogStateService
 from app.models import Conversation, Message
 from app.routers.webhook.trace import _record_decision_trace, _update_message_decision_metadata
-from app.schemas.webhook import InteractionStateContract, MemoryContract
 from app.services.ai_service import normalize_for_matching
+from app.services.state_service import (
+    _build_session_memory_observability_snapshot,
+    _should_reset_session_memory_trigger,
+)
 
-_INTERACTION_RESUME_SLOTS = {"service", "datetime", "name", "phone"}
-_INTERACTION_TARGETS = {"time", "specialist"}
-_INTERACTION_RELATIONS = {
-    "fill_requested_slot",
-    "ask_about_requested_slot",
-    "slot_constraint",
-    "slot_compare",
-    "mixed_fill_plus_question",
-    "referent_followup",
-    "generic_info_interrupt",
-    "specialist_availability_interrupt",
-    "specialist_availability_followup",
-    "tool_result_followup_specialist_missing",
-}
-_INTERACTION_REFERENT_KEYS = {"service", "specialist", "branch", "booking_ref"}
-
+_DIALOG_STATE_SERVICE = DialogStateService()
+SESSION_MEMORY_KEY = "session_memory"
+SESSION_MEMORY_TTL_HOURS = 24
+SESSION_MEMORY_RESET_PHRASES = (
+    "новый вопрос",
+    "другая тема",
+    "начнем сначала",
+    "начнём сначала",
+    "начнем заново",
+    "начнём заново",
+    "давай сначала",
+)
 
 def _get_session_memory(context: dict) -> dict:
-    from . import _legacy as legacy
-
-    payload = context.get(legacy.SESSION_MEMORY_KEY) if isinstance(context, dict) else None
+    payload = context.get(SESSION_MEMORY_KEY) if isinstance(context, dict) else None
     if isinstance(payload, dict):
         return dict(payload)
     return {}
 
 
-def _normalize_interaction_state(memory: dict, *, mark_error) -> None:
-    interaction_state = memory.get("interaction_state")
-    if interaction_state is None:
-        return
-    if not isinstance(interaction_state, dict):
-        memory.pop("interaction_state", None)
-        mark_error("interaction_state_type")
-        return
-
-    cleaned: dict[str, object] = {}
-    resume_slot = interaction_state.get("resume_slot")
-    if isinstance(resume_slot, str) and resume_slot.strip():
-        resume_token = resume_slot.strip().casefold()
-        if resume_token in _INTERACTION_RESUME_SLOTS:
-            cleaned["resume_slot"] = resume_token
-    interaction_target = interaction_state.get("interaction_target")
-    if isinstance(interaction_target, str) and interaction_target.strip():
-        target_token = interaction_target.strip().casefold()
-        if target_token in _INTERACTION_TARGETS:
-            cleaned["interaction_target"] = target_token
-    interaction_relation = interaction_state.get("interaction_relation")
-    if isinstance(interaction_relation, str) and interaction_relation.strip():
-        relation_token = interaction_relation.strip().casefold()
-        if relation_token in _INTERACTION_RELATIONS:
-            cleaned["interaction_relation"] = relation_token
-    interaction_owner = interaction_state.get("interaction_owner")
-    if isinstance(interaction_owner, str) and interaction_owner.strip():
-        cleaned["interaction_owner"] = " ".join(interaction_owner.split())[:80]
-    grounded_referents = interaction_state.get("grounded_referents")
-    if isinstance(grounded_referents, dict):
-        cleaned_referents: dict[str, str] = {}
-        for referent_key in _INTERACTION_REFERENT_KEYS:
-            referent_value = grounded_referents.get(referent_key)
-            if isinstance(referent_value, str) and referent_value.strip():
-                cleaned_referents[referent_key] = " ".join(referent_value.split())[:120]
-        if cleaned_referents:
-            cleaned["grounded_referents"] = cleaned_referents
-    confirmation_state = interaction_state.get("confirmation_state")
-    if isinstance(confirmation_state, dict):
-        cleaned_confirmation: dict[str, object] = {}
-        required = confirmation_state.get("required")
-        if isinstance(required, bool):
-            cleaned_confirmation["required"] = required
-        slot = confirmation_state.get("slot")
-        if isinstance(slot, str) and slot.strip():
-            slot_token = slot.strip().casefold()
-            if slot_token in _INTERACTION_RESUME_SLOTS:
-                cleaned_confirmation["slot"] = slot_token
-        value = confirmation_state.get("value")
-        if isinstance(value, str) and value.strip():
-            cleaned_confirmation["value"] = " ".join(value.split())[:120]
-        source = confirmation_state.get("source")
-        if isinstance(source, str) and source.strip():
-            cleaned_confirmation["source"] = " ".join(source.split())[:80]
-        if cleaned_confirmation:
-            cleaned["confirmation_state"] = cleaned_confirmation
-    degrade_reason = interaction_state.get("degrade_reason")
-    if isinstance(degrade_reason, str) and degrade_reason.strip():
-        cleaned["degrade_reason"] = " ".join(degrade_reason.split())[:120]
-
-    if "resume_slot" not in cleaned:
-        memory.pop("interaction_state", None)
-        mark_error("interaction_state_resume_slot")
-        return
-
-    try:
-        memory["interaction_state"] = InteractionStateContract(**cleaned).model_dump(
-            exclude_none=True
-        )
-    except ValidationError:
-        memory.pop("interaction_state", None)
-        mark_error("interaction_state_contract")
-
-
 def _normalize_session_memory(memory: dict | None) -> tuple[dict, str | None]:
-    if not isinstance(memory, dict):
-        return {}, "invalid_type"
-    normalized = dict(memory)
-    errors: list[str] = []
-
-    def mark_error(reason: str) -> None:
-        if reason not in errors:
-            errors.append(reason)
-
-    def normalize_string(key: str) -> None:
-        value = normalized.get(key)
-        if value is None:
-            return
-        if not isinstance(value, str):
-            normalized.pop(key, None)
-            mark_error(f"{key}_type")
-            return
-        value = value.strip()
-        if value:
-            normalized[key] = value
-        else:
-            normalized.pop(key, None)
-
-    def normalize_int(key: str) -> None:
-        value = normalized.get(key)
-        if value is None:
-            return
-        try:
-            normalized[key] = int(value)
-        except (TypeError, ValueError):
-            normalized.pop(key, None)
-            mark_error(f"{key}_type")
-
-    def normalize_list(key: str, *, limit: int | None = None) -> None:
-        value = normalized.get(key)
-        if value is None:
-            return
-        if not isinstance(value, list):
-            normalized.pop(key, None)
-            mark_error(f"{key}_type")
-            return
-        cleaned: list[str] = []
-        for item in value:
-            if not isinstance(item, str):
-                continue
-            cleaned_item = item.strip()
-            if cleaned_item:
-                cleaned.append(cleaned_item)
-        if limit:
-            cleaned = cleaned[-limit:]
-        normalized[key] = cleaned
-
-    def normalize_dict(key: str, *, values_as_str: bool) -> None:
-        value = normalized.get(key)
-        if value is None:
-            return
-        if not isinstance(value, dict):
-            normalized.pop(key, None)
-            mark_error(f"{key}_type")
-            return
-        cleaned: dict[str, object] = {}
-        for raw_key, raw_value in value.items():
-            if not isinstance(raw_key, str):
-                continue
-            cleaned_key = raw_key.strip()
-            if not cleaned_key:
-                continue
-            if values_as_str:
-                if not isinstance(raw_value, str):
-                    continue
-                cleaned_value = raw_value.strip()
-                if not cleaned_value:
-                    continue
-                cleaned[cleaned_key] = cleaned_value
-            else:
-                cleaned[cleaned_key] = raw_value
-        normalized[key] = cleaned
-
-    normalize_string("mode")
-    normalize_string("summary")
-    normalize_string("last_updated")
-    normalize_string("last_updated_at")
-    normalize_string("active_goal")
-    normalize_string("last_question_type")
-    normalize_int("ttl")
-    normalize_int("ttl_hours")
-    normalize_list("goal_stack", limit=3)
-    normalize_list("unanswered_questions")
-    normalize_dict("slots", values_as_str=False)
-    normalize_dict("pending_slots", values_as_str=True)
-    _normalize_interaction_state(normalized, mark_error=mark_error)
-
-    try:
-        MemoryContract(**normalized)
-    except ValidationError as exc:
-        return normalized, str(exc)
-    if errors:
-        return normalized, ",".join(errors)
-    return normalized, None
-
-
-def _set_session_memory(context: dict, memory: dict | None) -> dict:
-    from . import _legacy as legacy
-
-    context = dict(context)
-    if memory:
-        context[legacy.SESSION_MEMORY_KEY] = memory
-    else:
-        context.pop(legacy.SESSION_MEMORY_KEY, None)
-    return context
-
-
-def _sync_session_memory_interaction_state(
-    context: dict,
-    *,
-    interaction_state: dict | None,
-    now: datetime,
-) -> tuple[dict, dict]:
-    from . import _legacy as legacy
-
-    memory = _get_session_memory(context)
-    cleaned_state = None
-    if isinstance(interaction_state, dict):
-        normalized_memory = {"interaction_state": interaction_state}
-        _normalize_interaction_state(normalized_memory, mark_error=lambda _reason: None)
-        cleaned_state = normalized_memory.get("interaction_state")
-
-    changed = False
-    if isinstance(cleaned_state, dict):
-        if memory.get("interaction_state") != cleaned_state:
-            memory["interaction_state"] = cleaned_state
-            changed = True
-    elif "interaction_state" in memory:
-        memory.pop("interaction_state", None)
-        changed = True
-
-    if changed:
-        memory["last_updated_at"] = now.isoformat()
-        memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
-        context = _set_session_memory(context, memory)
-    return context, memory
-
-
-def _parse_session_memory_time(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+    return _DIALOG_STATE_SERVICE.normalize_session_memory_payload(memory)
 
 
 def _is_session_memory_expired(memory: dict, now: datetime) -> bool:
-    from . import _legacy as legacy
+    return _DIALOG_STATE_SERVICE.is_session_memory_expired(
+        memory,
+        now=now,
+        default_ttl_hours=SESSION_MEMORY_TTL_HOURS,
+    )
 
-    ttl_hours = memory.get("ttl_hours", legacy.SESSION_MEMORY_TTL_HOURS)
-    try:
-        ttl_hours = int(ttl_hours)
-    except (TypeError, ValueError):
-        ttl_hours = legacy.SESSION_MEMORY_TTL_HOURS
-    last_updated_at = _parse_session_memory_time(memory.get("last_updated_at"))
-    if not last_updated_at:
-        return True
-    return (now - last_updated_at) > timedelta(hours=max(1, ttl_hours))
+
+def _parse_session_memory_time(value: str | None) -> datetime | None:
+    return _DIALOG_STATE_SERVICE._parse_iso_datetime(value)
 
 
 def _should_reset_session_memory(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    from . import _legacy as legacy
-
-    return any(phrase in normalized for phrase in legacy.SESSION_MEMORY_RESET_PHRASES)
+    return _should_reset_session_memory_trigger(
+        message_text,
+        normalize_text=normalize_for_matching,
+        reset_phrases=SESSION_MEMORY_RESET_PHRASES,
+    )
 
 
 def _is_session_reset_only_message(message_text: str | None) -> bool:
@@ -300,49 +65,11 @@ def _is_session_reset_only_message(message_text: str | None) -> bool:
     normalized = normalize_for_matching(cleaned)
     if not normalized:
         return False
-    from . import _legacy as legacy
-
-    return normalized in legacy.SESSION_MEMORY_RESET_PHRASES
+    return normalized in SESSION_MEMORY_RESET_PHRASES
 
 
 def _session_memory_snapshot(memory: dict) -> dict:
-    pending_slots = memory.get("pending_slots")
-    if isinstance(pending_slots, dict):
-        pending_keys = sorted(
-            key for key in pending_slots.keys() if isinstance(key, str) and key.strip()
-        )
-    else:
-        pending_keys = []
-    goal_stack = memory.get("goal_stack")
-    if isinstance(goal_stack, list):
-        cleaned_goals = [item for item in goal_stack if isinstance(item, str) and item.strip()]
-    else:
-        cleaned_goals = []
-    unanswered = memory.get("unanswered_questions")
-    if isinstance(unanswered, list):
-        unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
-    else:
-        unanswered_count = 0
-    interaction_state = memory.get("interaction_state")
-    interaction_resume_slot = None
-    interaction_owner = None
-    if isinstance(interaction_state, dict):
-        raw_resume_slot = interaction_state.get("resume_slot")
-        if isinstance(raw_resume_slot, str) and raw_resume_slot.strip():
-            interaction_resume_slot = raw_resume_slot.strip()
-        raw_interaction_owner = interaction_state.get("interaction_owner")
-        if isinstance(raw_interaction_owner, str) and raw_interaction_owner.strip():
-            interaction_owner = raw_interaction_owner.strip()
-    return {
-        "last_question_type": memory.get("last_question_type"),
-        "active_goal": memory.get("active_goal"),
-        "goal_stack_depth": len(cleaned_goals),
-        "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
-        "pending_slots": pending_keys,
-        "unanswered_questions_count": unanswered_count,
-        "interaction_resume_slot": interaction_resume_slot,
-        "interaction_owner": interaction_owner,
-    }
+    return _build_session_memory_observability_snapshot(memory)
 
 
 def _record_session_memory_update(
@@ -360,63 +87,6 @@ def _record_session_memory_update(
         _update_message_decision_metadata(saved_message, {"session_memory_update": snapshot})
 
 
-def _reset_session_memory(
-    *,
-    context: dict,
-    context_manager: dict,
-    reason: str,
-    now: datetime,
-) -> tuple[dict, dict, dict]:
-    from . import _legacy as legacy
-
-    manager = dict(context_manager)
-    manager.pop(legacy.CLASS_CARRYOVER_KEY, None)
-    manager.pop(legacy.SERVICE_CARRYOVER_KEY, None)
-    manager.pop(legacy.CONSULT_CONTEXT_KEY, None)
-    context = legacy._set_context_manager(context, manager)
-    context = legacy._set_expected_reply_type(context, None)
-    context = legacy._set_intent_queue(context, [])
-    context = legacy._set_booking_context(context, {"active": False})
-    context = legacy._clear_service_hint(context)
-    context = _set_session_memory(context, None)
-    memory_payload = {"last_updated_at": now.isoformat(), "ttl_hours": legacy.SESSION_MEMORY_TTL_HOURS}
-    return context, manager, {"reason": reason, **_session_memory_snapshot(memory_payload)}
-
-
-def _update_session_memory_on_question(
-    context: dict,
-    *,
-    expected_reply_type: str,
-    active_goal: str | None,
-    now: datetime,
-) -> tuple[dict, dict]:
-    from . import _legacy as legacy
-
-    memory = _get_session_memory(context)
-    unanswered = memory.get("unanswered_questions")
-    unanswered_list = (
-        [item for item in unanswered if isinstance(item, str) and item.strip()]
-        if isinstance(unanswered, list)
-        else []
-    )
-    if expected_reply_type not in unanswered_list:
-        unanswered_list.append(expected_reply_type)
-    memory["last_question_type"] = expected_reply_type
-    if active_goal:
-        memory["active_goal"] = active_goal
-        goal_stack = memory.get("goal_stack")
-        if not isinstance(goal_stack, list):
-            goal_stack = []
-        if not goal_stack or goal_stack[-1] != active_goal:
-            goal_stack.append(active_goal)
-        memory["goal_stack"] = goal_stack[-3:]
-    memory["unanswered_questions"] = unanswered_list
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory
-
-
 def _update_session_memory_on_answer(
     context: dict,
     *,
@@ -424,33 +94,17 @@ def _update_session_memory_on_answer(
     value: str,
     now: datetime,
 ) -> tuple[dict, dict]:
-    from . import _legacy as legacy
-
-    memory = _get_session_memory(context)
-    pending_slots = memory.get("pending_slots")
-    pending_map = dict(pending_slots) if isinstance(pending_slots, dict) else {}
-    unanswered = memory.get("unanswered_questions")
-    unanswered_list = (
-        [item for item in unanswered if isinstance(item, str) and item.strip()]
-        if isinstance(unanswered, list)
-        else []
+    memory = _DIALOG_STATE_SERVICE.update_session_memory_on_answer(
+        _get_session_memory(context),
+        expected_reply_type=expected_reply_type,
+        value=value,
     )
-    if expected_reply_type in unanswered_list:
-        unanswered_list = [item for item in unanswered_list if item != expected_reply_type]
-    slot_map = {
-        legacy.EXPECTED_REPLY_SERVICE: "service",
-        legacy.EXPECTED_REPLY_TIME: "datetime",
-        legacy.EXPECTED_REPLY_NAME: "name",
-    }
-    slot_key = slot_map.get(expected_reply_type)
-    if slot_key and isinstance(value, str) and value.strip():
-        pending_map[slot_key] = value.strip()
-    memory["pending_slots"] = pending_map
-    memory["unanswered_questions"] = unanswered_list
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory
+    return _DIALOG_STATE_SERVICE.rebuild_context_session_memory(
+        context,
+        base_memory=memory,
+        now=now,
+        default_ttl_hours=SESSION_MEMORY_TTL_HOURS,
+    )
 
 
 def _clear_session_memory_expected_reply(
@@ -459,80 +113,12 @@ def _clear_session_memory_expected_reply(
     expected_reply_type: str | None,
     now: datetime,
 ) -> tuple[dict, dict, bool]:
-    from . import _legacy as legacy
-
-    memory = _get_session_memory(context)
-    if not memory:
-        return context, {}, False
-
-    memory = dict(memory)
-    expected_reply_tokens = {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-        legacy.EXPECTED_REPLY_NAME,
-    }
-    expected_clean = (
-        expected_reply_type.strip()
-        if isinstance(expected_reply_type, str) and expected_reply_type.strip()
-        else None
+    return _DIALOG_STATE_SERVICE.clear_context_session_memory_expected_reply(
+        context,
+        expected_reply_type=expected_reply_type,
+        now=now,
+        default_ttl_hours=SESSION_MEMORY_TTL_HOURS,
     )
-    target_types: set[str] = set()
-    if expected_clean in expected_reply_tokens:
-        target_types.add(expected_clean)
-
-    last_question_type = memory.get("last_question_type")
-    if (
-        isinstance(last_question_type, str)
-        and last_question_type.strip()
-        and last_question_type.strip() in expected_reply_tokens
-    ):
-        target_types.add(last_question_type.strip())
-
-    if not target_types:
-        return context, memory, False
-
-    changed = False
-
-    if (
-        isinstance(memory.get("last_question_type"), str)
-        and memory.get("last_question_type").strip() in target_types
-    ):
-        memory.pop("last_question_type", None)
-        changed = True
-
-    unanswered = memory.get("unanswered_questions")
-    if isinstance(unanswered, list):
-        filtered_unanswered = [
-            item
-            for item in unanswered
-            if isinstance(item, str) and item.strip() and item.strip() not in target_types
-        ]
-        if filtered_unanswered != unanswered:
-            memory["unanswered_questions"] = filtered_unanswered
-            changed = True
-
-    slot_map = {
-        legacy.EXPECTED_REPLY_SERVICE: "service",
-        legacy.EXPECTED_REPLY_TIME: "datetime",
-        legacy.EXPECTED_REPLY_NAME: "name",
-    }
-    pending_slots = memory.get("pending_slots")
-    if isinstance(pending_slots, dict):
-        pending_map = dict(pending_slots)
-        for expected_type in target_types:
-            slot_key = slot_map.get(expected_type)
-            if slot_key and slot_key in pending_map:
-                pending_map.pop(slot_key, None)
-                changed = True
-        memory["pending_slots"] = pending_map
-
-    if not changed:
-        return context, memory, False
-
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory, True
 
 
 def _update_session_memory_goal(
@@ -541,17 +127,13 @@ def _update_session_memory_goal(
     active_goal: str,
     now: datetime,
 ) -> tuple[dict, dict]:
-    from . import _legacy as legacy
-
-    memory = _get_session_memory(context)
-    memory["active_goal"] = active_goal
-    goal_stack = memory.get("goal_stack")
-    if not isinstance(goal_stack, list):
-        goal_stack = []
-    if not goal_stack or goal_stack[-1] != active_goal:
-        goal_stack.append(active_goal)
-    memory["goal_stack"] = goal_stack[-3:]
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory
+    memory = _DIALOG_STATE_SERVICE.update_session_memory_goal(
+        _get_session_memory(context),
+        active_goal=active_goal,
+    )
+    return _DIALOG_STATE_SERVICE.rebuild_context_session_memory(
+        context,
+        base_memory=memory,
+        now=now,
+        default_ttl_hours=SESSION_MEMORY_TTL_HOURS,
+    )

@@ -18,10 +18,9 @@ from app.services.pack_query_backend_service import (
     get_pack_query_retrieval_mode,
     resolve_backend_candidates,
 )
-from app.services.pack_runtime_default import (
+from app.services.pack_runtime_neutral_adapter import (
     _build_fact_meta,
     _detect_promotion_intent,
-    _format_service_not_found_reply,
     _has_contact_signal,
     _has_duration_signal,
     _has_guest_waiting_signal,
@@ -35,9 +34,6 @@ from app.services.pack_runtime_default import (
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
-    get_pack_adapter,
-    get_pack_price_item,
-    get_pack_price_reply,
     get_signal_lexicon_list,
     get_system_anchor_groups,
     get_system_lexicon_list,
@@ -47,16 +43,19 @@ from app.services.pack_runtime_default import (
     phrase_match_intent,
     semantic_question_type,
 )
-from app.services.pack_runtime_default import (
+from app.services.pack_runtime_neutral_adapter import (
+    _format_service_not_found_reply as _neutral_format_service_not_found_reply,
+)
+from app.services.pack_runtime_neutral_adapter import (
     get_pack_decision as _runtime_get_pack_decision,
 )
-from app.services.pack_runtime_default import (
+from app.services.pack_runtime_neutral_adapter import (
     get_pack_service_decision as _runtime_get_pack_service_decision,
 )
-from app.services.pack_runtime_default import (
+from app.services.pack_runtime_neutral_adapter import (
     get_pack_service_hint as _runtime_get_pack_service_hint,
 )
-from app.services.pack_runtime_default import (
+from app.services.pack_runtime_neutral_adapter import (
     semantic_service_match as _runtime_semantic_service_match,
 )
 from app.services.pack_runtime_types import PackDecision
@@ -111,6 +110,7 @@ _MASTER_QUERY_COLLECTION_ACTION = "collect"
 _MASTER_QUERY_FACT_ACTION = "reply"
 _MASTER_QUERY_FACT_INTENT = "master"
 _MASTER_QUERY_SERVICE_CLARIFY_REASON = "missing_service_query"
+_MASTER_QUERY_LONG_HAIR_SERVICE_LABEL = "Женская стрижка на длинные волосы"
 _PACK_QUERY_ENGINE_ID = "pack_query_engine.v2"
 _PACK_QUERY_ENGINE_VERSION = "2026-03-02"
 _PACK_QUERY_MATCH_MIN_SCORE = 0.56
@@ -134,6 +134,17 @@ _CAPABILITY_INFO_REF_MAP = {
     "hours": ["hours"],
     "promotions": ["promotions"],
 }
+
+
+def _format_service_not_found_reply(
+    truth: dict,
+    *,
+    client_slug: str | None = None,
+) -> str | None:
+    # The public facade keeps a stable keyword-compatible helper surface even
+    # though the neutral adapter currently ignores client-specific dispatch.
+    _ = client_slug
+    return _neutral_format_service_not_found_reply(truth)
 
 
 @dataclass(frozen=True)
@@ -270,6 +281,271 @@ def _service_entries_from_truth(truth: dict[str, Any] | None) -> list[dict[str, 
                 rows.extend(item for item in values if isinstance(item, dict))
                 break
     return rows
+
+
+def _price_items_from_truth(truth: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(truth, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    price_list = truth.get("price_list")
+    if not isinstance(price_list, list):
+        return rows
+    for category in price_list:
+        if not isinstance(category, dict):
+            continue
+        items = category.get("items")
+        if not isinstance(items, list):
+            continue
+        rows.extend(item for item in items if isinstance(item, dict))
+    return rows
+
+
+def _match_truth_service_entry(
+    query_text: str | None,
+    *,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    query = _coerce_text_token(query_text)
+    if not query:
+        return None
+    normalized_query = _normalize_text(query)
+    if not normalized_query:
+        return None
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return None
+    direct_match = _match_service(normalized_query, client_slug or "generic")
+    if isinstance(direct_match, dict):
+        return direct_match
+    best_match: tuple[int, dict[str, Any]] | None = None
+    for service_item in _service_entries_from_truth(truth):
+        aliases = _service_aliases(service_item)
+        for alias in aliases:
+            alias_norm = _normalize_text(alias)
+            if not alias_norm:
+                continue
+            if alias_norm == normalized_query:
+                return service_item
+            if alias_norm in normalized_query or normalized_query in alias_norm:
+                score = len(alias_norm)
+                if best_match is None or score > best_match[0]:
+                    best_match = (score, service_item)
+    return best_match[1] if best_match else None
+
+
+def _pack_query_service_context(
+    query_text: str | None,
+    *,
+    client_slug: str | None,
+    branch_id: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    query = _coerce_text_token(query_text)
+    if not query:
+        return None, None
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        truth = {}
+    candidates, engine_meta = _build_pack_query_candidates(
+        query,
+        client_slug=client_slug,
+        branch_id=branch_id,
+    )
+    if candidates and candidates[0].final_score >= _PACK_QUERY_HINT_MIN_SCORE:
+        best = candidates[0]
+        return best.service_item, {
+            "service_query": best.canonical_name,
+            "service_query_source": "pack_query_engine_v2",
+            "service_query_score": round(float(best.final_score), 4),
+            "retrieval_meta": _build_pack_query_retrieval_meta(candidates, engine_meta=engine_meta),
+        }
+    fallback_hint = _runtime_get_pack_service_hint(query, client_slug=client_slug or "generic")
+    if not fallback_hint:
+        price_item = _best_price_item_match(query, truth=truth)
+        item_name = _coerce_text_token(price_item.get("name")) if isinstance(price_item, dict) else None
+        if not item_name:
+            return None, None
+        synthetic_service = {
+            "name": item_name,
+            "price_items": [item_name],
+        }
+        return synthetic_service, {
+            "service_query": item_name,
+            "service_query_source": "price_catalog",
+            "service_query_score": 0.56,
+        }
+    service_item = _match_truth_service_entry(fallback_hint, client_slug=client_slug)
+    if service_item is None:
+        return None, None
+    return service_item, {
+        "service_query": fallback_hint,
+        "service_query_source": "neutral_runtime_hint",
+        "service_query_score": 0.56,
+    }
+
+
+def _service_quick_price_reply(
+    service_item: dict[str, Any] | None,
+    *,
+    truth: dict[str, Any],
+) -> str | None:
+    if not isinstance(service_item, dict):
+        return None
+    quick_key = _coerce_text_token(service_item.get("quick_price_key"))
+    if not quick_key:
+        return None
+    answers = truth.get("price_quick_answers")
+    if not isinstance(answers, dict):
+        return None
+    reply = answers.get(quick_key)
+    return reply.strip() if isinstance(reply, str) and reply.strip() else None
+
+
+def _find_price_item_by_exact_name(
+    truth: dict[str, Any],
+    *,
+    item_name: str | None,
+) -> dict[str, Any] | None:
+    normalized_name = _normalize_text(item_name or "")
+    if not normalized_name:
+        return None
+    for item in _price_items_from_truth(truth):
+        name = _coerce_text_token(item.get("name"))
+        if name and _normalize_text(name) == normalized_name:
+            return item
+    return None
+
+
+def _score_price_item(query_text: str, item_name: str) -> tuple[int, int, int]:
+    query_tokens = set(_normalize_text(query_text).split())
+    item_tokens = set(_normalize_text(item_name).split())
+    overlap = len(query_tokens & item_tokens)
+    exact = int(_normalize_text(query_text) == _normalize_text(item_name))
+    substring = int(
+        bool(_normalize_text(query_text))
+        and bool(_normalize_text(item_name))
+        and (
+            _normalize_text(query_text) in _normalize_text(item_name)
+            or _normalize_text(item_name) in _normalize_text(query_text)
+        )
+    )
+    return overlap, exact, substring
+
+
+def _best_price_item_match(
+    query_text: str | None,
+    *,
+    truth: dict[str, Any],
+) -> dict[str, Any] | None:
+    query = _coerce_text_token(query_text)
+    if not query:
+        return None
+    best_item: dict[str, Any] | None = None
+    best_score: tuple[int, int, int] | None = None
+    for item in _price_items_from_truth(truth):
+        item_name = _coerce_text_token(item.get("name"))
+        if not item_name:
+            continue
+        score = _score_price_item(query, item_name)
+        if score <= (0, 0, 0):
+            continue
+        if best_score is None or score > best_score:
+            best_score = score
+            best_item = item
+    return best_item
+
+
+def _format_pack_price_reply(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    name = _coerce_text_token(item.get("name")) or "Услуга"
+    if item.get("price") is not None:
+        return f"{name} — {_format_money(item.get('price'))} ₸."
+    if item.get("price_from") is not None:
+        return f"{name} — от {_format_money(item.get('price_from'))} ₸."
+    return f"{name} — уточните цену у администратора."
+
+
+def _format_money(value: Any) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if amount.is_integer():
+        return f"{int(amount):,}".replace(",", " ")
+    return f"{amount:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _service_price_reply(
+    service_item: dict[str, Any] | None,
+    *,
+    client_slug: str | None,
+    truth: dict[str, Any],
+) -> str | None:
+    if not isinstance(service_item, dict):
+        return None
+    quick_reply = _service_quick_price_reply(service_item, truth=truth)
+    if quick_reply:
+        return quick_reply
+    price_items = service_item.get("price_items")
+    replies: list[str] = []
+    if isinstance(price_items, list):
+        for item_name in price_items:
+            item = _find_price_item_by_exact_name(truth, item_name=item_name if isinstance(item_name, str) else None)
+            reply = _format_pack_price_reply(item)
+            if reply:
+                replies.append(reply)
+    if replies:
+        service_name = _coerce_text_token(service_item.get("name"))
+        combined = " ".join(replies)
+        if service_name and _normalize_text(service_name) not in _normalize_text(combined):
+            return f"{service_name}: {combined}"
+        return combined
+    description = _coerce_text_token(service_item.get("description"))
+    if description:
+        return description
+    service_name = _coerce_text_token(service_item.get("name"))
+    if service_name:
+        direct_item = _find_price_item_by_exact_name(truth, item_name=service_name)
+        direct_reply = _format_pack_price_reply(direct_item)
+        if direct_reply:
+            return direct_reply
+    return None
+
+
+def _duration_estimate_reply(
+    service_item: dict[str, Any] | None,
+    *,
+    service_label: str | None,
+    truth: dict[str, Any],
+) -> str | None:
+    label = _coerce_text_token(service_label)
+    if not label and isinstance(service_item, dict):
+        label = _coerce_text_token(service_item.get("name"))
+    if isinstance(service_item, dict):
+        duration_text = _coerce_text_token(service_item.get("duration_text"))
+        if duration_text:
+            suffix = "" if duration_text.endswith((".", "!", "?")) else "."
+            return f"{label or _coerce_text_token(service_item.get('name')) or 'Услуга'} — {duration_text}{suffix}"
+    estimates = truth.get("service_duration_estimates")
+    if isinstance(estimates, dict) and label:
+        normalized_label = _normalize_text(label)
+        for key, value in estimates.items():
+            key_text = _normalize_text(str(key))
+            if not key_text:
+                continue
+            if normalized_label == key_text or normalized_label in key_text or key_text in normalized_label:
+                duration_text = _coerce_text_token(value)
+                if duration_text:
+                    suffix = "" if duration_text.endswith((".", "!", "?")) else "."
+                    return f"{label} — {duration_text}{suffix}"
+    services_catalog = truth.get("services_catalog")
+    if isinstance(services_catalog, dict):
+        clarify = _coerce_text_token(services_catalog.get("duration_clarify"))
+        if clarify:
+            if label:
+                return f"{label} — точная длительность зависит от объема и сложности. {clarify}"
+            return clarify
+    return "По времени зависит от услуги. Какая именно?"
 
 
 def _service_aliases(service_item: dict[str, Any]) -> list[str]:
@@ -791,6 +1067,36 @@ def _normalize_optional_text(value: Any) -> str | None:
     return token or None
 
 
+def _master_long_haircut_signal(
+    text: str | None,
+    *,
+    client_slug: str | None,
+) -> str | None:
+    normalized_message = _normalize_text(text or "")
+    if not normalized_message:
+        return None
+    long_hair_phrases = [
+        _normalize_text(item)
+        for item in get_signal_lexicon_list(client_slug, "master_long_haircut_phrases")
+        if isinstance(item, str) and item.strip()
+    ]
+    if any(phrase and phrase in normalized_message for phrase in long_hair_phrases):
+        return "phrase"
+    message_tokens = [token for token in normalized_message.split() if token]
+    long_hair_anchor_groups = [
+        tuple(part for part in _normalize_text(item).split() if part)
+        for item in get_signal_lexicon_list(client_slug, "master_long_haircut_anchor_groups")
+        if isinstance(item, str) and item.strip()
+    ]
+    for group in long_hair_anchor_groups:
+        if group and all(
+            any(token.startswith(part) for token in message_tokens)
+            for part in group
+        ):
+            return "anchor"
+    return None
+
+
 def _resolve_master_service_query(
     *,
     message_text: str | None,
@@ -800,16 +1106,23 @@ def _resolve_master_service_query(
 ) -> tuple[str | None, str]:
     explicit_query = _normalize_optional_text(service_query)
     if explicit_query:
+        if _master_long_haircut_signal(explicit_query, client_slug=client_slug):
+            return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "input"
         return explicit_query, "input"
     if isinstance(intent_decomp, dict):
         decomp_query = _normalize_optional_text(intent_decomp.get("service_query"))
         if decomp_query:
+            if _master_long_haircut_signal(decomp_query, client_slug=client_slug):
+                return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "intent_decomp"
             return decomp_query, "intent_decomp"
     if message_text:
         semantic_query = get_pack_service_hint(message_text, client_slug=client_slug)
         semantic_query = _normalize_optional_text(semantic_query)
         if semantic_query:
             return semantic_query, "semantic_match"
+        long_hair_signal = _master_long_haircut_signal(message_text, client_slug=client_slug)
+        if long_hair_signal:
+            return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, f"master_long_haircut_{long_hair_signal}"
     return None, "none"
 
 
@@ -1120,8 +1433,17 @@ def build_master_reply_from_pack(
             meta=meta,
         )
 
+    display_service = resolved_service
+    long_hair_signal = _master_long_haircut_signal(display_service, client_slug=client_slug)
+    if long_hair_signal:
+        display_service = _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL
     canonical_service = get_pack_service_hint(resolved_service, client_slug=client_slug)
-    canonical_service = _normalize_optional_text(canonical_service) or resolved_service
+    canonical_service = _normalize_optional_text(canonical_service)
+    if not canonical_service and long_hair_signal:
+        canonical_service = _normalize_optional_text(
+            get_pack_service_hint(_MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, client_slug=client_slug)
+        )
+    canonical_service = canonical_service or resolved_service
     profiles = _extract_master_profiles(catalog)
     matched_profiles = [
         profile
@@ -1137,7 +1459,7 @@ def build_master_reply_from_pack(
             meta={
                 "master_query_contract": "masters_catalog.v1",
                 "master_reply_mode": "service_not_found",
-                "service_query": canonical_service,
+                "service_query": display_service,
                 "service_query_source": resolution.service_query_source,
                 "clarify_reason": "master_service_not_found",
                 "master_profiles_count": 0,
@@ -1160,7 +1482,7 @@ def build_master_reply_from_pack(
     if not specialist_lines:
         return None
     specialists_text = ", ".join(specialist_lines)
-    reply = reply_template.format(service=canonical_service, specialists=specialists_text)
+    reply = reply_template.format(service=display_service, specialists=specialists_text)
     meta = _build_fact_meta(
         fact_source="truth",
         fact_intents=[_MASTER_QUERY_FACT_INTENT],
@@ -1168,7 +1490,7 @@ def build_master_reply_from_pack(
         meta={
             "master_query_contract": "masters_catalog.v1",
             "master_reply_mode": "service_match",
-            "service_query": canonical_service,
+            "service_query": display_service,
             "service_query_source": resolution.service_query_source,
             "master_profiles_count": len(matched_profiles),
             "master_profiles": [profile.get("name") for profile in visible_profiles],
@@ -1225,70 +1547,90 @@ def _normalize_identifier_token(value: str | None) -> str | None:
 
 def _dedupe_entity_refs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     unique_rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for row in rows:
         if not isinstance(row, dict):
             continue
-        item_id = row.get("id")
-        if not isinstance(item_id, str) or not item_id.strip():
+        fingerprint = (
+            _coerce_text_token(row.get("entity_id")) or "",
+            _coerce_text_token(row.get("entity_type")) or "",
+            _coerce_text_token(row.get("source_ref")) or "",
+            _coerce_text_token(row.get("value")) or "",
+        )
+        if fingerprint in seen or not any(fingerprint):
             continue
-        token = item_id.strip()
-        if token in seen:
-            continue
-        seen.add(token)
+        seen.add(fingerprint)
         unique_rows.append(row)
     return unique_rows
 
 
-def _extract_entity_refs(meta: dict[str, Any], *, intent: str | None) -> list[dict[str, Any]]:
+def _extract_entity_refs(
+    meta: dict[str, Any],
+    *,
+    confidence: float | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not isinstance(meta, dict):
         meta = {}
     service_query = meta.get("service_query")
     if isinstance(service_query, str) and service_query.strip():
         service_id = _normalize_identifier_token(service_query) or "service"
-        rows.append(
-            {
-                "id": f"service:{service_id}",
-                "type": "service",
-                "label": service_query.strip(),
-            }
-        )
+        row: dict[str, Any] = {
+            "entity_id": f"service:{service_id}",
+            "entity_type": "service",
+            "value": service_query.strip(),
+            "source_ref": _coerce_text_token(meta.get("service_query_source")) or "resolver",
+        }
+        if confidence is not None:
+            row["confidence"] = confidence
+        rows.append(row)
     price_item = meta.get("price_item")
     if isinstance(price_item, dict):
         item_name = price_item.get("name")
         if isinstance(item_name, str) and item_name.strip():
             item_id = _normalize_identifier_token(item_name) or "price-item"
-            rows.append(
-                {
-                    "id": f"price_item:{item_id}",
-                    "type": "price_item",
-                    "label": item_name.strip(),
-                }
-            )
-    info_sections = meta.get("info_sections")
-    if isinstance(info_sections, list):
-        for section in info_sections:
-            if not isinstance(section, str) or not section.strip():
-                continue
-            section_token = section.strip().casefold()
-            rows.append(
-                {
-                    "id": f"info_section:{section_token}",
-                    "type": "info_section",
-                    "label": section.strip(),
-                }
-            )
-    if isinstance(intent, str) and intent.strip():
-        intent_token = intent.strip().casefold()
-        rows.append(
-            {
-                "id": f"intent:{intent_token}",
-                "type": "intent",
-                "label": intent.strip(),
+            row = {
+                "entity_id": f"price_item:{item_id}",
+                "entity_type": "price_item",
+                "value": item_name.strip(),
+                "source_ref": _coerce_text_token(meta.get("fact_source")) or "resolver",
             }
-        )
+            if confidence is not None:
+                row["confidence"] = confidence
+            rows.append(row)
     return _dedupe_entity_refs(rows)
+
+
+def _extract_referents(
+    meta: dict[str, Any],
+    *,
+    entity_refs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    referents: dict[str, dict[str, Any]] = {}
+    if not isinstance(meta, dict):
+        return referents
+    service_query = _coerce_text_token(meta.get("service_query"))
+    if service_query:
+        service_ref = next(
+            (
+                row
+                for row in entity_refs
+                if isinstance(row, dict)
+                and _coerce_text_token(row.get("entity_type")) == "service"
+            ),
+            None,
+        )
+        referent: dict[str, Any] = {
+            "value": service_query,
+            "entity_type": "service",
+            "source_ref": _coerce_text_token(meta.get("service_query_source")) or "resolver",
+        }
+        if isinstance(service_ref, dict):
+            entity_id = _coerce_text_token(service_ref.get("entity_id"))
+            if entity_id:
+                referent["entity_id"] = entity_id
+        referents["service"] = referent
+    return referents
 
 
 def _extract_slot_candidates(meta: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1363,6 +1705,42 @@ def _build_fact_bundle(
         "intent_class": intent_token,
         "abstain_reason": abstain_reason,
     }
+
+
+def _build_grounding_provenance(
+    *,
+    fact_bundle: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None,
+    resolver_id: str,
+    resolver_version: str,
+) -> dict[str, Any]:
+    provenance: dict[str, Any] = {
+        "pack_id": _coerce_text_token(fact_bundle.get("pack_id")),
+        "entity_id": _coerce_text_token(fact_bundle.get("entity_id")),
+        "source_ref": _coerce_text_token(fact_bundle.get("source_ref")),
+        "confidence": _coerce_confidence(fact_bundle.get("confidence")) or 0.0,
+        "resolver_id": resolver_id,
+        "resolver_version": resolver_version,
+    }
+    if isinstance(retrieval_meta, dict) and retrieval_meta:
+        provenance["retrieval"] = retrieval_meta
+    return provenance
+
+
+def _build_semantic_grounding(
+    *,
+    entity_refs: list[dict[str, Any]],
+    referents: dict[str, dict[str, Any]],
+    grounding_provenance: dict[str, Any] | None,
+) -> dict[str, Any]:
+    grounding: dict[str, Any] = {"contract_version": "semantic_contract.v1"}
+    if entity_refs:
+        grounding["entity_refs"] = entity_refs
+    if referents:
+        grounding["referents"] = referents
+    if isinstance(grounding_provenance, dict) and grounding_provenance:
+        grounding["grounding_provenance"] = grounding_provenance
+    return grounding
 
 
 def _derive_resolver_confidence(meta: dict[str, Any], *, action_class: str) -> float:
@@ -1501,19 +1879,21 @@ def ensure_resolver_meta(
         "info_clarify",
     }:
         action_class = "COLLECT"
-    entity_refs = _extract_entity_refs(payload, intent=intent)
-    slot_candidates = _extract_slot_candidates(payload)
     confidence = _derive_resolver_confidence(payload, action_class=action_class)
     abstain_reason = _derive_abstain_reason(
         payload,
         action_class=action_class,
         confidence=confidence,
     )
+    entity_refs = _extract_entity_refs(payload, confidence=confidence)
+    referents = _extract_referents(payload, entity_refs=entity_refs)
+    slot_candidates = _extract_slot_candidates(payload)
     intent_class = intent.strip() if isinstance(intent, str) and intent.strip() else None
     resolver_contract = {
         "intent_class": intent_class,
         "action_class": action_class,
         "entity_refs": entity_refs,
+        "referents": referents,
         "slot_candidates": slot_candidates,
         "confidence": confidence,
         "abstain_reason": abstain_reason,
@@ -1533,6 +1913,18 @@ def ensure_resolver_meta(
         entity_refs=entity_refs,
         client_slug=client_slug,
     )
+    grounding_provenance = _build_grounding_provenance(
+        fact_bundle=fact_bundle,
+        retrieval_meta=retrieval_meta,
+        resolver_id=resolver_id_token,
+        resolver_version=resolver_version_token,
+    )
+    resolver_contract["grounding_provenance"] = grounding_provenance
+    semantic_grounding = _build_semantic_grounding(
+        entity_refs=entity_refs,
+        referents=referents,
+        grounding_provenance=grounding_provenance,
+    )
     payload.update(resolver_contract)
     payload["resolver_contract_version"] = _RESOLVER_CONTRACT_VERSION
     payload["resolver_contract"] = resolver_contract
@@ -1541,6 +1933,8 @@ def ensure_resolver_meta(
     if retrieval_meta:
         payload["retrieval_meta"] = retrieval_meta
     payload["fact_bundle"] = fact_bundle
+    payload["semantic_grounding"] = semantic_grounding
+    payload["grounding_provenance"] = grounding_provenance
     payload["provenance"] = {
         "pack_id": fact_bundle["pack_id"],
         "entity_id": fact_bundle["entity_id"],
@@ -1762,7 +2156,154 @@ def get_pack_service_hint(
         return candidates[0].canonical_name
     if _is_strict_scope_block(engine_meta):
         return None
-    return _runtime_get_pack_service_hint(query, client_slug=normalized_slug)
+    fallback_hint = _runtime_get_pack_service_hint(query, client_slug=normalized_slug)
+    if fallback_hint:
+        return fallback_hint
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return None
+    price_item = _best_price_item_match(query, truth=truth)
+    if isinstance(price_item, dict):
+        return _coerce_text_token(price_item.get("name"))
+    return None
+
+
+def build_runtime_service_duration_reply(
+    *,
+    message: str | None = None,
+    service_label: str | None = None,
+    client_slug: str | None = None,
+    branch_id: str | None = None,
+) -> str | None:
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return None
+    service_item = None
+    resolved_service_label = _coerce_text_token(service_label)
+    if message:
+        service_item, _ = _pack_query_service_context(
+            message,
+            client_slug=client_slug,
+            branch_id=branch_id,
+        )
+        if service_item is not None:
+            resolved_service_label = _coerce_text_token(service_item.get("name")) or resolved_service_label
+    if service_item is None and service_label:
+        service_item = _match_truth_service_entry(service_label, client_slug=client_slug)
+    return _duration_estimate_reply(
+        service_item,
+        service_label=resolved_service_label,
+        truth=truth,
+    )
+
+
+def build_runtime_service_truth_reply(
+    service: dict[str, Any] | str | None,
+    *,
+    client_slug: str | None = None,
+    truth: dict[str, Any] | None = None,
+) -> str | None:
+    source_truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
+    if not isinstance(source_truth, dict):
+        return None
+    service_item = service if isinstance(service, dict) else _match_truth_service_entry(service, client_slug=client_slug)
+    return _service_price_reply(
+        service_item,
+        client_slug=client_slug,
+        truth=source_truth,
+    )
+
+
+def build_runtime_service_presence_reply_for_name(
+    service_name: str,
+    *,
+    client_slug: str | None = None,
+    truth: dict[str, Any] | None = None,
+) -> str | None:
+    cleaned = _coerce_text_token(service_name)
+    if not cleaned:
+        return None
+    source_truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
+    if not isinstance(source_truth, dict):
+        return None
+    services_catalog = source_truth.get("services_catalog")
+    if not isinstance(services_catalog, dict):
+        return None
+    template = _coerce_text_token(services_catalog.get("service_presence_reply"))
+    if not template:
+        return None
+    if "{service}" in template:
+        return template.format(service=cleaned)
+    return f"{template} {cleaned}."
+
+
+def build_runtime_service_not_found_reply(
+    *,
+    client_slug: str | None = None,
+    truth: dict[str, Any] | None = None,
+) -> str | None:
+    source_truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
+    if not isinstance(source_truth, dict):
+        return None
+    services_catalog = source_truth.get("services_catalog")
+    if not isinstance(services_catalog, dict):
+        return _format_service_not_found_reply(source_truth)
+    template = _coerce_text_token(services_catalog.get("not_found_reply")) or (
+        "В списке услуг нет такой позиции. Могу уточнить или предложить: {suggestions}."
+    )
+    suggestions = [
+        token
+        for token in _coerce_text_list(services_catalog.get("suggestions"))
+        if token
+    ]
+    suggestions_text = ", ".join(suggestions) if suggestions else "маникюр, педикюр, уход за лицом"
+    if "{suggestions}" in template:
+        return template.format(suggestions=suggestions_text)
+    return f"{template} {suggestions_text}."
+
+
+def get_pack_price_item(
+    message: str,
+    *,
+    client_slug: str | None = None,
+) -> dict[str, Any] | None:
+    query = _coerce_text_token(message)
+    if not query:
+        return None
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return None
+    service_item, _ = _pack_query_service_context(query, client_slug=client_slug)
+    if isinstance(service_item, dict):
+        price_items = service_item.get("price_items")
+        if isinstance(price_items, list):
+            for item_name in price_items:
+                item = _find_price_item_by_exact_name(
+                    truth,
+                    item_name=item_name if isinstance(item_name, str) else None,
+                )
+                if isinstance(item, dict):
+                    return item
+        service_name = _coerce_text_token(service_item.get("name"))
+        if service_name:
+            item = _find_price_item_by_exact_name(truth, item_name=service_name)
+            if isinstance(item, dict):
+                return item
+    return _best_price_item_match(query, truth=truth)
+
+
+def get_pack_price_reply(message: str, *, client_slug: str | None = None) -> str | None:
+    query = _coerce_text_token(message)
+    if not query:
+        return None
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return None
+    service_item, _ = _pack_query_service_context(query, client_slug=client_slug)
+    reply = _service_price_reply(service_item, client_slug=client_slug, truth=truth)
+    if reply:
+        return reply
+    return _format_pack_price_reply(get_pack_price_item(query, client_slug=client_slug))
 
 
 def get_pack_decision(
@@ -1771,8 +2312,123 @@ def get_pack_decision(
     client_slug: str | None = None,
     intent_decomp: dict | None = None,
 ) -> PackDecision | None:
+    query = _coerce_text_token(message)
+    if not query:
+        decision = PackDecision(
+            action="reply",
+            response=format_reply_from_truth("off_topic", client_slug=client_slug)
+            or "Подскажу по услугам салона и записи.",
+            intent="other",
+            meta={"fact_source": "neutral_pack"},
+        )
+        return enrich_pack_decision(
+            decision,
+            resolver_id="pack_runtime.truth_gate",
+            client_slug=client_slug,
+        )
+    normalized = _normalize_text(query)
+    service_item, service_meta = _pack_query_service_context(query, client_slug=client_slug)
+    info_intents = set(phrase_match_intent(query, client_slug=client_slug))
+    if _has_parking_signal(normalized, client_slug=client_slug):
+        info_intents.add("parking")
+    promo_intent = _detect_promotion_intent(normalized, client_slug=client_slug)
+    if promo_intent:
+        promo_reply = format_reply_from_truth(
+            "promotions",
+            slots={"promotion_intent": promo_intent},
+            client_slug=client_slug,
+        )
+        if promo_reply:
+            decision = PackDecision(
+                action="reply",
+                response=promo_reply,
+                intent="promotions",
+                meta=_build_fact_meta(
+                    fact_source="truth",
+                    fact_intents=["promotions"],
+                    meta={"info_sections": ["promotions"]},
+                ),
+            )
+            return enrich_pack_decision(
+                decision,
+                resolver_id="pack_runtime.truth_gate",
+                client_slug=client_slug,
+            )
+    duration_signal = _has_duration_signal(normalized, message=query, client_slug=client_slug)
+    price_signal = _has_price_signal(normalized, query, client_slug=client_slug)
+    if duration_signal:
+        service_query = service_meta.get("service_query") if isinstance(service_meta, dict) else None
+        duration_reply = build_runtime_service_duration_reply(
+            message=query,
+            service_label=service_query if isinstance(service_query, str) else None,
+            client_slug=client_slug,
+        )
+        if duration_reply:
+            duration_meta = dict(service_meta or {})
+            duration_meta.update(
+                _build_fact_meta(
+                    fact_source="truth",
+                    fact_intents=["service_duration", "duration"] if service_query else ["duration"],
+                    info_sections=["duration"],
+                    duration_item=service_query if isinstance(service_query, str) else None,
+                )
+            )
+            decision = PackDecision(
+                action="reply",
+                response=duration_reply,
+                intent="service_duration" if service_query else "duration",
+                meta=duration_meta,
+            )
+            return enrich_pack_decision(
+                decision,
+                resolver_id="pack_runtime.truth_gate",
+                client_slug=client_slug,
+            )
+    if price_signal:
+        price_reply = get_pack_price_reply(query, client_slug=client_slug)
+        if price_reply:
+            price_item = get_pack_price_item(query, client_slug=client_slug)
+            price_meta = dict(service_meta or {})
+            price_meta.update(
+                _build_fact_meta(
+                    fact_source="truth",
+                    fact_intents=["price_query"],
+                    info_sections=["pricing"],
+                    price_item=price_item,
+                )
+            )
+            decision = PackDecision(
+                action="reply",
+                response=price_reply,
+                intent="price_query",
+                meta=price_meta,
+            )
+            return enrich_pack_decision(
+                decision,
+                resolver_id="pack_runtime.truth_gate",
+                client_slug=client_slug,
+            )
+    if "parking" in info_intents:
+        reply, meta = build_info_combined_reply(include_parking=True, client_slug=client_slug)
+        if reply:
+            decision = PackDecision(action="reply", response=reply, intent="parking", meta=meta)
+            return enrich_pack_decision(
+                decision,
+                resolver_id="pack_runtime.truth_gate",
+                client_slug=client_slug,
+            )
+    if "location" in info_intents or "hours" in info_intents:
+        reply, meta = build_info_combined_reply(include_parking=False, client_slug=client_slug)
+        if reply:
+            primary_intent = "location" if "location" in info_intents else "hours"
+            decision = PackDecision(action="reply", response=reply, intent=primary_intent, meta=meta)
+            return enrich_pack_decision(
+                decision,
+                resolver_id="pack_runtime.truth_gate",
+                client_slug=client_slug,
+            )
     decision = _runtime_get_pack_decision(
-        message,
+        query,
         client_slug=client_slug,
         intent_decomp=intent_decomp,
     )
@@ -1789,6 +2445,73 @@ def get_pack_service_decision(
     client_slug: str | None = None,
     intent_decomp: dict | None = None,
 ) -> PackDecision | None:
+    query = _coerce_text_token(message)
+    if query:
+        direct_service = _match_truth_service_entry(query, client_slug=client_slug)
+        if isinstance(direct_service, dict):
+            service_name = _coerce_text_token(direct_service.get("name"))
+            if service_name:
+                candidates, engine_meta = _build_pack_query_candidates(
+                    query,
+                    client_slug=client_slug,
+                )
+                decision = PackDecision(
+                    action="reply",
+                    response=build_runtime_service_presence_reply_for_name(
+                        service_name,
+                        client_slug=client_slug,
+                    ) or f"Да, услуга {service_name} доступна.",
+                    intent="service_match",
+                    meta={
+                        "service_query": service_name,
+                        "service_query_source": "truth_alias_match",
+                        "service_query_score": 0.91,
+                        "fact_source": "truth",
+                        "fact_intents": ["service_match"],
+                        "retrieval_meta": _build_pack_query_retrieval_meta(candidates, engine_meta=engine_meta),
+                    },
+                )
+                return enrich_pack_decision(
+                    decision,
+                    resolver_id="pack_runtime.service_matcher",
+                    client_slug=client_slug,
+                )
+
+        semantic_match = semantic_service_match(query, client_slug=client_slug or "generic")
+        if isinstance(semantic_match, PackQuerySemanticMatch):
+            match_meta = dict(semantic_match.meta or {})
+            canonical_name = _coerce_text_token(semantic_match.canonical_name)
+            if semantic_match.action == "match" and canonical_name:
+                match_meta.setdefault("service_query", canonical_name)
+                match_meta.setdefault("service_query_source", "pack_query_engine_v2")
+                match_meta.setdefault("service_query_score", round(float(semantic_match.score), 4))
+                match_meta.setdefault("fact_source", "truth")
+                match_meta.setdefault("fact_intents", ["service_match"])
+                decision = PackDecision(
+                    action="reply",
+                    response=semantic_match.response,
+                    intent="service_match",
+                    meta=match_meta,
+                )
+                return enrich_pack_decision(
+                    decision,
+                    resolver_id="pack_runtime.service_matcher",
+                    client_slug=client_slug,
+                )
+            if semantic_match.action == "suggest":
+                match_meta.setdefault("clarify_reason", "service_suggest")
+                decision = PackDecision(
+                    action="collect",
+                    response=semantic_match.response,
+                    intent="service_clarify",
+                    meta=match_meta,
+                )
+                return enrich_pack_decision(
+                    decision,
+                    resolver_id="pack_runtime.service_matcher",
+                    client_slug=client_slug,
+                )
+
     decision = _runtime_get_pack_service_decision(
         message,
         client_slug=client_slug,
@@ -1808,10 +2531,21 @@ def get_pack_service_decision(
         retrieval_meta = _build_pack_query_retrieval_meta(candidates, engine_meta=engine_meta)
         if retrieval_meta:
             meta["retrieval_meta"] = retrieval_meta
+        action = decision.action
+        intent = decision.intent
+        if action == "reply" and isinstance(meta.get("service_query"), str) and meta.get("service_query"):
+            action = "reply"
+            intent = "service_match"
+            meta.setdefault("fact_source", "truth")
+            meta.setdefault("fact_intents", ["service_match"])
+        elif action == "reply" and (intent == "service_clarify" or not isinstance(intent, str) or not intent.strip()):
+            action = "collect"
+            intent = "service_clarify"
+            meta.setdefault("clarify_reason", "service_clarify")
         decision = PackDecision(
-            action=decision.action,
+            action=action,
             response=decision.response,
-            intent=decision.intent,
+            intent=intent,
             collect=decision.collect,
             meta=meta,
         )
@@ -1834,6 +2568,9 @@ def has_consult_recommendation_signal(decision: PackDecision | None) -> bool:
     ):
         return True
     intent_token = decision.intent.strip().casefold() if isinstance(decision.intent, str) else ""
+    intent_class = meta.get("intent_class")
+    if isinstance(intent_class, str) and intent_class.strip().casefold() == "consult_reply":
+        return True
     resolver_contract = meta.get("resolver_contract")
     if isinstance(resolver_contract, dict):
         intent_class = resolver_contract.get("intent_class")
@@ -1856,19 +2593,16 @@ def is_timeout_fact_fallback_candidate(
         return False
     meta = decision.meta if isinstance(decision.meta, dict) else {}
     resolver_contract = meta.get("resolver_contract")
-    action_class = None
-    abstain_reason = None
-    confidence = None
+    action_class = meta.get("action_class")
+    abstain_reason = meta.get("abstain_reason")
+    confidence = _coerce_confidence(meta.get("resolver_confidence"))
     if isinstance(resolver_contract, dict):
-        action_class = resolver_contract.get("action_class")
-        abstain_reason = resolver_contract.get("abstain_reason")
-        confidence = _coerce_confidence(resolver_contract.get("confidence"))
-    if not isinstance(action_class, str):
-        action_class = meta.get("action_class")
-    if not isinstance(abstain_reason, str):
-        abstain_reason = meta.get("abstain_reason")
-    if confidence is None:
-        confidence = _coerce_confidence(meta.get("resolver_confidence"))
+        if not isinstance(action_class, str):
+            action_class = resolver_contract.get("action_class")
+        if not isinstance(abstain_reason, str):
+            abstain_reason = resolver_contract.get("abstain_reason")
+        if confidence is None:
+            confidence = _coerce_confidence(resolver_contract.get("confidence"))
     if confidence is None:
         confidence = _RESOLVER_FACT_CONFIDENCE
     if not isinstance(action_class, str) or action_class.strip().upper() != "FACT":
@@ -1918,11 +2652,14 @@ __all__ = [
     "build_capability_question_contract",
     "build_master_reply_from_pack",
     "build_quiet_hours_notice",
+    "build_runtime_service_duration_reply",
+    "build_runtime_service_not_found_reply",
+    "build_runtime_service_presence_reply_for_name",
+    "build_runtime_service_truth_reply",
     "compose_multi_truth_reply",
     "enrich_pack_decision",
     "ensure_resolver_meta",
     "format_reply_from_truth",
-    "get_pack_adapter",
     "get_pack_decision",
     "get_pack_price_item",
     "get_pack_price_reply",

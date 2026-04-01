@@ -1,0 +1,22 @@
+version: 2026-03-31.v1
+active_block: Consultant Core Whole-System Governance Closure
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-governance-closure-a922.md
+next_move: run_fresh_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim
+required_registry_statuses:
+  authority_registry: machine_readable_whole_system_governance_closure_base
+  compatibility_carrier_inventory: machine_readable_whole_system_governance_closure_base
+  dead_surface_registry: machine_readable_whole_system_governance_closure_base
+  legacy_caller_surface: machine_readable_whole_system_governance_closure_base
+  governance_delta: machine_readable_governance_closure_delta_base
+required_authority_next_phase: replay_and_human_audit_acceptance
+required_program_open_blockers:
+  - fresh_replay_and_full_human_semantic_audit_are_the_only_remaining_acceptance_lane
+  - product_and_practical_closure_remain_open_until_acceptance_lane_passes
+  - canonical_baseline_update_remains_forbidden_until_valid_acceptance_run
+required_deferred_next_blocks:
+  - replay_and_human_audit_acceptance
+required_checks:
+  - python3 scripts/recovery_execution_guard.py
+  - python3 scripts/whole_system_governance_closure_guard.py
+  - python3 scripts/arch_guard.py
+  - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py

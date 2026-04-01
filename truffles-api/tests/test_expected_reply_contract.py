@@ -172,6 +172,24 @@ def test_tool_contract_book_slot_specialist_missing_requests_name():
     assert decision.requires_handoff is False
 
 
+def test_tool_contract_book_slot_branch_missing_requires_handoff():
+    decision = resolve_tool_expected_reply_contract(
+        tool_action="calendar.book_slot",
+        tool_decision="branch_missing",
+        current_expected_reply_type=EXPECTED_REPLY_NAME,
+        memory_expected_reply_type=None,
+        booking_has_service=True,
+        booking_has_datetime=True,
+        booking_has_name=True,
+        booking_active=True,
+    )
+
+    assert decision is not None
+    assert decision.requires_handoff is True
+    assert decision.clear_expected_reply is True
+    assert decision.reason == "calendar_book_slot_branch_missing_handoff"
+
+
 def test_tool_contract_reschedule_verifier_blocked_requires_handoff():
     decision = resolve_tool_expected_reply_contract(
         tool_action="calendar.reschedule",

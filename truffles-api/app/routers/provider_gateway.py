@@ -8,9 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
+from app.routers.public_entrypoint_contract import (
+    PublicEntrypointMaterializationMode,
+    handle_public_webhook_payload,
+)
 from app.schemas.provider_gateway import ProviderInbound, ProviderStatus
 from app.schemas.webhook import WebhookResponse
-from app.services import reasoning_core
 from app.services.inbox_event_service import record_inbox_event
 from app.services.provider_gateway_service import translate_provider_inbound, update_outbox_status_from_provider
 from app.services.tenant_context_contract import validate_tenant_context_contract
@@ -102,9 +105,11 @@ async def handle_provider_inbound(request: Request, db: Session = Depends(get_db
     if error:
         return WebhookResponse(success=False, message=error)
 
-    return await reasoning_core.handle_webhook_payload(
+    return await handle_public_webhook_payload(
         webhook_payload,
         db,
+        entrypoint_name="Provider inbound",
+        materialization_mode=PublicEntrypointMaterializationMode.ALLOW_UNMATERIALIZED,
         provided_secret=None,
         enforce_secret=False,
     )

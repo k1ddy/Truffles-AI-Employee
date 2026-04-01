@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 from datetime import datetime, timezone
@@ -16,11 +17,15 @@ from app.services.ai_service import (
     LOW_SIGNAL_RESPONSE,
     MULTI_INTENT_TIMEOUT_SECONDS,
     _sanitize_query_for_rag,
+    classify_confirmation,
     detect_multi_intent,
+    detect_refusal_flags,
     generate_ai_response,
     get_conversation_history,
     get_system_prompt,
+    is_greeting_message,
 )
+from app.services.intent_service import hybrid_retrieve_knowledge
 from app.services.result import Result
 
 
@@ -32,12 +37,68 @@ def _disable_hierarchical_memory_by_default(monkeypatch):
     monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 320)
 
 
+def test_ai_signal_helpers_no_longer_contain_override_short_circuit():
+    assert "_resolve_intent_signal_override" not in inspect.getsource(ai_service.is_greeting_message)
+    assert "_resolve_intent_signal_override" not in inspect.getsource(ai_service.classify_confirmation)
+    assert "_resolve_intent_signal_override" not in inspect.getsource(ai_service.detect_refusal_flags)
+
+
 class TestKnowledgeConfidenceThreshold:
     def test_threshold_is_reasonable(self):
         assert 0.5 <= KNOWLEDGE_CONFIDENCE_THRESHOLD <= 0.9
 
     def test_threshold_is_float(self):
         assert isinstance(KNOWLEDGE_CONFIDENCE_THRESHOLD, float)
+
+
+def test_hybrid_retrieve_knowledge_reports_sparse_only_when_dense_unavailable(monkeypatch):
+    monkeypatch.setenv("QDRANT_API_KEY", "test-key")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.services.intent_service.QDRANT_API_KEY", "test-key")
+
+    bm25_results = [
+        {
+            "id": "point-1",
+            "text": "client_pack: city: Almaty",
+            "source": "client_pack",
+            "metadata": {
+                "client_slug": "demo_salon",
+                "branch_id": "branch-123",
+                "knowledge_tag": "tag-1",
+            },
+            "bm25_score": 1.7,
+        }
+    ]
+    bm25_filter = {
+        "client_slug": "demo_salon",
+        "branch_id": "branch-123",
+        "knowledge_tag": "tag-1",
+        "filter_mode": "branch",
+        "filter_reason": "knowledge_tag",
+    }
+
+    with patch("app.services.intent_service._bm25_search", return_value=(bm25_results, bm25_filter)):
+        results, rag_scores = hybrid_retrieve_knowledge(
+            query="RBAC Demo Salon Almaty",
+            client_slug="demo_salon",
+            vector_results=[],
+            limit=3,
+            branch_id="branch-123",
+            knowledge_tag="tag-1",
+            dense_meta={
+                "status": "unavailable",
+                "attempted": True,
+                "available": False,
+                "unavailable_reason": "bge_dns_failure",
+            },
+        )
+
+    assert len(results) == 1
+    assert results[0]["source"] == "client_pack"
+    assert rag_scores["retrieval_mode"] == "sparse_only"
+    assert rag_scores["dense_available"] is False
+    assert rag_scores["dense_unavailable_reason"] == "bge_dns_failure"
+    assert rag_scores["bm25_filter"] == bm25_filter
 
 
 class TestGetSystemPrompt:
@@ -293,10 +354,10 @@ class TestGenerateAIResponse:
             {
                 "LLM_RETRY_ON_TIMEOUT": "1",
                 "LLM_RETRY_TIMEOUT_SECONDS": "2",
-                "LLM_TIMEOUT_FALLBACK_MODEL": "gpt-fallback",
+                "LLM_TIMEOUT_FALLBACK_MODEL": "fallback-model",
             },
             clear=False,
-        ), patch.object(ai_service, "LLM_TIMEOUT_FALLBACK_MODEL", "gpt-fallback"), patch.object(
+        ), patch.object(ai_service, "LLM_TIMEOUT_FALLBACK_MODEL", "fallback-model"), patch.object(
             ai_service, "LLM_RETRY_TIMEOUT_SECONDS", 2.0
         ):
             result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
@@ -305,7 +366,7 @@ class TestGenerateAIResponse:
         assert result.value[0] == "Fallback response"
         models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
         assert models[:2] == [ai_service.FAST_MODEL, ai_service.FAST_MODEL]
-        assert models[2] == "gpt-fallback"
+        assert models[2] == "fallback-model"
 
     @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")

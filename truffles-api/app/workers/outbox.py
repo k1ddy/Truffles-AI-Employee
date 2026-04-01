@@ -5,12 +5,16 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging
-from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.metrics_daily_service import (
     get_metrics_daily_status_allowlist,
     run_metrics_daily_snapshot,
 )
-from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+from app.services.outbox_runtime_service import (
+    OutboxProcessSettings,
+    load_outbox_process_settings,
+    run_outbox_worker_cycle,
+)
+from app.services.runtime_mode_service import get_outbox_worker_mode, is_outbox_worker_enabled
 from app.services.runtime_safety import assert_outbox_worker_startup_safe
 
 setup_logging()
@@ -67,26 +71,10 @@ def _setup_otel() -> None:
     SQLAlchemyInstrumentor().instrument(engine=engine)
     otel_logger.info("OTel enabled", extra={"context": {"endpoint": endpoint, "service": service_name}})
 
-def _get_outbox_worker_settings() -> tuple[float, int, int, int, float, int, int]:
+def _get_outbox_worker_settings() -> tuple[float, OutboxProcessSettings]:
     interval_seconds = float(os.environ.get("OUTBOX_WORKER_INTERVAL_SECONDS", "2"))
     interval_seconds = max(interval_seconds, 0.1)
-    limit = int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10"))
-    idle_seconds = int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8")))
-    max_wait_seconds = int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10")))
-    max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
-    retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
-    stale_seconds = int(float(os.environ.get("OUTBOX_STALE_PROCESSING_SECONDS", "120")))
-    stale_seconds = max(stale_seconds, 0)
-    max_wait_seconds = max(max_wait_seconds, 0)
-    return (
-        interval_seconds,
-        limit,
-        idle_seconds,
-        max_wait_seconds,
-        max_attempts,
-        retry_backoff_seconds,
-        stale_seconds,
-    )
+    return interval_seconds, load_outbox_process_settings()
 
 
 def _get_metrics_daily_settings() -> tuple[bool, int, int, int, int, int]:
@@ -132,8 +120,12 @@ def _get_metrics_daily_run_at(now: datetime, run_hour: int, run_minute: int) -> 
 
 async def run_worker():
     # 0. Check enabled flag
-    if not _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=True):
-        logger.info("Outbox Worker disabled via OUTBOX_WORKER_ENABLED")
+    outbox_worker_mode = get_outbox_worker_mode()
+    if not is_outbox_worker_enabled():
+        logger.info(
+            "Outbox Worker disabled by runtime mode",
+            extra={"context": {"outbox_worker_mode": outbox_worker_mode}},
+        )
         while True:
             await asyncio.sleep(60)
 
@@ -146,8 +138,6 @@ async def run_worker():
     # 1. Setup OTel
     _setup_otel()
 
-    from app.routers.webhook import _process_outbox_rows
-
     logger.info("Starting Outbox Worker...")
     next_inbound_schedule_at: datetime | None = None
     next_metrics_run_at: datetime | None = None
@@ -157,48 +147,13 @@ async def run_worker():
         try:
             (
                 interval_seconds,
-                limit,
-                idle_seconds,
-                max_wait_seconds,
-                max_attempts,
-                retry_backoff_seconds,
-                stale_seconds,
+                process_settings,
             ) = _get_outbox_worker_settings()
             
             loop_start = time.monotonic()
             db = SessionLocal()
             try:
-                # 1. Release stale locks
-                released = release_stale_processing(
-                    db,
-                    stale_seconds=stale_seconds,
-                    max_attempts=max_attempts,
-                    retry_backoff_seconds=retry_backoff_seconds,
-                )
-                if released["released"] or released["failed"]:
-                    logger.warning(
-                        "Outbox stale processing released",
-                        extra={"context": {**released, "stale_seconds": stale_seconds}},
-                    )
-
                 now = datetime.now(timezone.utc)
-                if next_inbound_schedule_at is None or now >= next_inbound_schedule_at:
-                    try:
-                        inbound_results = schedule_inbound_syncs(db, now=now)
-                    except Exception as exc:
-                        inbound_results = {"interval_seconds": 60, "scheduled": 0, "errors": 1}
-                        logger.warning(
-                            "Inbound calendar sync scheduling failed",
-                            extra={"context": {"error": str(exc)[:200]}},
-                        )
-                    schedule_interval = inbound_results.get("interval_seconds") or 60
-                    next_inbound_schedule_at = now + timedelta(seconds=max(schedule_interval, 60))
-                    if inbound_results.get("scheduled") or inbound_results.get("errors"):
-                        logger.info(
-                            "Inbound calendar sync scheduled",
-                            extra={"context": inbound_results},
-                        )
-
                 (
                     metrics_enabled,
                     run_hour,
@@ -258,33 +213,15 @@ async def run_worker():
                                     run_minute,
                                 )
 
-                # 2. Process pending messages
-                while True:
-                    rows = claim_pending_outbox_batches(
-                        db,
-                        limit=limit,
-                        idle_seconds=idle_seconds,
-                        max_wait_seconds=max_wait_seconds,
-                        include_without_conversation=True,
-                    )
-                    if not rows:
-                        break
-                    
-                    results = await _process_outbox_rows(
-                        db,
-                        rows,
-                        max_attempts=max_attempts,
-                        retry_backoff_seconds=retry_backoff_seconds,
-                    )
-                    
-                    logger.info(
-                        "Outbox worker processed",
-                        extra={"context": results},
-                    )
-                    
-                    # Don't hog CPU if we processed a batch, check time
-                    if time.monotonic() - loop_start >= interval_seconds:
-                        break
+                cycle = await run_outbox_worker_cycle(
+                    db,
+                    settings=process_settings,
+                    interval_seconds=interval_seconds,
+                    next_inbound_schedule_at=next_inbound_schedule_at,
+                    now=now,
+                    loop_started_at=loop_start,
+                )
+                next_inbound_schedule_at = cycle.next_inbound_schedule_at
             finally:
                 db.close()
             

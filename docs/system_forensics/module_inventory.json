@@ -1,0 +1,362 @@
+{
+  "schema_version": "v1",
+  "inventory_scope": "executive consultant-core module inventory for external researchers",
+  "current_practical_truth": "r35f",
+  "module_groups": [
+    {
+      "group_id": "hot_path_spine",
+      "description": "current active consultant-core runtime spine",
+      "modules": [
+        {
+          "module_id": "consultant_core_v2",
+          "path": "truffles-api/app/core/consultant_core_v2.py",
+          "current_role": "top-level compatibility cutover shell",
+          "current_authority": "entry shell",
+          "target_role": "thin facade or delete candidate after cutover",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_core_consultant_runtime.md"
+          ]
+        },
+        {
+          "module_id": "consultant_runtime",
+          "path": "truffles-api/app/core/consultant_runtime.py",
+          "current_role": "live orchestration shell for planning, execution, persistence, trace, and reply flow",
+          "current_authority": "primary runtime orchestrator",
+          "target_role": "durable orchestration shell around typed kernel artifacts",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_core_consultant_runtime.md"
+          ]
+        },
+        {
+          "module_id": "turn_planner",
+          "path": "truffles-api/app/core/turn_planner.py",
+          "current_role": "adapts runtime context into typed owner/boundary intake",
+          "current_authority": "planner and owner-adjacent adapter",
+          "target_role": "typed planner without synthetic semantic authority",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_core_turn_planner.md"
+          ]
+        },
+        {
+          "module_id": "intent_service",
+          "path": "truffles-api/app/services/intent_service.py",
+          "current_role": "policy-core owner gateway and semantic input assembly",
+          "current_authority": "semantic owner gateway",
+          "target_role": "single hot-path semantic owner gateway",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_services_intent_service.md"
+          ]
+        },
+        {
+          "module_id": "turn_executor",
+          "path": "truffles-api/app/core/turn_executor.py",
+          "current_role": "binding and execution stage with residual semantic reconstruction",
+          "current_authority": "execution plus boundary-adjacent context carrier",
+          "target_role": "binding executor with operational enrichment only",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_core_turn_executor.md"
+          ]
+        },
+        {
+          "module_id": "dialog_state_service",
+          "path": "truffles-api/app/core/dialog_state_service.py",
+          "current_role": "canonical state and projection service with compatibility reconciliation",
+          "current_authority": "state writer and truth-carrier reconciler",
+          "target_role": "canonical state layer around turn journal and conversation projection",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_core_dialog_state_service.md"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "typed_contract_artifacts",
+      "description": "interaction-side artifacts that already exist in typed form",
+      "modules": [
+        {
+          "module_id": "semantic_decision_v1",
+          "path": "truffles-api/app/core/semantic_decision.py",
+          "current_role": "typed semantic owner artifact",
+          "current_authority": "canonical meaning carrier on the canaried path",
+          "target_role": "single per-turn semantic contract",
+          "status": "partially_materialized",
+          "evidence_docs": [
+            "docs/system_forensics/TARGET_ARCHITECTURE.md",
+            "docs/system_forensics/final/SEMANTIC_DECISION_V1.md"
+          ]
+        },
+        {
+          "module_id": "binding_plan_v1",
+          "path": "truffles-api/app/core/binding_plan.py",
+          "current_role": "typed binding artifact",
+          "current_authority": "deterministic binding contract",
+          "target_role": "binding boundary contract",
+          "status": "partially_materialized",
+          "evidence_docs": [
+            "docs/system_forensics/TARGET_ARCHITECTURE.md",
+            "docs/system_forensics/final/BINDING_PLAN_V1.md"
+          ]
+        },
+        {
+          "module_id": "turn_journal_v1",
+          "path": "truffles-api/app/core/turn_journal.py",
+          "current_role": "append-only turn journal artifact",
+          "current_authority": "state/event carrier",
+          "target_role": "canonical state substrate",
+          "status": "partially_materialized",
+          "evidence_docs": [
+            "docs/system_forensics/TARGET_ARCHITECTURE.md",
+            "docs/system_forensics/final/TURN_JOURNAL_V1.md"
+          ]
+        },
+        {
+          "module_id": "conversation_projection_v1",
+          "path": "truffles-api/app/core/conversation_projection.py",
+          "current_role": "canonical conversation projection artifact",
+          "current_authority": "state projection carrier",
+          "target_role": "single primary conversation projection",
+          "status": "partially_materialized",
+          "evidence_docs": [
+            "docs/system_forensics/TARGET_ARCHITECTURE.md",
+            "docs/system_forensics/final/CONVERSATION_PROJECTION_V1.md"
+          ]
+        },
+        {
+          "module_id": "interaction_owner_matrix",
+          "path": "truffles-api/app/knowledge/generic/INTERACTION_OWNER_MATRIX.yaml",
+          "current_role": "machine-readable interaction owner matrix",
+          "current_authority": "interaction routing knowledge source",
+          "target_role": "governing interaction contract",
+          "status": "present_but_not_global_governing_contract",
+          "evidence_docs": [
+            "docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md",
+            "docs/system_forensics/final/TARGET_DECISION.md"
+          ]
+        },
+        {
+          "module_id": "owner_resolver",
+          "path": "truffles-api/app/services/owner_resolver.py",
+          "current_role": "resolver for owner matrix and interaction rows",
+          "current_authority": "interaction-side deterministic support",
+          "target_role": "pure resolver with no hidden semantic branching",
+          "status": "present_but_not_full_system_governor",
+          "evidence_docs": [
+            "docs/system_forensics/INTERACTION_ARCHITECTURE_AUDIT.md",
+            "docs/system_forensics/final/TARGET_DECISION.md"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "legacy_runtime_mesh",
+      "description": "still-live compatibility and domain helpers outside the narrow spine",
+      "modules": [
+        {
+          "module_id": "webhook_decision",
+          "path": "truffles-api/app/routers/webhook/decision.py",
+          "current_role": "mixed-authority compatibility router",
+          "current_authority": "legacy orchestration and semantic residue",
+          "target_role": "bounded adapter or delete candidate",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_decision.md"
+          ]
+        },
+        {
+          "module_id": "webhook_legacy",
+          "path": "truffles-api/app/routers/webhook/_legacy.py",
+          "current_role": "compatibility import bus",
+          "current_authority": "legacy namespace fanout",
+          "target_role": "delete candidate",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_legacy.md"
+          ]
+        },
+        {
+          "module_id": "webhook_context_manager",
+          "path": "truffles-api/app/routers/webhook/context_manager.py",
+          "current_role": "continuity/state bridge",
+          "current_authority": "legacy continuity coupling",
+          "target_role": "bounded adapter or delete candidate",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_context_manager.md"
+          ]
+        },
+        {
+          "module_id": "webhook_response",
+          "path": "truffles-api/app/routers/webhook/response.py",
+          "current_role": "response-stage orchestration and fallback surface",
+          "current_authority": "reply assembly and compatibility side effects",
+          "target_role": "bounded adapter",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_response.md"
+          ]
+        },
+        {
+          "module_id": "webhook_booking",
+          "path": "truffles-api/app/routers/webhook/booking.py",
+          "current_role": "booking-domain orchestration helper",
+          "current_authority": "booking continuity and commit residue",
+          "target_role": "bounded booking adapter",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_booking.md"
+          ]
+        },
+        {
+          "module_id": "webhook_info",
+          "path": "truffles-api/app/routers/webhook/info.py",
+          "current_role": "info-domain orchestration helper",
+          "current_authority": "fact composition and info-side continuity residue",
+          "target_role": "bounded fact adapter after fact contract materialization",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_info.md"
+          ]
+        },
+        {
+          "module_id": "webhook_pending",
+          "path": "truffles-api/app/routers/webhook/pending.py",
+          "current_role": "pending/manager-active continuity transport",
+          "current_authority": "handoff continuity helper",
+          "target_role": "bounded pending-state adapter",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_pending.md"
+          ]
+        },
+        {
+          "module_id": "webhook_policy",
+          "path": "truffles-api/app/routers/webhook/policy.py",
+          "current_role": "policy helper warehouse",
+          "current_authority": "law-gate and policy-pack routing residue",
+          "target_role": "deterministic policy boundary only",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_policy.md"
+          ]
+        },
+        {
+          "module_id": "webhook_guards",
+          "path": "truffles-api/app/routers/webhook/guards.py",
+          "current_role": "guard/mute/human-lock subsystem",
+          "current_authority": "deterministic guard surface",
+          "target_role": "bounded safety boundary",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_guards.md"
+          ]
+        },
+        {
+          "module_id": "webhook_dedup",
+          "path": "truffles-api/app/routers/webhook/dedup.py",
+          "current_role": "dedup/debounce preflight subsystem",
+          "current_authority": "transport preflight and shadow inbound logic",
+          "target_role": "bounded preflight boundary",
+          "status": "live_hotspot",
+          "evidence_docs": [
+            "docs/system_forensics/RUNTIME_ARCHITECTURE.md",
+            "docs/system_forensics/files/app_routers_webhook_dedup.md"
+          ]
+        }
+      ]
+    },
+    {
+      "group_id": "operational_entrypoints",
+      "description": "live operational surfaces that keep duplicate caller seams alive",
+      "modules": [
+        {
+          "module_id": "app_main",
+          "path": "truffles-api/app/main.py",
+          "current_role": "primary FastAPI composition root",
+          "current_authority": "mounted router surface",
+          "target_role": "single product ingress root",
+          "status": "live",
+          "evidence_docs": [
+            "docs/system_forensics/files/app_main.md"
+          ]
+        },
+        {
+          "module_id": "outbox_service_app",
+          "path": "truffles-api/app/outbox_service_app.py",
+          "current_role": "dedicated outbox-service FastAPI root",
+          "current_authority": "duplicate operational surface",
+          "target_role": "deduplicate or bound explicitly",
+          "status": "live_duplicate_surface",
+          "evidence_docs": [
+            "docs/system_forensics/files/app_outbox_service_app.md"
+          ]
+        },
+        {
+          "module_id": "routers_outbox_service",
+          "path": "truffles-api/app/routers/outbox_service.py",
+          "current_role": "dedicated outbox-worker endpoint",
+          "current_authority": "live package export caller of `_process_outbox_rows`",
+          "target_role": "single bounded operational adapter",
+          "status": "live_duplicate_surface",
+          "evidence_docs": [
+            "docs/system_forensics/files/app_routers_outbox_service.md"
+          ]
+        },
+        {
+          "module_id": "routers_admin",
+          "path": "truffles-api/app/routers/admin.py",
+          "current_role": "mounted admin router with duplicated outbox orchestration",
+          "current_authority": "duplicate operational entrypoint",
+          "target_role": "deduplicate or shrink to control-plane only",
+          "status": "live_duplicate_surface",
+          "evidence_docs": [
+            "docs/system_forensics/files/app_routers_admin.md"
+          ]
+        },
+        {
+          "module_id": "workers_outbox",
+          "path": "truffles-api/app/workers/outbox.py",
+          "current_role": "standalone outbox worker loop",
+          "current_authority": "live worker caller of package seam",
+          "target_role": "single operational caller or explicitly governed fanout",
+          "status": "live_duplicate_surface",
+          "evidence_docs": [
+            "docs/system_forensics/files/app_workers_outbox.md"
+          ]
+        },
+        {
+          "module_id": "routers_console",
+          "path": "truffles-api/app/routers/console.py",
+          "current_role": "console ops-job trigger with outbox execute caller",
+          "current_authority": "control-plane operational trigger",
+          "target_role": "governed control-plane caller",
+          "status": "live_duplicate_surface",
+          "evidence_docs": [
+            "docs/system_forensics/files/app_routers_console.md"
+          ]
+        }
+      ]
+    }
+  ],
+  "packet_status": "ready_for_external_handoff"
+}

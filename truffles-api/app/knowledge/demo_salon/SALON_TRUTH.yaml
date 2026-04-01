@@ -1378,6 +1378,18 @@ domain_pack:
         - акци
         - льгот
         - промо
+    promotion_general_terms:
+      ru:
+        - акци
+        - скидк
+        - промо
+      kk:
+        - акция
+        - жеңіл
+      en:
+        - promo
+        - discount
+        - offer
     promotion_promo_code_terms:
       ru:
         - промокод

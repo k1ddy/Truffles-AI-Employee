@@ -3,16 +3,17 @@ import math
 import os
 import re
 import time
+from copy import deepcopy
 from enum import Enum
-from pathlib import Path
-from typing import Any, Iterable, Tuple
+from typing import Any, Iterable, Mapping, Tuple
 
 import httpx
 
+from app.core.policy_tool_projector import build_binding_plan
+from app.core.semantic_decision import SemanticDecisionV1
 from app.logging_config import get_logger, record_llm_time
 from app.schemas.intent import (
-    validate_answer_interpreter_output,
-    validate_dialogue_controller_output,
+    LlmPolicyCoreOutput,
     validate_llm_plan_output,
     validate_llm_policy_core_output,
 )
@@ -28,8 +29,16 @@ from app.services.ai_service import (
     get_llm_provider,
     normalize_for_matching,
 )
+from app.services.knowledge_service import QDRANT_COLLECTION as KNOWLEDGE_QDRANT_COLLECTION
 
 logger = get_logger("intent_service")
+_SECONDARY_SEMANTIC_OWNER_REMOVED = "secondary_semantic_owner_removed"
+_BOOKING_MANAGE_REFERENCE_INTENTS = {
+    "check_booking",
+    "verify_booking",
+    "confirm_booking",
+    "booking_confirmation",
+}
 
 
 def _log_timing(
@@ -130,7 +139,7 @@ def _classify_llm_error(exc: Exception) -> str:
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "truffles_knowledge")
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION") or KNOWLEDGE_QDRANT_COLLECTION
 
 RAG_BM25_LIMIT = int(os.environ.get("RAG_BM25_LIMIT", "5"))
 RAG_BM25_MAX_DOCS = int(os.environ.get("RAG_BM25_MAX_DOCS", "200"))
@@ -138,32 +147,17 @@ RAG_BM25_TIMEOUT_SECONDS = float(os.environ.get("RAG_BM25_TIMEOUT_SECONDS", "0.8
 RAG_HYBRID_VECTOR_WEIGHT = float(os.environ.get("RAG_HYBRID_VECTOR_WEIGHT", "0.6"))
 RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 
-def _resolve_prompts_dir() -> Path:
-    module_path = Path(__file__).resolve()
-    for parent in module_path.parents:
-        candidate = parent / "prompts"
-        if candidate.is_dir():
-            return candidate
-    return module_path.parents[2] / "prompts"
-
-
-PROMPTS_DIR = _resolve_prompts_dir()
-CONTROLLER_PROMPT_PATH = PROMPTS_DIR / "intent_classifier.md"
 CONTROLLER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
 CONTROLLER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
 CONTROLLER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.30"))
-_DEFAULT_CONTROLLER_MODEL = (
-    "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
-)
+_DEFAULT_CONTROLLER_MODEL = FAST_MODEL
 CONTROLLER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_CONTROLLER_MODEL).strip()
-PLAN_PROMPT_PATH = PROMPTS_DIR / "llm_plan.md"
 PLAN_TIMEOUT_SECONDS = float(os.environ.get("LLM_PLAN_TIMEOUT_SECONDS", "3.0"))
 PLAN_MAX_TOKENS = int(os.environ.get("LLM_PLAN_MAX_TOKENS", "220"))
 PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
 PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
-POLICY_CORE_PROMPT_PATH = PROMPTS_DIR / "llm_policy_core.md"
 POLICY_CORE_TIMEOUT_SECONDS = float(
-    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "5.0")
+    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "15.0")
 )
 POLICY_CORE_MIN_TIMEOUT_SECONDS = max(
     float(os.environ.get("LLM_POLICY_CORE_MIN_TIMEOUT_SECONDS", "1.2")),
@@ -174,20 +168,32 @@ POLICY_CORE_BUDGET_GUARD_MS = max(
     0.0,
 )
 POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
-    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "2.5")),
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "4.0")),
+    0.1,
+)
+POLICY_CORE_FALLBACK_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_FALLBACK_SECONDS", "6.0")),
     0.1,
 )
 POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
 POLICY_CORE_RETRY_ON_TRANSIENT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TRANSIENT")
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
-POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
-_DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL = (
-    _DEFAULT_CONTROLLER_MODEL if _DEFAULT_CONTROLLER_MODEL.strip() else FAST_MODEL
+_DEFAULT_POLICY_CORE_MODEL = (
+    os.environ.get("LLM_SEMANTIC_OWNER_MODEL", "gpt-5.4-nano-2026-03-17").strip()
+    or "gpt-5.4-nano-2026-03-17"
 )
+POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", _DEFAULT_POLICY_CORE_MODEL).strip()
 POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
     "LLM_POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
-    _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL,
+    "",
 ).strip()
+POLICY_CORE_REASONING_EFFORT = (
+    os.environ.get("LLM_POLICY_CORE_REASONING_EFFORT", "low").strip().lower()
+)
+POLICY_CORE_GPT5_MIN_MAX_TOKENS = max(
+    int(os.environ.get("LLM_POLICY_CORE_GPT5_MIN_MAX_TOKENS", "800")),
+    1,
+)
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
     os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
 )
@@ -222,6 +228,10 @@ POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS = max(
 POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS = max(
     int(os.environ.get("LLM_POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS", "120")),
     40,
+)
+POLICY_CORE_CONTEXT_CARD_LIMIT = max(
+    int(os.environ.get("LLM_POLICY_CORE_CONTEXT_CARD_LIMIT", "6")),
+    1,
 )
 POLICY_CORE_STRUCTURED_OUTPUT = os.environ.get("LLM_POLICY_CORE_STRUCTURED_OUTPUT")
 POLICY_CORE_MICRO_TIMEOUT_SECONDS = max(
@@ -333,15 +343,52 @@ def _resolve_policy_core_micro_timeout_seconds(timing_context: dict | None) -> f
 
 
 def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
+    return _resolve_policy_core_max_tokens_with_cap(timeout_seconds, None)
+
+
+def _resolve_policy_core_max_tokens_with_cap(
+    timeout_seconds: float,
+    max_tokens_override: int | None,
+    model_name: str | None = None,
+) -> int:
+    max_tokens_cap = POLICY_CORE_MAX_TOKENS
+    if max_tokens_override is not None:
+        try:
+            max_tokens_cap = int(max_tokens_override)
+        except (TypeError, ValueError):
+            max_tokens_cap = POLICY_CORE_MAX_TOKENS
+    max_tokens_cap = max(1, min(POLICY_CORE_MAX_TOKENS, max_tokens_cap))
     if timeout_seconds <= 0:
-        return min(POLICY_CORE_MAX_TOKENS, 120)
+        return min(max_tokens_cap, 120)
     if timeout_seconds < 1.4:
-        return min(POLICY_CORE_MAX_TOKENS, 120)
+        return min(max_tokens_cap, 120)
     if timeout_seconds < 2.2:
-        return min(POLICY_CORE_MAX_TOKENS, 160)
-    if timeout_seconds < 3.0:
-        return min(POLICY_CORE_MAX_TOKENS, 200)
-    return POLICY_CORE_MAX_TOKENS
+        resolved = min(max_tokens_cap, 160)
+    elif timeout_seconds < 3.0:
+        resolved = min(max_tokens_cap, 200)
+    else:
+        resolved = max_tokens_cap
+    if isinstance(model_name, str) and model_name.strip().lower().startswith("gpt-5"):
+        return max(resolved, POLICY_CORE_GPT5_MIN_MAX_TOKENS)
+    return resolved
+
+
+def _resolve_policy_core_reasoning_effort(model_name: str | None) -> str | None:
+    normalized = (model_name or "").strip().lower()
+    if not normalized.startswith("gpt-5"):
+        return None
+    if POLICY_CORE_REASONING_EFFORT == "minimal":
+        return "low"
+    if POLICY_CORE_REASONING_EFFORT in {"none", "low", "medium", "high", "xhigh"}:
+        return POLICY_CORE_REASONING_EFFORT
+    return "low"
+
+
+def _resolve_model_temperature(model_name: str | None) -> float | None:
+    normalized = (model_name or "").strip().lower()
+    if normalized.startswith("gpt-5"):
+        return None
+    return 0.0
 
 
 def _policy_core_structured_output_enabled() -> bool:
@@ -362,73 +409,6 @@ def _policy_core_uses_response_format(error: Exception) -> bool:
         )
     )
 
-
-def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[str, Any]:
-    schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": [
-            "intent",
-            "action",
-            "tool_action",
-            "tool_args",
-            "pack_refs",
-            "slots",
-            "open_questions",
-            "needs_manager",
-            "risk_signals",
-            "confidence",
-        ],
-        "properties": {
-            "intent": {"type": "string", "minLength": 1},
-            "action": {"type": "string", "enum": ["fact", "collect", "handoff"]},
-            "tool_action": {"type": "string", "enum": allowed_tool_actions},
-            "tool_args": {"type": "object", "additionalProperties": True},
-            "pack_refs": {"type": "array", "items": {"type": "string"}},
-            "slots": {
-                "type": "object",
-                "additionalProperties": {"type": "string"},
-            },
-            "next_question": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "open_questions": {"type": "array", "items": {"type": "string"}},
-            "needs_manager": {"type": "boolean"},
-            "risk_signals": {"type": "array", "items": {"type": "string"}},
-            "language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-            "reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "goal": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "entity_refs": {
-                "type": "array",
-                "items": {
-                    "anyOf": [
-                        {"type": "string"},
-                        {"type": "object", "additionalProperties": True},
-                    ]
-                },
-            },
-            "subject_kind": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "capability": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "temporal_scope": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "resolution_mode": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "pending_question_act": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "pending_question_target": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "active_question_relation": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "resolver_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            "resolver_version": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-        },
-    }
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "llm_policy_core_output",
-            # Keep provider schema transport-compatible; semantic conditional rules such as
-            # master_query service requirements are enforced later by validate_llm_policy_core_output().
-            # tool_args/slots are intentionally open-ended and validated later by contract validators.
-            # strict=False keeps schema guidance without forcing hard-fail on dynamic nested objects.
-            "strict": False,
-            "schema": schema,
-        },
-    }
 
 
 def _build_policy_core_messages(prompt: str, payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -488,7 +468,549 @@ def _build_policy_core_compact_input(policy_input: dict[str, Any]) -> dict[str, 
             normalized_memory["profile"] = normalized_profile
         compact_input["memory"] = normalized_memory
 
+    context_payload = compact_input.get("context")
+    if isinstance(context_payload, dict):
+        normalized_context = _compact_policy_core_context(context_payload)
+        if normalized_context:
+            compact_input["context"] = normalized_context
+        else:
+            compact_input.pop("context", None)
+
     return compact_input
+
+
+def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    sanitized_payload = dict(payload)
+    sanitized = False
+    if "tool_args" in sanitized_payload:
+        sanitized_payload.pop("tool_args", None)
+        sanitized = True
+    if "tool_action_hint" not in sanitized_payload and "tool_action" in sanitized_payload:
+        sanitized_payload["tool_action_hint"] = sanitized_payload.get("tool_action")
+        sanitized = True
+    if "tool_action" in sanitized_payload:
+        sanitized_payload.pop("tool_action", None)
+        sanitized = True
+
+    def _token(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip().casefold()
+        return cleaned or None
+
+    tool_action_hint = _token(sanitized_payload.get("tool_action_hint"))
+    subject_kind = _token(sanitized_payload.get("subject_kind"))
+    capability = _token(sanitized_payload.get("capability"))
+    reason = _token(sanitized_payload.get("reason"))
+    next_question = _token(sanitized_payload.get("next_question"))
+    open_questions = {
+        _token(item)
+        for item in sanitized_payload.get("open_questions") or []
+        if _token(item) is not None
+    }
+    if (
+        tool_action_hint == "calendar.get_booking"
+        and subject_kind == "booking"
+        and capability == "booking_manage"
+        and reason is not None
+        and reason.startswith("calendar_get_booking_collect_reference")
+        and (next_question == "name" or "name" in open_questions)
+    ):
+        for field_name in (
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+        ):
+            if sanitized_payload.pop(field_name, None) is not None:
+                sanitized = True
+
+    return sanitized_payload, sanitized
+
+
+def _policy_core_has_grounded_referent(
+    referents: Mapping[str, Any],
+    key: str,
+) -> bool:
+    payload = referents.get(key) if isinstance(referents, Mapping) else None
+    if not isinstance(payload, Mapping):
+        return False
+    for field_name in ("entity_id", "value"):
+        value = payload.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def _policy_core_active_pending_contract(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(normalized_memory_profile, Mapping):
+        return {}
+    pending = normalized_memory_profile.get("pending_question_contract")
+    return dict(pending) if isinstance(pending, Mapping) else {}
+
+
+def _policy_core_resume_pending_contract(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(normalized_memory_profile, Mapping):
+        return {}
+    pending = normalized_memory_profile.get("resume_pending_question_contract")
+    return dict(pending) if isinstance(pending, Mapping) else {}
+
+
+def _policy_core_expected_open_questions(contract_payload: Mapping[str, Any]) -> list[str]:
+    raw_open_questions = contract_payload.get("open_questions") or []
+    open_questions = [
+        item
+        for item in raw_open_questions
+        if isinstance(item, str) and item.strip()
+    ]
+    if open_questions:
+        return open_questions
+    next_question = contract_payload.get("next_question")
+    if isinstance(next_question, str) and next_question.strip():
+        return [next_question]
+    return []
+
+
+def _policy_core_payload_token(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().casefold()
+    return normalized or None
+
+
+def _policy_core_payload_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item.strip().casefold()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    ]
+
+
+def _policy_core_has_active_media_resume(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
+    resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
+    return pending_contract.get("expected_reply_type") == "media" and bool(
+        resume_contract.get("expected_reply_type")
+    )
+
+
+def _policy_core_is_media_reason_family(reason: str | None) -> bool:
+    if not isinstance(reason, str) or not reason.strip():
+        return False
+    normalized = reason.strip().casefold()
+    return normalized.startswith(
+        (
+            "user_offers_photo_reference",
+            "user_offers_photos_for_style_reference",
+        )
+    )
+
+
+def _policy_core_reason_indicates_followup_interrupt(reason: str | None) -> bool:
+    if not isinstance(reason, str) or not reason.strip():
+        return False
+    normalized = reason.strip().casefold()
+    return "_query" in normalized or "_interrupt" in normalized
+
+
+def _policy_core_is_active_followup_info_interrupt(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    if contract.action != "fact":
+        return False
+    if contract.capability == "booking_manage":
+        return False
+    if contract.active_question_relation == "generic_info_interrupt":
+        return True
+    if contract.intent in {
+        "pricing",
+        "hours",
+        "location",
+        "parking",
+        "duration",
+        "promotions",
+        "contact",
+        "master_query",
+    }:
+        return True
+    if contract.capability in {
+        "pricing",
+        "hours",
+        "location",
+        "parking",
+        "duration",
+        "promotions",
+        "contact",
+        "portfolio",
+    }:
+        return True
+    pack_refs = {
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    }
+    return bool(pack_refs & {"pricing", "hours", "location", "parking", "promotions", "contact", "master"})
+
+
+def _policy_core_is_master_query_time_collect(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    if contract.intent != "master_query" or contract.action != "collect":
+        return False
+    open_questions = {
+        item.strip().casefold()
+        for item in list(contract.open_questions or [])
+        if isinstance(item, str) and item.strip()
+    }
+    if contract.next_question == "service" or "service" in open_questions:
+        return False
+    return bool(
+        contract.expected_reply_type == "time"
+        or contract.next_question == "datetime"
+        or contract.capability == "live_availability"
+        or contract.resolution_mode == "live_calendar"
+        or contract.pending_question_target == "time"
+    )
+
+
+def _policy_core_is_active_followup_master_query_shape(
+    *,
+    intent: str | None,
+    next_question: str | None,
+    open_questions: Iterable[str],
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    if intent != "master_query":
+        return False
+    if not _policy_core_has_active_media_resume(normalized_memory_profile):
+        return False
+    normalized_open_questions = {
+        item.strip().casefold()
+        for item in open_questions
+        if isinstance(item, str) and item.strip()
+    }
+    if next_question == "service" or "service" in normalized_open_questions:
+        return False
+    return True
+
+
+def _policy_core_schema_requires_master_query_reclassification(
+    *,
+    payload: Mapping[str, Any] | None,
+    schema_error: str | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(schema_error, str):
+        return False
+    normalized_schema_error = schema_error.casefold()
+    if "master_query" not in normalized_schema_error or "tool_action_invalid" not in normalized_schema_error:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    intent = _policy_core_payload_token(payload.get("intent"))
+    next_question = _policy_core_payload_token(payload.get("next_question"))
+    open_questions = _policy_core_payload_string_list(payload.get("open_questions"))
+    return _policy_core_is_active_followup_master_query_shape(
+        intent=intent,
+        next_question=next_question,
+        open_questions=open_questions,
+        normalized_memory_profile=normalized_memory_profile,
+    )
+
+
+def _validate_policy_core_runtime_contract(
+    contract: LlmPolicyCoreOutput,
+    *,
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> str | None:
+    referents = contract.referents if isinstance(contract.referents, dict) else {}
+    has_booking_ref = _policy_core_has_grounded_referent(referents, "booking_ref")
+    has_customer = _policy_core_has_grounded_referent(referents, "customer") or bool(
+        contract.slots.get("name")
+    )
+
+    if (
+        contract.intent in _BOOKING_MANAGE_REFERENCE_INTENTS
+        and contract.capability == "booking_manage"
+        and contract.subject_kind == "booking"
+        and not has_booking_ref
+    ):
+        expected_reply_type = "time" if has_customer else "name"
+        expected_next_question = "datetime" if has_customer else "name"
+        if contract.action != "fact":
+            return "llm_policy_core_error:booking_manage_reference_action_invalid"
+        if contract.tool_action_hint != "calendar.get_booking":
+            return "llm_policy_core_error:booking_manage_reference_tool_action_invalid"
+        if contract.expected_reply_type != expected_reply_type:
+            return "llm_policy_core_error:booking_manage_reference_expected_reply_invalid"
+        if contract.next_question != expected_next_question:
+            return "llm_policy_core_error:booking_manage_reference_next_question_invalid"
+        if expected_next_question not in list(contract.open_questions or []):
+            return "llm_policy_core_error:booking_manage_reference_open_questions_invalid"
+        if (
+            not has_customer
+            and any(
+                (
+                    contract.pending_question_act,
+                    contract.pending_question_target,
+                    contract.active_question_relation,
+                )
+            )
+        ):
+            return "llm_policy_core_error:booking_manage_reference_stale_axes"
+
+    pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
+    resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
+    carry_contract = resume_contract or pending_contract
+
+    if _policy_core_is_media_reason_family(contract.reason):
+        if resume_contract and _policy_core_reason_indicates_followup_interrupt(contract.reason):
+            return "llm_policy_core_error:active_followup_interrupt_reclassification_required"
+        if contract.intent != "consult":
+            return "llm_policy_core_error:consult_media_intent_invalid"
+        if contract.action != "collect":
+            return "llm_policy_core_error:consult_media_action_invalid"
+        if contract.tool_action_hint != "consult":
+            return "llm_policy_core_error:consult_media_tool_action_invalid"
+        if contract.capability not in {"consultation", "bookability"}:
+            return "llm_policy_core_error:consult_media_capability_invalid"
+        if "style_reference" not in list(contract.pack_refs or []):
+            return "llm_policy_core_error:consult_media_pack_refs_invalid"
+        if contract.expected_reply_type != "media":
+            return "llm_policy_core_error:consult_media_expected_reply_invalid"
+        if contract.next_question != "media":
+            return "llm_policy_core_error:consult_media_next_question_invalid"
+        if list(contract.open_questions or []) != ["media"]:
+            return "llm_policy_core_error:consult_media_open_questions_invalid"
+        expected_pending_act = resume_contract.get("pending_question_act")
+        if expected_pending_act and contract.pending_question_act != expected_pending_act:
+            return "llm_policy_core_error:consult_media_pending_act_invalid"
+        expected_pending_target = resume_contract.get("pending_question_target")
+        if expected_pending_target and contract.pending_question_target != expected_pending_target:
+            return "llm_policy_core_error:consult_media_pending_target_invalid"
+        expected_relation = resume_contract.get("active_question_relation")
+        if expected_relation and contract.active_question_relation != expected_relation:
+            return "llm_policy_core_error:consult_media_relation_invalid"
+
+    carry_reply_type = carry_contract.get("expected_reply_type")
+    carry_next_question = carry_contract.get("next_question")
+    if (
+        _policy_core_is_active_followup_info_interrupt(contract)
+        and isinstance(carry_reply_type, str)
+        and carry_reply_type.strip()
+        and isinstance(carry_next_question, str)
+        and carry_next_question.strip()
+    ):
+        active_followup_master_query = _policy_core_is_active_followup_master_query_shape(
+            intent=contract.intent,
+            next_question=contract.next_question,
+            open_questions=list(contract.open_questions or []),
+            normalized_memory_profile=normalized_memory_profile,
+        )
+        expected_open_questions = _policy_core_expected_open_questions(carry_contract)
+        if contract.expected_reply_type != carry_reply_type:
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
+            )
+        if contract.next_question != carry_next_question:
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_next_question_invalid"
+            )
+        if list(contract.open_questions or []) != expected_open_questions:
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_open_questions_invalid"
+            )
+        expected_pending_act = carry_contract.get("pending_question_act")
+        if expected_pending_act and contract.pending_question_act != expected_pending_act:
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_pending_act_invalid"
+            )
+        expected_pending_target = carry_contract.get("pending_question_target")
+        if expected_pending_target and contract.pending_question_target != expected_pending_target:
+            return (
+                "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                if active_followup_master_query
+                else "llm_policy_core_error:generic_info_interrupt_pending_target_invalid"
+            )
+        if active_followup_master_query and contract.active_question_relation != "generic_info_interrupt":
+            return "llm_policy_core_error:active_followup_master_query_reclassification_required"
+
+    if (
+        _policy_core_has_active_media_resume(normalized_memory_profile)
+        and _policy_core_is_master_query_time_collect(contract)
+    ):
+        return "llm_policy_core_error:active_followup_master_query_reclassification_required"
+
+    return None
+
+
+def _build_policy_core_contract_repair_instruction(
+    *,
+    schema_error: str,
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> str | None:
+    if not isinstance(schema_error, str) or not schema_error.strip():
+        return None
+
+    token = schema_error.removeprefix("llm_policy_core_error:")
+    pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
+    resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
+    carry_contract = resume_contract or pending_contract
+    carry_reply_type = carry_contract.get("expected_reply_type")
+    carry_next_question = carry_contract.get("next_question")
+
+    if token.startswith("booking_manage_reference_"):
+        has_customer = False
+        if isinstance(pending_contract, dict):
+            has_customer = pending_contract.get("expected_reply_type") == "time"
+        expected_reply_type = "time" if has_customer else "name"
+        expected_next_question = "datetime" if has_customer else "name"
+        return (
+            "The previous JSON violated the governed booking-manage reference contract. "
+            "For existing booking lookup without `referents.booking_ref`, keep "
+            '`action="fact"` and `tool_action_hint="calendar.get_booking"`. '
+            f"Use `expected_reply_type=\"{expected_reply_type}\"`, "
+            f"`next_question=\"{expected_next_question}\"`, "
+            f"`open_questions=[\"{expected_next_question}\"]`. "
+            "If the missing follow-up is `name`, omit "
+            "`pending_question_act`, `pending_question_target`, and "
+            "`active_question_relation`. Return corrected JSON only."
+        )
+
+    if token.startswith("consult_media_"):
+        preserve_parts: list[str] = []
+        pending_act = resume_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            preserve_parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = resume_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            preserve_parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        relation = resume_contract.get("active_question_relation")
+        if isinstance(relation, str) and relation.strip():
+            preserve_parts.append(f'Keep `active_question_relation="{relation}"`.')
+        return (
+            "The previous JSON violated the governed consult-media follow-up contract. "
+            "For the governed photo/style-reference continuation reason family "
+            "(`user_offers_photo_reference*` / `user_offers_photos_for_style_reference*`), keep "
+            '`intent=\"consult\"`, `action=\"collect\"`, '
+            '`tool_action_hint=\"consult\"`, and `capability` inside '
+            '`{\"consultation\",\"bookability\"}`. '
+            '`pack_refs=[\"style_reference\"]`, `expected_reply_type=\"media\"`, '
+            '`next_question=\"media\"`, and `open_questions=[\"media\"]`. '
+            + (" ".join(preserve_parts) + " " if preserve_parts else "")
+            + "Return corrected JSON only."
+        )
+
+    if token.startswith("generic_info_interrupt_"):
+        if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
+            return None
+        open_questions = _policy_core_expected_open_questions(carry_contract)
+        pending_parts: list[str] = [
+            "The previous JSON violated the governed active-followup info-interrupt contract.",
+            "When a fact-side side question interrupts an active follow-up,",
+            "preserve the active resume contract exactly:",
+            f'`expected_reply_type="{carry_reply_type}"`,',
+            f'`next_question="{carry_next_question}"`,',
+            f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
+        ]
+        source_ref = "memory.profile.resume_pending_question_contract"
+        if not resume_contract:
+            source_ref = "memory.profile.pending_question_contract"
+        pending_parts.append(f"Use `{source_ref}` as the carryover source of truth.")
+        pending_act = carry_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            pending_parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = carry_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            pending_parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        pending_parts.append("Return corrected JSON only.")
+        return " ".join(pending_parts)
+
+    if token.startswith("active_followup_interrupt_reclassification_required"):
+        if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
+            return None
+        open_questions = _policy_core_expected_open_questions(carry_contract)
+        parts: list[str] = [
+            "The previous JSON incorrectly kept a media/style-reference continuation active.",
+            "The owner reason already signals a later side-question (`...query` / `...interrupt`),",
+            "so reclassify this turn as the correct interrupt family instead of continuing media.",
+            "Do NOT return `expected_reply_type=\"media\"` or `next_question=\"media\"`.",
+            "Preserve the active booking resume contract exactly:",
+            f'`expected_reply_type="{carry_reply_type}"`,',
+            f'`next_question="{carry_next_question}"`,',
+            f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
+        ]
+        pending_act = carry_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = carry_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        parts.extend(
+            [
+                "If the user is asking which specialist/master performs the service without temporal scope,",
+                "emit the generic master/specialist info interrupt instead of consult-media continuation.",
+                "Use carried service grounding from memory when available.",
+                "Return corrected JSON only.",
+            ]
+        )
+        return " ".join(parts)
+
+    if token.startswith("active_followup_master_query_reclassification_required"):
+        if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
+            return None
+        open_questions = _policy_core_expected_open_questions(carry_contract)
+        parts: list[str] = [
+            "The previous JSON incorrectly turned a specialist/master side-question into live availability collection during an active media follow-up.",
+            "Do NOT ask for time availability and do NOT use live-calendar resolution for this turn.",
+            "Reclassify it as the master/specialist info interrupt instead:",
+            '`intent="master_query"`, `action="fact"`, `tool_action_hint="info"`, `pack_refs=["master"]`.',
+            "Keep the booking resume contract explicit:",
+            f'`expected_reply_type="{carry_reply_type}"`,',
+            f'`next_question="{carry_next_question}"`,',
+            f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
+            'Set `active_question_relation="generic_info_interrupt"`.',
+            "Keep carried service grounding from memory when available.",
+        ]
+        pending_act = carry_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = carry_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    return None
+
+
+def _parse_policy_core_content(content: str) -> dict[str, Any] | None:
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    return payload if isinstance(payload, dict) else None
 
 
 def _resolve_specialist_hint_timeout_seconds(timing_context: dict | None) -> float:
@@ -700,6 +1222,10 @@ def extract_specialist_hint_llm(
     result["raw"] = content
     if not content:
         result["error"] = "empty_response"
+        logger.warning(
+            "LLM policy core returned empty response",
+            extra={"context": {"model_name": SPECIALIST_HINT_MODEL, "elapsed_ms": elapsed_ms}},
+        )
         return result
 
     payload = None
@@ -1083,6 +1609,93 @@ def _normalize_policy_core_memory_summary(summary: str | None) -> str | None:
     return compact[:POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS]
 
 
+def _normalize_policy_core_slot_state(slot_state: dict[str, Any] | None) -> dict[str, str] | None:
+    if not isinstance(slot_state, dict):
+        return None
+    normalized: dict[str, str] = {}
+    for field_name in ("service", "datetime", "name", "phone"):
+        value = slot_state.get(field_name)
+        if not isinstance(value, str):
+            continue
+        cleaned = " ".join(value.split())
+        if cleaned:
+            normalized[field_name] = cleaned[:POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS]
+    return normalized or None
+
+
+def _normalize_policy_core_pending_contract_payload(
+    payload: dict[str, Any] | None,
+    *,
+    allowed_next_questions: set[str],
+    allowed_expected_reply_types: set[str],
+    allowed_pending_question_acts: set[str],
+    allowed_pending_question_targets: set[str],
+    allowed_active_question_relations: set[str],
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    cleaned_pending: dict[str, Any] = {}
+    next_question = payload.get("next_question") or payload.get("slot")
+    if isinstance(next_question, str) and next_question.strip():
+        slot_token = next_question.strip().casefold()
+        slot_token = {"time": "datetime", "date": "datetime"}.get(slot_token, slot_token)
+        if slot_token in allowed_next_questions:
+            cleaned_pending["next_question"] = slot_token
+    open_questions = payload.get("open_questions")
+    if isinstance(open_questions, list):
+        cleaned_questions: list[str] = []
+        seen_questions: set[str] = set()
+        for raw_question in open_questions:
+            if len(cleaned_questions) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                break
+            if not isinstance(raw_question, str) or not raw_question.strip():
+                continue
+            question_token = raw_question.strip().casefold()
+            question_token = {"time": "datetime", "date": "datetime"}.get(
+                question_token,
+                question_token,
+            )
+            if question_token not in allowed_next_questions:
+                continue
+            if question_token in seen_questions:
+                continue
+            cleaned_questions.append(question_token)
+            seen_questions.add(question_token)
+        if cleaned_questions:
+            cleaned_pending["open_questions"] = cleaned_questions
+    pending_expected_reply_type = payload.get("expected_reply_type")
+    if isinstance(pending_expected_reply_type, str) and pending_expected_reply_type.strip():
+        expected_token = pending_expected_reply_type.strip().casefold()
+        if expected_token in allowed_expected_reply_types:
+            cleaned_pending["expected_reply_type"] = expected_token
+    reason = payload.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        cleaned_pending["reason"] = " ".join(reason.split())[
+            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+        ]
+    pending_question_act = payload.get("pending_question_act")
+    if isinstance(pending_question_act, str) and pending_question_act.strip():
+        act_token = pending_question_act.strip().casefold()
+        if act_token in allowed_pending_question_acts:
+            cleaned_pending["pending_question_act"] = act_token
+    pending_question_target = payload.get("pending_question_target")
+    if isinstance(pending_question_target, str) and pending_question_target.strip():
+        target_token = pending_question_target.strip().casefold()
+        if target_token in allowed_pending_question_targets:
+            cleaned_pending["pending_question_target"] = target_token
+    active_question_relation = payload.get("active_question_relation")
+    if isinstance(active_question_relation, str) and active_question_relation.strip():
+        relation_token = active_question_relation.strip().casefold()
+        if relation_token in allowed_active_question_relations:
+            cleaned_pending["active_question_relation"] = relation_token
+    value = payload.get("value")
+    if isinstance(value, str) and value.strip():
+        cleaned_pending["value"] = " ".join(value.split())[
+            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+        ]
+    return cleaned_pending or None
+
+
 def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(profile, dict):
         return None
@@ -1093,11 +1706,6 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     active_goal = profile.get("active_goal")
     if isinstance(active_goal, str) and active_goal.strip():
         normalized["active_goal"] = active_goal.strip().casefold()
-    expected_reply_type = profile.get("expected_reply_type")
-    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
-        expected_reply_type = expected_reply_type.strip().casefold()
-        if expected_reply_type in {"service_choice", "time", "name", "phone"}:
-            normalized["expected_reply_type"] = expected_reply_type
     active_slots = profile.get("active_slots")
     if isinstance(active_slots, list):
         cleaned_slots: list[str] = []
@@ -1108,7 +1716,7 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             if not isinstance(raw_slot, str):
                 continue
             slot = raw_slot.strip().casefold()
-            if slot not in {"service", "datetime", "name"}:
+            if slot not in {"service", "datetime", "name", "phone"}:
                 continue
             if slot in seen_slots:
                 continue
@@ -1116,6 +1724,9 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             seen_slots.add(slot)
         if cleaned_slots:
             normalized["active_slots"] = cleaned_slots
+    slot_state = _normalize_policy_core_slot_state(profile.get("slot_state"))
+    if slot_state:
+        normalized["slot_state"] = slot_state
     stored_keys = profile.get("stored_keys")
     if isinstance(stored_keys, list):
         cleaned_keys: list[str] = []
@@ -1162,45 +1773,112 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             seen_items.add(fingerprint)
         if cleaned_items:
             normalized["retrieved_items"] = cleaned_items
-    current_referents = profile.get("current_referents")
-    if isinstance(current_referents, dict):
-        cleaned_referents: dict[str, str] = {}
-        for key in ("service", "specialist", "branch", "booking_ref"):
-            value = current_referents.get(key)
+    from app.services.policy_vocabulary_snapshot_service import (
+        build_policy_core_vocabulary_snapshot,
+        policy_core_semantic_contract_allowlists,
+    )
+
+    vocabulary_snapshot = build_policy_core_vocabulary_snapshot()
+    allowed_next_questions = set(vocabulary_snapshot.next_questions)
+    allowed_expected_reply_types = set(vocabulary_snapshot.expected_reply_types)
+    allowed_pending_question_acts = set(vocabulary_snapshot.pending_question_acts)
+    allowed_pending_question_targets = set(vocabulary_snapshot.pending_question_targets)
+    allowed_active_question_relations = set(vocabulary_snapshot.active_question_relations)
+
+    pending_question_contract = _normalize_policy_core_pending_contract_payload(
+        profile.get("pending_question_contract"),
+        allowed_next_questions=allowed_next_questions,
+        allowed_expected_reply_types=allowed_expected_reply_types,
+        allowed_pending_question_acts=allowed_pending_question_acts,
+        allowed_pending_question_targets=allowed_pending_question_targets,
+        allowed_active_question_relations=allowed_active_question_relations,
+    )
+    if pending_question_contract:
+        normalized["pending_question_contract"] = pending_question_contract
+    resume_pending_question_contract = _normalize_policy_core_pending_contract_payload(
+        profile.get("resume_pending_question_contract"),
+        allowed_next_questions=allowed_next_questions,
+        allowed_expected_reply_types=allowed_expected_reply_types,
+        allowed_pending_question_acts=allowed_pending_question_acts,
+        allowed_pending_question_targets=allowed_pending_question_targets,
+        allowed_active_question_relations=allowed_active_question_relations,
+    )
+    if resume_pending_question_contract:
+        normalized["resume_pending_question_contract"] = resume_pending_question_contract
+    semantic_contract = profile.get("semantic_contract")
+    if isinstance(semantic_contract, dict):
+        cleaned_contract: dict[str, Any] = {}
+        for field_name, allowed in policy_core_semantic_contract_allowlists().items():
+            value = semantic_contract.get(field_name)
             if isinstance(value, str) and value.strip():
-                cleaned_referents[key] = " ".join(value.split())[
-                    :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-                ]
-        if cleaned_referents:
-            normalized["current_referents"] = cleaned_referents
-    pending_question_contract = profile.get("pending_question_contract")
-    if isinstance(pending_question_contract, dict):
-        cleaned_pending: dict[str, Any] = {}
-        slot = pending_question_contract.get("slot")
-        if isinstance(slot, str) and slot.strip():
-            slot_token = slot.strip().casefold()
-            if slot_token in {"service", "datetime", "name", "phone"}:
-                cleaned_pending["slot"] = slot_token
-        pending_expected_reply_type = pending_question_contract.get("expected_reply_type")
-        if (
-            isinstance(pending_expected_reply_type, str)
-            and pending_expected_reply_type.strip()
-        ):
-            expected_token = pending_expected_reply_type.strip().casefold()
-            if expected_token in {"service_choice", "time", "name", "phone"}:
-                cleaned_pending["expected_reply_type"] = expected_token
-        reason = pending_question_contract.get("reason")
-        if isinstance(reason, str) and reason.strip():
-            cleaned_pending["reason"] = " ".join(reason.split())[
-                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-            ]
-        value = pending_question_contract.get("value")
-        if isinstance(value, str) and value.strip():
-            cleaned_pending["value"] = " ".join(value.split())[
-                :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
-            ]
-        if cleaned_pending:
-            normalized["pending_question_contract"] = cleaned_pending
+                token = value.strip().casefold()
+                if token in allowed:
+                    cleaned_contract[field_name] = token
+        raw_entity_refs = semantic_contract.get("entity_refs")
+        if isinstance(raw_entity_refs, list):
+            cleaned_entity_refs: list[dict[str, Any]] = []
+            for raw_row in raw_entity_refs[:POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS]:
+                if not isinstance(raw_row, dict):
+                    continue
+                row: dict[str, Any] = {}
+                for source_key, target_key in (
+                    ("entity_id", "entity_id"),
+                    ("entity_type", "entity_type"),
+                    ("source_ref", "source_ref"),
+                    ("value", "value"),
+                ):
+                    raw_value = raw_row.get(source_key)
+                    if isinstance(raw_value, str) and raw_value.strip():
+                        row[target_key] = " ".join(raw_value.split())[
+                            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                        ]
+                confidence = raw_row.get("confidence")
+                if isinstance(confidence, (int, float)):
+                    row["confidence"] = max(0.0, min(float(confidence), 1.0))
+                if row:
+                    cleaned_entity_refs.append(row)
+            if cleaned_entity_refs:
+                cleaned_contract["entity_refs"] = cleaned_entity_refs
+        referents = semantic_contract.get("referents")
+        if isinstance(referents, dict):
+            cleaned_referents: dict[str, dict[str, Any]] = {}
+            for referent_key in ("service", "specialist", "branch", "booking_ref", "customer"):
+                raw_payload = referents.get(referent_key)
+                if not isinstance(raw_payload, dict):
+                    continue
+                row: dict[str, Any] = {}
+                for source_key, target_key in (
+                    ("value", "value"),
+                    ("entity_id", "entity_id"),
+                    ("entity_type", "entity_type"),
+                    ("source_ref", "source_ref"),
+                ):
+                    raw_value = raw_payload.get(source_key)
+                    if isinstance(raw_value, str) and raw_value.strip():
+                        row[target_key] = " ".join(raw_value.split())[
+                            :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                        ]
+                if row:
+                    cleaned_referents[referent_key] = row
+            if cleaned_referents:
+                cleaned_contract["referents"] = cleaned_referents
+        grounding_provenance = semantic_contract.get("grounding_provenance")
+        if isinstance(grounding_provenance, dict):
+            cleaned_grounding: dict[str, Any] = {}
+            for field_name in ("pack_id", "entity_id", "source_ref", "resolver_id", "resolver_version"):
+                raw_value = grounding_provenance.get(field_name)
+                if isinstance(raw_value, str) and raw_value.strip():
+                    cleaned_grounding[field_name] = " ".join(raw_value.split())[
+                        :POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS
+                    ]
+            confidence = grounding_provenance.get("confidence")
+            if isinstance(confidence, (int, float)):
+                cleaned_grounding["confidence"] = max(0.0, min(float(confidence), 1.0))
+            if cleaned_grounding:
+                cleaned_contract["grounding_provenance"] = cleaned_grounding
+        if cleaned_contract:
+            cleaned_contract["contract_version"] = "semantic_contract.v1"
+            normalized["semantic_contract"] = cleaned_contract
     consult_state = profile.get("consult_state")
     if isinstance(consult_state, dict):
         cleaned_consult_state: dict[str, Any] = {}
@@ -1235,6 +1913,77 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
         if cleaned_consult_state:
             normalized["consult_state"] = cleaned_consult_state
     return normalized or None
+
+
+def _trim_policy_core_context_text(
+    value: Any,
+    *,
+    max_chars: int = POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS,
+) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = " ".join(value.split())
+    if not compact:
+        return None
+    return compact[:max_chars]
+
+
+def _compact_policy_core_context(context_payload: dict[str, Any]) -> dict[str, Any] | None:
+    normalized_context: dict[str, Any] = {}
+    for key in ("capability_cards", "policy_cards", "consult_cards"):
+        raw_cards = context_payload.get(key)
+        if not isinstance(raw_cards, list):
+            continue
+        compact_cards: list[dict[str, Any]] = []
+        for raw_card in raw_cards[:POLICY_CORE_CONTEXT_CARD_LIMIT]:
+            if not isinstance(raw_card, dict):
+                continue
+            compact_card: dict[str, Any] = {}
+            for field_name, raw_value in raw_card.items():
+                if isinstance(raw_value, str):
+                    compact_value = _trim_policy_core_context_text(
+                        raw_value,
+                        max_chars=POLICY_CORE_COMPACT_MEMORY_SUMMARY_MAX_CHARS,
+                    )
+                    if compact_value:
+                        compact_card[field_name] = compact_value
+                elif isinstance(raw_value, bool):
+                    compact_card[field_name] = raw_value
+                elif isinstance(raw_value, list):
+                    compact_items: list[str] = []
+                    for raw_item in raw_value[:POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX]:
+                        compact_item = _trim_policy_core_context_text(raw_item, max_chars=64)
+                        if compact_item and compact_item not in compact_items:
+                            compact_items.append(compact_item)
+                    if compact_items:
+                        compact_card[field_name] = compact_items
+            if compact_card:
+                compact_cards.append(compact_card)
+        if compact_cards:
+            normalized_context[key] = compact_cards
+    return normalized_context or None
+
+
+def _build_policy_core_pending_contract_from_expected_reply_type(
+    expected_reply_type: str | None,
+) -> dict[str, Any] | None:
+    if not isinstance(expected_reply_type, str) or not expected_reply_type.strip():
+        return None
+    expected_token = expected_reply_type.strip().casefold()
+    next_question = {
+        "service_choice": "service",
+        "time": "datetime",
+        "name": "name",
+        "phone": "phone",
+        "media": "media",
+    }.get(expected_token)
+    if next_question is None:
+        return None
+    return {
+        "expected_reply_type": expected_token,
+        "next_question": next_question,
+        "open_questions": [next_question],
+    }
 
 
 ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
@@ -1281,122 +2030,6 @@ CONTROLLER_ALLOWED_GOALS = {
 }
 OFFLINE_CONTROLLER_CLASS = "other"
 OFFLINE_CONTROLLER_GOAL = "other"
-CONTROLLER_PROMPT_FALLBACK = """# Dialogue Controller Prompt (pack-ref-only)
-
-Ты Dialogue Controller для сервисного бизнеса. Вход всегда JSON. Верни ТОЛЬКО JSON.
-Не придумывай факты о бизнесе и не используй внешний контекст: только текст клиента и входные поля.
-service_query должен быть словом/фразой только из сообщения клиента (1-6 слов), иначе пустая строка.
-
-Вход (JSON):
-```json
-{"task":"controller","message":"...","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"expected_reply_type":"..."}
-```
-
-или
-```json
-{"task":"answer_interpreter","message":"...","expected_reply_type":"service_choice|time|name","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"question_context":{"prompt_hint":"..."}}
-```
-
-Режимы:
-
-1) task="controller" (или task отсутствует) → строго такой вид:
-```json
-{"class":"...","goal":"...","intents":["..."],"slots":{"service_query":""},"followups":[],"safety_flags":[],"confidence":0.0,"reason":"...","carryover":{}}
-```
-
-2) task="answer_interpreter" → строго такой вид:
-```json
-{"slot":"service|datetime|name","value":"...","confidence":0.0,"reason":"..."}
-```
-
-## CLASS (одно значение)
-- booking — запись/перенос/отмена/окошко/время записи.
-- info_bundle — адрес/как добраться/график/время работы/парковка/гости/ранний приход/цены/длительность.
-- consult — совет/подбор/рекомендации по услугам без цены/адреса/записи.
-- greeting — привет/спасибо/ок.
-- out_of_domain — не по теме (погода, код, рецепты).
-- other — остальное/неуверенность.
-
-## GOAL (одно значение)
-- booking, info, consult, greeting, out_of_domain, other — выбери наиболее точную цель диалога.
-
-## INTENTS (список)
-Разрешённые: booking, pricing, duration, location, hours, consult, greeting, out_of_domain, other.
-- Для info_bundle перечисляй info-интенты из текста (pricing/duration/location/hours).
-- Для booking/consult/greeting/out_of_domain ставь одноимённый интент.
-- Если не уверен — other.
-
-## SLOTS
-- service_query: 1–6 слов, только из текста клиента, если услуга названа явно. Иначе пустая строка.
-
-## FOLLOWUPS
-- Список коротких подсказок (строки), что спросить дальше. Пустой список, если не нужно.
-
-## SAFETY_FLAGS
-- Список коротких меток рисков (например, "payment", "medical", "complaint") если они видны. Иначе пусто.
-
-## CONFIDENCE
-- 0.0–1.0. Если сомневаешься — 0.0.
-
-## REASON
-- Короткая причина (1–6 слов).
-
-## ANSWER INTERPRETER (task="answer_interpreter")
-- slot: service|datetime|name. expected_reply_type: service_choice→service, time→datetime, name→name.
-- value: краткий ответ из сообщения клиента (для service 1–6 слов). Если ответа нет — пустая строка.
-- confidence: 0.0–1.0. Если сомневаешься — 0.0.
-"""
-
-PLAN_PROMPT_FALLBACK = """# Hybrid LLM Plan Prompt
-Return JSON only (no markdown). Required fields: outcome, tool_action, confidence.
-Optional fields: tool_args, pack_refs, language, reason, goal, slot_state, open_questions.
-Use tool_action and pack_refs only from the allowed lists provided in the input.
-slot_state and open_questions may only use: service, datetime, name.
-For info pricing/duration, include tool_args.service_query (or slot_state.service).
-If missing required args, set outcome=collect and list open_questions accordingly.
-"""
-POLICY_CORE_PROMPT_FALLBACK = """# LLM Policy Core Prompt
-Return JSON only (no markdown). Required fields: intent, action, tool_action, slots, confidence.
-Optional fields: tool_args, pack_refs, slots, next_question, open_questions, needs_manager,
-risk_signals, language, reason, goal, entity_refs, subject_kind, capability, temporal_scope,
-resolution_mode, pending_question_act, pending_question_target, active_question_relation,
-resolver_id, resolver_version.
-Use tool_action and pack_refs only from the allowed lists provided in the input.
-slots/open_questions/next_question may only use: service, datetime, name.
-If memory.profile.current_referents or memory.profile.pending_question_contract is present,
-use it as grounded dialog state for follow-up questions.
-Treat inflected or prepositional service phrases as explicit service mention; do not
-switch to collect only because the service is not in base dictionary form.
-Use intent=master_query only when user explicitly asks about specialists for a concrete service/skill.
-Availability or specialist-selection questions for a concrete service (for example,
-"есть ли специалист по X" or "есть мастер по X") are master_query, not pricing.
-If the service is already present, do not collect specialist name; return fact with
-tool_action=catalog.service_query and tool_args.service_query instead.
-Example: "У вас есть специалист по окрашиванию?" -> intent=master_query,
-action=fact, tool_action=catalog.service_query, tool_args.service_query="окрашивание".
-Example: "Какого мастера вы можете предложить?" -> intent=master_query,
-action=collect, tool_action=collect, next_question=service.
-master_query requires slots.service or tool_args.service_query for fact answers.
-If service is missing for master_query, use action=collect, tool_action=collect,
-next_question=service and open_questions must include service.
-subject_kind values: service, specialist, branch, booking, general.
-capability values: pricing, duration, location, hours, promotions, bookability,
-live_availability, booking_manage, consultation, portfolio, other.
-temporal_scope values: none, specific_time, day, weekday, weekend, date_range.
-resolution_mode values: direct, referent_followup, clarify_missing_subject,
-clarify_missing_time, policy_fact, live_calendar.
-pending_question_target values: time, specialist.
-active_question_relation values: fill_requested_slot, ask_about_requested_slot,
-slot_constraint, slot_compare, mixed_fill_plus_question, referent_followup,
-generic_info_interrupt, specialist_availability_interrupt,
-specialist_availability_followup, tool_result_followup_specialist_missing.
-"""
-
-_CONTROLLER_PROMPT_CACHE: str | None = None
-_PLAN_PROMPT_CACHE: str | None = None
-_POLICY_CORE_PROMPT_CACHE: str | None = None
-
-
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
         return default
@@ -1404,50 +2037,23 @@ def _is_env_enabled(value: str | None, default: bool = True) -> bool:
 
 
 def _load_controller_prompt() -> str:
-    global _CONTROLLER_PROMPT_CACHE
-    if _CONTROLLER_PROMPT_CACHE is not None:
-        return _CONTROLLER_PROMPT_CACHE
-    try:
-        _CONTROLLER_PROMPT_CACHE = CONTROLLER_PROMPT_PATH.read_text(encoding="utf-8").strip()
-    except Exception as exc:
-        logger.warning(f"Dialogue controller prompt load failed: {exc}")
-        _CONTROLLER_PROMPT_CACHE = ""
-    if not _CONTROLLER_PROMPT_CACHE:
-        logger.warning("Dialogue controller prompt fallback in use")
-        _CONTROLLER_PROMPT_CACHE = CONTROLLER_PROMPT_FALLBACK.strip()
-    return _CONTROLLER_PROMPT_CACHE
+    from app.services.controller_plan_prompt_snapshot_service import (
+        load_controller_prompt_snapshot,
+    )
+
+    return load_controller_prompt_snapshot().prompt_text
 
 
 def _load_plan_prompt() -> str:
-    global _PLAN_PROMPT_CACHE
-    if _PLAN_PROMPT_CACHE is not None:
-        return _PLAN_PROMPT_CACHE
-    try:
-        _PLAN_PROMPT_CACHE = PLAN_PROMPT_PATH.read_text(encoding="utf-8").strip()
-    except Exception as exc:
-        logger.warning(f"LLM plan prompt load failed: {exc}")
-        _PLAN_PROMPT_CACHE = ""
-    if not _PLAN_PROMPT_CACHE:
-        logger.warning("LLM plan prompt fallback in use")
-        _PLAN_PROMPT_CACHE = PLAN_PROMPT_FALLBACK.strip()
-    return _PLAN_PROMPT_CACHE
+    from app.services.controller_plan_prompt_snapshot_service import load_plan_prompt_snapshot
+
+    return load_plan_prompt_snapshot().prompt_text
 
 
 def _load_policy_core_prompt() -> str:
-    global _POLICY_CORE_PROMPT_CACHE
-    if _POLICY_CORE_PROMPT_CACHE is not None:
-        return _POLICY_CORE_PROMPT_CACHE
-    try:
-        _POLICY_CORE_PROMPT_CACHE = POLICY_CORE_PROMPT_PATH.read_text(
-            encoding="utf-8"
-        ).strip()
-    except Exception as exc:
-        logger.warning(f"LLM policy core prompt load failed: {exc}")
-        _POLICY_CORE_PROMPT_CACHE = ""
-    if not _POLICY_CORE_PROMPT_CACHE:
-        logger.warning("LLM policy core prompt fallback in use")
-        _POLICY_CORE_PROMPT_CACHE = POLICY_CORE_PROMPT_FALLBACK.strip()
-    return _POLICY_CORE_PROMPT_CACHE
+    from app.services.policy_prompt_snapshot_service import load_policy_core_prompt_snapshot
+
+    return load_policy_core_prompt_snapshot().prompt_text
 
 
 def _clean_controller_class(value: str | None) -> str | None:
@@ -1793,320 +2399,30 @@ def route_dialogue_controller(
     client_config: dict | None = None,
     timing_context: dict | None = None,
 ) -> dict:
-    result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
     carryover_input = _build_controller_carryover(carryover)
-    normalized = (message or "").strip()
-    controller_retry = False
-    total_elapsed_ms = 0.0
-
-    def _build_payload(
-        *,
-        controller_class: str | None = None,
-        goal: str | None = None,
-        intents: list[str] | None = None,
-        slots: dict | None = None,
-        followups: list[str] | None = None,
-        safety_flags: list[str] | None = None,
-        confidence: float = 0.0,
-        reason: str = "",
-        carryover_payload: dict | None = None,
-        controller_llm_ms: float | None = None,
-        controller_error: str = "none",
-        controller_retry_flag: bool | None = None,
-    ) -> dict:
-        payload = {
-            "class": controller_class,
-            "goal": goal,
-            "intents": list(intents or []),
-            "slots": dict(slots or {}),
-            "followups": list(followups or []),
-            "safety_flags": list(safety_flags or []),
-            "confidence": float(confidence or 0.0),
-            "reason": str(reason or ""),
-            "carryover": dict(carryover_payload or carryover_input),
-            "controller_llm_ms": round(controller_llm_ms or 0.0, 2),
-            "controller_error": controller_error,
-            "controller_retry": bool(
-                controller_retry_flag if controller_retry_flag is not None else controller_retry
-            ),
-        }
-        return payload
-
-    if not _current_openai_api_key():
-        result["error"] = "no_api_key"
-        result["payload"] = _build_payload(
-            controller_class=OFFLINE_CONTROLLER_CLASS,
-            goal=OFFLINE_CONTROLLER_GOAL,
-            intents=[],
-            slots={},
-            followups=[],
-            safety_flags=[],
-            confidence=0.0,
-            reason="offline_no_api_key",
-            carryover_payload=carryover_input,
-            controller_llm_ms=0.0,
-            controller_error="no_api_key",
-            controller_retry_flag=False,
-        )
-        return result
-
-    if not normalized:
-        result["error"] = "empty_message"
-        result["payload"] = _build_payload(controller_error="empty_message")
-        return result
-    prompt = _load_controller_prompt()
-    if not prompt:
-        result["error"] = "prompt_missing"
-        result["payload"] = _build_payload(controller_error="prompt_missing")
-        return result
-    if not _should_attempt_llm(
-        timing_context,
-        timeout_seconds=CONTROLLER_TIMEOUT_SECONDS,
-        stage="controller_llm",
-    ):
-        result["error"] = "deadline_exceeded"
-        result["payload"] = _build_payload(
-            controller_error="deadline_exceeded",
-            controller_llm_ms=0.0,
-            reason="deadline_exceeded",
-            controller_retry_flag=False,
-        )
-        return result
-
-    controller_input = {
-        "task": "controller",
-        "message": message,
-        "carryover": carryover_input,
+    logger.warning(
+        "Dialogue controller retired; semantic ownership lives in policy-core",
+        extra={"context": {"client_slug": client_slug, "timing_context_present": bool(timing_context)}},
+    )
+    return {
+        "ok": False,
+        "payload": {
+            "class": None,
+            "goal": None,
+            "intents": [],
+            "slots": {},
+            "followups": [],
+            "safety_flags": [],
+            "confidence": 0.0,
+            "reason": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+            "carryover": dict(carryover_input),
+            "controller_llm_ms": 0.0,
+            "controller_error": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+            "controller_retry": False,
+        },
+        "error": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+        "raw": None,
     }
-    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
-        controller_input["expected_reply_type"] = expected_reply_type.strip()
-
-    budget_meta = consume_llm_budget(
-        client_slug=client_slug or "unknown",
-        client_config=client_config,
-        scope="router",
-    )
-    _append_llm_budget_event(timing_context, budget_meta)
-    if not budget_meta.get("allowed", True):
-        result["error"] = "budget_exceeded"
-        result["payload"] = _build_payload(
-            controller_error="budget_exceeded",
-            controller_llm_ms=0.0,
-            controller_retry_flag=False,
-        )
-        return result
-
-    try:
-        llm = get_llm_provider()
-    except RuntimeError as exc:
-        if "OPENAI_API_KEY missing" in str(exc):
-            logger.info("Controller skipped: OPENAI_API_KEY missing")
-            result["error"] = "no_api_key"
-            return result
-        logger.warning(f"Controller provider init failed: {exc}")
-        result["error"] = _classify_llm_error(exc)
-        return result
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(controller_input, ensure_ascii=False)},
-    ]
-    model_name = CONTROLLER_MODEL.strip().lower()
-    temperature = 0.0
-    temperature_override: float | None = temperature
-    if model_name.startswith("gpt-5"):
-        temperature_override = 1.0
-    def _call_controller_llm(
-        max_tokens: int,
-        *,
-        temperature_override: float | None,
-    ) -> tuple[Any | None, float, str | None]:
-        llm_start = time.monotonic()
-        try:
-            kwargs = {
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "model": CONTROLLER_MODEL,
-                "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
-            }
-            if temperature_override is not None:
-                kwargs["temperature"] = temperature_override
-            response = llm.generate(**kwargs)
-        except httpx.TimeoutException as exc:
-            elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-            _log_timing(
-                "controller_llm_ms",
-                elapsed_ms,
-                timing_context=timing_context,
-                extra={
-                    "model_name": CONTROLLER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": True,
-                    "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature_override,
-                },
-            )
-            record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
-            logger.warning(f"Dialogue controller LLM timeout after {CONTROLLER_TIMEOUT_SECONDS}s: {exc}")
-            return None, elapsed_ms, "timeout"
-        except Exception as exc:
-            elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-            error_text = str(exc)
-            error_code = "error"
-            if "temperature" in error_text and "unsupported" in error_text:
-                error_code = "unsupported_temperature"
-            _log_timing(
-                "controller_llm_ms",
-                elapsed_ms,
-                timing_context=timing_context,
-                extra={
-                    "model_name": CONTROLLER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": False,
-                    "error": error_text,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature_override,
-                },
-            )
-            record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
-            logger.warning(f"Dialogue controller LLM failed: {exc}")
-            return None, elapsed_ms, error_code
-
-        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        _log_timing(
-            "controller_llm_ms",
-            elapsed_ms,
-            timing_context=timing_context,
-            extra={
-                "model_name": CONTROLLER_MODEL,
-                "model_tier": "fast",
-                "timeout": False,
-                "max_tokens": max_tokens,
-                "temperature": temperature_override,
-            },
-        )
-        record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
-        return response, elapsed_ms, None
-
-    response, elapsed_ms, error = _call_controller_llm(
-        CONTROLLER_MAX_TOKENS, temperature_override=temperature_override
-    )
-    total_elapsed_ms += elapsed_ms
-    if error == "unsupported_temperature":
-        controller_retry = True
-        temperature_override = 1.0
-        response, elapsed_ms, error = _call_controller_llm(
-            CONTROLLER_MAX_TOKENS, temperature_override=temperature_override
-        )
-        total_elapsed_ms += elapsed_ms
-    if error == "timeout":
-        controller_retry = True
-        retry_tokens = _controller_retry_max_tokens(CONTROLLER_MAX_TOKENS)
-        response, elapsed_ms, error = _call_controller_llm(
-            retry_tokens, temperature_override=temperature_override
-        )
-        total_elapsed_ms += elapsed_ms
-    if error is not None:
-        result["error"] = error
-        result["payload"] = _build_payload(
-            controller_error=error,
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-
-    content = (response.content or "").strip()
-    result["raw"] = content
-    if not content:
-        result["error"] = "empty_response"
-        result["payload"] = _build_payload(
-            controller_error="empty_response",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-
-    payload = None
-    try:
-        payload = json.loads(content)
-    except Exception:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                payload = json.loads(match.group(0))
-            except Exception:
-                payload = None
-    if not isinstance(payload, dict):
-        result["error"] = "invalid_json"
-        result["payload"] = _build_payload(
-            controller_error="invalid_json",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-    contract, schema_error = validate_dialogue_controller_output(payload)
-    if schema_error:
-        result["error"] = "invalid_schema"
-        result["payload"] = _build_payload(
-            controller_error="invalid_schema",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-    payload = contract.model_dump(by_alias=True)
-
-    controller_class = _clean_controller_class(payload.get("class"))
-    goal = _clean_controller_goal(payload.get("goal"))
-    if not controller_class:
-        result["error"] = "invalid_class"
-        result["payload"] = _build_payload(
-            controller_error="invalid_class",
-            controller_llm_ms=total_elapsed_ms,
-            controller_retry_flag=controller_retry,
-        )
-        return result
-
-    intents = _clean_controller_intents(payload.get("intents"))
-    confidence = payload.get("confidence")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(confidence, 1.0))
-    reason = payload.get("reason")
-    if not isinstance(reason, str):
-        reason = ""
-
-    slots = payload.get("slots")
-    if not isinstance(slots, dict):
-        slots = {}
-    slots = dict(slots)
-    slots["service_query"] = _clean_controller_service_query(slots.get("service_query"))
-    followups = _clean_controller_followups(payload.get("followups"))
-    safety_flags = _clean_controller_safety_flags(payload.get("safety_flags"))
-
-    carryover_payload = payload.get("carryover")
-    if not isinstance(carryover_payload, dict):
-        carryover_payload = {}
-    if not carryover_payload and controller_input.get("carryover"):
-        carryover_payload = controller_input["carryover"]
-
-    result["ok"] = True
-    result["payload"] = _build_payload(
-        controller_class=controller_class,
-        goal=goal,
-        intents=intents,
-        slots=slots,
-        followups=followups,
-        safety_flags=safety_flags,
-        confidence=confidence,
-        reason=reason,
-        carryover_payload=carryover_payload,
-        controller_llm_ms=total_elapsed_ms,
-        controller_error="none",
-        controller_retry_flag=controller_retry,
-    )
-    return result
 
 
 def route_llm_plan(
@@ -2156,6 +2472,7 @@ def route_llm_policy_core(
     client_slug: str | None = None,
     client_config: dict | None = None,
     timing_context: dict | None = None,
+    max_tokens_override: int | None = None,
 ) -> dict:
     result: dict[str, Any] = {
         "ok": False,
@@ -2168,6 +2485,18 @@ def route_llm_policy_core(
         "compact_retry_used": False,
         "structured_output_enabled": False,
         "structured_output_fallback_used": False,
+        "structured_output_fallback_reason": None,
+        "response_format_error": None,
+        "policy_input": None,
+        "schema_error": None,
+        "binding": None,
+        "projection_error": None,
+        "projection_trace": None,
+        "model_name": None,
+        "attempt_count": 0,
+        "contract_repair_retry_used": False,
+        "contract_repair_reason": None,
+        "contract_repair_input": None,
     }
     normalized = (message or "").strip()
     if not normalized:
@@ -2216,41 +2545,52 @@ def route_llm_policy_core(
         result["error"] = "budget_exceeded"
         return result
 
-    allowed_tool_actions = [
-        "info",
-        "consult",
-        "booking",
-        "handoff",
-        "collect",
-        "calendar.list_slots",
-        "calendar.book_slot",
-        "calendar.get_booking",
-        "calendar.reschedule",
-        "calendar.cancel",
-        "catalog.service_query",
-        "catalog.location",
-        "catalog.portfolio",
-    ]
+    normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile) or {}
+    if (
+        isinstance(current_goal, str)
+        and current_goal.strip()
+        and not normalized_memory_profile.get("active_goal")
+    ):
+        normalized_memory_profile["active_goal"] = current_goal.strip().casefold()
+    legacy_slot_state = _normalize_policy_core_slot_state(slot_state)
+    if legacy_slot_state and not normalized_memory_profile.get("slot_state"):
+        normalized_memory_profile["slot_state"] = legacy_slot_state
+    if not normalized_memory_profile.get("pending_question_contract"):
+        pending_contract = _build_policy_core_pending_contract_from_expected_reply_type(
+            expected_reply_type,
+        )
+        if pending_contract:
+            normalized_memory_profile["pending_question_contract"] = pending_contract
+
+    # Assemble the owner envelope from a governed context snapshot rather than
+    # letting the owner gateway compile refs/cards locally.
+    from app.services.policy_context_snapshot_service import build_policy_core_context_snapshot
+
+    context_snapshot = build_policy_core_context_snapshot(
+        client_slug=client_slug,
+        info_refs=info_refs,
+        consult_refs=consult_refs,
+    )
+    allowed_payload = context_snapshot.as_allowed_payload()
+    context_payload = context_snapshot.as_context_payload()
+    allowed_tool_actions = list(allowed_payload.get("tool_actions") or [])
+    allowed_info_refs = list(allowed_payload.get("info_refs") or [])
+    allowed_consult_refs = list(allowed_payload.get("consult_refs") or [])
     policy_input: dict[str, Any] = {
         "task": "llm_policy_core",
         "message": message,
-        "expected_reply_type": expected_reply_type,
-        "current_goal": current_goal,
-        "slot_state": slot_state or {},
-        "allowed": {
-            "tool_actions": list(allowed_tool_actions),
-            "info_refs": list(info_refs or []),
-            "consult_refs": list(consult_refs or []),
-        },
+        "allowed": dict(allowed_payload),
     }
+    if context_payload:
+        policy_input["context"] = context_payload
     normalized_memory_summary = _normalize_policy_core_memory_summary(memory_summary)
-    normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile)
     if normalized_memory_summary or normalized_memory_profile:
         policy_input["memory"] = {}
         if normalized_memory_summary:
             policy_input["memory"]["summary"] = normalized_memory_summary
         if normalized_memory_profile:
             policy_input["memory"]["profile"] = normalized_memory_profile
+    result["policy_input"] = deepcopy(policy_input)
 
     try:
         llm = get_llm_provider()
@@ -2262,10 +2602,7 @@ def route_llm_policy_core(
         logger.warning(f"Policy core provider init failed: {exc}")
         result["error"] = _classify_llm_error(exc)
         return result
-    temperature = 0.0
-    model_name = POLICY_CORE_MODEL.strip().lower()
-    if model_name.startswith("gpt-5"):
-        temperature = 1.0
+    temperature = _resolve_model_temperature(POLICY_CORE_MODEL)
 
     messages = _build_policy_core_messages(prompt, policy_input)
     compact_messages: list[dict[str, str]] | None = None
@@ -2277,8 +2614,10 @@ def route_llm_policy_core(
     use_compact_messages = compact_first_attempt
     structured_output_enabled = _policy_core_structured_output_enabled()
     result["structured_output_enabled"] = structured_output_enabled
+    from app.services.policy_vocabulary_snapshot_service import build_policy_core_response_format
+
     policy_response_format = (
-        _build_policy_core_response_format(allowed_tool_actions)
+        build_policy_core_response_format(allowed_tool_actions)
         if structured_output_enabled
         else None
     )
@@ -2287,31 +2626,41 @@ def route_llm_policy_core(
     if micro_deadline_mode:
         retry_on_timeout = False
         retry_on_transient = False
-    timeout_attempts = [policy_timeout_seconds]
-    if retry_on_timeout:
-        retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
-        if retry_timeout > 0 and retry_timeout not in timeout_attempts:
-            timeout_attempts.append(retry_timeout)
-    if retry_on_transient and len(timeout_attempts) == 1:
-        timeout_attempts.append(timeout_attempts[0])
     fallback_model = POLICY_CORE_TIMEOUT_FALLBACK_MODEL.strip()
     if fallback_model.casefold() == POLICY_CORE_MODEL.strip().casefold():
         fallback_model = ""
+    timeout_attempts = [policy_timeout_seconds]
+    if retry_on_timeout and not fallback_model:
+        retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        if retry_timeout > 0 and retry_timeout not in timeout_attempts:
+            timeout_attempts.append(retry_timeout)
+    if retry_on_transient and len(timeout_attempts) == 1 and not fallback_model:
+        timeout_attempts.append(timeout_attempts[0])
 
     llm_start = time.monotonic()
     response = None
     error = None
     attempt_count = 0
     model_name_used = POLICY_CORE_MODEL
+    temperature_used = temperature
+    reasoning_effort_used = _resolve_policy_core_reasoning_effort(POLICY_CORE_MODEL)
     fallback_model_attempted = False
     timeout_seconds_used = policy_timeout_seconds
-    max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
+    max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
+        policy_timeout_seconds,
+        max_tokens_override,
+        POLICY_CORE_MODEL,
+    )
     transient_retry_used = False
     structured_output_fallback_used = False
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
         attempt_count = attempt_idx + 1
         timeout_seconds_used = timeout_seconds
-        max_tokens_used = _resolve_policy_core_max_tokens(timeout_seconds)
+        max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
+            timeout_seconds,
+            max_tokens_override,
+            POLICY_CORE_MODEL,
+        )
         attempt_uses_compact = use_compact_messages
         if attempt_uses_compact and compact_messages is None:
             compact_input = _build_policy_core_compact_input(policy_input)
@@ -2334,6 +2683,7 @@ def route_llm_policy_core(
                 timeout_seconds=timeout_seconds,
                 temperature=temperature,
                 response_format=policy_response_format,
+                reasoning_effort=reasoning_effort_used,
             )
             model_name_used = POLICY_CORE_MODEL
             error = None
@@ -2365,12 +2715,15 @@ def route_llm_policy_core(
                 and _policy_core_uses_response_format(exc)
             ):
                 try:
+                    result["response_format_error"] = str(exc)
+                    result["structured_output_fallback_reason"] = "response_format_invalid_request"
                     response = llm.generate(
                         messages=messages_for_attempt,
                         max_tokens=max_tokens_used,
                         model=POLICY_CORE_MODEL,
                         timeout_seconds=timeout_seconds,
                         temperature=temperature,
+                        reasoning_effort=reasoning_effort_used,
                     )
                     model_name_used = POLICY_CORE_MODEL
                     error = None
@@ -2443,7 +2796,10 @@ def route_llm_policy_core(
             break
 
     if error == "timeout" and fallback_model:
-        fallback_timeout_seconds = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        fallback_timeout_seconds = min(
+            max(POLICY_CORE_FALLBACK_TIMEOUT_SECONDS, POLICY_CORE_RETRY_TIMEOUT_SECONDS),
+            policy_timeout_seconds,
+        )
         fallback_use_compact = use_compact_messages or compact_input_used
         if not fallback_use_compact:
             fallback_use_compact = True
@@ -2461,7 +2817,13 @@ def route_llm_policy_core(
         ):
             attempt_count += 1
             timeout_seconds_used = fallback_timeout_seconds
-            max_tokens_used = _resolve_policy_core_max_tokens(fallback_timeout_seconds)
+            temperature_used = _resolve_model_temperature(fallback_model)
+            reasoning_effort_used = _resolve_policy_core_reasoning_effort(fallback_model)
+            max_tokens_used = _resolve_policy_core_max_tokens_with_cap(
+                fallback_timeout_seconds,
+                max_tokens_override,
+                fallback_model,
+            )
             fallback_model_attempted = True
             try:
                 response = llm.generate(
@@ -2469,8 +2831,9 @@ def route_llm_policy_core(
                     max_tokens=max_tokens_used,
                     model=fallback_model,
                     timeout_seconds=fallback_timeout_seconds,
-                    temperature=temperature,
+                    temperature=temperature_used,
                     response_format=policy_response_format,
+                    reasoning_effort=reasoning_effort_used,
                 )
                 model_name_used = fallback_model
                 error = None
@@ -2485,12 +2848,15 @@ def route_llm_policy_core(
                     and _policy_core_uses_response_format(exc)
                 ):
                     try:
+                        result["response_format_error"] = str(exc)
+                        result["structured_output_fallback_reason"] = "response_format_invalid_request"
                         response = llm.generate(
                             messages=fallback_messages,
                             max_tokens=max_tokens_used,
                             model=fallback_model,
                             timeout_seconds=fallback_timeout_seconds,
-                            temperature=temperature,
+                            temperature=temperature_used,
+                            reasoning_effort=reasoning_effort_used,
                         )
                         model_name_used = fallback_model
                         error = None
@@ -2514,6 +2880,8 @@ def route_llm_policy_core(
     result["compact_input_used"] = compact_input_used
     result["compact_retry_used"] = compact_retry_used
     result["structured_output_fallback_used"] = structured_output_fallback_used
+    result["model_name"] = model_name_used
+    result["attempt_count"] = attempt_count
     _log_timing(
         "policy_core_llm_ms",
         elapsed_ms,
@@ -2530,8 +2898,9 @@ def route_llm_policy_core(
             "fallback_model_attempted": fallback_model_attempted,
             "fallback_model": fallback_model or None,
             "max_tokens": max_tokens_used,
+            "max_tokens_override": max_tokens_override,
             "timeout_budgeted": policy_timeout_seconds,
-            "temperature": temperature,
+            "temperature": temperature_used,
             "micro_deadline_mode": micro_deadline_mode,
             "compact_first_attempt": compact_first_attempt,
             "compact_input_used": compact_input_used,
@@ -2539,6 +2908,7 @@ def route_llm_policy_core(
             "compact_trigger_timeout_seconds": POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS,
             "structured_output_enabled": structured_output_enabled,
             "structured_output_fallback_used": structured_output_fallback_used,
+            "reasoning_effort": reasoning_effort_used,
         },
     )
     record_llm_time(client_slug, "policy_core_llm_ms", elapsed_ms)
@@ -2553,27 +2923,140 @@ def route_llm_policy_core(
         result["error"] = "empty_response"
         return result
 
-    payload = None
-    try:
-        payload = json.loads(content)
-    except Exception:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                payload = json.loads(match.group(0))
-            except Exception:
-                payload = None
+    payload = _parse_policy_core_content(content)
     if not isinstance(payload, dict):
         result["error"] = "invalid_json"
+        logger.warning(
+            "LLM policy core returned invalid JSON",
+            extra={
+                "context": {
+                    "model_name": model_name_used,
+                    "elapsed_ms": elapsed_ms,
+                    "raw": content[:500],
+                }
+            },
+        )
         return result
 
+    payload, tool_args_sanitized = _sanitize_policy_core_payload(payload)
+    if tool_args_sanitized:
+        result["tool_args_sanitized"] = True
     contract, schema_error = validate_llm_policy_core_output(payload)
+    if schema_error and _policy_core_schema_requires_master_query_reclassification(
+        payload=payload,
+        schema_error=schema_error,
+        normalized_memory_profile=normalized_memory_profile,
+    ):
+        schema_error = "llm_policy_core_error:active_followup_master_query_reclassification_required"
+    if contract is not None and schema_error is None:
+        schema_error = _validate_policy_core_runtime_contract(
+            contract,
+            normalized_memory_profile=normalized_memory_profile,
+        )
     if schema_error:
+        repair_instruction = _build_policy_core_contract_repair_instruction(
+            schema_error=schema_error,
+            normalized_memory_profile=normalized_memory_profile,
+        )
+        if repair_instruction and _should_attempt_llm(
+            timing_context,
+            timeout_seconds=timeout_seconds_used,
+            stage="policy_core_contract_repair",
+        ):
+            repair_messages = list(messages)
+            repair_messages.append({"role": "assistant", "content": content})
+            repair_messages.append({"role": "user", "content": repair_instruction})
+            try:
+                repair_response = llm.generate(
+                    messages=repair_messages,
+                    max_tokens=max_tokens_used,
+                    model=model_name_used,
+                    timeout_seconds=timeout_seconds_used,
+                    temperature=temperature_used,
+                    response_format=policy_response_format,
+                    reasoning_effort=reasoning_effort_used,
+                )
+                attempt_count += 1
+                repaired_content = (repair_response.content or "").strip()
+                if repaired_content:
+                    result["contract_repair_retry_used"] = True
+                    result["contract_repair_reason"] = schema_error
+                    result["contract_repair_input"] = repair_instruction
+                    result["raw"] = repaired_content
+                    content = repaired_content
+                    payload = _parse_policy_core_content(repaired_content)
+                    if isinstance(payload, dict):
+                        payload, repair_tool_args_sanitized = _sanitize_policy_core_payload(payload)
+                        if repair_tool_args_sanitized:
+                            result["tool_args_sanitized"] = True
+                        contract, schema_error = validate_llm_policy_core_output(payload)
+                        if schema_error and _policy_core_schema_requires_master_query_reclassification(
+                            payload=payload,
+                            schema_error=schema_error,
+                            normalized_memory_profile=normalized_memory_profile,
+                        ):
+                            schema_error = "llm_policy_core_error:active_followup_master_query_reclassification_required"
+                        if contract is not None and schema_error is None:
+                            schema_error = _validate_policy_core_runtime_contract(
+                                contract,
+                                normalized_memory_profile=normalized_memory_profile,
+                            )
+                elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+                result["elapsed_ms"] = elapsed_ms
+                result["attempt_count"] = attempt_count
+            except Exception as exc:
+                logger.warning("LLM policy core contract repair retry failed: %s", exc)
+        if schema_error:
+            result["error"] = "invalid_schema"
+            result["schema_error"] = schema_error
+            logger.warning(
+                "LLM policy core returned invalid schema",
+                extra={
+                    "context": {
+                        "model_name": model_name_used,
+                        "elapsed_ms": elapsed_ms,
+                        "schema_error": schema_error,
+                        "payload": payload,
+                    }
+                },
+            )
+            return result
+    allowed_pack_refs = {
+        ref.strip()
+        for ref in allowed_info_refs + allowed_consult_refs
+        if isinstance(ref, str) and ref.strip()
+    }
+    if any(ref not in allowed_pack_refs for ref in contract.pack_refs):
         result["error"] = "invalid_schema"
         return result
 
+    semantic_frame = contract.model_dump(exclude_none=True)
+    for container_field in ("pack_refs", "slots", "open_questions", "risk_signals", "entity_refs", "referents"):
+        if not semantic_frame.get(container_field):
+            semantic_frame.pop(container_field, None)
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(semantic_frame)
+    semantic_decision_payload = semantic_decision.model_dump(mode="python", exclude_none=True)
+
+    binding_plan, projection_trace, projection_error = build_binding_plan(
+        semantic_decision=semantic_decision_payload,
+        allowed_tool_actions=allowed_tool_actions,
+    )
+    if projection_error:
+        result["error"] = "invalid_projection"
+        result["projection_error"] = projection_error
+        result["projection_trace"] = {
+            "status": "error",
+            "projection_source": "policy_tool_projector",
+            "tool_action_hint": semantic_frame.get("tool_action_hint"),
+            "error": projection_error,
+        }
+        return result
+
+    result["binding_plan"] = binding_plan.model_dump(mode="python", exclude_none=True)
+    result["binding"] = binding_plan.as_compat_binding_payload()
+    result["projection_trace"] = dict(projection_trace or {})
     result["ok"] = True
-    result["payload"] = contract.model_dump()
+    result["payload"] = semantic_decision_payload
     return result
 
 
@@ -2585,7 +3068,6 @@ def interpret_expected_reply(
     question_context: dict | None = None,
     client_slug: str | None = None,
 ) -> dict:
-    result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
     expected_reply_type_cleaned = (
         expected_reply_type.strip().lower()
         if isinstance(expected_reply_type, str)
@@ -2594,177 +3076,28 @@ def interpret_expected_reply(
     expected_slot = ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE.get(
         expected_reply_type_cleaned or ""
     )
-    payload = {
-        "slot": expected_slot or "",
-        "value": "",
-        "confidence": 0.0,
-        "reason": "",
-    }
-    result["payload"] = payload
-
-    normalized = (message or "").strip()
-    if not normalized:
-        result["error"] = "empty_message"
-        return result
-    if not expected_slot:
-        result["error"] = "unsupported_expected_reply_type"
-        return result
-    prompt = _load_controller_prompt()
-    if not prompt:
-        result["error"] = "prompt_missing"
-        return result
-
-    carryover_input = _build_controller_carryover(carryover)
-    interpreter_input = {
-        "task": "answer_interpreter",
-        "message": message,
-        "expected_reply_type": expected_reply_type_cleaned,
-        "carryover": carryover_input,
-        "question_context": question_context if isinstance(question_context, dict) else {},
-    }
-    try:
-        llm = get_llm_provider()
-    except RuntimeError as exc:
-        if "OPENAI_API_KEY missing" in str(exc):
-            logger.info("Answer interpreter skipped: OPENAI_API_KEY missing")
-            result["error"] = "no_api_key"
-            return result
-        logger.warning(f"Answer interpreter provider init failed: {exc}")
-        result["error"] = _classify_llm_error(exc)
-        return result
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(interpreter_input, ensure_ascii=False)},
-    ]
-    model_name = ANSWER_INTERPRETER_MODEL.strip()
-    temperature = 1.0 if model_name.lower().startswith("gpt-5") else 0.0
-    llm_start = time.monotonic()
-    try:
-        response = llm.generate(
-            messages,
-            temperature=temperature,
-            max_tokens=ANSWER_INTERPRETER_MAX_TOKENS,
-            model=ANSWER_INTERPRETER_MODEL,
-            timeout_seconds=ANSWER_INTERPRETER_TIMEOUT_SECONDS,
-        )
-    except httpx.TimeoutException as exc:
-        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        logger.info(
-            "Timing",
-            extra={
-                "context": {
-                    "stage": "answer_interpreter_llm_ms",
-                    "elapsed_ms": elapsed_ms,
-                    "model_name": ANSWER_INTERPRETER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": True,
-                    "timeout_seconds": ANSWER_INTERPRETER_TIMEOUT_SECONDS,
-                    "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
-                    "temperature": temperature,
-                }
-            },
-        )
-        record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
-        logger.warning(
-            f"Answer interpreter timeout after {ANSWER_INTERPRETER_TIMEOUT_SECONDS}s: {exc}"
-        )
-        result["error"] = "timeout"
-        return result
-    except Exception as exc:
-        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        logger.info(
-            "Timing",
-            extra={
-                "context": {
-                    "stage": "answer_interpreter_llm_ms",
-                    "elapsed_ms": elapsed_ms,
-                    "model_name": ANSWER_INTERPRETER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": False,
-                    "error": str(exc),
-                    "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
-                    "temperature": temperature,
-                }
-            },
-        )
-        record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
-        logger.warning(f"Answer interpreter failed: {exc}")
-        result["error"] = _classify_llm_error(exc)
-        return result
-
-    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-    logger.info(
-        "Timing",
+    logger.warning(
+        "Answer interpreter retired; semantic ownership lives in policy-core",
         extra={
             "context": {
-                "stage": "answer_interpreter_llm_ms",
-                "elapsed_ms": elapsed_ms,
-                "model_name": ANSWER_INTERPRETER_MODEL,
-                "model_tier": "fast",
-                "timeout": False,
-                "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
-                "temperature": temperature,
+                "client_slug": client_slug,
+                "expected_reply_type": expected_reply_type_cleaned,
+                "question_context_present": bool(question_context),
             }
         },
     )
-    record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
-
-    content = (response.content or "").strip()
-    result["raw"] = content
-    if not content:
-        result["error"] = "empty_response"
-        return result
-
-    parsed = None
-    try:
-        parsed = json.loads(content)
-    except Exception:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-            except Exception:
-                parsed = None
-    if not isinstance(parsed, dict):
-        result["error"] = "invalid_json"
-        return result
-    contract, schema_error = validate_answer_interpreter_output(parsed)
-    if schema_error:
-        result["error"] = "invalid_schema"
-        return result
-    parsed = contract.model_dump()
-
-    detected_slot = _clean_answer_slot(parsed.get("slot")) or expected_slot
-    slot = detected_slot
-    error = None
-    if slot != expected_slot:
-        error = "slot_mismatch"
-        slot = expected_slot
-    value = _clean_answer_value(parsed.get("value"), slot=slot)
-    if not value:
-        error = error or "empty_value"
-    confidence = parsed.get("confidence")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(confidence, 1.0))
-    if error:
-        confidence = 0.0
-    reason = parsed.get("reason")
-    if not isinstance(reason, str):
-        reason = ""
-
-    result["payload"] = {
-        "slot": slot,
-        "detected_slot": detected_slot or "",
-        "value": value,
-        "confidence": confidence,
-        "reason": reason,
+    return {
+        "ok": False,
+        "payload": {
+            "slot": expected_slot or "",
+            "detected_slot": "",
+            "value": "",
+            "confidence": 0.0,
+            "reason": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+        },
+        "error": _SECONDARY_SEMANTIC_OWNER_REMOVED,
+        "raw": None,
     }
-    result["error"] = error
-    result["ok"] = error is None
-    return result
 
 
 def should_escalate(intent: Intent) -> bool:
@@ -3195,6 +3528,7 @@ def hybrid_retrieve_knowledge(
     limit: int = 5,
     branch_id: str | None = None,
     knowledge_tag: str | None = None,
+    dense_meta: dict | None = None,
 ) -> tuple[list[dict], dict]:
     bm25_enabled = _is_env_enabled(os.environ.get("RAG_BM25_ENABLED"), default=True)
     if not QDRANT_API_KEY or os.environ.get("PYTEST_CURRENT_TEST"):
@@ -3241,6 +3575,15 @@ def hybrid_retrieve_knowledge(
         merged["bm25_score"] = bm25_score
         by_key[key] = merged
 
+    vector_count = len(vector_results or [])
+    dense_trace = dict(dense_meta) if isinstance(dense_meta, dict) else {}
+    dense_attempted = bool(dense_trace.get("attempted")) or vector_count > 0
+    dense_available = dense_trace.get("available")
+    if not isinstance(dense_available, bool):
+        dense_available = vector_count > 0
+    dense_status = str(dense_trace.get("status") or ("ok" if dense_available else "not_attempted"))
+    dense_unavailable_reason = dense_trace.get("unavailable_reason")
+
     vector_weight = max(RAG_HYBRID_VECTOR_WEIGHT, 0.0)
     bm25_weight = max(RAG_HYBRID_BM25_WEIGHT, 0.0)
     if vector_weight + bm25_weight <= 0:
@@ -3261,17 +3604,32 @@ def hybrid_retrieve_knowledge(
     )
     merged_results = merged_results[: max(limit, 1)]
 
+    bm25_count = len(bm25_results)
+    if vector_count > 0 and bm25_count > 0:
+        retrieval_mode = "dense_sparse"
+    elif bm25_count > 0:
+        retrieval_mode = "sparse_only"
+    elif vector_count > 0:
+        retrieval_mode = "dense_only"
+    else:
+        retrieval_mode = "empty"
+
     bm25_max_norm = 1.0 if bm25_max > 0 else 0.0
     rag_scores = {
         "vector_max": vector_max,
         "bm25_max": bm25_max,
         "bm25_max_norm": bm25_max_norm,
         "hybrid_max": merged_results[0]["hybrid_score"] if merged_results else 0.0,
-        "vector_count": len(vector_results or []),
-        "bm25_count": len(bm25_results),
+        "vector_count": vector_count,
+        "bm25_count": bm25_count,
         "vector_weight": vector_weight,
         "bm25_weight": bm25_weight,
         "bm25_enabled": bm25_enabled,
+        "retrieval_mode": retrieval_mode,
+        "dense_attempted": dense_attempted,
+        "dense_available": dense_available,
+        "dense_status": dense_status,
+        "dense_unavailable_reason": dense_unavailable_reason,
     }
     if isinstance(bm25_filter_meta, dict):
         rag_scores["bm25_filter"] = bm25_filter_meta

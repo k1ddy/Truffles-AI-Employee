@@ -19,6 +19,7 @@ from app.services.knowledge_runtime import get_runtime_truth
 from app.services.knowledge_service import get_embedding
 from app.services.pack_compiler_service import compile_pack_payload
 from app.services.pack_runtime_types import PackDecision as DemoSalonDecision
+from app.services.runtime_mode_service import is_nonprod_eval_mode
 
 _KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _DEFAULT_CLIENT_SLUG = "demo_salon"
@@ -66,8 +67,7 @@ logger = get_logger("demo_salon_knowledge")
 
 
 def _use_local_embeddings() -> bool:
-    value = str(os.environ.get("TEST_MODE", "")).strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    return is_nonprod_eval_mode(os.environ)
 
 
 @dataclass(frozen=True)
@@ -1201,6 +1201,38 @@ def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def _contains_any_terms(
+    normalized: str,
+    keywords: list[str],
+    *,
+    exact_terms: set[str] | None = None,
+    stem_terms: dict[str, str] | None = None,
+) -> bool:
+    tokens = _tokenize(normalized)
+    exact_terms = {term.casefold() for term in (exact_terms or set()) if term}
+    stem_terms = {
+        str(term).casefold(): str(stem).casefold()
+        for term, stem in (stem_terms or {}).items()
+        if term and stem
+    }
+    for keyword in keywords:
+        candidate = str(keyword or "").strip().casefold()
+        if not candidate:
+            continue
+        if any(char.isspace() for char in candidate):
+            if candidate in normalized:
+                return True
+            continue
+        if candidate in exact_terms:
+            if any(token == candidate for token in tokens):
+                return True
+            continue
+        stem = stem_terms.get(candidate, candidate)
+        if any(token.startswith(stem) for token in tokens):
+            return True
+    return False
+
+
 def _signal_contains_any(normalized: str, client_slug: str | None, key: str) -> bool:
     phrases = get_signal_lexicon_list(client_slug, key)
     return bool(phrases) and _contains_any(normalized, phrases)
@@ -1583,15 +1615,22 @@ def _has_price_signal(
     *,
     client_slug: str | None = None,
 ) -> bool:
-    if _signal_contains_any(normalized, client_slug, "price_keywords"):
+    if _contains_any_terms(
+        normalized,
+        get_signal_lexicon_list(client_slug, "price_keywords"),
+        exact_terms={"почем", "скок", "скока"},
+        stem_terms={"цена": "цен", "стоимость": "стоимост"},
+    ):
         return True
     if _signal_contains_any(normalized, client_slug, "price_currency_words"):
         return True
     if normalized and "во сколько" not in normalized:
         colloquial_price_patterns = (
             r"\bскольк\w*(?:\s+\w+){0,3}\s+это\s+будет\b",
+            r"\bскольк\w*(?:\s+\w+){0,2}\s+это\s+сто(?:ит|ят)\b",
             r"\bскольк\w*(?:\s+\w+){0,3}\s+обойд",
             r"\bскольк\w*(?:\s+\w+){0,3}\s+выйдет\b",
+            r"\bкак(?:ая|ова)?\s+цен\w*\b",
         )
         if any(re.search(pattern, normalized) for pattern in colloquial_price_patterns):
             slug = _normalize_client_slug(client_slug)
@@ -1647,6 +1686,12 @@ def _has_duration_signal(
     if _signal_contains_any(normalized, client_slug, "duration_keywords"):
         return True
     if re.search(r"\bзанимает\b", normalized):
+        return True
+    if re.search(r"\bскольк\w*(?:\s+\w+){0,3}\s+длит", normalized):
+        return True
+    if re.search(r"\bкак(?:\s+\w+){0,2}\s+долг\w*\b", normalized):
+        return True
+    if "время на" in normalized and get_pack_service_hint(raw_text or "", client_slug=client_slug):
         return True
     if raw_text:
         if _extract_minutes(raw_text) is not None:
@@ -2954,14 +2999,6 @@ def format_reply_from_truth(
     slots = slots or {}
 
     if intent in {"location", "hours", "parking"}:
-        include_parking = intent == "parking"
-        reply, _meta = build_info_combined_reply(
-            include_parking=include_parking,
-            client_slug=client_slug,
-        )
-        if reply:
-            return reply
-        # Fallback to legacy shape if combined reply is not available.
         address = truth.get("salon", {}).get("address", {})
         hours = truth.get("salon", {}).get("hours", {})
         if intent == "location":
@@ -3150,6 +3187,8 @@ def _detect_promotion_intent(normalized: str, *, client_slug: str | None = None)
         "promotion_student_weekday_terms",
     ) and _signal_contains_any(normalized, client_slug, "promotion_student_discount_terms"):
         return "promotion_student"
+    if _signal_contains_any(normalized, client_slug, "promotion_general_terms"):
+        return "promotions"
     return None
 
 

@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 def _summarize_validation_error(exc: ValidationError, *, limit: int = 3) -> str:
@@ -144,8 +152,12 @@ SEMANTIC_RESOLUTION_MODE_VALUES = {
     "referent_followup",
     "clarify_missing_subject",
     "clarify_missing_time",
+    "ask_about_requested_slot",
     "policy_fact",
     "live_calendar",
+}
+SEMANTIC_RESOLUTION_MODE_ALIASES = {
+    "collect": "direct",
 }
 SEMANTIC_PENDING_QUESTION_ACT_VALUES = {
     "fill_requested_slot",
@@ -153,6 +165,9 @@ SEMANTIC_PENDING_QUESTION_ACT_VALUES = {
     "slot_constraint",
     "slot_compare",
     "mixed_fill_plus_question",
+}
+SEMANTIC_PENDING_QUESTION_ACT_ALIASES = {
+    "referent_followup": None,
 }
 SEMANTIC_PENDING_QUESTION_TARGET_VALUES = {
     "time",
@@ -169,6 +184,13 @@ SEMANTIC_ACTIVE_QUESTION_RELATION_VALUES = {
     "specialist_availability_interrupt",
     "specialist_availability_followup",
     "tool_result_followup_specialist_missing",
+}
+SEMANTIC_REFERENT_KEYS = {
+    "service",
+    "specialist",
+    "branch",
+    "booking_ref",
+    "customer",
 }
 
 
@@ -291,14 +313,30 @@ def _normalize_optional_semantic_token(
     *,
     field: str,
     allowed: set[str],
+    aliases: dict[str, str | None] | None = None,
 ) -> str | None:
     cleaned = _normalize_optional_string(value, field=field)
     if cleaned is None:
         return None
     token = cleaned.casefold()
+    if aliases and token in aliases:
+        return aliases[token]
     if token not in allowed:
         raise ValueError(f"{field}_invalid")
     return token
+
+
+def _normalize_optional_confidence(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, bool):
+        raise ValueError("confidence_invalid")
+    if not isinstance(value, (int, float)):
+        raise ValueError("confidence_invalid")
+    normalized = float(value)
+    if normalized < 0 or normalized > 1:
+        raise ValueError("confidence_invalid")
+    return normalized
 
 
 def _normalize_master_service_value(value: Any) -> str | None:
@@ -340,12 +378,78 @@ def _normalize_entity_refs(value: Any) -> list[dict[str, Any]]:
         source_ref = item.get("source_ref")
         if isinstance(source_ref, str) and source_ref.strip():
             row["source_ref"] = source_ref.strip()
+        entity_value = item.get("value")
+        if not isinstance(entity_value, str) or not entity_value.strip():
+            fallback_value = item.get("label")
+            if isinstance(fallback_value, str) and fallback_value.strip():
+                entity_value = fallback_value
+        if isinstance(entity_value, str) and entity_value.strip():
+            row["value"] = entity_value.strip()
         confidence = item.get("confidence")
         if isinstance(confidence, (int, float)):
             row["confidence"] = max(0.0, min(float(confidence), 1.0))
         if row:
             cleaned.append(row)
     return cleaned
+
+
+def _normalize_referent_payload(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("referents_invalid")
+    row: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("value", "value"),
+        ("entity_id", "entity_id"),
+        ("entity_type", "entity_type"),
+        ("source_ref", "source_ref"),
+    ):
+        raw_value = value.get(source_key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            row[target_key] = raw_value.strip()
+    if not row:
+        return {}
+    return row
+
+
+def _normalize_referents(value: Any) -> dict[str, dict[str, Any]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("referents_invalid")
+    cleaned: dict[str, dict[str, Any]] = {}
+    for key, raw_payload in value.items():
+        if not isinstance(key, str):
+            raise ValueError("referents_invalid")
+        referent_key = key.strip().casefold()
+        if referent_key not in SEMANTIC_REFERENT_KEYS:
+            raise ValueError("referents_invalid")
+        payload = _normalize_referent_payload(raw_payload)
+        if payload:
+            cleaned[referent_key] = payload
+    return cleaned
+
+
+def _referent_value(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("value")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    entity_id = payload.get("entity_id")
+    if isinstance(entity_id, str) and entity_id.strip():
+        return entity_id.strip()
+    return None
+
+
+def _referent_entity_id(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    entity_id = payload.get("entity_id")
+    if isinstance(entity_id, str) and entity_id.strip():
+        return entity_id.strip()
+    return None
 
 
 class DialogueControllerOutput(BaseModel):
@@ -483,19 +587,22 @@ class LlmPolicyCoreOutput(BaseModel):
 
     intent: str
     action: str
-    tool_action: str
-    tool_args: dict[str, Any] = Field(default_factory=dict)
+    tool_action_hint: str = Field(
+        validation_alias=AliasChoices("tool_action_hint", "tool_action")
+    )
     pack_refs: list[str] = Field(default_factory=list)
-    slots: dict[str, str]
+    slots: dict[str, str] = Field(default_factory=dict)
+    expected_reply_type: str | None = None
     next_question: str | None = None
     open_questions: list[str] = Field(default_factory=list)
     needs_manager: bool = False
     risk_signals: list[str] = Field(default_factory=list)
     language: str | None = None
-    confidence: float = Field(..., ge=0, le=1)
+    confidence: float = Field(0.0, ge=0, le=1)
     reason: str | None = None
     goal: str | None = None
     entity_refs: list[dict[str, Any]] = Field(default_factory=list)
+    referents: dict[str, dict[str, Any]] = Field(default_factory=dict)
     subject_kind: str | None = None
     capability: str | None = None
     temporal_scope: str | None = None
@@ -506,7 +613,7 @@ class LlmPolicyCoreOutput(BaseModel):
     resolver_id: str | None = None
     resolver_version: str | None = None
 
-    @field_validator("intent", "action", "tool_action", mode="before")
+    @field_validator("intent", "action", "tool_action_hint", mode="before")
     @classmethod
     def _validate_action(cls, value: Any, info) -> str:
         normalized = _normalize_required_string(value, field=info.field_name)
@@ -514,11 +621,17 @@ class LlmPolicyCoreOutput(BaseModel):
             return _MASTER_QUERY_INTENT_ALIASES.get(normalized, normalized)
         return normalized
 
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _validate_confidence(cls, value: Any) -> float:
+        return _normalize_optional_confidence(value)
+
     @field_validator(
-        "tool_action",
+        "tool_action_hint",
         "language",
         "reason",
         "goal",
+        "expected_reply_type",
         "next_question",
         "resolver_id",
         "resolver_version",
@@ -527,14 +640,6 @@ class LlmPolicyCoreOutput(BaseModel):
     @classmethod
     def _validate_optional_fields(cls, value: Any, info) -> str | None:
         return _normalize_optional_string(value, field=info.field_name)
-
-    @field_validator("tool_args", mode="before")
-    @classmethod
-    def _validate_tool_args(cls, value: Any) -> dict[str, Any]:
-        normalized, error = validate_tool_args_shape(tool_action=None, tool_args=value)
-        if error:
-            raise ValueError(error)
-        return normalized or {}
 
     @field_validator("pack_refs", "open_questions", "risk_signals", mode="before")
     @classmethod
@@ -550,6 +655,11 @@ class LlmPolicyCoreOutput(BaseModel):
     @classmethod
     def _validate_entity_refs(cls, value: Any) -> list[dict[str, Any]]:
         return _normalize_entity_refs(value)
+
+    @field_validator("referents", mode="before")
+    @classmethod
+    def _validate_referents(cls, value: Any) -> dict[str, dict[str, Any]]:
+        return _normalize_referents(value)
 
     @field_validator("subject_kind", mode="before")
     @classmethod
@@ -585,6 +695,7 @@ class LlmPolicyCoreOutput(BaseModel):
             value,
             field="resolution_mode",
             allowed=SEMANTIC_RESOLUTION_MODE_VALUES,
+            aliases=SEMANTIC_RESOLUTION_MODE_ALIASES,
         )
 
     @field_validator("pending_question_act", mode="before")
@@ -594,6 +705,7 @@ class LlmPolicyCoreOutput(BaseModel):
             value,
             field="pending_question_act",
             allowed=SEMANTIC_PENDING_QUESTION_ACT_VALUES,
+            aliases=SEMANTIC_PENDING_QUESTION_ACT_ALIASES,
         )
 
     @field_validator("pending_question_target", mode="before")
@@ -624,34 +736,23 @@ class LlmPolicyCoreOutput(BaseModel):
         raise ValueError("needs_manager_invalid")
 
     @model_validator(mode="after")
-    def _validate_tool_args_for_action(self):
-        normalized, error = validate_tool_args_shape(
-            tool_action=self.tool_action,
-            tool_args=self.tool_args,
-        )
-        if error:
-            raise ValueError(error)
-        self.tool_args = normalized or {}
-        return self
-
-    @model_validator(mode="after")
     def _validate_master_query_contract(self):
         if self.intent not in _MASTER_QUERY_INTENTS:
             return self
 
         slot_service = _normalize_master_service_value(self.slots.get("service"))
-        arg_service = _normalize_master_service_value(self.tool_args.get("service_query"))
-        has_service_query = bool(slot_service or arg_service)
+        referent_service = _referent_value(self.referents.get("service"))
+        has_service_query = bool(slot_service or referent_service)
 
         if self.action == "fact":
-            if self.tool_action not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
+            if self.tool_action_hint not in _MASTER_QUERY_FACT_TOOL_ACTIONS:
                 raise ValueError("master_query_tool_action_invalid")
             if not has_service_query:
                 raise ValueError("master_query_service_required")
             return self
 
         if self.action == "collect":
-            if self.tool_action not in _MASTER_QUERY_COLLECT_TOOL_ACTIONS:
+            if self.tool_action_hint not in _MASTER_QUERY_COLLECT_TOOL_ACTIONS:
                 raise ValueError("master_query_collect_tool_action_invalid")
             # Clarify path is valid when service is missing and the model explicitly asks for it.
             collect_requires_service = bool(
@@ -662,7 +763,6 @@ class LlmPolicyCoreOutput(BaseModel):
             return self
 
         return self
-
 
 def validate_dialogue_controller_output(
     payload_json: dict[str, Any],

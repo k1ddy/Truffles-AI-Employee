@@ -372,6 +372,41 @@ def test_build_info_intent_reply_location_uses_truth_address():
     assert "address" in info_sections or "location" in info_sections
 
 
+def test_build_info_intent_reply_location_scoped_request_excludes_hours():
+    reply, meta = _build_info_intent_reply(
+        "location",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Где находится салон?",
+        requested_info_intents=["location"],
+    )
+
+    assert isinstance(reply, str) and "адрес" in reply.casefold()
+    assert "работаем" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert fact_intents == ["location"]
+    assert info_sections == ["address"]
+
+
+def test_build_info_intent_reply_parking_scoped_request_excludes_location_bundle():
+    reply, meta = _build_info_intent_reply(
+        "parking",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Есть ли у вас парковка?",
+        requested_info_intents=["parking"],
+    )
+
+    assert isinstance(reply, str) and "парков" in reply.casefold()
+    assert "адрес" not in reply.casefold()
+    assert "работаем" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert fact_intents == ["parking"]
+    assert info_sections == ["parking"]
+
+
 def test_build_info_intent_reply_promotions_uses_truth_promotions():
     reply, meta = _build_info_intent_reply(
         "promotions",

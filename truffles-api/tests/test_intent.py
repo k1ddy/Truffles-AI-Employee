@@ -1,18 +1,32 @@
+import inspect
 import json
 import time
 from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 
+from app.schemas.capabilities import CapabilitiesPayload
+from app.schemas.consult import ConsultPlaybook
+from app.schemas.intent import validate_llm_policy_core_output
+from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
 from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
+    DomainIntent,
     Intent,
     _build_customer_name_hint_response_format,
-    _build_policy_core_response_format,
+    _build_policy_core_contract_repair_instruction,
     _build_service_query_hint_response_format,
     _build_specialist_hint_response_format,
     _load_policy_core_prompt,
+    _normalize_policy_core_memory_profile,
+    _resolve_model_temperature,
+    _resolve_policy_core_reasoning_effort,
+    _sanitize_policy_core_payload,
+    _validate_policy_core_runtime_contract,
+    classify_domain_with_scores,
+    classify_intent,
     extract_customer_name_hint_llm,
     extract_service_query_hint_llm,
     interpret_expected_reply,
@@ -24,6 +38,7 @@ from app.services.intent_service import (
     route_llm_policy_core,
     should_escalate,
 )
+from app.services.policy_vocabulary_snapshot_service import build_policy_core_response_format
 
 
 class DummyResponse:
@@ -105,6 +120,13 @@ class TestHumanRequestHeuristics:
         assert is_human_request_message("сколько стоит маникюр?") is False
 
 
+def test_classify_intent_no_longer_contains_override_short_circuit():
+    source = inspect.getsource(classify_intent)
+
+    assert "_resolve_override_intent" not in source
+    assert "_resolve_intent_override_flag" not in source
+
+
 class TestOptOutHeuristics:
     def test_detects_opt_out(self):
         assert is_opt_out_message("я не хочу чтобы ты писал мне") is True
@@ -125,122 +147,88 @@ class TestFrustrationHeuristics:
         assert is_frustration_message("спасибо") is False
 
 
-class TestDialogueControllerOffline:
-    def test_returns_fixed_class_and_goal_without_key(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "")
+class TestDialogueControllerRetired:
+    def test_returns_explicit_shadow_owner_removed_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             result = route_dialogue_controller("Привет")
 
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["ok"] is False
+        payload = result["payload"]
+        assert payload["class"] is None
+        assert payload["goal"] is None
+        assert payload["controller_error"] == "secondary_semantic_owner_removed"
+        mock_llm.assert_not_called()
+
+
+def test_route_dialogue_controller_no_longer_contains_override_short_circuit():
+    assert "_resolve_dialogue_controller_override" not in inspect.getsource(route_dialogue_controller)
+
+
+class TestDialogueControllerLegacySurface:
+    def test_carryover_payload_is_preserved_for_legacy_callers(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            result = route_dialogue_controller(
+                "Привет",
+                carryover={"class": "booking", "intents": ["booking"], "info_sections": ["pricing"]},
+            )
+
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["payload"]["carryover"]["class"] == "booking"
+        assert result["payload"]["carryover"]["intents"] == ["booking"]
+        assert result["payload"]["carryover"]["info_sections"] == ["pricing"]
+        mock_llm.assert_not_called()
+
+
+def test_classify_domain_with_scores_no_longer_contains_override_short_circuit():
+    assert "_resolve_domain_routing_override" not in inspect.getsource(classify_domain_with_scores)
+
+
+class TestPolicyCoreOverride:
+    def test_route_llm_policy_core_no_longer_contains_override_short_circuit(self):
+        source = inspect.getsource(route_llm_policy_core)
+
+        assert "_resolve_policy_core_override" not in source
+
+    def test_route_llm_policy_core_returns_no_api_key_without_override_escape(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            result = route_llm_policy_core("Хочу поговорить с менеджером")
+
+        assert result["ok"] is False
         assert result["error"] == "no_api_key"
-        assert result["ok"] is False
-        payload = result["payload"]
-        assert payload["class"] == "other"
-        assert payload["goal"] == "other"
-        assert payload["controller_error"] == "no_api_key"
+        assert result["attempted"] is False
         mock_llm.assert_not_called()
 
 
-class TestDialogueControllerBudget:
-    def test_budget_deadline_skips_llm(self, monkeypatch):
+class TestAnswerInterpreterRetired:
+    def test_returns_explicit_shadow_owner_removed_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        timing_context = {"pipeline_deadline": time.monotonic() - 1.0, "pipeline_budget_ms": 10}
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            result = route_dialogue_controller("Привет", timing_context=timing_context)
+            result = interpret_expected_reply("Alex", expected_reply_type="name")
 
-        assert result["error"] == "deadline_exceeded"
         assert result["ok"] is False
-        payload = result["payload"]
-        assert payload["controller_error"] == "deadline_exceeded"
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["payload"] == {
+            "slot": "name",
+            "detected_slot": "",
+            "value": "",
+            "confidence": 0.0,
+            "reason": "secondary_semantic_owner_removed",
+        }
         mock_llm.assert_not_called()
 
-
-class TestDialogueControllerSchema:
-    def test_valid_schema(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
-            "class": "booking",
-            "goal": "booking",
-            "intents": ["booking"],
-            "slots": {"service_query": "service"},
-            "followups": [],
-            "safety_flags": [],
-            "confidence": 0.7,
-            "reason": "booking request",
-            "carryover": {},
-        }
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps(payload)
-            )
-            result = route_dialogue_controller("I want to book")
-
-        assert result["ok"] is True
-        assert result["error"] is None
-        assert result["payload"]["class"] == "booking"
-        assert result["payload"]["goal"] == "booking"
-
-    def test_invalid_schema(self, monkeypatch):
+    def test_unsupported_slot_still_returns_explicit_removed_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps({"goal": "booking", "confidence": 0.4})
-            )
-            result = route_dialogue_controller("I want to book")
+            result = interpret_expected_reply("Alex", expected_reply_type="unsupported")
 
         assert result["ok"] is False
-        assert result["error"] == "invalid_schema"
-
-
-class TestAnswerInterpreterSchema:
-    def test_valid_schema(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
-            "slot": "name",
-            "value": "Alex",
-            "confidence": 0.6,
-            "reason": "name provided",
-        }
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps(payload)
-            )
-            result = interpret_expected_reply("Alex", expected_reply_type="name")
-
-        assert result["ok"] is True
-        assert result["error"] is None
-        assert result["payload"]["slot"] == "name"
-        assert result["payload"]["value"] == "Alex"
-
-    def test_invalid_schema(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps({"slot": 123, "confidence": 0.5})
-            )
-            result = interpret_expected_reply("Alex", expected_reply_type="name")
-
-        assert result["ok"] is False
-        assert result["error"] == "invalid_schema"
-
-    def test_slot_mismatch_preserves_detected_slot(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
-            "slot": "name",
-            "value": "Лена",
-            "confidence": 0.92,
-            "reason": "name_provided",
-        }
-        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
-            mock_llm.return_value.generate.return_value = DummyResponse(
-                json.dumps(payload, ensure_ascii=False)
-            )
-            result = interpret_expected_reply("Меня зовут Лена", expected_reply_type="time")
-
-        assert result["ok"] is False
-        assert result["error"] == "slot_mismatch"
-        assert result["payload"]["slot"] == "datetime"
-        assert result["payload"]["detected_slot"] == "name"
-        assert result["payload"]["value"] == "Лена"
+        assert result["error"] == "secondary_semantic_owner_removed"
+        assert result["payload"]["slot"] == ""
+        mock_llm.assert_not_called()
 
 
 class TestPolicyCoreTimeoutRetry:
@@ -249,15 +237,28 @@ class TestPolicyCoreTimeoutRetry:
         return {
             "intent": "booking",
             "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "tool_args": {},
+            "tool_action_hint": "collect",
             "pack_refs": [],
+            "entity_refs": [],
+            "referents": {},
             "language": "ru",
             "confidence": 0.8,
             "reason": "ask_time",
             "goal": "booking",
             "slots": {},
+            "next_question": None,
             "open_questions": ["datetime"],
+            "needs_manager": False,
+            "risk_signals": [],
+            "subject_kind": None,
+            "capability": None,
+            "temporal_scope": None,
+            "resolution_mode": None,
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": None,
+            "resolver_id": None,
+            "resolver_version": None,
             "expected_reply_type": "time",
         }
 
@@ -267,8 +268,7 @@ class TestPolicyCoreTimeoutRetry:
             "intent": "master_query",
             "action": "fact",
             "tool_action": "info",
-            "tool_args": {},
-            "pack_refs": ["master"],
+            "pack_refs": [],
             "language": "ru",
             "confidence": 0.8,
             "reason": "master_lookup",
@@ -285,6 +285,73 @@ class TestPolicyCoreTimeoutRetry:
 
         assert result["ok"] is False
         assert result["error"] == "invalid_schema"
+
+    def test_master_query_fact_with_referent_service_passes_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "master_lookup",
+            "goal": "info",
+            "slots": {"service": "", "datetime": "", "name": "", "phone": ""},
+            "next_question": None,
+            "open_questions": [],
+            "needs_manager": False,
+            "risk_signals": [],
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                    "value": "маникюр",
+                    "confidence": 0.94,
+                }
+            ],
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "message",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": "generic_info_interrupt",
+            "resolver_id": "master_lookup",
+            "resolver_version": "2026-03-25",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Кто делает маникюр?")
+
+        assert result["ok"] is True
+        assert "semantic_frame" not in result
+        assert result["payload"]["schema_version"] == "semantic_decision.v1"
+        assert result["payload"]["grounding_requirements"]["referents"]["service"] == {
+            "value": "маникюр",
+            "entity_id": "svc:manicure",
+            "entity_type": "service",
+            "source_ref": "message",
+        }
+        assert result["binding"] == {
+            "tool_action": "info",
+            "tool_args": {},
+        }
+        assert result["binding_plan"]["schema_version"] == "binding_plan.v1"
+        assert result["binding_plan"]["decision_id"] == result["payload"]["decision_id"]
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "info"
+        assert result["binding_plan"]["resolved_args"] == {}
+        assert "tool_args" not in result["payload"]
 
     def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -351,28 +418,776 @@ class TestPolicyCoreTimeoutRetry:
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_MODEL",
-            "gpt-primary",
+            "primary-model",
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
-            "gpt-fallback",
+            "gpt-5.4-nano-2026-03-17",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_REASONING_EFFORT",
+            "low",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_GPT5_MIN_MAX_TOKENS",
+            400,
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_FALLBACK_TIMEOUT_SECONDS",
+            6.0,
         )
 
         payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
                 httpx.TimeoutException("timeout-1"),
-                httpx.TimeoutException("timeout-2"),
                 DummyResponse(json.dumps(payload)),
             ]
             result = route_llm_policy_core("Нужно время", expected_reply_type="time")
 
         assert result["ok"] is True
         assert result["error"] is None
-        assert mock_llm.return_value.generate.call_count == 3
+        assert mock_llm.return_value.generate.call_count == 2
         models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
-        assert models[:2] == ["gpt-primary", "gpt-primary"]
-        assert models[2] == "gpt-fallback"
+        assert models == ["primary-model", "gpt-5.4-nano-2026-03-17"]
+        fallback_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
+        assert fallback_kwargs["reasoning_effort"] == "low"
+        assert fallback_kwargs["max_tokens"] >= 400
+        assert fallback_kwargs["temperature"] is None
+        assert fallback_kwargs["timeout_seconds"] == 6.0
+
+    def test_policy_core_gpt5_compatibility_helpers_use_chat_safe_defaults(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_REASONING_EFFORT",
+            "minimal",
+        )
+
+        assert _resolve_policy_core_reasoning_effort("gpt-5.4-nano-2026-03-17") == "low"
+        assert _resolve_policy_core_reasoning_effort("legacy-model") is None
+        assert _resolve_model_temperature("gpt-5.4-nano-2026-03-17") is None
+        assert _resolve_model_temperature("legacy-model") == 0.0
+
+    def test_policy_core_payload_sanitizer_drops_invalid_optional_tool_args(self):
+        payload, sanitized = _sanitize_policy_core_payload(
+            {
+                "intent": "booking",
+                "action": "fact",
+                "tool_action": "calendar.list_slots",
+                "tool_args": {
+                    "service_query": "Маникюр",
+                    "date": "tomorrow",
+                    "duration_min": "null? nope invalid?",
+                },
+            }
+        )
+
+        assert sanitized is True
+        assert "tool_args" not in payload
+
+    def test_policy_core_route_salvages_invalid_optional_tool_args(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "booking",
+            "action": "fact",
+            "tool_action_hint": "calendar.list_slots",
+            "tool_args": {
+                "service_query": "Маникюр",
+                "date": "tomorrow",
+                "duration_min": "null? nope invalid?",
+            },
+            "pack_refs": [],
+            "slots": {"service": "Маникюр"},
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "booking_availability_for_tomorrow",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "slot_state",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "live_availability",
+            "temporal_scope": "day",
+            "resolution_mode": "live_calendar",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Можно записаться на завтра?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["tool_args_sanitized"] is True
+        assert result["binding"]["tool_args"] == {"service_query": "Маникюр"}
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.list_slots"
+        assert result["binding_plan"]["resolved_args"] == {"service_query": "Маникюр"}
+
+    def test_policy_core_route_rejects_collect_tool_action_hint_conflict(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action_hint": "handoff",
+            "pack_refs": [],
+            "slots": {"service": "Маникюр"},
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "bad_collect_binding",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "temporal_scope": "day",
+            "resolution_mode": "ask_about_requested_slot",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Можно записаться на завтра?")
+
+        assert result["ok"] is False
+        assert result["error"] == "invalid_projection"
+        assert result["projection_error"] == "collect_tool_action_hint_conflict"
+
+    def test_policy_core_repairs_booking_manage_reference_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "check_booking",
+            "action": "collect",
+            "tool_action_hint": "collect",
+            "pack_refs": [],
+            "slots": {},
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
+            "needs_manager": False,
+            "reason": "calendar_get_booking_collect_reference",
+            "subject_kind": "booking",
+            "capability": "booking_manage",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": None,
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "action": "fact",
+            "tool_action_hint": "calendar.get_booking",
+            "reason": "calendar_get_booking_collect_reference",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core("Проверьте мою запись")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert result["contract_repair_reason"] == "llm_policy_core_error:booking_manage_reference_action_invalid"
+        assert result["binding"]["tool_action"] == "calendar.get_booking"
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.get_booking"
+        assert result["payload"]["requested_outcome"] == "fact"
+        assert result["payload"]["tool_action_hint"] == "calendar.get_booking"
+
+    def test_policy_core_repairs_generic_info_interrupt_followup_contract(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action_hint": "catalog.service_query",
+            "pack_refs": ["pricing"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": None,
+            "next_question": None,
+            "open_questions": [],
+            "needs_manager": False,
+            "reason": "user_asks_price_for_known_service",
+            "subject_kind": "service",
+            "capability": "pricing",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "active_question_relation": "generic_info_interrupt",
+            "pending_question_act": None,
+            "pending_question_target": None,
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Какая цена?",
+                expected_reply_type="time",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert result["contract_repair_reason"] == "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["open_questions"] == ["datetime"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+
+    def test_policy_core_repairs_active_media_interrupt_to_preserve_booking_resume(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "consult",
+            "action": "collect",
+            "tool_action_hint": "consult",
+            "pack_refs": ["style_reference"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+            "needs_manager": False,
+            "reason": "user_offers_photos_for_style_reference_continuation_and_photo_needed_for_style_alignment_with_specialist_query",
+            "goal": "booking",
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                    "value": "маникюр",
+                    "confidence": 0.91,
+                }
+            ],
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "consultation",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "resolver_id": None,
+            "resolver_version": None,
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "entity_refs": [
+                {
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                    "value": "маникюр",
+                    "confidence": 0.91,
+                }
+            ],
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "resolver_id": "master_lookup",
+            "resolver_version": "2026-04-01",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                    "semantic_contract": {
+                        "capability": "bookability",
+                        "subject_kind": "service",
+                        "resolution_mode": "direct",
+                        "referents": {
+                            "service": {
+                                "value": "маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            }
+                        },
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_interrupt_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "info"
+        assert result["payload"]["requested_outcome"] == "fact"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["open_questions"] == ["datetime"]
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+
+    def test_policy_core_repairs_active_media_master_query_live_availability_interrupt(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "collect",
+            "tool_action_hint": "calendar.list_slots",
+            "pack_refs": [],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asks_specialists_for_service_need_time_to_check_availability",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "live_availability",
+            "temporal_scope": "none",
+            "resolution_mode": "live_calendar",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "specialist_availability_followup",
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "resolver_id": "master_lookup",
+            "resolver_version": "2026-04-01",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                    "semantic_contract": {
+                        "capability": "bookability",
+                        "subject_kind": "service",
+                        "resolution_mode": "direct",
+                        "referents": {
+                            "service": {
+                                "value": "маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            }
+                        },
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["requested_outcome"] == "fact"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+
+    def test_policy_core_rejects_master_query_time_collect_during_active_media_followup(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "collect",
+            "tool_action_hint": "collect",
+            "pack_refs": [],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asks_specialists_for_service_need_time_to_check_availability",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "live_availability",
+            "temporal_scope": "none",
+            "resolution_mode": "live_calendar",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "specialist_availability_followup",
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "service",
+            "capability": "portfolio",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["requested_outcome"] == "fact"
+
+    def test_policy_core_reclassifies_master_query_carryover_mismatch_during_active_media_followup(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "active_question_relation": "generic_info_interrupt",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
+        assert result["payload"]["missing_information"]["next_question"] == "datetime"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "generic_info_interrupt"
+
+    def test_policy_core_repairs_invalid_master_query_consult_tool_action_during_active_media_followup(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "consult",
+            "pack_refs": [],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "fact_side_specialist_question_interrupt_preserve_resume_datetime_collect_contract",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_message",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "live_availability",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        }
+        repaired_payload = {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["master"],
+            "slots": {"service": "маникюр"},
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "needs_manager": False,
+            "reason": "user_asked_master_with_active_booking_media_interrupt",
+            "goal": "booking",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Кто из специалистов делает маникюр?",
+                current_goal="booking",
+                slot_state={"service": "маникюр"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "pending_question_contract": {
+                        "expected_reply_type": "media",
+                        "next_question": "media",
+                        "open_questions": ["media"],
+                        "reason": "user_offers_photos_for_style_reference",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert (
+            result["contract_repair_reason"]
+            == "llm_policy_core_error:active_followup_master_query_reclassification_required"
+        )
+        assert result["binding"]["tool_action"] == "info"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "generic_info_interrupt"
 
     def test_retries_once_after_transient_connection_error(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -383,6 +1198,10 @@ class TestPolicyCoreTimeoutRetry:
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_RETRY_ON_TRANSIENT",
             "1",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
+            "",
         )
 
         payload = self._policy_payload()
@@ -396,6 +1215,75 @@ class TestPolicyCoreTimeoutRetry:
         assert result["ok"] is True
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
+
+    def test_sanitizes_service_query_shadow_to_referent_for_policy_fact(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = self._policy_payload()
+        invalid_payload.update(
+            {
+                "intent": "pricing",
+                "action": "fact",
+                "tool_action_hint": "catalog.service_query",
+                "tool_args": {"service_query": "маникюр с дизайном"},
+                "pack_refs": [],
+                "slots": {"service": "маникюр"},
+                "next_question": "name",
+                "open_questions": ["name"],
+                "needs_manager": False,
+                "reason": "pricing_interrupt_keep_name_collect",
+                "referents": {
+                    "service": {
+                        "value": "маникюр",
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "carryover",
+                    }
+                },
+                "subject_kind": "service",
+                "capability": "pricing",
+                "temporal_scope": "specific_time",
+                "resolution_mode": "policy_fact",
+                "pending_question_act": "fill_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "generic_info_interrupt",
+            }
+        )
+        repaired_payload = {
+            **invalid_payload,
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Сколько стоит маникюр с дизайном?",
+                expected_reply_type="name",
+                current_goal="booking",
+                slot_state={"service": "маникюр", "datetime": "завтра 15:00"},
+                memory_profile={
+                    "active_goal": "booking",
+                    "current_referents": {"service": "маникюр"},
+                    "pending_question_contract": {
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                        "expected_reply_type": "name",
+                        "reason": "collect:name",
+                        "pending_question_act": "fill_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "fill_requested_slot",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["contract_repair_retry_used"] is True
+        assert result["contract_repair_reason"] == "llm_policy_core_error:generic_info_interrupt_expected_reply_invalid"
+        assert result["tool_args_sanitized"] is True
+        assert result["binding"]["tool_args"] == {"service_query": "маникюр"}
 
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -450,7 +1338,7 @@ class TestPolicyCoreTimeoutRetry:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS",
-            10.0,
+            20.0,
         )
         monkeypatch.setattr(
             "app.services.intent_service.POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS",
@@ -468,6 +1356,21 @@ class TestPolicyCoreTimeoutRetry:
         policy_input = json.loads(mock_llm.return_value.generate.call_args.kwargs["messages"][1]["content"])
         assert len(policy_input["message"]) <= 90
         assert policy_input["message"] != long_message
+
+    def test_policy_core_respects_explicit_max_tokens_override_with_gpt5_floor(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                max_tokens_override=120,
+            )
+
+        assert result["ok"] is True
+        kwargs = mock_llm.return_value.generate.call_args.kwargs
+        assert kwargs["max_tokens"] == 800
 
     def test_returns_deadline_when_budget_below_min_policy_timeout(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -506,9 +1409,13 @@ class TestPolicyCoreTimeoutRetry:
                         "ignored": "skip",
                     },
                     "pending_question_contract": {
-                        "slot": "datetime",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
                         "expected_reply_type": "time",
                         "reason": "booking_followup",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
                         "value": "завтра после 15",
                         "ignored": "skip",
                     },
@@ -547,20 +1454,21 @@ class TestPolicyCoreTimeoutRetry:
         assert len(memory_payload.get("summary")) <= 360
         assert memory_payload.get("profile", {}).get("consent_status") == "granted"
         assert memory_payload.get("profile", {}).get("active_goal") == "booking"
-        assert memory_payload.get("profile", {}).get("expected_reply_type") == "time"
+        assert "expected_reply_type" not in (memory_payload.get("profile") or {})
         assert memory_payload.get("profile", {}).get("active_slots") == ["service", "datetime"]
         assert memory_payload.get("profile", {}).get("stored_keys") == [
             "preferred_master",
             "parking_near",
         ]
-        assert memory_payload.get("profile", {}).get("current_referents") == {
-            "service": "маникюр",
-            "booking_ref": "ref-123",
-        }
+        assert "current_referents" not in (memory_payload.get("profile") or {})
         assert memory_payload.get("profile", {}).get("pending_question_contract") == {
-            "slot": "datetime",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
             "expected_reply_type": "time",
             "reason": "booking_followup",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
             "value": "завтра после 15",
         }
         assert memory_payload.get("profile", {}).get("consult_state") == {
@@ -574,6 +1482,193 @@ class TestPolicyCoreTimeoutRetry:
             {"key": "parking_note", "value": "Рядом со входом", "source": "booking_slot"},
         ]
 
+    def test_policy_core_backfills_canonical_memory_from_legacy_args(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                current_goal="booking",
+                slot_state={"service": "маникюр", "datetime": "завтра 15:00"},
+            )
+
+        assert result["ok"] is True
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        assert "expected_reply_type" not in policy_input
+        assert "current_goal" not in policy_input
+        assert "slot_state" not in policy_input
+        assert policy_input["memory"]["profile"]["active_goal"] == "booking"
+        assert policy_input["memory"]["profile"]["slot_state"] == {
+            "service": "маникюр",
+            "datetime": "завтра 15:00",
+        }
+        assert policy_input["memory"]["profile"]["pending_question_contract"] == {
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+
+    def test_policy_core_assembles_manifest_scoped_dynamic_context(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        runtime = RuntimeCapabilities(
+            payload=CapabilitiesPayload.model_validate(
+                {
+                    "domain_slug": "beauty_salon",
+                    "providers": {"calendar_provider": "google_calendar"},
+                    "features": {"booking_mode": "confirm_slots"},
+                    "tools": {"allow": ["calendar.get_booking", "catalog.location"]},
+                    "allowed_fact_scopes": ["info.location", "consult.hair_damage"],
+                    "handoff_policy": "manager_request_only",
+                    "policy_overrides": {
+                        "payment_info": {"response": "Оплата только по счету"}
+                    },
+                }
+            ),
+            client_id=uuid4(),
+            branch_id=None,
+            source="client_capabilities",
+            has_records=True,
+            has_tool_policy_records=True,
+        )
+        playbook = ConsultPlaybook.model_validate(
+            {
+                "version": "v1",
+                "topics": [
+                    {
+                        "id": "hair_damage",
+                        "title": "Восстановление волос",
+                        "summary": "Советы по уходу после осветления и признаки риска.",
+                        "allowed_advice": ["Используйте мягкий уход."],
+                        "required_questions": ["Когда было окрашивание?"],
+                        "optional_questions": [],
+                        "disallowed_claims": [],
+                        "fact_requirements": ["service_exists"],
+                        "risk_tags": ["none"],
+                        "clarify_limit": 1,
+                        "escalate_when": ["missing_fact"],
+                        "next_step": "Если есть жжение, нужен мастер.",
+                    }
+                ],
+            }
+        )
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            monkeypatch.setattr(
+                "app.services.consult_pack_service.load_consult_playbook",
+                lambda _client_slug: (playbook, None),
+            )
+            set_runtime_capabilities(runtime)
+            try:
+                result = route_llm_policy_core(
+                    "Где вы находитесь?",
+                    info_refs=["pricing", "location"],
+                    consult_refs=None,
+                    client_slug="demo_salon",
+                )
+            finally:
+                set_runtime_capabilities(None)
+
+        assert result["ok"] is True
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        assert policy_input["allowed"] == {
+            "tool_actions": [
+                "info",
+                "consult",
+                "booking",
+                "handoff",
+                "collect",
+                "calendar.get_booking",
+                "catalog.location",
+            ],
+            "info_refs": ["location"],
+            "consult_refs": ["hair_damage"],
+        }
+        assert policy_input["context"]["capability_cards"] == [
+            {
+                "kind": "domain",
+                "source": "client_capabilities",
+                "domain_slug": "beauty_salon",
+            },
+            {
+                "kind": "providers",
+                "source": "client_capabilities",
+                "calendar_provider": "google_calendar",
+            },
+            {
+                "kind": "features",
+                "source": "client_capabilities",
+                "booking_mode": "confirm_slots",
+            },
+            {
+                "kind": "tool_policy",
+                "source": "client_capabilities",
+                "allow": ["calendar.get_booking", "catalog.location"],
+            },
+            {
+                "kind": "fact_scope",
+                "source": "client_capabilities",
+                "allowed_scopes": ["info.location", "consult.hair_damage"],
+            },
+            {
+                "kind": "handoff_policy",
+                "source": "client_capabilities",
+                "policy": "manager_request_only",
+            },
+        ]
+        assert policy_input["context"]["policy_cards"] == [
+            {
+                "section": "payment_info",
+                "response": "Оплата только по счету",
+                "source": "client_capabilities",
+            }
+        ]
+        assert policy_input["context"]["consult_cards"] == [
+            {
+                "id": "hair_damage",
+                "title": "Восстановление волос",
+                "summary": "Советы по уходу после осветления и признаки риска.",
+                "risk_tags": ["none"],
+                "fact_requirements": ["service_exists"],
+                "next_step": "Если есть жжение, нужен мастер.",
+            }
+        ]
+
+    def test_policy_core_honors_explicit_booking_only_context_envelope(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Хочу записаться на маникюр",
+                info_refs=[],
+                consult_refs=[],
+                client_slug="demo_salon",
+            )
+
+        assert result["ok"] is True
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        assert policy_input["allowed"] == {
+            "tool_actions": [
+                "booking",
+                "handoff",
+                "collect",
+                "calendar.book_slot",
+                "calendar.cancel",
+                "calendar.get_booking",
+                "calendar.list_slots",
+                "calendar.reschedule",
+            ],
+            "info_refs": [],
+            "consult_refs": [],
+        }
+        assert "context" not in policy_input or "consult_cards" not in policy_input.get("context", {})
+
     def test_policy_core_preserves_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         payload = self._policy_payload()
@@ -584,6 +1679,7 @@ class TestPolicyCoreTimeoutRetry:
                 "open_questions": ["datetime"],
                 "needs_manager": False,
                 "risk_signals": [],
+                "resolution_mode": "ask_about_requested_slot",
                 "pending_question_act": "ask_about_requested_slot",
                 "pending_question_target": "time",
                 "active_question_relation": "ask_about_requested_slot",
@@ -597,9 +1693,235 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "time"
-        assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
+        assert result["payload"]["grounding_requirements"]["resolution_mode"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "ask_about_requested_slot"
+
+    def test_policy_core_normalizes_collect_resolution_mode_to_direct(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "resolution_mode": "collect",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Хотел бы записаться на маникюр.",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert result["payload"]["grounding_requirements"]["resolution_mode"] == "direct"
+
+    def test_policy_core_drops_relation_token_from_pending_question_act(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "slots": {"service": "маникюр", "datetime": "", "name": ""},
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "tool_args": {"specialist_name": "Айгерим"},
+                "entity_refs": [
+                    {"entity_id": "svc:manicure", "entity_type": "service"},
+                    {"entity_id": "spec:aigerim", "entity_type": "specialist"},
+                ],
+                "referents": {
+                    "service": {
+                        "value": "маникюр",
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "message",
+                    },
+                    "specialist": {
+                        "value": "Айгерим",
+                        "entity_id": "spec:aigerim",
+                        "entity_type": "specialist",
+                        "source_ref": "message",
+                    },
+                },
+                "subject_kind": "specialist",
+                "capability": "bookability",
+                "resolution_mode": "referent_followup",
+                "pending_question_act": "referent_followup",
+                "pending_question_target": "specialist",
+                "active_question_relation": "referent_followup",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Можно выбрать Айгерим?",
+                expected_reply_type="time",
+            )
+
+        assert result["ok"] is True
+        assert "pending_question_act" not in result["payload"]
+        assert result["payload"]["missing_information"]["pending_question_target"] == "specialist"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "referent_followup"
+        assert result["payload"]["grounding_requirements"]["referents"]["specialist"] == {
+            "value": "Айгерим",
+            "entity_id": "spec:aigerim",
+            "entity_type": "specialist",
+            "source_ref": "message",
+        }
+        assert "tool_args" not in result["payload"]
+
+    def test_policy_core_strips_stale_time_axes_from_check_booking_reference_followup(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "intent": "booking",
+                "action": "fact",
+                "tool_action_hint": "calendar.get_booking",
+                "pack_refs": [],
+                "slots": {},
+                "next_question": "name",
+                "open_questions": ["name"],
+                "needs_manager": False,
+                "reason": "calendar_get_booking_collect_reference",
+                "subject_kind": "booking",
+                "capability": "booking_manage",
+                "resolution_mode": "direct",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Когда я записан?",
+                expected_reply_type="name",
+                current_goal="booking",
+                slot_state={"service": "наращивание гелем"},
+                memory_profile={
+                    "pending_question_contract": {
+                        "expected_reply_type": "name",
+                        "reason": "calendar_get_booking_collect_reference",
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                    },
+                    "semantic_contract": {
+                        "subject_kind": "booking",
+                        "capability": "booking_manage",
+                        "resolution_mode": "direct",
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["binding"]["tool_action"] == "calendar.get_booking"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.get_booking"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"].get("pending_question_act") is None
+        assert result["payload"]["missing_information"].get("pending_question_target") is None
+        assert result["payload"]["missing_information"].get("active_question_relation") is None
+
+    def test_policy_core_binding_plan_resolves_info_capability_to_executable_tool(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["promotions"],
+            "needs_manager": False,
+            "reason": "promo_question",
+            "subject_kind": "service",
+            "capability": "promotions",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("У вас есть акции?")
+
+        assert result["ok"] is True
+        assert result["binding"]["tool_action"] == "catalog.service_query"
+        assert result["binding_plan"]["binding_outcome_type"] == "tool_call"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "catalog.service_query"
+
+    def test_policy_core_binding_plan_types_handoff_explicitly(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "intent": "manager",
+                "action": "handoff",
+                "tool_action_hint": "handoff",
+                "reason": "manager_requested",
+                "goal": "handoff",
+                "needs_manager": True,
+                "subject_kind": "general",
+                "capability": "other",
+                "temporal_scope": "none",
+                "resolution_mode": "direct",
+                "next_question": None,
+                "open_questions": [],
+                "expected_reply_type": None,
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Позовите менеджера")
+
+        assert result["ok"] is True
+        assert result["binding"]["tool_action"] == "handoff"
+        assert result["binding_plan"]["binding_outcome_type"] == "handoff"
+        assert result["binding_plan"]["handoff_reason_code"] == "manager_requested"
+
+    def test_policy_core_rejects_conflicting_service_shadow_against_canonical_referent(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        payload.update(
+            {
+                "action": "fact",
+                "intent": "pricing",
+                "tool_action_hint": "catalog.service_query",
+                "tool_args": {"service_query": "педикюр"},
+                "pack_refs": [],
+                "entity_refs": [
+                    {
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "message",
+                        "value": "маникюр",
+                        "confidence": 0.93,
+                    }
+                ],
+                "referents": {
+                    "service": {
+                        "value": "маникюр",
+                        "entity_id": "svc:manicure",
+                        "entity_type": "service",
+                        "source_ref": "message",
+                    }
+                },
+                "subject_kind": "service",
+                "capability": "pricing",
+                "temporal_scope": "none",
+                "resolution_mode": "policy_fact",
+                "active_question_relation": "generic_info_interrupt",
+            }
+        )
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core("Сколько стоит маникюр?")
+
+        assert result["ok"] is True
+        assert result.get("tool_args_sanitized") is True
+        assert result["binding"]["tool_args"] == {"service_query": "маникюр"}
 
     def test_policy_core_preserves_slot_compare_pending_question_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -624,9 +1946,9 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["pending_question_act"] == "slot_compare"
-        assert result["payload"]["pending_question_target"] == "time"
-        assert result["payload"]["active_question_relation"] == "slot_compare"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "slot_compare"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "slot_compare"
 
     def test_policy_core_preserves_specialist_availability_followup_contract(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -654,13 +1976,13 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["subject_kind"] == "specialist"
-        assert result["payload"]["capability"] == "live_availability"
-        assert result["payload"]["temporal_scope"] == "date_range"
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "specialist"
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "specialist"
+        assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["temporal_scope"] == "date_range"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "specialist"
         assert (
-            result["payload"]["active_question_relation"]
+            result["payload"]["missing_information"]["active_question_relation"]
             == "specialist_availability_followup"
         )
 
@@ -692,15 +2014,15 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["subject_kind"] == "specialist"
-        assert result["payload"]["capability"] == "live_availability"
-        assert result["payload"]["temporal_scope"] == "specific_time"
-        assert result["payload"]["next_question"] == "name"
-        assert result["payload"]["open_questions"] == ["name"]
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "specialist"
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "specialist"
+        assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["temporal_scope"] == "specific_time"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"]["open_questions"] == ["name"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "specialist"
         assert (
-            result["payload"]["active_question_relation"]
+            result["payload"]["missing_information"]["active_question_relation"]
             == "specialist_availability_followup"
         )
 
@@ -734,14 +2056,14 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["payload"]["subject_kind"] == "booking"
-        assert result["payload"]["capability"] == "live_availability"
-        assert result["payload"]["temporal_scope"] == "specific_time"
-        assert result["payload"]["next_question"] == "name"
-        assert result["payload"]["open_questions"] == ["name"]
-        assert result["payload"]["pending_question_act"] == "ask_about_requested_slot"
-        assert result["payload"]["pending_question_target"] == "time"
-        assert result["payload"]["active_question_relation"] == "ask_about_requested_slot"
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "booking"
+        assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["temporal_scope"] == "specific_time"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"]["open_questions"] == ["name"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "ask_about_requested_slot"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "ask_about_requested_slot"
 
     def test_policy_core_prompt_free_slots_question_keeps_pending_time_contract(self):
         prompt = _load_policy_core_prompt()
@@ -751,6 +2073,7 @@ class TestPolicyCoreTimeoutRetry:
         assert '`pending_question_act="ask_about_requested_slot"`' in prompt
         assert '`pending_question_target="time"`' in prompt
         assert '`active_question_relation="ask_about_requested_slot"`' in prompt
+        assert "ask_about_requested_slot" in prompt
         assert "Какой мастер свободен на этой неделе?" in prompt
         assert "А какие мастера доступны?" in prompt
         assert "А есть ли свободные слоты на 15:00?" in prompt
@@ -758,6 +2081,279 @@ class TestPolicyCoreTimeoutRetry:
         assert '`next_question="name"`' in prompt
         assert '`subject_kind="booking"`' in prompt
         assert "alternate-time availability follow-up" in prompt
+
+    def test_policy_core_prompt_wait_time_interrupt_stays_duration_fact(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Долго ли ждать?"' in prompt
+        assert '"Как долго длится процедура?"' in prompt
+        assert '"Сколько по времени занимает услуга?"' in prompt
+        assert 'Верни `intent="duration"`, `action="fact"`, `tool_action_hint="catalog.service_query"`' in prompt
+        assert '`capability="duration"`' in prompt
+        assert '`active_question_relation="generic_info_interrupt"`' in prompt
+        assert 'Booking continuity сохрани через `next_question="datetime"`' in prompt
+        assert 'Forbidden: `action="collect"`, `capability="bookability"`' in prompt
+        assert 'generic prompt `"На какую дату и время вам удобно?"`' in prompt
+
+    def test_policy_core_prompt_initial_booking_prompt_keeps_requested_slot_contract(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я хочу записаться на маникюр."' in prompt
+        assert "это canonical `ask_about_requested_slot(time)`" in prompt
+        assert "Не оставляй `active_question_relation` пустым на первом booking prompt." in prompt
+        assert "не используй `fill_requested_slot` для первого booking prompt" in prompt
+
+    def test_policy_core_prompt_reschedule_without_reference_escalates(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я хочу изменить время записи."' in prompt
+        assert '`action=handoff`, `tool_action_hint="handoff"`' in prompt
+        assert '`capability="booking_manage"`' in prompt
+        assert "Не перезапускай generic `next_question=\"datetime\"` collect" in prompt
+
+    def test_policy_core_prompt_check_booking_without_reference_stays_bot_active(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я хотел бы проверить свою запись."' in prompt
+        assert '"Когда я записан?"' in prompt
+        assert '"intent": "booking|check_booking|verify_booking|' in prompt
+        assert '`intent="check_booking"`' in prompt
+        assert '`tool_action_hint="calendar.get_booking"`' in prompt
+        assert '`reason="calendar_get_booking_collect_reference"`' in prompt
+        assert '`expected_reply_type="name"`' in prompt
+        assert '`next_question="name"`' in prompt
+        assert "это НЕ handoff по умолчанию" in prompt
+        assert "Сохрани bot-active follow-up contract" in prompt
+
+    def test_policy_core_prompt_existing_booking_detail_question_stays_check_booking(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Какой специалист меня ждет?"' in prompt
+        assert '"Кто мой мастер?"' in prompt
+        assert '"Во сколько моя запись?"' in prompt
+        assert "это не live availability и не новый booking collect" in prompt
+        assert 'фразы с `моя запись`, `мой мастер`, `меня ждет` => detail query про уже существующую запись, значит `check_booking`' in prompt
+        assert 'memory semantic context: `capability="booking_manage"` + активный `pending_question_contract` по `datetime`' in prompt
+        assert 'forbidden: `intent="master_query"`, `action="collect"`' in prompt
+        assert 'Не возвращай `master_query` с generic `next_question="datetime"`' in prompt
+        assert 'не спрашивай `"На какую дату и время вам удобно?"`' in prompt
+        assert 'Omit `pending_question_act`, `pending_question_target`, `active_question_relation`' in prompt
+        assert '`pending_question_target="time"`' in prompt
+        assert '`reason="calendar_get_booking_collect_reference"`' in prompt
+
+    def test_policy_core_prompt_keeps_customer_name_distinct_from_specialist_preference(self):
+        prompt = _load_policy_core_prompt()
+
+        assert "`slots.name` и `next_question=\"name\"` означают только имя клиента" in prompt
+        assert "Предпочтение конкретного мастера/специалиста НЕ записывай в `slots.name`." in prompt
+        assert "`memory.profile.semantic_contract` и `memory.profile.pending_question_contract`" in prompt
+        assert "Не возвращай `tool_args`" in prompt
+
+    def test_policy_core_prompt_uses_dynamic_context_cards(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"context": {' in prompt
+        assert '"capability_cards"' in prompt
+        assert '"policy_cards"' in prompt
+        assert '"consult_cards"' in prompt
+        assert "dynamic context assembly envelope" in prompt
+
+    def test_policy_core_prompt_named_specialist_preference_under_active_time_collect_is_referent_followup(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Мне нужно, чтобы мастер был Айгерим."' in prompt
+        assert '"Хочу к Айгерим."' in prompt
+        assert '"Можно к Айгерим?"' in prompt
+        assert '`subject_kind="specialist"`' in prompt
+        assert '`resolution_mode="referent_followup"`' in prompt
+        assert '`pending_question_target="specialist"`' in prompt
+        assert '`active_question_relation="referent_followup"`' in prompt
+        assert "Forbidden: generic `subject_kind=\"service\"`" in prompt
+
+    def test_policy_core_prompt_consult_media_offer_uses_media_followup_contract(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Я могу прислать фото своих ногтей."' in prompt or "фото/референс/пример" in prompt
+        assert '`reason="user_offers_photos_for_style_reference"`' in prompt
+        assert '`expected_reply_type="media"`' in prompt
+        assert '`next_question="media"`' in prompt
+        assert '`open_questions=["media"]`' in prompt
+        assert 'Forbidden: `next_question="service"`' in prompt
+
+    def test_policy_core_response_format_allows_media_followup_contract(self):
+        schema = build_policy_core_response_format(["collect", "consult"])
+        properties = schema["json_schema"]["schema"]["properties"]
+
+        assert "media" in properties["expected_reply_type"]["anyOf"][0]["enum"]
+        assert "media" in properties["next_question"]["anyOf"][0]["enum"]
+
+    def test_policy_core_runtime_contract_enforces_consult_media_followup(self):
+        contract, schema_error = validate_llm_policy_core_output(
+            {
+                "intent": "consult",
+                "action": "collect",
+                "tool_action_hint": "consult",
+                "pack_refs": ["style_reference"],
+                "slots": {},
+                "expected_reply_type": "service_choice",
+                "next_question": "service",
+                "open_questions": ["service"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "language": "ru",
+                "confidence": 0.93,
+                "reason": "user_offers_photos_for_style_reference",
+                "goal": "consult",
+                "entity_refs": [],
+                "referents": {},
+                "subject_kind": "general",
+                "capability": "consultation",
+                "temporal_scope": "none",
+                "resolution_mode": "direct",
+                "pending_question_act": None,
+                "pending_question_target": None,
+                "active_question_relation": None,
+                "resolver_id": None,
+                "resolver_version": None,
+            }
+        )
+
+        assert schema_error is None
+        assert contract is not None
+        assert _validate_policy_core_runtime_contract(
+            contract,
+            normalized_memory_profile=None,
+        ) == "llm_policy_core_error:consult_media_expected_reply_invalid"
+        repair = _build_policy_core_contract_repair_instruction(
+            schema_error="llm_policy_core_error:consult_media_expected_reply_invalid",
+            normalized_memory_profile=None,
+        )
+        assert repair is not None
+        assert '`expected_reply_type="media"`' in repair
+        assert '`next_question="media"`' in repair
+
+    def test_policy_core_runtime_contract_accepts_booking_media_reason_family_with_resume_axes(self):
+        contract, schema_error = validate_llm_policy_core_output(
+            {
+                "intent": "consult",
+                "action": "collect",
+                "tool_action_hint": "consult",
+                "pack_refs": ["style_reference"],
+                "slots": {"service": "Наращивание гелем"},
+                "expected_reply_type": "media",
+                "next_question": "media",
+                "open_questions": ["media"],
+                "needs_manager": False,
+                "risk_signals": [],
+                "language": "ru",
+                "confidence": 0.93,
+                "reason": "user_offers_photo_reference_before_time_selection",
+                "goal": "booking",
+                "entity_refs": [],
+                "referents": {
+                    "service": {
+                        "value": "Наращивание гелем",
+                        "entity_id": "svc:gel_extension",
+                        "entity_type": "service",
+                        "source_ref": "carryover",
+                    }
+                },
+                "subject_kind": "service",
+                "capability": "bookability",
+                "temporal_scope": "none",
+                "resolution_mode": "direct",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+                "resolver_id": None,
+                "resolver_version": None,
+            }
+        )
+
+        assert schema_error is None
+        assert contract is not None
+        assert (
+            _validate_policy_core_runtime_contract(
+                contract,
+                normalized_memory_profile={
+                    "active_goal": "booking",
+                    "resume_pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                    },
+                },
+            )
+            is None
+        )
+
+    def test_policy_core_memory_profile_strips_duplicate_semantic_carriers(self):
+        normalized = _normalize_policy_core_memory_profile(
+            {
+                "active_goal": " booking ",
+                "expected_reply_type": " time ",
+                "active_slots": [" service ", " datetime ", " phone "],
+                "current_referents": {
+                    "service": " Маникюр ",
+                    "specialist": " Айгерим ",
+                    "customer": " Марина ",
+                    "booking_ref": " BK-1 ",
+                },
+                "pending_question_contract": {
+                    "next_question": " time ",
+                    "open_questions": [" time ", " "],
+                    "expected_reply_type": " time ",
+                    "reason": " booking_followup ",
+                    "pending_question_act": " ask_about_requested_slot ",
+                    "pending_question_target": " time ",
+                    "active_question_relation": " ask_about_requested_slot ",
+                },
+                "resume_pending_question_contract": {
+                    "next_question": " time ",
+                    "open_questions": [" time ", " "],
+                    "expected_reply_type": " time ",
+                    "pending_question_act": " ask_about_requested_slot ",
+                    "pending_question_target": " time ",
+                    "active_question_relation": " ask_about_requested_slot ",
+                },
+                "interaction_state": {
+                    "resume_slot": " datetime ",
+                    "interaction_target": " specialist ",
+                    "interaction_relation": " referent_followup ",
+                    "interaction_owner": " llm_policy_core_booking ",
+                    "grounded_referents": {
+                        "service": " Маникюр ",
+                        "specialist": " Айгерим ",
+                        "customer": " Марина ",
+                    },
+                },
+            }
+        )
+
+        assert normalized == {
+            "active_goal": "booking",
+            "active_slots": ["service", "datetime", "phone"],
+            "pending_question_contract": {
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "expected_reply_type": "time",
+                "reason": "booking_followup",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+            },
+            "resume_pending_question_contract": {
+                "next_question": "datetime",
+                "open_questions": ["datetime"],
+                "expected_reply_type": "time",
+                "pending_question_act": "ask_about_requested_slot",
+                "pending_question_target": "time",
+                "active_question_relation": "ask_about_requested_slot",
+            },
+        }
 
     def test_retries_without_response_format_when_provider_rejects_it(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -772,31 +2368,64 @@ class TestPolicyCoreTimeoutRetry:
         assert result["ok"] is True
         assert result["structured_output_enabled"] is True
         assert result["structured_output_fallback_used"] is True
+        assert result["structured_output_fallback_reason"] == "response_format_invalid_request"
+        assert "response_format json_schema is not supported" in result["response_format_error"]
         assert mock_llm.return_value.generate.call_count == 2
         first_kwargs = mock_llm.return_value.generate.call_args_list[0].kwargs
         second_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
         assert isinstance(first_kwargs.get("response_format"), dict)
         assert "response_format" not in second_kwargs or second_kwargs.get("response_format") is None
 
-    def test_policy_core_response_format_is_provider_compatible_and_keeps_dynamic_objects(self):
-        response_format = _build_policy_core_response_format(["calendar.book_slot"])
-        assert response_format["json_schema"]["strict"] is False
+    def test_policy_core_response_format_is_strict_and_canonical(self):
+        response_format = build_policy_core_response_format(["calendar.book_slot"])
+        assert response_format["json_schema"]["strict"] is True
         schema = response_format["json_schema"]["schema"]
         assert schema["type"] == "object"
-        assert schema["properties"]["tool_args"]["additionalProperties"] is True
-        assert schema["properties"]["slots"]["additionalProperties"] == {"type": "string"}
+        assert schema["required"] == list(schema["properties"].keys())
+        assert "check_booking" in schema["properties"]["intent"]["enum"]
+        assert "verify_booking" in schema["properties"]["intent"]["enum"]
+        assert "referents" in schema["properties"]
         assert "entity_refs" in schema["properties"]
         assert "subject_kind" in schema["properties"]
         assert "capability" in schema["properties"]
         assert "temporal_scope" in schema["properties"]
         assert "resolution_mode" in schema["properties"]
+        assert "expected_reply_type" in schema["properties"]
+        assert "risk_signals" in schema["properties"]
+        assert "language" in schema["properties"]
+        assert "confidence" in schema["properties"]
+        assert "goal" in schema["properties"]
         assert "pending_question_act" in schema["properties"]
         assert "pending_question_target" in schema["properties"]
         assert "active_question_relation" in schema["properties"]
         assert "resolver_id" in schema["properties"]
         assert "resolver_version" in schema["properties"]
-        for keyword in ("allOf", "oneOf", "anyOf", "not", "enum"):
-            assert keyword not in schema
+        assert "tool_args" not in schema["properties"]
+        assert schema["properties"]["tool_action_hint"]["enum"] == ["calendar.book_slot"]
+        slots_schema = schema["properties"]["slots"]
+        referents_schema = schema["properties"]["referents"]
+        assert "anyOf" in slots_schema
+        assert "anyOf" in referents_schema
+        slot_variants = next(
+            variant["anyOf"]
+            for variant in slots_schema["anyOf"]
+            if isinstance(variant, dict) and "anyOf" in variant
+        )
+        referent_variants = next(
+            variant["anyOf"]
+            for variant in referents_schema["anyOf"]
+            if isinstance(variant, dict) and "anyOf" in variant
+        )
+        assert any(
+            variant["required"] == ["service"]
+            and list(variant["properties"].keys()) == ["service"]
+            for variant in slot_variants
+        )
+        assert any(
+            variant["required"] == ["service"]
+            and list(variant["properties"].keys()) == ["service"]
+            for variant in referent_variants
+        )
 
 
 class TestPolicyCoreErrorClassification:
@@ -827,7 +2456,7 @@ class TestPolicyCoreErrorClassification:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = Exception(
-                "The model gpt-x does not exist"
+                "The model missing-model does not exist"
             )
             result = route_llm_policy_core("нужна запись")
 

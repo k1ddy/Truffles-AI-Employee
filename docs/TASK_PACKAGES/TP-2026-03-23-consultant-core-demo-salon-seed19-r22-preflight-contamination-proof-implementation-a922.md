@@ -1,0 +1,65 @@
+# TP-2026-03-23 Consultant Core Demo Salon Seed19 R22 Preflight Contamination Proof Implementation A922
+
+- Title/goal: repair the bounded `ops/diagnose.py` preflight contamination family so acceptance/dev replay no longer fail-closes on clean latest conversations just because the allowlist JID has historical bot-active rows and decision traces.
+- Canon refs: `STATE.md` NOW; `docs/ACTIVE_PROGRAM.md`; `docs/TASK_PACKAGES/TP-2026-03-23-consultant-core-demo-salon-seed19-r22-preflight-contamination-proof-decision-a922.md`; CA_ID `a922-go2f-seed19-r22-preflight-contamination-family`.
+- One web search (mandatory before implementation):
+  - Query: `site:docs.pytest.org pytest fixture safe teardown state contamination`
+  - Date/time: `2026-03-23 11:09 +06:00`
+  - Opened sources: `https://docs.pytest.org/en/6.2.x/fixture.html`
+  - Found ready-made solutions: pytest fixture guidance recommends isolating one state-changing action per fixture and making teardown specific so historical state does not leak into later tests.
+  - Decision: `integrate` the isolation principle into replay preflight contamination classification.
+  - Why: the surfaced blocker is not missing reset behavior anymore; it is over-broad proof isolation that treats historical bot-active rows as live contamination.
+  - Rejected options: deleting old conversations, weakening `--reset-before-dialog`, bypassing allowlist, reopening runtime code.
+- Root cause (mandatory):
+  - Symptom: fresh replay `r22` still exits before dialog turn `1` even though reset preflight now returns `Session reset ack sent`.
+  - Minimal reproduction: exact seed-`19` replay on the refreshed runtime with `--reset-before-dialog --jid-mode unique --allow-non-allowlist`; latest conversation is clean, but historical bot-active rows on the same allowlist JID still trigger contamination.
+  - Evidence: `/tmp/booking_quality/a922-go2f-seed19-r22/manual_audit.json`; `/tmp/booking_quality/a922-go2f-seed19-r22/run_manifest.json`; DB inspection of the latest allowlist conversations; `ops/diagnose.py` contamination logic.
+  - Five whys:
+    - Why does replay stop before turn `1`? preflight remains contaminated.
+    - Why is it contaminated? replay scans the last few conversations for the JID and marks the pool dirty.
+    - Why does it mark clean JIDs dirty? `multiple_recent_conversations` fires on mere history, and historical bot-active rows contribute `booking_active` / `simulation_id_mismatch` / `decision_trace_present`.
+    - Why is that wrong? the latest conversation after reset is already `bot_active`, `booking.active=false`, and tagged with the current `simulation.id`; the remaining rows are historical evidence, not live continuity.
+    - Why does the proof lane still fail-close? the preflight classifier does not separate latest/live contamination from historical bot-active residue.
+  - Root cause statement: `ops/diagnose.py` over-classifies historical bot-active conversations as active preflight contamination, so allowlist JIDs with reused history become permanently dirty even when the latest reset result is clean.
+  - Fix mechanism: scope blocking contamination to the latest conversation or still-live historical rows, and derive `multiple_recent_conversations` only from multiple contaminated rows instead of raw history count.
+- Invariant: keep `--reset-before-dialog`, allowlist/outbox safety, and runtime reset proof strict; do not hide genuinely live `pending`/`manager_active` contamination.
+- Scope: `ops/diagnose.py` preflight contamination helpers and deterministic proof tests.
+- Out of scope: runtime owner changes, frozen router edits, acceptance threshold changes.
+- Touch-list:
+  - `ops/diagnose.py`
+  - `truffles-api/tests/test_booking_quality_status_gate.py`
+  - `truffles-api/tests/test_booking_quality_jid_mode.py`
+- Plan:
+  1. Narrow preflight contamination classification so clean latest bot-active rows with only historical trace residue do not fail-close.
+  2. Only raise `multiple_recent_conversations` when more than one recent row is still actually contaminated.
+  3. Add deterministic proof regressions for the `r22` pattern and for multiple genuinely live recent rows.
+- DoD:
+  - clean latest bot-active replay rows no longer contaminate preflight by history alone;
+  - historical bot-active booking residue no longer blocks replay isolation;
+  - genuinely live pending/manager-active rows still block;
+  - focused proof tests are green.
+- Work mode (mandatory): implementation
+- Checks:
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_jid_mode.py -k "preflight or contamination or fallback_jid"`
+- Evidence:
+  - code diff in `ops/diagnose.py`
+  - deterministic proof in `truffles-api/tests/test_booking_quality_status_gate.py`
+  - follow-up replay artifact from the next closure block
+- Rollback: revert the contamination helper changes and the paired proof regressions.
+- No-go:
+  - no weakening of allowlist/outbox rules;
+  - no DB cleanup for evidence;
+  - no frozen router edits.
+- Risks/blockers:
+  - after proof isolation is repaired, replay may surface the next real runtime or proof family.
+- Residual architecture debt (mandatory):
+  - Current residuals accepted in this block: replay still depends on a reused allowlist pool with large historical conversation sets; `reasoning_core.py` duplicate defs remain outside this proof lane.
+  - Why not in this block: the active blocker is proof preflight classification, not runtime authority cleanup.
+  - Risk if deferred: replay can remain permanently fail-closed on historically used allowlist JIDs.
+  - Linked follow-up Task Package(s): `TP-2026-03-23-consultant-core-demo-salon-seed19-r22-preflight-contamination-canary-replay-a922.md`
+  - Expiry/trigger to stop deferral: immediate; the next truthful step is a fresh replay on the same seed-`19` scenario file.
+- Next-block contract (mandatory):
+  - Next block objective: rerun the exact seed-`19` replay on fresh runtime parity and classify the first surviving blocker after the proof isolation repair.
+  - First deterministic check command: `python3 ops/diagnose.py llm-quality-audit --run-dir /tmp/booking_quality/a922-go2f-seed19-r23 --status done --strict-artifacts`
+  - Blocked-by conditions: stale local runtime; replay launched without the frozen `scenarios.json`; unaudited invalid artifacts.
+  - Owner role for closure: Brain / Top Architect

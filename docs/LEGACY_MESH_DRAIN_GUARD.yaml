@@ -1,0 +1,19 @@
+version: 2026-03-31.v1
+active_block: Consultant Core Legacy Mesh Drain
+active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-legacy-mesh-drain-a922.md
+package_root:
+  path: truffles-api/app/routers/webhook/__init__.py
+  required_lazy_exports:
+    _should_block_expected_reply_by_info:
+      module: app.routers.webhook.expected_reply_interrupt_runtime
+      attr: _should_block_expected_reply_by_info
+  forbidden_module_refs:
+  - app.routers.webhook.decision
+app_runtime_import_contract:
+  decision_importers:
+  - truffles-api/app/routers/webhook/_legacy.py
+  legacy_bus_importers: []
+registry_contract:
+  decision_static_app_importers:
+  - truffles-api/app/routers/webhook/_legacy.py
+  legacy_bus_static_app_importers: []
