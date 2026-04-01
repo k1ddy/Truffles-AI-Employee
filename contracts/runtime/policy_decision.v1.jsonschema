@@ -89,13 +89,13 @@
       "default": []
     },
     "interaction": {
-      "$ref": "#/$defs/interaction"
+      "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/interaction"
     },
     "semantic_frame": {
-      "$ref": "#/$defs/semanticFrame"
+      "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/semanticFrame"
     },
     "pending_question_contract": {
-      "$ref": "#/$defs/pendingQuestionContract"
+      "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/pendingQuestionContract"
     },
     "semantic_decision": {
       "anyOf": [
@@ -146,10 +146,10 @@
           "minLength": 1
         },
         "target": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "relation": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         }
       }
     },
@@ -167,22 +167,22 @@
       ],
       "properties": {
         "expected_reply_type": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "reason": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "pending_question_act": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "pending_question_target": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "active_question_relation": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "next_question": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "open_questions": {
           "type": "array",
@@ -212,10 +212,10 @@
           "const": "semantic_frame.v2"
         },
         "user_goal": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "requested_effect": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         },
         "subject": {
           "type": "object",
@@ -248,7 +248,7 @@
           "type": "boolean"
         },
         "reason": {
-          "$ref": "#/$defs/nullableToken"
+          "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/nullableToken"
         }
       }
     },
@@ -360,10 +360,10 @@
             "$ref": "https://truffles.ai/contracts/runtime/binding_plan.v1.jsonschema"
           },
           "semantic_frame": {
-            "$ref": "#/$defs/shadowSemanticFrame"
+            "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/shadowSemanticFrame"
           },
           "pending_question_contract": {
-            "$ref": "#/$defs/shadowPendingQuestionContract"
+            "$ref": "https://truffles.ai/contracts/runtime/policy_decision.v1.jsonschema#/$defs/shadowPendingQuestionContract"
           },
           "meta": {
             "not": {
