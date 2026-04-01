@@ -1,20 +1,33 @@
-# SESSION 2026-03-30-consultant-core-consolidation-a922 — consultant-core consolidation freeze inventory
+# SESSION 2026-03-30-consultant-core-consolidation-a922 — consultant-core consolidation worktree
 
 - status: active
 - owner: Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md
+- task_package: docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md
 - branch: feat/2026-03-30-consultant-core-consolidation-a922
 - worktree: /home/zhan/worktrees/2026-03-30-consultant-core-consolidation-a922
 - base_ref: 531001fc
-- scope: Freeze the three fragmented checkout states, build a file-level inventory, and establish one safe continuation worktree.
+- scope: Active consolidation worktree for bounded consultant-core and CI blocks; latest closed block splits Console k6 into PR, live, and nightly lanes without pointing PR CI at prod by default.
 - done:
   - captured freeze manifests/diff bundles for `truffles-main`, `governance-lock`, `practical-closure`
   - generated inventory and transfer matrix under `/home/zhan/consolidation_freeze/2026-03-30-consultant-core-consolidation-a922`
   - created the new consolidation worktree from `531001fc`
+  - added `console-k6-pr` to `.github/workflows/ci.yml` with console-related path gating and explicit non-prod `CONSOLE_K6_PR_*` secrets
+  - added dedicated workflow `.github/workflows/console-k6.yml` with `console-k6-live` (`workflow_dispatch`) and `console-k6-nightly` (`schedule`)
+  - extended `ops/k6/console_smoke.js` with optional `X-Company-Id`, `X-Client-Id`, and `X-Branch-Id` headers
+  - updated `TECH.md`, `docs/DEV_SETUP.md`, and `docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md` for the new k6 cadence
 - next:
-  - build the file-level transfer matrix inside the consolidation worktree
-  - resolve only the true-conflict files manually
+  - provision a stable non-prod Console API target and `CONSOLE_K6_PR_*` secrets so `console-k6-pr` runs instead of skipping
 - evidence:
   - /home/zhan/consolidation_freeze/2026-03-30-consultant-core-consolidation-a922
   - docs/REPORTS/2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md
-- last_updated: 2026-03-30T09:05:00+05:00
+  - .github/workflows/ci.yml
+  - .github/workflows/console-k6.yml
+  - ops/k6/console_smoke.js
+  - TECH.md
+  - docs/DEV_SETUP.md
+  - docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md
+  - Checks:
+    - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml'); yaml.safe_load('.github/workflows/console-k6.yml') ... PY` (`pass`)
+    - `node --check ops/k6/console_smoke.js` (`pass`)
+    - `git diff --check -- .github/workflows/ci.yml .github/workflows/console-k6.yml ops/k6/console_smoke.js TECH.md docs/DEV_SETUP.md docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md` (`pass`)
+- last_updated: 2026-04-01T10:20:00+05:00

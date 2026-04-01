@@ -1,0 +1,29 @@
+# SESSION 2026-04-01-console-k6-cadence-split-a922 — console k6 cadence split
+
+- status: done
+- owner: Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md
+- branch: feat/2026-03-30-consultant-core-consolidation-a922
+- worktree: /home/zhan/worktrees/2026-03-30-consultant-core-consolidation-a922
+- base_ref: origin/main
+- scope: Split Console k6 into PR non-prod smoke, manual live smoke, and nightly live drift check without pointing PR CI to prod by default.
+- done:
+  - Added `console-k6-pr` to `.github/workflows/ci.yml` with console-related path gating and explicit non-prod `CONSOLE_K6_PR_*` secrets.
+  - Added dedicated workflow `.github/workflows/console-k6.yml` with `console-k6-live` (`workflow_dispatch`) and `console-k6-nightly` (`schedule`).
+  - Extended `ops/k6/console_smoke.js` with optional `X-Company-Id`, `X-Client-Id`, and `X-Branch-Id` headers.
+  - Updated `TECH.md` and `docs/DEV_SETUP.md` with the new three-lane cadence and secret requirements.
+  - Recorded RCA, one web search, residual debt, and next-block contract in `docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md`.
+- next:
+  - Provision a stable non-prod Console API target and `CONSOLE_K6_PR_*` secrets so `console-k6-pr` runs instead of skipping.
+- evidence:
+  - `.github/workflows/ci.yml`
+  - `.github/workflows/console-k6.yml`
+  - `ops/k6/console_smoke.js`
+  - `TECH.md`
+  - `docs/DEV_SETUP.md`
+  - `docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md`
+  - Checks:
+    - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml'); yaml.safe_load('.github/workflows/console-k6.yml') ... PY` (`pass`)
+    - `node --check ops/k6/console_smoke.js` (`pass`)
+    - `git diff --check -- .github/workflows/ci.yml .github/workflows/console-k6.yml ops/k6/console_smoke.js TECH.md docs/DEV_SETUP.md docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md` (`pass`)
+- last_updated: 2026-04-01T10:10:00+05:00
