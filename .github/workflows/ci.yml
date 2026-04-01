@@ -14,10 +14,6 @@ on:
         description: "Force ci-livecheck (requires deploy)"
         type: boolean
         default: false
-      run_k6:
-        description: "Run k6 console load smoke"
-        type: boolean
-        default: false
       knowledge_activation_closeout_client_slug:
         description: "Optional knowledge activation closeout client slug override"
         type: string
@@ -50,6 +46,7 @@ jobs:
       core_eval_related: ${{ steps.manual.outputs.core_eval_related || steps.filter.outputs.core_eval_related }}
       console_web: ${{ steps.manual.outputs.console_web || steps.filter.outputs.console_web }}
       console_contracts: ${{ steps.manual.outputs.console_contracts || steps.filter.outputs.console_contracts }}
+      console_k6_related: ${{ steps.manual.outputs.console_k6_related || steps.filter.outputs.console_k6_related }}
       deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
       livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
       run_core_eval: ${{ steps.core_eval_gate.outputs.run_core_eval }}
@@ -66,6 +63,7 @@ jobs:
           echo "core_eval_related=true" >> "$GITHUB_OUTPUT"
           echo "console_web=true" >> "$GITHUB_OUTPUT"
           echo "console_contracts=true" >> "$GITHUB_OUTPUT"
+          echo "console_k6_related=true" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.run_long }}" = "true" ]; then
             echo "l2=true" >> "$GITHUB_OUTPUT"
           fi
@@ -144,6 +142,14 @@ jobs:
               - "truffles-api/app/schemas/console.py"
               - "truffles-api/app/services/console_auth.py"
               - "truffles-api/scripts/generate_openapi.py"
+              - ".github/workflows/**"
+            console_k6_related:
+              - "console-web/**"
+              - "contracts/console_api/**"
+              - "truffles-api/app/routers/console.py"
+              - "truffles-api/app/schemas/console.py"
+              - "truffles-api/app/services/console_auth.py"
+              - "ops/k6/**"
               - ".github/workflows/**"
 
       - name: Merge gate for core-eval rerun
@@ -620,25 +626,39 @@ jobs:
       - name: Console audit governance gate
         run: python3 scripts/check_console_audit_governance.py --pretty --output /tmp/console_audit_governance.json
 
-  console-k6:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}
+  console-k6-pr:
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.console_k6_related == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
-      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
-      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
-      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
-      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
-      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
-      SCHEMATHESIS_FALLBACK_CLIENT_ID: ${{ secrets.CONSOLE_SCHEMATHESIS_CLIENT_ID }}
-      SCHEMATHESIS_FALLBACK_BRANCH_ID: ${{ secrets.CONSOLE_SCHEMATHESIS_BRANCH_ID }}
+      CONSOLE_API_URL: ${{ secrets.CONSOLE_K6_PR_API_URL }}
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_K6_PR_API_TOKEN }}
+      CONSOLE_API_COMPANY_ID: ${{ secrets.CONSOLE_K6_PR_COMPANY_ID }}
+      CONSOLE_API_CLIENT_ID: ${{ secrets.CONSOLE_K6_PR_CLIENT_ID }}
+      CONSOLE_API_BRANCH_ID: ${{ secrets.CONSOLE_K6_PR_BRANCH_ID }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_K6_PR_KEYCLOAK_TOKEN_URL }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_K6_PR_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_K6_PR_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_K6_PR_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_K6_PR_KEYCLOAK_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Guard console k6 auth
+      - name: Guard PR console k6 target
         id: guard
         run: |
+          if [ -z "${CONSOLE_API_URL}" ]; then
+            echo "Non-prod console k6 target is not configured; skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### console-k6-pr
+          - skipped: true
+          - reason: missing `CONSOLE_K6_PR_API_URL`
+          - next step: provision a non-prod Console API URL and token or preview Keycloak creds
+          EOF
+            exit 0
+          fi
           if [ -n "${CONSOLE_API_TOKEN}" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -647,8 +667,13 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "Missing console auth secrets; skipping k6."
+          echo "Missing non-prod console auth secrets; skipping k6."
           echo "skip=true" >> "$GITHUB_OUTPUT"
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### console-k6-pr
+          - skipped: true
+          - reason: missing `CONSOLE_K6_PR_API_TOKEN` or preview Keycloak creds
+          EOF
 
       - name: Use pre-provisioned token
         if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
@@ -686,8 +711,11 @@ jobs:
         with:
           filename: ops/k6/console_smoke.js
         env:
-          CONSOLE_API_URL: https://api.truffles.kz/console/v1
+          CONSOLE_API_URL: ${{ env.CONSOLE_API_URL }}
           CONSOLE_API_TOKEN: ${{ env.CONSOLE_API_TOKEN }}
+          CONSOLE_API_COMPANY_ID: ${{ env.CONSOLE_API_COMPANY_ID }}
+          CONSOLE_API_CLIENT_ID: ${{ env.CONSOLE_API_CLIENT_ID }}
+          CONSOLE_API_BRANCH_ID: ${{ env.CONSOLE_API_BRANCH_ID }}
 
   core-eval:
     needs: [lint, unit-tests, changes]

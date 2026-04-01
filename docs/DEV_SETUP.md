@@ -191,12 +191,27 @@ schemathesis --config-file /home/zhan/truffles-main/contracts/console_api/schema
 ```
 Seed IDs live in `/home/zhan/truffles-main/contracts/console_api/schemathesis.toml`.
 
-**k6 (manual load smoke):**
+**k6 (manual live smoke):**
 ```bash
 CONSOLE_API_URL=https://api.truffles.kz/console/v1 \
 CONSOLE_API_TOKEN="<bearer token>" \
 k6 run /home/zhan/truffles-main/ops/k6/console_smoke.js
 ```
+
+**k6 optional selection headers:**
+```bash
+CONSOLE_API_COMPANY_ID="<company-uuid>" \
+CONSOLE_API_CLIENT_ID="<client-uuid>" \
+CONSOLE_API_BRANCH_ID="<branch-uuid>" \
+CONSOLE_API_URL=https://api.truffles.kz/console/v1 \
+CONSOLE_API_TOKEN="<bearer token>" \
+k6 run /home/zhan/truffles-main/ops/k6/console_smoke.js
+```
+
+**CI modes:**
+- `console-k6-pr` lives in `.github/workflows/ci.yml` and only uses explicit non-prod `CONSOLE_K6_PR_*` secrets.
+- `Console k6` live/nightly lives in `.github/workflows/console-k6.yml`.
+- PR lane must not target prod by default.
 
 ---
 
