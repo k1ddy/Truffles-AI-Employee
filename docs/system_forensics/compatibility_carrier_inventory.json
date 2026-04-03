@@ -1,7 +1,7 @@
 {
   "schema_version": "v3",
   "status": "machine_readable_system_reproof_base",
-  "active_block": "Consultant Core Block H.1B — File Replay Scenario Contract Materialization",
+  "active_block": "Consultant Core Block G — Operational Final Dedupe",
   "current_practical_truth": "r35f",
   "external_packet_status": "ready_for_external_handoff",
   "canonical_owner_paths": [

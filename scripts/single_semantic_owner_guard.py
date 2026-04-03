@@ -1,6 +1,94 @@
 from __future__ import annotations
 
+import ast
+from collections import Counter
 from pathlib import Path
+
+
+CANONICAL_FIELDS = (
+    "action",
+    "outcome",
+    "expected_reply_type",
+    "expected_reply_reason",
+    "pending_question_target",
+    "active_question_relation",
+    "semantic_contract",
+    "semantic_frame",
+)
+
+CANONICAL_WRITE_SCAN_PATHS = (
+    "truffles-api/app/services/intent_service.py",
+    "truffles-api/app/core/turn_planner.py",
+    "truffles-api/app/core/dialog_state_service.py",
+    "truffles-api/app/core/consultant_runtime.py",
+    "truffles-api/app/core/turn_executor.py",
+    "truffles-api/app/core/response_realizer.py",
+    "truffles-api/app/routers/webhook/decision.py",
+    "truffles-api/app/routers/webhook/info.py",
+    "truffles-api/app/routers/webhook/booking.py",
+    "truffles-api/app/routers/webhook/response.py",
+    "truffles-api/app/routers/webhook/class_router_runtime.py",
+    "truffles-api/app/routers/webhook/booking_compat.py",
+    "truffles-api/app/routers/webhook/decision_compat.py",
+    "truffles-api/app/routers/webhook/info_compat.py",
+    "truffles-api/app/routers/webhook/info_followup_compat.py",
+    "truffles-api/app/routers/webhook/policy_compat.py",
+    "truffles-api/app/routers/webhook/response_compat.py",
+    "truffles-api/app/services/pack_runtime_compat.py",
+    "truffles-api/app/services/demo_salon_knowledge_compat.py",
+)
+
+LEGAL_CANONICAL_WRITE_PATHS = {
+    "truffles-api/app/services/intent_service.py",
+    "truffles-api/app/core/turn_planner.py",
+    "truffles-api/app/core/dialog_state_service.py",
+}
+
+KNOWN_NON_OWNER_CANONICAL_WRITE_SIGNATURES = {
+    ("truffles-api/app/core/consultant_runtime.py", "_build_policy_core_memory_profile", "profile", "semantic_contract", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "action", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "active_question_relation", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "expected_reply_reason", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "expected_reply_type", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "outcome", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "pending_question_target", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "semantic_contract", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "decision_meta", "semantic_frame", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "interaction_entry", "active_question_relation", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "interaction_entry", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "interaction_entry", "pending_question_target", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "question_contract_entry", "active_question_relation", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "question_contract_entry", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "question_contract_entry", "pending_question_target", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "active_question_relation", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "expected_reply_reason", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "expected_reply_type", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "outcome", "dict_literal"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "pending_question_target", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "semantic_contract", "subscript_assign"): 1,
+    ("truffles-api/app/core/consultant_runtime.py", "_record_turn_trace", "trace_event", "semantic_frame", "subscript_assign"): 1,
+    ("truffles-api/app/core/response_realizer.py", "realize", "meta", "outcome", "subscript_assign"): 1,
+    ("truffles-api/app/core/turn_executor.py", "_attach_semantic_contract_meta", "payload", "semantic_contract", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/booking.py", "_handle_booking_interrupt", "message_meta_updates", "pending_question_target", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/booking.py", "_handle_booking_interrupt", "trace_payload", "pending_question_target", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "bypass_trace", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "bypass_updates", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "interaction_trace", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "interaction_trace", "pending_question_target", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "interaction_updates", "pending_question_target", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "trace_payload", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_apply_expected_reply_contract", "updates", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_run_intent_decomposition", "intent_queue_event", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_run_intent_decomposition", "trace_payload", "expected_reply_reason", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/decision.py", "_run_intent_decomposition", "trace_payload", "expected_reply_type", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/info.py", "_handle_truth_gate_fallback", "override_meta", "expected_reply_type", "call.update"): 1,
+    ("truffles-api/app/routers/webhook/info.py", "_handle_truth_gate_fallback", "trace_payload", "expected_reply_type", "dict_literal"): 1,
+    ("truffles-api/app/routers/webhook/response.py", "_apply_locked_consult_topic_shift", "consult_meta", "expected_reply_reason", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/response.py", "_apply_locked_consult_topic_shift", "consult_meta", "expected_reply_type", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/response.py", "_handle_consult_flow", "consult_flow_trace", "expected_reply_type", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/response.py", "_handle_consult_flow", "consult_meta", "expected_reply_reason", "subscript_assign"): 1,
+    ("truffles-api/app/routers/webhook/response.py", "_handle_consult_flow", "consult_meta", "expected_reply_type", "subscript_assign"): 4,
+}
 
 
 GLOBAL_FORBIDDEN = (
@@ -381,6 +469,159 @@ FILE_RULES = {
 }
 
 
+def _source_segment(source: str, node: ast.AST | None) -> str | None:
+    if node is None:
+        return None
+    return (ast.get_source_segment(source, node) or "").strip() or None
+
+
+def _literal_string(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _assignment_targets(node: ast.AST) -> list[ast.AST]:
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    if isinstance(node, ast.AnnAssign):
+        return [node.target]
+    if isinstance(node, ast.AugAssign):
+        return [node.target]
+    return []
+
+
+def _assignment_value(node: ast.AST) -> ast.AST | None:
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        return getattr(node, "value", None)
+    return None
+
+
+def _iter_dict_entries(node: ast.Dict) -> list[tuple[str, ast.AST]]:
+    entries: list[tuple[str, ast.AST]] = []
+    for key, value in zip(node.keys, node.values):
+        key_token = _literal_string(key)
+        if key_token is not None:
+            entries.append((key_token, value))
+    return entries
+
+
+class _CanonicalWriteScanner(ast.NodeVisitor):
+    def __init__(self, *, relative_path: str, source: str):
+        self.relative_path = relative_path
+        self.source = source
+        self.function_stack: list[str] = []
+        self.signatures: list[tuple[str, str | None, str | None, str, str]] = []
+
+    def _record(self, *, field: str, kind: str, container: str | None) -> None:
+        if self.relative_path in LEGAL_CANONICAL_WRITE_PATHS:
+            return
+        self.signatures.append(
+            (
+                self.relative_path,
+                self.function_stack[-1] if self.function_stack else None,
+                container,
+                field,
+                kind,
+            )
+        )
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.function_stack.append(node.name)
+        self.generic_visit(node)
+        self.function_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.function_stack.append(node.name)
+        self.generic_visit(node)
+        self.function_stack.pop()
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self._scan_assignment(node)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._scan_assignment(node)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._scan_assignment(node)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            container = _source_segment(self.source, func.value)
+            if func.attr == "setdefault" and node.args:
+                key = _literal_string(node.args[0])
+                if key in CANONICAL_FIELDS:
+                    self._record(field=key, kind="call.setdefault", container=container)
+            if func.attr == "update" and node.args and isinstance(node.args[0], ast.Dict):
+                for key, _value in _iter_dict_entries(node.args[0]):
+                    if key in CANONICAL_FIELDS:
+                        self._record(field=key, kind="call.update", container=container)
+            if func.attr == "model_copy":
+                for keyword in node.keywords:
+                    if keyword.arg == "update" and isinstance(keyword.value, ast.Dict):
+                        for key, _value in _iter_dict_entries(keyword.value):
+                            if key in CANONICAL_FIELDS:
+                                self._record(
+                                    field=key,
+                                    kind="call.model_copy_update",
+                                    container=container,
+                                )
+        self.generic_visit(node)
+
+    def _scan_assignment(self, node: ast.AST) -> None:
+        targets = _assignment_targets(node)
+        value = _assignment_value(node)
+        if isinstance(value, ast.Dict):
+            containers = [_source_segment(self.source, target) for target in targets] or [None]
+            container = next((item for item in containers if item), None)
+            for key, _entry_value in _iter_dict_entries(value):
+                if key in CANONICAL_FIELDS:
+                    self._record(field=key, kind="dict_literal", container=container)
+        for target in targets:
+            if isinstance(target, ast.Subscript):
+                key = _literal_string(target.slice)
+                if key in CANONICAL_FIELDS:
+                    self._record(
+                        field=key,
+                        kind="subscript_assign",
+                        container=_source_segment(self.source, target.value),
+                    )
+
+
+def _collect_canonical_write_signatures(repo_root: Path) -> Counter[tuple[str, str | None, str | None, str, str]]:
+    signatures: Counter[tuple[str, str | None, str | None, str, str]] = Counter()
+    for relative_path in CANONICAL_WRITE_SCAN_PATHS:
+        path = repo_root / relative_path
+        if not path.exists():
+            continue
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        scanner = _CanonicalWriteScanner(relative_path=relative_path, source=source)
+        scanner.visit(tree)
+        signatures.update(scanner.signatures)
+    return signatures
+
+
+def _canonical_write_violations(repo_root: Path) -> list[str]:
+    violations: list[str] = []
+    current = _collect_canonical_write_signatures(repo_root)
+    for signature, count in sorted(current.items()):
+        allowed_count = KNOWN_NON_OWNER_CANONICAL_WRITE_SIGNATURES.get(signature, 0)
+        if count <= allowed_count:
+            continue
+        path, function, container, field, kind = signature
+        violations.append(
+            f"{path} contains unexpected canonical write signature "
+            f"(function={function or '<module>'}, container={container or '<unknown>'}, "
+            f"field={field}, kind={kind}, allowed_count={allowed_count}, actual_count={count})"
+        )
+    return violations
+
+
 def evaluate(repo_root: Path) -> list[str]:
     violations: list[str] = []
     app_root = repo_root / "truffles-api" / "app"
@@ -425,6 +666,7 @@ def evaluate(repo_root: Path) -> list[str]:
                 violations.append(
                     f"{relative_path} contains class-router compatibility token {token!r} outside the allowed boundary"
                 )
+    violations.extend(_canonical_write_violations(repo_root))
     return violations
 
 

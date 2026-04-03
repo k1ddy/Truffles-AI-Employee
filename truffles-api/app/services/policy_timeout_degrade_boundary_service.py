@@ -167,7 +167,7 @@ def handle_policy_timeout_degrade_boundary(
         )
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action=runtime_input.continue_message_action or "reply",
+            action="collect",
             intent=runtime_input.continue_message_intent or "booking",
             source=runtime_input.continue_message_source or "booking_slot_guidance",
             fast_intent=False,
@@ -335,7 +335,7 @@ def handle_policy_timeout_degrade_boundary(
         )
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action=runtime_input.continue_message_action or "reply",
+            action="collect",
             intent=runtime_input.continue_message_intent or "policy_core_guard",
             source=runtime_input.continue_message_source or "llm_policy_core",
             fast_intent=False,

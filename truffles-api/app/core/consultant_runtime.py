@@ -685,6 +685,8 @@ class ConsultantRuntime:
         else:
             decision = plan_result.decision
             boundary_signal = plan_result.boundary_signal
+            if isinstance(plan_result.boundary_signal, PlannerBoundarySignal):
+                boundary_signal = plan_result.boundary_signal
         override = None
         if isinstance(boundary_signal, PlannerBoundarySignal):
             signal = boundary_signal

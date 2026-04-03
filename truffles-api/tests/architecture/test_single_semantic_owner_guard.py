@@ -15,6 +15,25 @@ def load_module(name: str, path: Path):
     return module
 
 
+def _seed_guard_repo(repo: Path, module) -> None:
+    for relative_path in module.FILE_RULES:
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    for relative_path in module.CANONICAL_WRITE_SCAN_PATHS:
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("", encoding="utf-8")
+
+    for relative_path in module.CONTAINED_PACK_API_ALLOWED_FILES:
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("", encoding="utf-8")
+
+
 def test_single_semantic_owner_guard_matches_current_repo() -> None:
     module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
 
@@ -28,10 +47,7 @@ def test_single_semantic_owner_guard_flags_raw_service_fallback(tmp_path: Path) 
     (repo / "truffles-api" / "app" / "routers" / "webhook").mkdir(parents=True)
     (repo / "truffles-api" / "app" / "core").mkdir(parents=True)
 
-    for relative_path in module.FILE_RULES:
-        path = repo / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
+    _seed_guard_repo(repo, module)
 
     (repo / "truffles-api" / "app" / "services" / "intent_service.py").write_text(
         "from app.services.pack_runtime_service import get_pack_service_hint\n"
@@ -89,15 +105,7 @@ def test_single_semantic_owner_guard_flags_contained_pack_api_escape(tmp_path: P
     (app_root / "services").mkdir(parents=True)
     (app_root / "routers" / "webhook").mkdir(parents=True)
 
-    for relative_path in module.FILE_RULES:
-        path = repo / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
-
-    for relative_path in module.CONTAINED_PACK_API_ALLOWED_FILES:
-        path = repo / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
+    _seed_guard_repo(repo, module)
 
     (app_root / "routers" / "webhook" / "policy.py").write_text(
         "from app.services.pack_runtime_service import get_pack_decision\n\n"
@@ -117,15 +125,7 @@ def test_single_semantic_owner_guard_flags_compat_import_escape(tmp_path: Path) 
     (app_root / "services").mkdir(parents=True)
     (app_root / "routers" / "webhook").mkdir(parents=True)
 
-    for relative_path in module.FILE_RULES:
-        path = repo / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
-
-    for relative_path in module.CONTAINED_PACK_API_ALLOWED_FILES:
-        path = repo / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
+    _seed_guard_repo(repo, module)
 
     (app_root / "routers" / "webhook" / "policy.py").write_text(
         "from app.services.pack_runtime_compat import get_pack_decision\n\n"
@@ -136,3 +136,56 @@ def test_single_semantic_owner_guard_flags_compat_import_escape(tmp_path: Path) 
 
     violations = module.evaluate(repo)
     assert any("compatibility-only pack runtime helpers" in item for item in violations)
+
+
+def test_single_semantic_owner_guard_flags_unknown_canonical_subscript_writer(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+
+    target = repo / "truffles-api" / "app" / "routers" / "webhook" / "info_compat.py"
+    target.write_text(
+        "def leak(meta):\n"
+        "    meta['action'] = 'collect'\n",
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo)
+    assert any("unexpected canonical write signature" in item and "field=action" in item for item in violations)
+
+
+def test_single_semantic_owner_guard_flags_unknown_canonical_update_writer(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+
+    target = repo / "truffles-api" / "app" / "routers" / "webhook" / "response_compat.py"
+    target.write_text(
+        "def leak(meta):\n"
+        "    meta.update({'expected_reply_type': 'time'})\n",
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo)
+    assert any(
+        "unexpected canonical write signature" in item and "kind=call.update" in item for item in violations
+    )
+
+
+def test_single_semantic_owner_guard_flags_unknown_canonical_model_copy_writer(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+
+    target = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision_compat.py"
+    target.write_text(
+        "def leak(payload):\n"
+        "    return payload.model_copy(update={'semantic_contract': {'goal': 'booking'}})\n",
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo)
+    assert any(
+        "unexpected canonical write signature" in item and "kind=call.model_copy_update" in item
+        for item in violations
+    )

@@ -158,7 +158,7 @@ def _run_handoff_mode(
     )
     hooks.record_message_decision_meta(
         runtime_input.saved_message,
-        action="escalate",
+        action="handoff",
         intent=message_meta_intent,
         source=message_meta_source,
         fast_intent=False,
@@ -201,7 +201,7 @@ def handle_policy_core_guard_orchestration(
         )
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action="reply",
+            action="collect",
             intent="policy_core_guard",
             source="llm_policy_core",
             fast_intent=False,
@@ -339,7 +339,7 @@ def handle_policy_core_guard_orchestration(
         )
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action=runtime_input.collect_action or "reply",
+            action="collect",
             intent=runtime_input.collect_intent or "policy_core_guard",
             source="llm_policy_core",
             fast_intent=False,

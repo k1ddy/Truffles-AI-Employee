@@ -58,7 +58,7 @@ class PolicyTimeoutBookingTimeFollowupBoundaryRuntimeInput:
     pending_question_owner: str = "booking_time_availability_followup"
     recovery_tag: str = "timeout_active_name_time_availability_followup"
     retry_path: str = "booking_time_availability_followup"
-    message_action: str = "booking_prompt"
+    message_action: str = "collect"
     message_intent: str = "booking"
     message_source: str = "llm_policy_core"
     style_signal: bool = False

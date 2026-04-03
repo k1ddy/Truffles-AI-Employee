@@ -360,7 +360,7 @@ def handle_policy_validation_boundary(
     if runtime_input.mode == "clarify":
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action="reply",
+            action="collect",
             intent="policy_core_guard",
             source="llm_policy_core",
             fast_intent=False,
@@ -379,7 +379,7 @@ def handle_policy_validation_boundary(
             )
             hooks.record_message_decision_meta(
                 runtime_input.saved_message,
-                action="booking_prompt",
+                action="collect",
                 intent="booking",
                 source="policy_core_guard",
                 fast_intent=False,
@@ -418,7 +418,7 @@ def handle_policy_validation_boundary(
             if runtime_input.mode == "collect_prompt":
                 hooks.record_message_decision_meta(
                     runtime_input.saved_message,
-                    action="booking_prompt",
+                    action="collect",
                     intent="booking",
                     source="policy_core_guard",
                     fast_intent=False,
@@ -450,7 +450,7 @@ def handle_policy_validation_boundary(
                 )
                 hooks.record_message_decision_meta(
                     runtime_input.saved_message,
-                    action="reply",
+                    action="collect",
                     intent="booking",
                     source="booking_slot_guidance",
                     fast_intent=False,

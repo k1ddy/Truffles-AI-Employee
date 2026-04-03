@@ -52,8 +52,6 @@ class ResponseRealizer:
             reply_kind = "handoff"
             body = text
         meta: dict[str, Any] = {}
-        if decision is not None:
-            meta["outcome"] = decision.outcome
         if override is not None:
             meta["boundary_decision"] = override.decision
         return ReplyEnvelope(channel=channel, reply_kind=reply_kind, text=body, meta=meta)
