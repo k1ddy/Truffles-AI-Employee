@@ -1024,10 +1024,13 @@ class TurnExecutor:
         decision: PolicyDecision,
     ) -> dict[str, Any] | None:
         dialog_state_service = DialogStateService()
-        if not TurnExecutor._has_canonical_semantic_owner(decision):
-            return None
-        return dialog_state_service.project_pending_question_contract(
+        pending_question_contract = dialog_state_service.project_pending_question_contract(
             TurnPlanner().canonical_pending_question_contract(decision)
+        )
+        if pending_question_contract:
+            return pending_question_contract
+        return dialog_state_service.project_pending_question_contract(
+            decision.pending_question_contract
         )
 
     def _build_execution_semantic_contract(
@@ -1038,7 +1041,7 @@ class TurnExecutor:
         service_name: str | None = None,
     ) -> dict[str, Any] | None:
         base_contract = TurnPlanner().canonical_semantic_contract(decision) or {}
-        if not base_contract or not self._has_canonical_semantic_owner(decision):
+        if not base_contract:
             return None
         contract = dict(base_contract)
         contract["contract_version"] = "semantic_contract.v1"

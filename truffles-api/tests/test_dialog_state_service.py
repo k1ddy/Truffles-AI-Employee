@@ -73,7 +73,7 @@ def test_dialog_state_service_projects_expected_reply_fields() -> None:
     )
 
     assert projections.expected_reply_type == "time"
-    assert projections.expected_reply_reason == "booking_prompt"
+    assert projections.expected_reply_reason == "collect:datetime"
 
 
 def test_dialog_state_service_projects_expected_reply_fields_without_mutating_other_projections() -> None:
@@ -357,7 +357,7 @@ def test_expected_reply_context_sync_result_carries_canonical_pending_question_c
 
     assert result.pending_question_contract == {
         "expected_reply_type": "time",
-        "reason": "booking_prompt",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
     }
@@ -543,7 +543,7 @@ def test_dialog_state_service_sets_expected_reply_context_fields_and_clears_stal
     updated["session_memory"]["active_goal"] = "info"
 
     assert updated["expected_reply_type"] == "time"
-    assert updated["expected_reply_reason"] == "booking_prompt"
+    assert updated["expected_reply_reason"] == "collect:datetime"
     assert "expected_reply_type" not in cleared
     assert "expected_reply_reason" not in cleared
     assert context["session_memory"]["active_goal"] == "booking"
@@ -2632,13 +2632,13 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
 
     state = result.context["context_manager"]["canonical_dialog_state"]
     assert result.expected_reply_type == "time"
-    assert result.expected_reply_reason == "booking_prompt"
+    assert result.expected_reply_reason == "collect:datetime"
     assert result.re_entry_cleared is True
     assert result.question_memory == {
         "active_goal": "booking",
         "interaction_state": {
             "resume_slot": "datetime",
-            "interaction_owner": "question_contract:booking_prompt",
+            "interaction_owner": "question_contract:collect:datetime",
             "grounded_referents": {"service": "Маникюр"},
             "confirmation_state": {
                 "required": True,
@@ -2651,7 +2651,7 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
         "goal_stack": ["booking"],
         "pending_question_contract": {
             "expected_reply_type": "time",
-            "reason": "booking_prompt",
+            "reason": "collect:datetime",
             "next_question": "datetime",
             "open_questions": ["datetime"],
         },
@@ -2660,13 +2660,13 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
     }
     assert state["pending_question_contract"] == {
         "expected_reply_type": "time",
-        "reason": "booking_prompt",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
     }
     assert state["interaction_state"] == {
         "resume_slot": "datetime",
-        "interaction_owner": "question_contract:booking_prompt",
+        "interaction_owner": "question_contract:collect:datetime",
         "grounded_referents": {"service": "Маникюр"},
         "confirmation_state": {
             "required": True,
@@ -2676,10 +2676,10 @@ def test_dialog_state_service_builds_expected_reply_context_sync_result() -> Non
         },
     }
     assert result.context["expected_reply_type"] == "time"
-    assert result.context["expected_reply_reason"] == "booking_prompt"
+    assert result.context["expected_reply_reason"] == "collect:datetime"
     assert result.context["re_entry_required"] == {
         "required": False,
-        "reason": "booking_prompt",
+        "reason": "collect:datetime",
         "cleared_at": now.isoformat(),
     }
     assert result.context["session_memory"] == result.question_memory
@@ -3466,8 +3466,8 @@ def test_dialog_state_service_merges_fact_interrupt_slots_into_active_booking() 
     assert "expected_reply_type" not in updated
     assert "expected_reply_reason" not in updated
     loaded = service.load_runtime_payload(updated)
-    assert loaded["expected_reply_type"] == "service_choice"
-    assert loaded["expected_reply_reason"] == "collect:service"
+    assert loaded["expected_reply_type"] is None
+    assert loaded["expected_reply_reason"] is None
     assert dialog_state.current_referents.service == "Наращивание полигелем"
     assert booking_payload["service"] == "Наращивание полигелем"
 
@@ -4923,7 +4923,7 @@ def test_dialog_state_service_write_runtime_payload_reprojects_compatibility_con
 
     expected_pending_question = {
         "expected_reply_type": "time",
-        "reason": "collect_datetime",
+        "reason": "collect:datetime",
         "pending_question_act": "ask_about_requested_slot",
         "pending_question_target": "time",
         "active_question_relation": "ask_about_requested_slot",
@@ -4999,7 +4999,7 @@ def test_dialog_state_service_write_runtime_payload_captures_pending_resume_from
 
     expected_pending_question = {
         "expected_reply_type": "time",
-        "reason": "collect_datetime",
+        "reason": "collect:datetime",
         "pending_question_act": "ask_about_requested_slot",
         "pending_question_target": "time",
         "active_question_relation": "ask_about_requested_slot",
@@ -5011,7 +5011,7 @@ def test_dialog_state_service_write_runtime_payload_captures_pending_resume_from
     assert pending_resume["context_manager"]["current_goal"] == "booking"
     assert pending_resume["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == expected_pending_question
     assert pending_resume["expected_reply_type"] == "time"
-    assert pending_resume["expected_reply_reason"] == "collect_datetime"
+    assert pending_resume["expected_reply_reason"] == "collect:datetime"
     assert pending_resume["booking"]["service"] == "Маникюр"
     assert "current_goal" not in handoff_updated
 

@@ -385,6 +385,8 @@ def _resolve_policy_core_max_tokens_with_cap(
         isinstance(model_name, str)
         and model_name.strip().lower().startswith("gpt-5")
     ):
+        if max_tokens_override is not None:
+            return max(resolved, POLICY_CORE_GPT5_MIN_MAX_TOKENS)
         min_tokens = (
             POLICY_CORE_GPT5_COMPACT_MIN_MAX_TOKENS
             if compact_mode
@@ -546,6 +548,8 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
         return cleaned or None
 
     tool_action_hint = _token(sanitized_payload.get("tool_action_hint"))
+    action = _token(sanitized_payload.get("action"))
+    intent = _token(sanitized_payload.get("intent"))
     subject_kind = _token(sanitized_payload.get("subject_kind"))
     capability = _token(sanitized_payload.get("capability"))
     reason = _token(sanitized_payload.get("reason"))
@@ -569,6 +573,24 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
             "active_question_relation",
         ):
             if sanitized_payload.pop(field_name, None) is not None:
+                sanitized = True
+
+    if tool_action_hint == "catalog.service_query" and action == "fact":
+        expected_pack_ref = None
+        if capability == "live_availability" or intent == "master_query":
+            expected_pack_ref = "master"
+        elif capability in {"pricing", "duration", "promotions"}:
+            expected_pack_ref = capability
+        elif intent in {"pricing", "duration", "promotions"}:
+            expected_pack_ref = intent
+        if expected_pack_ref:
+            normalized_pack_refs = [
+                item.strip().casefold()
+                for item in (sanitized_payload.get("pack_refs") or [])
+                if isinstance(item, str) and item.strip()
+            ]
+            if normalized_pack_refs != [expected_pack_ref]:
+                sanitized_payload["pack_refs"] = [expected_pack_ref]
                 sanitized = True
 
     return sanitized_payload, sanitized
@@ -1330,6 +1352,8 @@ def _policy_core_is_active_booking_time_fill_progression_contract(
     current_message: str | None,
 ) -> bool:
     if contract.intent != "booking" or contract.action != "collect":
+        return False
+    if _policy_core_payload_token(contract.capability) == "live_availability":
         return False
     carry_contract = _policy_core_resume_pending_contract(
         normalized_memory_profile
@@ -4266,6 +4290,24 @@ def route_llm_policy_core(
         normalized_memory_profile=normalized_memory_profile,
     ):
         schema_error = "llm_policy_core_error:active_booking_live_availability_reclassification_required"
+    if (
+        schema_error == "llm_policy_core_error:standalone_fact_followup_contract_invalid"
+        and not _policy_core_resume_pending_contract(normalized_memory_profile)
+        and not _policy_core_active_pending_contract(normalized_memory_profile)
+        and isinstance(payload, dict)
+    ):
+        stripped_payload = dict(payload)
+        for field_name in (
+            "expected_reply_type",
+            "next_question",
+            "open_questions",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+        ):
+            stripped_payload.pop(field_name, None)
+        payload = stripped_payload
+        contract, schema_error = validate_llm_policy_core_output(payload)
     if contract is not None and schema_error is None:
         schema_error = _validate_policy_core_runtime_contract(
             contract,
@@ -4274,6 +4316,32 @@ def route_llm_policy_core(
             context_payload=context_payload,
             client_slug=client_slug,
         )
+    if (
+        schema_error == "llm_policy_core_error:standalone_fact_followup_contract_invalid"
+        and not _policy_core_resume_pending_contract(normalized_memory_profile)
+        and not _policy_core_active_pending_contract(normalized_memory_profile)
+        and isinstance(payload, dict)
+    ):
+        stripped_payload = dict(payload)
+        for field_name in (
+            "expected_reply_type",
+            "next_question",
+            "open_questions",
+            "pending_question_act",
+            "pending_question_target",
+            "active_question_relation",
+        ):
+            stripped_payload.pop(field_name, None)
+        payload = stripped_payload
+        contract, schema_error = validate_llm_policy_core_output(payload)
+        if contract is not None and schema_error is None:
+            schema_error = _validate_policy_core_runtime_contract(
+                contract,
+                normalized_memory_profile=normalized_memory_profile,
+                current_message=message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
     if schema_error:
         repair_instruction = _build_policy_core_contract_repair_instruction(
             schema_error=schema_error,
@@ -4327,6 +4395,24 @@ def route_llm_policy_core(
                             normalized_memory_profile=normalized_memory_profile,
                         ):
                             schema_error = "llm_policy_core_error:active_booking_live_availability_reclassification_required"
+                        if (
+                            schema_error == "llm_policy_core_error:standalone_fact_followup_contract_invalid"
+                            and not _policy_core_resume_pending_contract(normalized_memory_profile)
+                            and not _policy_core_active_pending_contract(normalized_memory_profile)
+                            and isinstance(payload, dict)
+                        ):
+                            stripped_payload = dict(payload)
+                            for field_name in (
+                                "expected_reply_type",
+                                "next_question",
+                                "open_questions",
+                                "pending_question_act",
+                                "pending_question_target",
+                                "active_question_relation",
+                            ):
+                                stripped_payload.pop(field_name, None)
+                            payload = stripped_payload
+                            contract, schema_error = validate_llm_policy_core_output(payload)
                         if contract is not None and schema_error is None:
                             schema_error = _validate_policy_core_runtime_contract(
                                 contract,
@@ -4335,6 +4421,33 @@ def route_llm_policy_core(
                                 context_payload=context_payload,
                                 client_slug=client_slug,
                             )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:standalone_fact_followup_contract_invalid"
+                            and not _policy_core_resume_pending_contract(normalized_memory_profile)
+                            and not _policy_core_active_pending_contract(normalized_memory_profile)
+                            and isinstance(payload, dict)
+                        ):
+                            stripped_payload = dict(payload)
+                            for field_name in (
+                                "expected_reply_type",
+                                "next_question",
+                                "open_questions",
+                                "pending_question_act",
+                                "pending_question_target",
+                                "active_question_relation",
+                            ):
+                                stripped_payload.pop(field_name, None)
+                            payload = stripped_payload
+                            contract, schema_error = validate_llm_policy_core_output(payload)
+                            if contract is not None and schema_error is None:
+                                schema_error = _validate_policy_core_runtime_contract(
+                                    contract,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
                 elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
                 result["elapsed_ms"] = elapsed_ms
                 result["attempt_count"] = attempt_count

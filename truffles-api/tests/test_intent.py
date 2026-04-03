@@ -4449,11 +4449,8 @@ class TestPolicyCoreTimeoutRetry:
             )
 
         assert result["ok"] is True
-        assert result["contract_repair_retry_used"] is True
-        assert (
-            result["contract_repair_reason"]
-            == "llm_policy_core_error:catalog_service_query_pack_refs_invalid"
-        )
+        assert result["contract_repair_retry_used"] is False
+        assert result["contract_repair_reason"] is None
         assert result["binding"]["tool_action"] == "catalog.service_query"
         assert result["binding"]["tool_args"] == {"service_query": "маникюр"}
         assert result["payload"]["grounding_requirements"]["pack_refs"] == ["pricing"]

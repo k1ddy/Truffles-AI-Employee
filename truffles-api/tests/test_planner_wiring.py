@@ -35,7 +35,8 @@ def test_runtime_planner_wiring_keeps_legacy_plan_retired() -> None:
     calls = _collect_call_names(tree)
     imports = _collect_intent_service_imports(tree)
 
-    assert "route_dialogue_controller" in calls
+    assert "route_dialogue_controller" not in calls
+    assert "route_dialogue_controller" not in imports
     assert "route_llm_policy_core" in imports
     assert "route_llm_plan" not in calls
     assert "route_llm_plan" not in imports

@@ -82,7 +82,7 @@ def _policy_payload() -> dict:
     return {
         "schema_version": "policy_decision.v1",
         "outcome": "COLLECT",
-        "action": "booking_prompt",
+        "action": "collect",
         "intent": "booking",
         "source": "policy_core",
         "tool_action": "calendar.list_slots",
@@ -108,6 +108,83 @@ def _policy_payload() -> dict:
         },
         "meta": {"reason_code": "owner_matrix_m27"},
     }
+
+
+def test_dialog_state_service_canonicalizes_booking_prompt_reason_to_collect_slot() -> None:
+    projections = DialogStateService().project_expected_reply_projections(
+        expected_reply_type="time",
+        expected_reply_reason="booking_prompt",
+    )
+    assert projections.expected_reply_type == "time"
+    assert projections.expected_reply_reason == "collect:datetime"
+
+    media_projections = DialogStateService().project_expected_reply_projections(
+        expected_reply_type="media",
+        expected_reply_reason="booking_prompt_media_ack",
+    )
+    assert media_projections.expected_reply_reason == "collect:media"
+
+
+def test_dialog_state_service_expected_reply_sync_canonicalizes_booking_prompt_reason() -> None:
+    now = datetime(2026, 4, 3, 18, 0, tzinfo=timezone.utc)
+    result = DialogStateService().build_expected_reply_context_sync_result(
+        {
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+            "context_manager": {
+                "message_count": 4,
+                "current_goal": "booking",
+            },
+        },
+        expected_reply_type="time",
+        reason="booking_prompt",
+        now=now,
+    )
+
+    assert result.expected_reply_type == "time"
+    assert result.expected_reply_reason == "collect:datetime"
+    assert result.pending_question_contract == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+    }
+    assert result.context["expected_reply_reason"] == "collect:datetime"
+    assert (
+        result.context.get("context_manager", {})
+        .get("canonical_dialog_state", {})
+        .get("pending_question_contract", {})
+        .get("reason")
+        == "collect:datetime"
+    )
+
+
+def test_decision_booking_followup_reason_helper_accepts_canonical_collect_reason() -> None:
+    from app.routers.webhook import decision as decision_router
+
+    assert decision_router._is_booking_followup_expected_reply_reason(
+        "collect:datetime",
+        expected_reply_type="time",
+    ) is True
+    assert decision_router._is_booking_followup_expected_reply_reason(
+        "collect:service",
+        expected_reply_type="service_choice",
+    ) is True
+    assert decision_router._is_booking_followup_expected_reply_reason(
+        "booking_prompt",
+        expected_reply_type="time",
+    ) is True
+    assert decision_router._is_booking_followup_expected_reply_reason(
+        "info_interrupt",
+        expected_reply_type="time",
+    ) is False
+    assert decision_router._timeout_booking_completion_override("booking_prompt") == (
+        "collect",
+        "collect",
+    )
 
 
 def _binding_plan_payload() -> dict:
@@ -535,7 +612,6 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
     memory_profile = captured["memory_profile"]
     assert memory_profile == {
         "active_goal": "booking",
-        "slot_state": {"service": "manicure"},
         "pending_question_contract": {
             "next_question": "datetime",
             "open_questions": ["datetime"],
@@ -544,53 +620,6 @@ def test_consultant_runtime_plan_turn_passes_dialog_state_continuity_to_policy_c
             "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
             "active_question_relation": "ask_about_requested_slot",
-        },
-            "semantic_contract": {
-                "contract_version": "semantic_contract.v1",
-                "subject_kind": "specialist",
-                "capability": "bookability",
-                "resolution_mode": "referent_followup",
-                "pending_question_act": "ask_about_requested_slot",
-                "pending_question_target": "time",
-                "active_question_relation": "ask_about_requested_slot",
-                "entity_refs": [
-                    {
-                        "entity_id": "svc:manicure",
-                        "entity_type": "service",
-                        "value": "manicure",
-                    "source_ref": "carryover",
-                },
-                {
-                    "entity_id": "spec:aigerim",
-                    "entity_type": "specialist",
-                    "value": "Айгерим",
-                    "source_ref": "carryover",
-                },
-            ],
-            "referents": {
-                "service": {
-                    "value": "manicure",
-                    "entity_id": "svc:manicure",
-                    "entity_type": "service",
-                    "source_ref": "carryover",
-                },
-                "specialist": {
-                    "value": "Айгерим",
-                    "entity_id": "spec:aigerim",
-                    "entity_type": "specialist",
-                    "source_ref": "carryover",
-                },
-                "branch": {
-                    "value": "almaty-center",
-                    "entity_type": "branch",
-                    "source_ref": "carryover",
-                },
-                "customer": {
-                    "value": "Марина",
-                    "entity_type": "customer",
-                    "source_ref": "carryover",
-                },
-            },
         },
     }
     assert decision.interaction.owner == "llm_policy_core_booking"
@@ -646,19 +675,7 @@ def test_consultant_runtime_plan_turn_does_not_prefill_service_from_raw_message(
     )
 
     assert captured["booking_state"] == {}
-    assert captured["memory_profile"]["semantic_contract"] == {
-        "contract_version": "semantic_contract.v1",
-        "pending_question_act": "ask_about_requested_slot",
-        "pending_question_target": "time",
-        "active_question_relation": "ask_about_requested_slot",
-        "referents": {
-            "branch": {
-                "value": "almaty-center",
-                "entity_type": "branch",
-                "source_ref": "carryover",
-            }
-        },
-    }
+    assert "semantic_contract" not in captured["memory_profile"]
     assert TurnPlanner().canonical_pending_question_contract(decision).next_question == "datetime"
     assert override is None
 
@@ -2182,6 +2199,523 @@ def test_policy_validation_boundary_fact_guard_escalates_at_limit() -> None:
     assert "committed" not in captured
 
 
+def _capture_boundary_message_meta(captured: dict[str, object]):
+    def _record_message_decision_meta(_saved_message, **payload):
+        captured["message_meta"] = payload
+
+    return _record_message_decision_meta
+
+
+def _capture_boundary_override(captured: dict[str, object]):
+    def _apply_policy_guard_override(**payload):
+        captured["override"] = payload
+
+    return _apply_policy_guard_override
+
+
+def test_policy_timeout_booking_specialist_boundary_records_canonical_collect_action() -> None:
+    from app.services.policy_timeout_booking_specialist_boundary_service import (
+        PolicyTimeoutBookingSpecialistBoundaryRuntimeHooks,
+        PolicyTimeoutBookingSpecialistBoundaryRuntimeInput,
+        handle_policy_timeout_booking_specialist_boundary,
+    )
+
+    captured: dict[str, object] = {}
+
+    response = handle_policy_timeout_booking_specialist_boundary(
+        runtime_input=PolicyTimeoutBookingSpecialistBoundaryRuntimeInput(
+            mode="specialist_followup",
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            saved_message=SimpleNamespace(id="msg-1"),
+            now=datetime(2026, 4, 3, 18, 0, tzinfo=timezone.utc),
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="timeout",
+            reason_code="timeout_degrade",
+            guard_reason="policy_core_timeout_pending_specialist",
+            booking_state={"active": True, "service": "маникюр"},
+            collect_slot="specialist",
+            expected_reply_type="specialist",
+            expected_reply_reason="booking_specialist_followup",
+            active_question_relation="referent_followup",
+            specialist_name="Динара",
+        ),
+        hooks=PolicyTimeoutBookingSpecialistBoundaryRuntimeHooks(
+            get_conversation_context=lambda *_args, **_kwargs: {},
+            set_booking_context=lambda context, booking_state: {**context, "booking": booking_state},
+            set_expected_reply_context=lambda **kwargs: kwargs["context"],
+            set_conversation_context=lambda *_args, **_kwargs: None,
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            format_specialist_followup_prompt=lambda **_kwargs: "Какого специалиста предпочитаете?",
+            send_and_save=lambda text: (text, True),
+            commit=lambda: None,
+            handle_booking_interrupt=lambda **_kwargs: None,
+        ),
+    )
+
+    assert response.bot_response == "Какого специалиста предпочитаете?"
+    assert captured["override"] == {
+        "final_action": "collect",
+        "final_tool_action": "collect",
+        "reason_code": "timeout_degrade",
+        "reason": "policy_core_timeout_pending_specialist",
+    }
+    assert captured["message_meta"] == {
+        "action": "collect",
+        "intent": "booking",
+        "source": "policy_core_guard",
+        "fast_intent": False,
+    }
+
+
+def test_policy_timeout_booking_time_followup_boundary_records_canonical_collect_action() -> None:
+    from app.services.policy_timeout_booking_time_followup_boundary_service import (
+        PolicyTimeoutBookingTimeFollowupBoundaryRuntimeHooks,
+        PolicyTimeoutBookingTimeFollowupBoundaryRuntimeInput,
+        handle_policy_timeout_booking_time_followup_boundary,
+    )
+
+    captured: dict[str, object] = {}
+
+    response = handle_policy_timeout_booking_time_followup_boundary(
+        runtime_input=PolicyTimeoutBookingTimeFollowupBoundaryRuntimeInput(
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            saved_message=SimpleNamespace(id="msg-2"),
+            now=datetime(2026, 4, 3, 18, 5, tzinfo=timezone.utc),
+            message_count=4,
+            branch_id=None,
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="timeout",
+            reason_code="timeout_degrade",
+            guard_reason="booking_time_availability_followup",
+            booking_state={"active": True, "service": "маникюр"},
+            collect_slot="datetime",
+            current_booking_datetime="2026-04-04 17:45",
+            alternate_booking_datetime="2026-04-04 18:00",
+            expected_reply_type="time",
+            expected_reply_reason="booking_time_availability_followup",
+        ),
+        hooks=PolicyTimeoutBookingTimeFollowupBoundaryRuntimeHooks(
+            get_conversation_context=lambda *_args, **_kwargs: {"context_manager": {}},
+            set_booking_context=lambda context, booking_state: {**context, "booking": booking_state},
+            set_expected_reply_context=lambda **kwargs: kwargs["context"],
+            get_context_manager=lambda context: context.get("context_manager", {}),
+            sync_canonical_dialog_state=lambda manager, **_kwargs: manager,
+            set_context_manager=lambda context, manager: {**context, "context_manager": manager},
+            get_canonical_dialog_state=lambda manager: manager.get("canonical_dialog_state", {}),
+            sync_session_memory_interaction_state=lambda current_context, interaction_state, now: (
+                current_context,
+                {"interaction_state": interaction_state},
+            ),
+            set_conversation_context=lambda *_args, **_kwargs: None,
+            record_session_memory_update=lambda *_args, **_kwargs: None,
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            build_response=lambda **_kwargs: "Уточните время",
+            combine_sidecar=lambda sidecar, response_text: f"{sidecar} {response_text}",
+            maybe_apply_consult_return=lambda **kwargs: kwargs["bot_response"],
+            reset_low_confidence_retry=lambda *_args, **_kwargs: None,
+            send_and_save=lambda text: (text, True),
+            commit=lambda: None,
+        ),
+    )
+
+    assert response.bot_response == "Уточните время"
+    assert captured["override"] == {
+        "final_action": "collect",
+        "final_tool_action": "collect",
+        "reason_code": "timeout_degrade",
+        "reason": "booking_time_availability_followup",
+    }
+    assert captured["message_meta"] == {
+        "action": "collect",
+        "intent": "booking",
+        "source": "llm_policy_core",
+        "fast_intent": False,
+    }
+
+
+def test_policy_timeout_recovery_boundary_fact_fallback_records_canonical_fact_action() -> None:
+    from app.services.policy_timeout_recovery_boundary_service import (
+        PolicyTimeoutRecoveryBoundaryRuntimeHooks,
+        PolicyTimeoutRecoveryBoundaryRuntimeInput,
+        handle_policy_timeout_recovery_boundary,
+    )
+
+    captured: dict[str, object] = {}
+
+    response = handle_policy_timeout_recovery_boundary(
+        runtime_input=PolicyTimeoutRecoveryBoundaryRuntimeInput(
+            mode="fact_fallback",
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            saved_message=SimpleNamespace(id="msg-3"),
+            now=datetime(2026, 4, 3, 18, 10, tzinfo=timezone.utc),
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="timeout",
+            response_text="Маникюр стоит 2500 ₸.",
+            fallback_intent="pricing",
+            expected_reply_type="time",
+            expected_reply_reason="booking_interrupt",
+            info_sections=["pricing"],
+        ),
+        hooks=PolicyTimeoutRecoveryBoundaryRuntimeHooks(
+            get_conversation_context=lambda *_args, **_kwargs: {},
+            set_style_reference_pending=lambda context, payload: {**context, "style": payload},
+            set_conversation_context=lambda *_args, **_kwargs: None,
+            set_expected_reply_context=lambda **kwargs: kwargs["context"],
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            send_and_save=lambda text: (text, True),
+            commit=lambda: None,
+        ),
+    )
+
+    assert response.bot_response == "Маникюр стоит 2500 ₸."
+    assert captured["override"] == {
+        "final_action": "fact",
+        "final_tool_action": "pack.fact_fallback",
+        "reason_code": "timeout_degrade",
+        "reason": "policy_core_timeout_fact_fallback",
+    }
+    assert captured["message_meta"] == {
+        "action": "fact",
+        "intent": "pricing",
+        "source": "llm_policy_core",
+        "fast_intent": False,
+    }
+
+
+def test_policy_timeout_degrade_boundary_pending_slot_question_records_canonical_collect_action() -> None:
+    from app.services.policy_timeout_degrade_boundary_service import (
+        PolicyTimeoutDegradeBoundaryRuntimeHooks,
+        PolicyTimeoutDegradeBoundaryRuntimeInput,
+        handle_policy_timeout_degrade_boundary,
+    )
+
+    captured: dict[str, object] = {}
+
+    result = handle_policy_timeout_degrade_boundary(
+        runtime_input=PolicyTimeoutDegradeBoundaryRuntimeInput(
+            mode="pending_slot_question",
+            db=SimpleNamespace(),
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            user=SimpleNamespace(id="user-4"),
+            saved_message=SimpleNamespace(id="msg-4"),
+            message_text="Не понял",
+            allow_handover=True,
+            now=datetime(2026, 4, 3, 18, 15, tzinfo=timezone.utc),
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="timeout",
+            retry_intent="booking",
+            retry_reason="timeout",
+            retry_limit=2,
+            retry_limit_decision="clarify_limit",
+            retry_limit_reason="policy_core_timeout_limit",
+            escalation_intent="booking",
+            escalation_fallback_message="Помогу продолжить запись.",
+            retry_count=1,
+            continue_decision="timeout_pending_slot_question",
+            continue_missing_slot="datetime",
+            continue_response_text="Уточните, пожалуйста, время.",
+            continue_expected_reply_type="time",
+            continue_expected_reply_reason="booking_slot_guidance",
+            continue_pending_question_decision="booking_slot_guidance",
+            continue_pending_question_act="ask_about_requested_slot",
+            continue_pending_question_target="time",
+            continue_recovery="timeout_pending_slot_question",
+            continue_guard_reason_code="timeout_degrade",
+            continue_guard_reason="policy_core_timeout_pending_question",
+        ),
+        hooks=PolicyTimeoutDegradeBoundaryRuntimeHooks(
+            get_conversation_context=lambda *_args, **_kwargs: {},
+            get_context_manager=lambda *_args, **_kwargs: {},
+            timeout_degrade_retry_status=lambda *_args, **_kwargs: (0, False),
+            set_expected_reply_context=lambda **kwargs: kwargs["context"],
+            record_context_manager_decision=lambda *_args, **_kwargs: None,
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            handle_clarify_limit_escalation=lambda **_kwargs: None,
+            register_clarify_attempt=lambda **_kwargs: 1,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            send_and_save=lambda text: (text, True),
+            commit=lambda: None,
+        ),
+    )
+
+    assert result.response is not None
+    assert result.response.bot_response == "Уточните, пожалуйста, время."
+    assert captured["override"] == {
+        "final_action": "collect",
+        "final_tool_action": "collect",
+        "reason_code": "timeout_degrade",
+        "reason": "policy_core_timeout_pending_question",
+    }
+    assert captured["message_meta"] == {
+        "action": "collect",
+        "intent": "booking",
+        "source": "booking_slot_guidance",
+        "fast_intent": False,
+    }
+
+
+def test_policy_timeout_degrade_boundary_generic_clarify_records_canonical_collect_action() -> None:
+    from app.services.policy_timeout_degrade_boundary_service import (
+        PolicyTimeoutDegradeBoundaryRuntimeHooks,
+        PolicyTimeoutDegradeBoundaryRuntimeInput,
+        handle_policy_timeout_degrade_boundary,
+    )
+
+    captured: dict[str, object] = {}
+
+    result = handle_policy_timeout_degrade_boundary(
+        runtime_input=PolicyTimeoutDegradeBoundaryRuntimeInput(
+            mode="generic_clarify",
+            db=SimpleNamespace(),
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            user=SimpleNamespace(id="user-5"),
+            saved_message=SimpleNamespace(id="msg-5"),
+            message_text="Не понял",
+            allow_handover=True,
+            now=datetime(2026, 4, 3, 18, 20, tzinfo=timezone.utc),
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="timeout",
+            retry_intent="policy_timeout_degrade",
+            retry_reason="timeout",
+            retry_limit=2,
+            retry_limit_decision="clarify_limit",
+            retry_limit_reason="policy_core_timeout_limit",
+            escalation_intent="policy_timeout_degrade",
+            escalation_fallback_message="Уточните, пожалуйста.",
+            continue_response_text="Уточните, пожалуйста.",
+        ),
+        hooks=PolicyTimeoutDegradeBoundaryRuntimeHooks(
+            get_conversation_context=lambda *_args, **_kwargs: {},
+            get_context_manager=lambda *_args, **_kwargs: {},
+            timeout_degrade_retry_status=lambda *_args, **_kwargs: (0, False),
+            set_expected_reply_context=lambda **kwargs: kwargs["context"],
+            record_context_manager_decision=lambda *_args, **_kwargs: None,
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            handle_clarify_limit_escalation=lambda **_kwargs: None,
+            register_clarify_attempt=lambda **_kwargs: 1,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            send_and_save=lambda text: (text, True),
+            commit=lambda: None,
+        ),
+    )
+
+    assert result.response is not None
+    assert result.response.bot_response == "Уточните, пожалуйста."
+    assert captured["override"] == {
+        "final_action": "collect",
+        "final_tool_action": "collect",
+        "reason_code": "timeout_degrade",
+        "reason": "policy_core_timeout_degrade_clarify",
+    }
+    assert captured["message_meta"] == {
+        "action": "collect",
+        "intent": "policy_core_guard",
+        "source": "llm_policy_core",
+        "fast_intent": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_intent", "expected_source", "expected_response"),
+    [
+        ("clarify", "policy_core_guard", "llm_policy_core", "Уточните, пожалуйста."),
+        ("collect_prompt", "booking", "policy_core_guard", "Когда вам удобно?"),
+        ("pending_question_guidance", "booking", "booking_slot_guidance", "Подскажите удобное время."),
+        ("service_grounded_booking", "booking", "policy_core_guard", "Когда вам удобно?"),
+    ],
+)
+def test_policy_validation_boundary_records_canonical_collect_action_for_collect_modes(
+    mode: str,
+    expected_intent: str,
+    expected_source: str,
+    expected_response: str,
+) -> None:
+    captured: dict[str, object] = {}
+
+    response = handle_policy_validation_boundary(
+        runtime_input=PolicyValidationBoundaryRuntimeInput(
+            mode=mode,
+            validation_error="invalid_schema",
+            guard_reason="invalid_schema",
+            trace_decision="invalid_schema_collect_contract",
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            saved_message=SimpleNamespace(id=f"msg-{mode}"),
+            now=datetime(2026, 4, 3, 18, 25, tzinfo=timezone.utc),
+            llm_policy_core_meta={"validated": True},
+            msg_fact_guard_clarify="Уточните, пожалуйста.",
+            booking_state={"active": True},
+            collect_slot="datetime",
+            requested_slot="datetime",
+            pending_question_act="ask_about_requested_slot",
+            pending_question_target="time",
+            msg_booking_pending_question_time_guidance="Подскажите удобное время.",
+            service_query="маникюр",
+            service_query_source="carryover",
+        ),
+        hooks=PolicyValidationBoundaryRuntimeHooks(
+            classify_policy_core_degrade_reason=lambda *_args, **_kwargs: {"category": "timeout"},
+            sync_semantic_arbiter_meta=lambda *_args, **_kwargs: None,
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            backfill_policy_degraded_referent_evidence=lambda *_args, **_kwargs: None,
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            get_conversation_context=lambda *_args, **_kwargs: {"context_manager": {}},
+            get_context_manager=lambda context: context.get("context_manager", {}),
+            get_clarify_attempt_state=lambda *_args, **_kwargs: (0, None),
+            record_context_manager_decision=lambda *_args, **_kwargs: None,
+            handle_clarify_limit_escalation=lambda **_kwargs: None,
+            register_clarify_attempt=lambda **_kwargs: 1,
+            set_booking_context=lambda context, booking_state: {**context, "booking": booking_state},
+            set_service_hint=lambda context, *_args, **_kwargs: context,
+            set_expected_reply_context=lambda **kwargs: kwargs["context"],
+            set_conversation_context=lambda *_args, **_kwargs: None,
+            expected_reply_for_booking_question=lambda *_args, **_kwargs: "time",
+            booking_prompt_for_expected_reply_type=lambda *_args, **_kwargs: "Когда вам удобно?",
+            reset_low_confidence_retry=lambda *_args, **_kwargs: None,
+            combine_sidecar=lambda *parts: "\n".join(part for part in parts if part),
+            maybe_apply_consult_return=lambda **kwargs: kwargs["bot_response"],
+            send_and_save=lambda text: (text, True),
+            commit=lambda: None,
+        ),
+    )
+
+    assert response.bot_response == expected_response
+    assert captured["override"] == {
+        "final_action": "collect",
+        "final_tool_action": "collect",
+        "reason_code": "contract_validation_failure",
+        "reason": "invalid_schema",
+    }
+    assert captured["message_meta"] == {
+        "action": "collect",
+        "intent": expected_intent,
+        "source": expected_source,
+        "fast_intent": False,
+    }
+
+
+def test_policy_core_guard_orchestration_handoff_policy_blocked_records_canonical_collect_action() -> None:
+    from app.services.policy_core_guard_orchestration_service import (
+        PolicyCoreGuardOrchestrationRuntimeHooks,
+        PolicyCoreGuardOrchestrationRuntimeInput,
+        handle_policy_core_guard_orchestration,
+    )
+
+    captured: dict[str, object] = {}
+
+    response = handle_policy_core_guard_orchestration(
+        runtime_input=PolicyCoreGuardOrchestrationRuntimeInput(
+            mode="handoff_policy_blocked_safe_reply",
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            saved_message=SimpleNamespace(id="msg-6"),
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="blocked",
+            response_text="Опишите детали записи, и я помогу продолжить.",
+            capability_reason="handoff_not_allowed",
+        ),
+        hooks=PolicyCoreGuardOrchestrationRuntimeHooks(
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            send_and_save=lambda text: (text, True),
+            reuse_active_handover=lambda **_kwargs: (None, False, False),
+            create_pending_escalation_with_notification=lambda **_kwargs: SimpleNamespace(ok=True, telegram_sent=True),
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+            timeout_booking_completion_override=lambda action: (action or "collect", action or "collect"),
+            commit=lambda: None,
+        ),
+    )
+
+    assert response.bot_response == "Опишите детали записи, и я помогу продолжить."
+    assert captured["override"] == {
+        "final_action": "collect",
+        "final_tool_action": "collect",
+        "reason_code": "safety_policy_block",
+        "reason": "handoff_policy_blocked",
+    }
+    assert captured["message_meta"] == {
+        "action": "collect",
+        "intent": "policy_core_guard",
+        "source": "llm_policy_core",
+        "fast_intent": False,
+    }
+
+
+def test_policy_core_guard_orchestration_handoff_mode_records_canonical_handoff_action() -> None:
+    from app.services.policy_core_guard_orchestration_service import (
+        PolicyCoreGuardOrchestrationRuntimeHooks,
+        PolicyCoreGuardOrchestrationRuntimeInput,
+        handle_policy_core_guard_orchestration,
+    )
+
+    captured: dict[str, object] = {}
+
+    response = handle_policy_core_guard_orchestration(
+        runtime_input=PolicyCoreGuardOrchestrationRuntimeInput(
+            mode="guard_handoff_safe",
+            conversation=SimpleNamespace(id=uuid4(), state="bot_active"),
+            saved_message=SimpleNamespace(id="msg-7"),
+            policy_core_mode="degraded_fallback",
+            policy_core_degrade_reason="timeout",
+            user=SimpleNamespace(id="user-7"),
+            handover_message="Соедините с менеджером.",
+            allow_handover=True,
+            reason_code="timeout_degrade",
+            response_text="Передал менеджеру.",
+            error_response_text="Передача не удалась.",
+        ),
+        hooks=PolicyCoreGuardOrchestrationRuntimeHooks(
+            apply_policy_guard_override=_capture_boundary_override(captured),
+            sync_policy_plan_audit=lambda **_kwargs: None,
+            record_decision_trace=lambda *_args, **_kwargs: None,
+            record_message_decision_meta=_capture_boundary_message_meta(captured),
+            update_message_decision_metadata=lambda *_args, **_kwargs: None,
+            send_and_save=lambda text: (text, True),
+            reuse_active_handover=lambda **_kwargs: (None, False, False),
+            create_pending_escalation_with_notification=lambda **_kwargs: SimpleNamespace(ok=True, telegram_sent=True),
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+            timeout_booking_completion_override=lambda action: (action or "collect", action or "collect"),
+            commit=lambda: None,
+        ),
+    )
+
+    assert response.bot_response == "Передал менеджеру."
+    assert captured["override"] == {
+        "final_action": "handoff",
+        "final_tool_action": "handoff",
+        "reason_code": "timeout_degrade",
+        "reason": "policy_core_guard_handoff_safe",
+    }
+    assert captured["message_meta"] == {
+        "action": "handoff",
+        "intent": "policy_core_guard",
+        "source": "llm_policy_core",
+        "fast_intent": False,
+    }
+
+
 def test_turn_executor_check_booking_fact_routes_through_tool_registry_with_conversation_id() -> None:
     decision = build_test_policy_override_decision(
         {
@@ -2865,7 +3399,7 @@ def test_turn_executor_rejects_out_of_plan_tool_fact_scope(monkeypatch) -> None:
         _execute_tool_action,
     )
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: SimpleNamespace(response="", intent=None, meta={}, action="reply"),
     )
 
@@ -3096,7 +3630,7 @@ def test_turn_executor_first_fact_family_blocks_direct_truth_and_pack_bypass(mon
         _format_reply_from_truth,
     )
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         _get_pack_decision,
     )
 
@@ -3176,7 +3710,7 @@ def test_turn_executor_first_fact_family_blocks_mixed_scope_direct_truth_and_pac
         _format_reply_from_truth,
     )
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         _get_pack_decision,
     )
 
@@ -3687,7 +4221,7 @@ def test_turn_executor_projects_policy_info_refs_into_catalog_execution(monkeypa
         _execute_tool_action,
     )
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
@@ -3730,7 +4264,7 @@ def test_turn_executor_projects_policy_info_refs_into_catalog_execution(monkeypa
 
 def test_turn_executor_uses_policy_owned_info_truth_fallback_without_echo(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
@@ -3798,7 +4332,7 @@ def test_turn_executor_routes_owner_backed_promotions_interrupt_through_catalog_
         _execute_tool_action,
     )
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
@@ -3832,7 +4366,7 @@ def test_turn_executor_routes_owner_backed_promotions_interrupt_through_catalog_
 
 def test_turn_executor_accepts_owner_backed_promotions_direct_truth_fallback(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
@@ -3896,7 +4430,7 @@ def test_turn_executor_no_longer_fans_out_logical_info_tool_candidates(monkeypat
         _execute_tool_action,
     )
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw pack fallback should not run")),
     )
 
@@ -4273,7 +4807,7 @@ def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(m
         return "Маникюр стоит 10000 тг."
 
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("raw pack decision fallback should stay disabled")
         ),
@@ -4309,8 +4843,10 @@ def test_turn_executor_keeps_original_fact_query_text_without_semantic_rewrite(m
         now=datetime.now(timezone.utc),
     )
 
-    assert captured["service"] == "Маникюр"
-    assert result.tool_decision == "price_query"
+    assert captured == {}
+    assert result.tool_decision == "fact_unresolved"
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "fact_execution_unresolved"
 
 
 def test_turn_executor_pricing_fact_uses_public_pack_runtime_seam_without_adapter_runtime_fallback(
@@ -4320,7 +4856,7 @@ def test_turn_executor_pricing_fact_uses_public_pack_runtime_seam_without_adapte
         raise AssertionError("default adapter fallback should stay unused on the active pricing seam")
 
     monkeypatch.setattr(
-        "app.services.pack_runtime_service._runtime_get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         _runtime_pack_decision,
     )
 
@@ -4359,7 +4895,7 @@ def test_turn_executor_pricing_fact_uses_public_pack_runtime_seam_without_adapte
 
 def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("raw pack decision fallback should stay disabled")
         ),
@@ -4398,14 +4934,16 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
         now=datetime.now(timezone.utc),
     )
 
-    service_referent = result.meta["semantic_contract"]["referents"]["service"]
-    assert service_referent["value"] == "Маникюр"
-    assert service_referent["entity_type"] == "service"
-    assert service_referent["source_ref"] == "slot_state"
-    assert result.meta["semantic_contract"]["entity_refs"][0]["entity_type"] == "service"
-    assert result.meta["semantic_contract"]["entity_refs"][0]["value"] == "Маникюр"
-    assert result.meta["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
-    assert result.meta["semantic_contract"]["grounding_provenance"]["resolver_id"] == "pack_runtime.owner_fact"
+    assert result.tool_decision == "info_ref_unresolved"
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "policy_info_unresolved"
+    assert result.meta["semantic_contract"] == {
+        "contract_version": "semantic_contract.v1",
+        "subject_kind": "service",
+        "capability": "pricing",
+        "temporal_scope": "none",
+        "resolution_mode": "policy_fact",
+    }
 
     now = datetime.now(timezone.utc)
     updated, dialog_state, _ = DialogStateService().write_runtime_payload(
@@ -4415,11 +4953,15 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
         now=now,
     )
     runtime_payload = updated["consultant_runtime"]
-    assert dialog_state.current_referents.service == "Маникюр"
+    assert dialog_state.current_referents.service is None
     assert "semantic_contract" not in runtime_payload
-    assert dialog_state.meta["semantic_contract"]["referents"]["service"]["value"] == "Маникюр"
-    assert dialog_state.meta["semantic_contract"]["referents"]["service"]["source_ref"] == "slot_state"
-    assert dialog_state.meta["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
+    assert dialog_state.meta["semantic_contract"] == {
+        "contract_version": "semantic_contract.v1",
+        "subject_kind": "service",
+        "capability": "pricing",
+        "temporal_scope": "none",
+        "resolution_mode": "policy_fact",
+    }
 
     runtime = ConsultantRuntime()
     conversation = SimpleNamespace(context={}, state="bot_active")
@@ -4444,20 +4986,23 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
     trace = conversation.context.get("decision_trace") or []
     assert any(
         entry.get("stage") == "consultant_runtime"
-        and entry.get("semantic_contract", {}).get("referents", {}).get("service", {}).get("value")
-        == "Маникюр"
-        and entry.get("semantic_contract", {}).get("grounding_provenance", {}).get("pack_id")
-        == "demo_salon"
+        and entry.get("semantic_contract", {}).get("capability") == "pricing"
+        and entry.get("tool_decision") == "info_ref_unresolved"
         for entry in trace
     )
     decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
-    assert decision_meta["semantic_contract"]["referents"]["service"]["value"] == "Маникюр"
-    assert decision_meta["semantic_contract"]["grounding_provenance"]["pack_id"] == "demo_salon"
+    assert decision_meta["semantic_contract"] == {
+        "contract_version": "semantic_contract.v1",
+        "subject_kind": "service",
+        "capability": "pricing",
+        "temporal_scope": "none",
+        "resolution_mode": "policy_fact",
+    }
 
 
 def test_turn_executor_does_not_use_truth_semantic_fallback_when_pack_misses(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.pack_runtime_service.get_pack_decision",
+        "app.services.pack_runtime_compat.get_pack_decision",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("raw pack decision fallback should stay disabled")
         ),
@@ -5063,7 +5608,7 @@ def test_consultant_runtime_write_runtime_state_reprojects_compatibility_continu
 
     expected_pending_question = {
         "expected_reply_type": "time",
-        "reason": "collect_datetime",
+        "reason": "collect:datetime",
         "pending_question_act": "ask_about_requested_slot",
         "pending_question_target": "time",
         "active_question_relation": "ask_about_requested_slot",
@@ -5508,6 +6053,7 @@ def test_dialog_state_service_projects_booking_resume_contract_for_active_media_
 
     assert resume_contract == {
         "expected_reply_type": "time",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
         "pending_question_act": "ask_about_requested_slot",
@@ -5532,6 +6078,7 @@ def test_dialog_state_service_projects_booking_resume_contract_for_active_media_
 
     assert resume_contract == {
         "expected_reply_type": "time",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
         "pending_question_act": "ask_about_requested_slot",
@@ -5611,6 +6158,7 @@ def test_consultant_runtime_exposes_resume_contract_for_active_media_followup() 
     }
     assert profile["resume_pending_question_contract"] == {
         "expected_reply_type": "time",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
         "pending_question_act": "ask_about_requested_slot",
@@ -5687,6 +6235,7 @@ def test_consultant_runtime_recovers_booking_resume_contract_from_active_media_f
     assert profile["active_goal"] == "booking"
     assert profile["resume_pending_question_contract"] == {
         "expected_reply_type": "time",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
         "pending_question_act": "ask_about_requested_slot",
@@ -6897,6 +7446,125 @@ def test_consultant_runtime_contract_action_preserves_owner_action_on_owner_back
     assert action == "collect"
 
 
+def test_consultant_runtime_owner_backed_trace_ignores_execution_meta_canonical_fields() -> None:
+    runtime = ConsultantRuntime()
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "goal": "booking",
+            "reason": "collect_datetime",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "ask_about_requested_slot",
+            "slots": {"service": "Маникюр"},
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core_booking",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, _ = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta={"next_slot": "datetime"},
+        now=datetime(2026, 4, 3, 11, 0, tzinfo=timezone.utc),
+        conversation_id="conv-owner-meta-filter",
+        trace_id="trace-owner-meta-filter",
+    )
+
+    execution_meta = {
+        "action": "handoff",
+        "outcome": "HANDOFF",
+        "expected_reply_type": "name",
+        "expected_reply_reason": "stale_projection",
+        "pending_question_act": "stale_pending_question",
+        "pending_question_target": "name",
+        "question_contract": True,
+        "active_question_relation": "stale_relation",
+        "pending_question_contract": {
+            "expected_reply_type": "name",
+            "reason": "stale_projection",
+            "pending_question_act": "stale_pending_question",
+            "pending_question_target": "name",
+            "active_question_relation": "stale_relation",
+        },
+        "semantic_contract": {
+            "contract_version": "semantic_contract.v1",
+            "capability": "stale_capability",
+            "pending_question_target": "name",
+            "active_question_relation": "stale_relation",
+        },
+        "semantic_frame": {
+            "schema_version": "semantic_frame.v2",
+            "user_goal": "handoff",
+        },
+        "decision_trace": {"stage": "stale_runtime"},
+        "tool_execution_projection": {"selected_specialist": None},
+    }
+    conversation = SimpleNamespace(context=updated, state="bot_active")
+    user_message = SimpleNamespace(message_metadata={})
+    execution = SimpleNamespace(
+        tool_action="collect",
+        tool_decision="slot_constraint",
+        meta=execution_meta,
+    )
+    turn_result = TurnExecutor().assemble(
+        decision=decision,
+        dialog_state=dialog_state,
+        reply=ResponseRealizer().realize(
+            decision,
+            text="Подскажите, пожалуйста, удобное время записи.",
+        ),
+        stages=["ingress", "planner", "boundary", "state", "executor", "realizer"],
+    )
+
+    runtime._record_turn_trace(
+        conversation=conversation,
+        user_message=user_message,
+        bot_response=None,
+        decision=decision,
+        execution=execution,
+        turn_result=turn_result,
+        delivered=True,
+    )
+
+    trace = conversation.context.get("decision_trace") or []
+    runtime_entry = next(entry for entry in trace if entry.get("stage") == "consultant_runtime")
+    assert runtime_entry["decision"] == "collect"
+    assert runtime_entry["outcome"] == "COLLECT"
+    assert runtime_entry["expected_reply_type"] == "time"
+    assert runtime_entry["expected_reply_reason"] == "collect_datetime"
+    assert runtime_entry["pending_question_target"] == "time"
+    assert runtime_entry["active_question_relation"] == "ask_about_requested_slot"
+    assert runtime_entry["semantic_contract"]["capability"] == "bookability"
+    assert runtime_entry["semantic_frame"]["user_goal"] == "booking"
+    assert runtime_entry["tool_execution_projection"] == {"selected_specialist": None}
+
+    decision_meta = (user_message.message_metadata or {}).get("decision_meta") or {}
+    assert decision_meta["action"] == "collect"
+    assert decision_meta["outcome"] == "COLLECT"
+    assert decision_meta["expected_reply_type"] == "time"
+    assert decision_meta["expected_reply_reason"] == "collect_datetime"
+    assert decision_meta["pending_question_target"] == "time"
+    assert decision_meta["active_question_relation"] == "ask_about_requested_slot"
+    assert decision_meta["semantic_contract"]["capability"] == "bookability"
+    assert decision_meta["semantic_frame"]["user_goal"] == "booking"
+    assert decision_meta["decision_trace"]["stage"] == "consultant_runtime"
+    assert decision_meta["decision_trace"]["pending_question_target"] == "time"
+    assert decision_meta["tool_execution_projection"] == {"selected_specialist": None}
+
+
 def test_consultant_runtime_contract_action_does_not_promote_non_owner_binding_plan_collect() -> None:
     runtime = ConsultantRuntime()
     decision = build_test_policy_override_decision(
@@ -7497,6 +8165,7 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
     expected_pending_question_contract = {
         "expected_reply_type": "time",
         "reason": "collect:datetime",
+        "pending_question_act": "ask_about_requested_slot",
         "pending_question_target": "specialist",
         "active_question_relation": "referent_followup",
         "next_question": "datetime",
@@ -7508,12 +8177,11 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
         "specialist_name": "Айгерим",
     }
 
-    decision = build_test_policy_override_decision(
+    planner = TurnPlanner()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
         {
             "intent": "booking",
             "action": "collect",
-            "tool_action": "calendar.check_availability",
-            "tool_args": {},
             "entity_refs": [
                 {
                     "entity_id": expected_service_referent["entity_id"],
@@ -7535,14 +8203,20 @@ def test_consultant_runtime_closure_proof_preserves_canonical_semantic_and_quest
             "subject_kind": "specialist",
             "capability": "bookability",
             "resolution_mode": "policy_collect",
+            "reason": "collect:datetime",
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
             "next_question": "datetime",
             "open_questions": ["datetime"],
             "goal": "booking",
             "pending_question_target": "specialist",
             "active_question_relation": "referent_followup",
-        },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.check_availability",
         interaction_owner="llm_policy_core_booking",
-        interaction_relation="referent_followup",
         source="llm_policy_core",
     )
     execution_meta = {
@@ -7976,6 +8650,7 @@ def test_response_realizer_maps_degrade_to_handoff_without_override_business_con
 
     assert reply.reply_kind == "handoff"
     assert reply.text == "Передаю диалог менеджеру."
+    assert reply.meta == {"boundary_decision": "degrade"}
 
 
 def test_response_realizer_uses_system_block_and_keeps_non_boundary_degrade_reply_kinds_out_of_fact_collect() -> None:
@@ -7999,6 +8674,7 @@ def test_response_realizer_uses_system_block_and_keeps_non_boundary_degrade_repl
 
     assert block_reply.reply_kind == "system"
     assert block_reply.text == "Системная блокировка."
+    assert block_reply.meta == {"boundary_decision": "block"}
 
     degrade_override = BoundaryOverride.model_validate(
         {
@@ -8013,6 +8689,26 @@ def test_response_realizer_uses_system_block_and_keeps_non_boundary_degrade_repl
 
     assert degrade_reply.reply_kind == "handoff"
     assert degrade_reply.text == "Передаю диалог менеджеру."
+    assert degrade_reply.meta == {"boundary_decision": "degrade"}
+
+
+def test_response_realizer_does_not_mint_outcome_meta_without_boundary_override() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    reply = ResponseRealizer().realize(decision, text="Мы работаем до 20:00.")
+
+    assert reply.reply_kind == "fact"
+    assert reply.text == "Мы работаем до 20:00."
+    assert reply.meta == {}
 
 
 def test_consultant_runtime_preserves_owner_decision_when_executor_requests_handoff() -> None:

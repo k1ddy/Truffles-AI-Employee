@@ -535,7 +535,6 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
-    route_dialogue_controller,
     route_llm_policy_core,
     should_escalate,
 )
@@ -845,11 +844,17 @@ def _derive_timeout_active_name_time_availability_followup_slots(
         if isinstance(expected_reply_reason, str) and expected_reply_reason.strip()
         else None
     )
-    if normalized_reason not in {
-        "booking_prompt",
-        "booking_time_availability_followup",
-        "policy_core_timeout_owner_boundary",
-    }:
+    if not (
+        _is_booking_followup_expected_reply_reason(
+            normalized_reason,
+            expected_reply_type=expected_reply_type,
+        )
+        or normalized_reason
+        in {
+            "booking_time_availability_followup",
+            "policy_core_timeout_owner_boundary",
+        }
+    ):
         return None
     if not isinstance(booking_state, dict):
         return None
@@ -1514,7 +1519,10 @@ def _apply_expected_reply_contract(
                 context = _set_booking_context(context, booking_state)
                 _set_conversation_context(conversation, context)
         if expected_reply_shortcircuit:
-            if not expected_reply_reason or expected_reply_reason == "booking_prompt":
+            if not expected_reply_reason or _is_booking_followup_expected_reply_reason(
+                expected_reply_reason,
+                expected_reply_type=expected_reply_type,
+            ):
                 context_manager = _get_context_manager(context)
                 if context_manager.get("current_goal") != "booking":
                     context_manager["current_goal"] = "booking"
@@ -1737,13 +1745,10 @@ def _run_intent_decomposition(
         and not expected_reply_blocked_by_info
         and (
             not expected_reply_reason
-            or expected_reply_reason
-            in {
-                "booking_prompt",
-                "booking_interrupt",
-                "booking_confirm_reject",
-                "booking_prompt_media_ack",
-            }
+            or _is_booking_followup_expected_reply_reason(
+                expected_reply_reason,
+                expected_reply_type=expected_reply_type,
+            )
         )
     )
     direct_booking_request = bool(booking_signal or booking_slot_signal)
@@ -2202,7 +2207,10 @@ def _run_intent_decomposition(
         and direct_booking_request
     )
     if expected_reply_shortcircuit:
-        if not expected_reply_reason or expected_reply_reason == "booking_prompt":
+        if not expected_reply_reason or _is_booking_followup_expected_reply_reason(
+            expected_reply_reason,
+            expected_reply_type=expected_reply_type,
+        ):
             booking_signal = True
             booking_block_meta = None
     elif intent_decomp_has_booking:
@@ -3016,6 +3024,32 @@ def _expected_reply_slot_key(expected_reply_type: str | None) -> str | None:
     return None
 
 
+def _is_booking_followup_expected_reply_reason(
+    expected_reply_reason: str | None,
+    *,
+    expected_reply_type: str | None,
+) -> bool:
+    normalized_reason = (
+        expected_reply_reason.strip().casefold()
+        if isinstance(expected_reply_reason, str) and expected_reply_reason.strip()
+        else None
+    )
+    if not normalized_reason:
+        return False
+    if normalized_reason in {
+        "booking_prompt",
+        "booking_prompt_media_ack",
+        "booking_interrupt",
+        "booking_confirm_reject",
+        "booking_followup",
+    }:
+        return True
+    expected_slot = _expected_reply_slot_key(expected_reply_type)
+    if not expected_slot:
+        return False
+    return normalized_reason == f"collect:{expected_slot}"
+
+
 def _booking_prompt_for_expected_reply_type(expected_reply_type: str | None) -> str | None:
     if expected_reply_type == EXPECTED_REPLY_SERVICE:
         return MSG_BOOKING_ASK_SERVICE
@@ -3206,11 +3240,13 @@ def _timeout_booking_completion_override(action: str | None) -> tuple[str, str]:
     )
     if normalized_action in {"escalate", "handoff", "pending_escalation"}:
         return "escalate", "handoff"
-    if normalized_action in {"booking_confirm", "booking_prompt", "check_booking_prompt"}:
+    if normalized_action == "booking_confirm":
         return normalized_action, "collect"
+    if normalized_action in {"booking_prompt", "check_booking_prompt"}:
+        return "collect", "collect"
     if normalized_action == "reply":
         return "reply", "reply"
-    return "booking_prompt", "collect"
+    return "collect", "collect"
 
 
 def _validate_expected_reply_value(

@@ -64,6 +64,38 @@ _TURN_TRACE_REFRESH_STAGES = frozenset(
 )
 _RUNTIME_ALLOWED_OUTCOMES = {"FACT", "COLLECT", "HANDOFF"}
 _NO_SEND_SOURCES = {"message_api", "console_simulation", "simulation"}
+_PROTECTED_RUNTIME_DECISION_META_FIELDS = frozenset(
+    {
+        "source",
+        "runtime_entrypoint",
+        "semantic_runtime_path",
+        "action",
+        "intent",
+        "outcome",
+        "tool_action",
+        "tool_decision",
+        "interaction_owner",
+        "decision_trace",
+        "reason_code",
+        "earliest_failed_stage",
+        "root_reason_code",
+        "control_label",
+        "expected_reply_type",
+        "expected_reply_reason",
+        "pending_question_act",
+        "pending_question_contract",
+        "question_contract",
+        "pending_question_target",
+        "active_question_relation",
+        "semantic_contract",
+        "semantic_frame",
+        "semantic_state_before",
+        "semantic_state_after",
+        "source_detail",
+        "policy_core_trace",
+        "runtime_trace_contract",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -647,10 +679,15 @@ class ConsultantRuntime:
             memory_summary=recent_summary,
             memory_profile=memory_profile,
         )
-        decision = plan_result.decision
+        if isinstance(plan_result, PolicyDecision):
+            decision = plan_result
+            boundary_signal = None
+        else:
+            decision = plan_result.decision
+            boundary_signal = plan_result.boundary_signal
         override = None
-        if isinstance(plan_result.boundary_signal, PlannerBoundarySignal):
-            signal = plan_result.boundary_signal
+        if isinstance(boundary_signal, PlannerBoundarySignal):
+            signal = boundary_signal
             signal_meta = dict(signal.meta)
             signal_meta.setdefault("planner_boundary_signal", True)
             signal_meta.setdefault("control_label", signal.control_label)
@@ -853,9 +890,8 @@ class ConsultantRuntime:
         profile: dict[str, Any] = {}
         dialog_state = runtime_state.dialog_state
         pending_contract = deepcopy(
-            self.dialog_state.project_runtime_pending_question_contract(
-                dialog_state,
-                booking_payload=runtime_state.booking_state,
+            self.dialog_state.project_pending_question_contract(
+                dialog_state.pending_question_contract,
             )
             or {}
         )
@@ -885,12 +921,11 @@ class ConsultantRuntime:
         if slot_state:
             profile["slot_state"] = slot_state
 
-        semantic_contract = self.dialog_state.project_runtime_semantic_contract(
-            dialog_state,
-            booking_payload=runtime_state.booking_state,
-        )
         semantic_contract = (
-            deepcopy(semantic_contract) if isinstance(semantic_contract, dict) else {}
+            deepcopy(dialog_state.meta.get("semantic_contract"))
+            if isinstance(dialog_state.meta, dict)
+            and isinstance(dialog_state.meta.get("semantic_contract"), dict)
+            else {}
         )
         if semantic_contract:
             profile["semantic_contract"] = semantic_contract
@@ -1130,6 +1165,10 @@ class ConsultantRuntime:
         booking_state: dict[str, Any] | None = None,
         decision: PolicyDecision | None = None,
     ) -> dict[str, Any]:
+        runtime_pending_question_contract = self.dialog_state.project_runtime_pending_question_contract(
+            dialog_state,
+            booking_payload=booking_state,
+        )
         owner_contract = self.dialog_state.project_pending_question_contract(
             (
                 self.planner.canonical_pending_question_contract(decision)
@@ -1139,7 +1178,26 @@ class ConsultantRuntime:
         )
         if self._has_canonical_semantic_owner(decision):
             return dict(owner_contract) if isinstance(owner_contract, dict) and owner_contract else {}
-        return {}
+        if isinstance(runtime_pending_question_contract, dict) and runtime_pending_question_contract:
+            return dict(runtime_pending_question_contract)
+        return dict(owner_contract) if isinstance(owner_contract, dict) and owner_contract else {}
+
+    @classmethod
+    def _observer_execution_meta(
+        cls,
+        *,
+        decision: PolicyDecision | None,
+        execution: RuntimeExecutionResult,
+    ) -> dict[str, Any]:
+        execution_meta = getattr(execution, "meta", None)
+        if not isinstance(execution_meta, dict):
+            return {}
+        payload = dict(execution_meta)
+        if not cls._has_canonical_semantic_owner(decision):
+            return payload
+        for key in _PROTECTED_RUNTIME_DECISION_META_FIELDS:
+            payload.pop(key, None)
+        return payload
 
     @staticmethod
     def _fresh_turn_trace_seed(existing_trace: Any) -> list[dict[str, Any]]:
@@ -1388,6 +1446,10 @@ class ConsultantRuntime:
         delivered: bool,
     ) -> None:
         dialog_state = turn_result.dialog_state
+        execution_meta = self._observer_execution_meta(
+            decision=decision,
+            execution=execution,
+        )
         runtime_payload = self.dialog_state.load_runtime_payload(conversation.context or {})
         runtime_projection = runtime_payload.get("conversation_projection")
         runtime_turn_journal = runtime_payload.get("turn_journal")
@@ -1481,8 +1543,8 @@ class ConsultantRuntime:
             reason_code = getattr(observability, "reason_code", None)
         if not reason_code and isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             reason_code = decision.meta.get("reason_code")
-        if not reason_code and isinstance(execution.meta, dict):
-            reason_code = execution.meta.get("reason_code")
+        if not reason_code:
+            reason_code = execution_meta.get("reason_code")
         override_meta = (
             dict(turn_result.boundary_override.meta)
             if getattr(turn_result, "boundary_override", None) is not None
@@ -1492,10 +1554,10 @@ class ConsultantRuntime:
         if isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             earliest_failed_stage = decision.meta.get("earliest_failed_stage")
             root_reason_code = decision.meta.get("root_reason_code")
-        if not earliest_failed_stage and isinstance(execution.meta, dict):
-            earliest_failed_stage = execution.meta.get("earliest_failed_stage")
-        if not root_reason_code and isinstance(execution.meta, dict):
-            root_reason_code = execution.meta.get("root_reason_code")
+        if not earliest_failed_stage:
+            earliest_failed_stage = execution_meta.get("earliest_failed_stage")
+        if not root_reason_code:
+            root_reason_code = execution_meta.get("root_reason_code")
         if not earliest_failed_stage:
             earliest_failed_stage = override_meta.get("earliest_failed_stage")
         if not root_reason_code:
@@ -1527,10 +1589,10 @@ class ConsultantRuntime:
             "active_question_relation"
         ) or interaction_relation
         question_contract_active = False
-        if isinstance(execution.meta, dict):
-            pending_question_act = execution.meta.get("pending_question_act")
-            pending_question_target = execution.meta.get("pending_question_target")
-            question_contract_active = bool(execution.meta.get("question_contract"))
+        if not self._has_canonical_semantic_owner(decision):
+            pending_question_act = execution_meta.get("pending_question_act")
+            pending_question_target = execution_meta.get("pending_question_target")
+            question_contract_active = bool(execution_meta.get("question_contract"))
         if isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             pending_question_act = pending_question_act or decision.meta.get("pending_question_act")
             pending_question_target = pending_question_target or decision.meta.get(
@@ -1566,11 +1628,9 @@ class ConsultantRuntime:
             trace_event["semantic_state_before"] = semantic_frame_before
         if semantic_frame_after:
             trace_event["semantic_state_after"] = semantic_frame_after
-        if isinstance(execution.meta, dict) and isinstance(
-            execution.meta.get("tool_execution_projection"), dict
-        ):
+        if isinstance(execution_meta.get("tool_execution_projection"), dict):
             trace_event["tool_execution_projection"] = dict(
-                execution.meta["tool_execution_projection"]
+                execution_meta["tool_execution_projection"]
             )
         runtime_trace_contract = build_runtime_trace_contract(
             trace_id=trace_event["trace_id"],
@@ -1696,8 +1756,8 @@ class ConsultantRuntime:
             decision_meta["source_detail"] = decision.source
         if policy_core_trace:
             decision_meta["policy_core_trace"] = policy_core_trace
-        if isinstance(execution.meta, dict):
-            decision_meta.update(execution.meta)
+        if execution_meta:
+            decision_meta.update(execution_meta)
         decision_meta["runtime_trace_contract"] = runtime_trace_contract_payload
         if getattr(turn_result, "trace", None) is not None and hasattr(turn_result.trace, "runtime_trace_contract"):
             turn_result.trace.runtime_trace_contract = runtime_trace_contract
