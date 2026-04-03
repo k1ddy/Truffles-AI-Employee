@@ -98,7 +98,7 @@ class TestEscalateToPending:
         assert snapshot["context_manager"]["current_goal"] == "booking"
         assert snapshot["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
             "expected_reply_type": "time",
-            "reason": "booking_prompt",
+            "reason": "collect:datetime",
             "next_question": "datetime",
             "open_questions": ["datetime"],
         }
@@ -144,7 +144,7 @@ class TestEscalateToPending:
         snapshot = conversation.context.get("pending_resume")
         assert snapshot["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
             "expected_reply_type": "time",
-            "reason": "booking_prompt",
+            "reason": "collect:datetime",
             "next_question": "datetime",
             "open_questions": ["datetime"],
         }
@@ -286,7 +286,7 @@ class TestEscalateToPending:
         assert isinstance(snapshot, dict)
         assert snapshot["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
             "expected_reply_type": "time",
-            "reason": "booking_prompt",
+            "reason": "collect:datetime",
             "next_question": "datetime",
             "open_questions": ["datetime"],
         }
@@ -945,7 +945,7 @@ class TestManagerResolve:
         assert did_restore is True
         assert (
             restored["context_manager"]["canonical_dialog_state"]["pending_question_contract"]
-            == {"expected_reply_type": "name", "reason": "booking_prompt"}
+            == {"expected_reply_type": "name", "reason": "collect:name"}
         )
         assert restored["context_manager"]["current_goal"] == "booking"
         assert restored["intent_queue"] == ["booking", "check_booking"]
@@ -954,7 +954,7 @@ class TestManagerResolve:
         assert restored["session_memory"]["interaction_state"]["resume_slot"] == "name"
         assert restored["session_memory"]["pending_question_contract"] == {
             "expected_reply_type": "name",
-            "reason": "booking_prompt",
+            "reason": "collect:name",
         }
         assert restored["session_memory"]["last_updated_at"] == now.isoformat()
         assert restored["last_service_hint"] == "Маникюр"
@@ -1252,11 +1252,11 @@ class TestManagerResolve:
             conversation.context.get("context_manager", {})
             .get("canonical_dialog_state", {})
             .get("pending_question_contract")
-            == {"expected_reply_type": "time", "reason": "booking_prompt"}
+            == {"expected_reply_type": "time", "reason": "collect:datetime"}
         )
         assert conversation.context.get("session_memory", {}).get("pending_question_contract") == {
             "expected_reply_type": "time",
-            "reason": "booking_prompt",
+            "reason": "collect:datetime",
         }
         assert conversation.context.get("re_entry_required", {}).get("reason") == "pending_resume"
         assert trace_calls == [
@@ -1398,7 +1398,7 @@ def test_build_pending_resume_snapshot_payload_captures_pending_resume_contract(
     assert payload["context_manager"]["current_goal"] == "booking"
     assert payload["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
         "expected_reply_type": "time",
-        "reason": "booking_prompt",
+        "reason": "collect:datetime",
         "next_question": "datetime",
         "open_questions": ["datetime"],
     }
@@ -1587,8 +1587,8 @@ def test_restore_pending_resume_payload_restores_owner_contract() -> None:
         now=now,
     )
 
-    assert "expected_reply_type" not in restored
-    assert "expected_reply_reason" not in restored
+    assert restored["expected_reply_type"] == "name"
+    assert restored["expected_reply_reason"] == "booking_prompt"
     assert restored["context_manager"]["current_goal"] == "booking"
     assert restored["intent_queue"] == ["booking", "check_booking"]
     assert restored["booking"]["service"] == "Маникюр"
@@ -1674,8 +1674,8 @@ def test_restore_pending_resume_payload_roundtrip_preserves_canonical_snapshot_o
         now=now,
     )
 
-    assert "expected_reply_type" not in restored
-    assert "expected_reply_reason" not in restored
+    assert restored["expected_reply_type"] == "name"
+    assert restored["expected_reply_reason"] == "stale_canonical"
     assert restored["booking"] == {"active": True, "service": "Маникюр"}
     assert restored["context_manager"]["current_goal"] == "info"
     assert restored["context_manager"]["canonical_dialog_state"]["pending_question_contract"] == {
@@ -2371,13 +2371,13 @@ class TestManagerReturn:
             ctx.get("context_manager", {})
             .get("canonical_dialog_state", {})
             .get("pending_question_contract")
-            == {"expected_reply_type": "name", "reason": "booking_prompt"}
+            == {"expected_reply_type": "name", "reason": "collect:name"}
         )
         assert ctx.get("intent_queue") == ["booking", "check_booking"]
         assert ctx.get("booking", {}).get("service") == "Маникюр"
         assert ctx.get("session_memory", {}).get("pending_question_contract") == {
             "expected_reply_type": "name",
-            "reason": "booking_prompt",
+            "reason": "collect:name",
         }
         assert ctx.get("last_service_hint") == "Маникюр"
         assert ctx.get("last_service_hint_at") == "2026-02-18T01:00:00+00:00"

@@ -105,6 +105,7 @@ def test_reasoning_core_pending_booking_reactivation_candidate_restores_dialog_s
         "active_slots": ["datetime"],
         "pending_question_contract": {
             "expected_reply_type": decision_router.EXPECTED_REPLY_SERVICE,
+            "reason": "collect:service",
         },
     }
     assert set(policy_core_calls[0]["consult_refs"]) == {

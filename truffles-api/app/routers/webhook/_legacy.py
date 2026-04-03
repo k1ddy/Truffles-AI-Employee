@@ -133,6 +133,7 @@ from app.services.handover_owner_service import (
 from app.services.intent_service import (
     classify_domain_with_scores,
     is_strong_out_of_domain,
+    route_dialogue_controller,
 )
 from app.services.pack_runtime_compat import (
     phrase_match_intent,
@@ -1962,6 +1963,7 @@ _DIRECT_EXPORTS = {
     "_run_class_router_stage": _run_class_router_stage,
     "_should_use_expected_reply_collect_fast_path": _should_use_expected_reply_collect_fast_path,
     "_build_expected_reply_collect_fast_policy_result": _build_expected_reply_collect_fast_policy_result,
+    "route_dialogue_controller": route_dialogue_controller,
     "send_bot_response": send_bot_response,
     "_detect_info_class_intents": _detect_info_class_intents,
     "_format_discounts_reply_for_message": _format_discounts_reply_for_message,
@@ -1983,7 +1985,8 @@ _DIRECT_EXPORTS = {
 globals().update(_SHARED_EXPORTS)
 globals().update(_DIRECT_EXPORTS)
 for _name in _DECISION_EXPORTS:
-    globals()[_name] = getattr(_decision, _name)
+    if hasattr(_decision, _name):
+        globals()[_name] = getattr(_decision, _name)
 
 globals().update(
     {
