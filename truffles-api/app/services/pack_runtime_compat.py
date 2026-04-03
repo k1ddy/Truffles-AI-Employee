@@ -8,25 +8,25 @@ from __future__ import annotations
 
 from app.services.pack_runtime_default import _resolve_adapter
 from app.services.pack_runtime_service import (
-    _build_pack_query_truth_decision as get_pack_decision,
-)
-from app.services.pack_runtime_service import (
-    _resolve_pack_query_price_item as get_pack_price_item,
-)
-from app.services.pack_runtime_service import (
     _build_pack_query_price_reply as get_pack_price_reply,
 )
 from app.services.pack_runtime_service import (
     _build_pack_query_service_decision as get_pack_service_decision,
 )
 from app.services.pack_runtime_service import (
-    _resolve_pack_query_service_hint as get_pack_service_hint,
+    _build_pack_query_truth_decision as get_pack_decision,
+)
+from app.services.pack_runtime_service import (
+    _resolve_pack_query_master_intent as resolve_master_intent,
+)
+from app.services.pack_runtime_service import (
+    _resolve_pack_query_price_item as get_pack_price_item,
 )
 from app.services.pack_runtime_service import (
     _resolve_pack_query_semantic_match as semantic_service_match,
 )
 from app.services.pack_runtime_service import (
-    _resolve_pack_query_master_intent as resolve_master_intent,
+    _resolve_pack_query_service_hint as get_pack_service_hint,
 )
 
 

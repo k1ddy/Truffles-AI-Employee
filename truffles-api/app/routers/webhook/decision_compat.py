@@ -5,6 +5,8 @@ from __future__ import annotations
 from app.routers.webhook.policy import _format_discounts_policy_reply
 from app.services.pack_runtime_service import (
     _normalize_text as _normalize_service_text,
+)
+from app.services.pack_runtime_service import (
     get_signal_lexicon_list,
 )
 

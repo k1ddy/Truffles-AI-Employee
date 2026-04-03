@@ -55,10 +55,10 @@ surface_fates:
     surface_path: truffles-api/app/routers/webhook/info.py
     final_fate: unreachable
     expected_app_importers:
+    - truffles-api/app/routers/webhook/_legacy.py
     - truffles-api/app/routers/webhook/booking.py
-    - truffles-api/app/routers/webhook/booking_signal_runtime.py
     - truffles-api/app/routers/webhook/decision.py
-    - truffles-api/app/routers/webhook/expected_reply_interrupt_runtime.py
+    - truffles-api/app/routers/webhook/policy.py
     expected_runtime_importers: []
   context_manager:
     surface_path: truffles-api/app/routers/webhook/context_manager.py

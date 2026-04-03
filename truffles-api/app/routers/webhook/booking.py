@@ -32,10 +32,11 @@ from app.routers.webhook.booking_signal_runtime import (
     TIME_HOUR_PATTERN,
     TIME_PATTERN,
     _extract_datetime,
+    _matches_booking_request_lexicon,
 )
 from app.routers.webhook.class_router_runtime import (
-    build_observer_class_router_result,
     _router_observability_updates_from_class_router,
+    build_observer_class_router_result,
 )
 from app.routers.webhook.context_runtime import (
     SERVICE_HINT_AT_KEY,
@@ -137,8 +138,8 @@ from app.services.intent_service import (
     is_opt_out_message,
 )
 from app.services.pack_runtime_service import (
-    _match_service,
     _format_service_not_found_reply,
+    _match_service,
     _normalize_text,
     get_system_lexicon_list,
     load_yaml_truth,
@@ -816,13 +817,16 @@ def _is_booking_related_message(
     allow_name: bool = True,
     allow_service: bool = True,
 ) -> bool:
-    del allow_service
     if not message_text:
         return False
+    if _matches_booking_request_lexicon(message_text, client_slug=client_slug):
+        return True
     refusal_flags = detect_refusal_flags(message_text)
     if refusal_flags.get("name") or refusal_flags.get("phone"):
         return True
     if _extract_datetime(message_text, client_slug=client_slug):
+        return True
+    if allow_service and _validate_service_slot(message_text, client_slug=client_slug):
         return True
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
@@ -1629,8 +1633,8 @@ def _handle_booking_interrupt(
         compose_multi_truth_reply,
         ensure_resolver_meta,
         format_reply_from_truth,
-        resolve_runtime_service_price_item,
         resolve_explicit_master_intent,
+        resolve_runtime_service_price_item,
     )
 
     from .info import _build_info_intent_reply as _build_booking_interrupt_info_reply
@@ -2770,6 +2774,7 @@ def _handle_booking_flow(
     expected_reply_type: str | None,
     expected_reply_matched: bool | None,
     expected_reply_blocked_by_info: bool = False,
+    intent_decomp_payload: dict | None = None,
     basic_info_message: bool,
     session_memory_reset_reason: str | None,
     memory_expected_reply_type: str | None,

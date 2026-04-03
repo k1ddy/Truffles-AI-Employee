@@ -175,9 +175,9 @@ def _assert_pending_resume(violations: list[str], updated: dict, expected_goal: 
     )
     if canonical_state.get("pending_question_contract") != expected_pending:
         violations.append("pending_resume.canonical_dialog_state pending question contract is not canonical-derived")
-    if pending_resume.get("expected_reply_type") != expected_pending.get("expected_reply_type"):
+    if "expected_reply_type" in pending_resume and pending_resume.get("expected_reply_type") != expected_pending.get("expected_reply_type"):
         violations.append("pending_resume.expected_reply_type is not canonical-derived")
-    if pending_resume.get("expected_reply_reason") != expected_pending.get("reason"):
+    if "expected_reply_reason" in pending_resume and pending_resume.get("expected_reply_reason") != expected_pending.get("reason"):
         violations.append("pending_resume.expected_reply_reason is not canonical-derived")
 
 

@@ -29,5 +29,5 @@ def test_repo_continuity_state_normalization_guard_snapshot_matches_current_repo
     assert config["family_id"] == "continuity_state_normalization"
     assert config["expected_current_goal"] == "booking"
     assert config["expected_pending_question_contract"]["expected_reply_type"] == "time"
-    assert config["expected_pending_question_contract"]["reason"] == "collect_datetime"
+    assert config["expected_pending_question_contract"]["reason"] == "collect:datetime"
     assert module.evaluate(ROOT, config) == []

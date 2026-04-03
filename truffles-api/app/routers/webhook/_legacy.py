@@ -7,6 +7,10 @@ import re
 import time
 from typing import Any, Callable
 
+from app.routers.webhook.booking_compat import _looks_like_booking_reschedule_request
+from app.routers.webhook.booking_runtime import (
+    _matches_guest_policy_lexicon as _booking_runtime_matches_guest_policy_lexicon,
+)
 from app.routers.webhook.booking_signal_runtime import (
     TIME_HOUR_PATTERN,
     TIME_ONLY_ALLOWED_PREFIXES,
@@ -14,38 +18,39 @@ from app.routers.webhook.booking_signal_runtime import (
     TIME_ONLY_AMPM_PATTERN,
     TIME_PATTERN,
     _extract_datetime,
+    _has_explicit_service_signal,
 )
-from app.routers.webhook.booking_compat import _looks_like_booking_reschedule_request
+from app.routers.webhook.class_router_runtime import _resolve_class_router_result
+from app.routers.webhook.context_manager import _apply_consult_return
 from app.routers.webhook.decision_compat import (
     _format_discounts_reply_for_message,
     _looks_like_promo_code_request,
 )
 from app.routers.webhook.expected_reply_interrupt_runtime import _validate_expected_reply_value
+from app.routers.webhook.info import (
+    _count_anchor_hits,
+    _has_token_prefix,
+    _normalized_contains_any,
+    _signal_all_match,
+    _signal_any_match,
+    _signal_pair_match,
+    _signal_phrase_list,
+    _system_any_match,
+    _system_any_match_multi,
+    _tokenize_for_matching,
+    _tokens_have_prefixes,
+)
 from app.routers.webhook.info_followup_compat import (
     _looks_like_carryover_followup,
     _looks_like_hours_followup,
 )
 from app.routers.webhook.media import _is_style_reference_request
+from app.routers.webhook.policy import _POLICY_HANDLERS, _get_policy_handler
 from app.routers.webhook.policy_compat import (
     _looks_like_policy_topic,
     _looks_like_promotions_request,
 )
-from app.routers.webhook.booking_runtime import _matches_guest_policy_lexicon as _booking_runtime_matches_guest_policy_lexicon
-from app.routers.webhook.context_manager import _apply_consult_return
-from app.routers.webhook.info import _count_anchor_hits
-from app.routers.webhook.info import _has_token_prefix
-from app.routers.webhook.info import _normalized_contains_any
-from app.routers.webhook.info import _signal_all_match
-from app.routers.webhook.info import _signal_any_match
-from app.routers.webhook.info import _signal_pair_match
-from app.routers.webhook.info import _signal_phrase_list
-from app.routers.webhook.info import _system_any_match
-from app.routers.webhook.info import _system_any_match_multi
-from app.routers.webhook.info import _tokenize_for_matching
-from app.routers.webhook.info import _tokens_have_prefixes
-from app.routers.webhook.policy import _POLICY_HANDLERS, _get_policy_handler
 from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
-from app.routers.webhook.runtime_primitives import _contains_any
 from app.routers.webhook.runtime_primitives import (
     BOOKING_CTA_SERVICE_INTENTS,
     BOOKING_TIME_SERVICE_INTENTS,
@@ -73,6 +78,7 @@ from app.routers.webhook.runtime_primitives import (
     SERVICE_CARRYOVER_TTL_MESSAGES,
     SESSION_MEMORY_SHORT_TOKENS,
     ConversationState,
+    _contains_any,
 )
 from app.services.ai_service import (
     is_acknowledgement_message,
@@ -80,6 +86,18 @@ from app.services.ai_service import (
     is_low_signal_message,
     is_thanks_message,
     normalize_for_matching,
+)
+from app.services.booking_signal_service import (
+    extract_daypart_token as _extract_daypart_token,
+)
+from app.services.booking_signal_service import (
+    has_daypart_stem as _has_daypart_stem,
+)
+from app.services.booking_signal_service import (
+    has_pending_time_question_marker as _has_pending_time_question_marker,
+)
+from app.services.booking_signal_service import (
+    looks_like_time_preference_statement as _looks_like_time_preference_statement,
 )
 from app.services.chatflow_service import send_bot_response
 from app.services.handover_owner_service import (
@@ -135,22 +153,36 @@ from app.services.pack_runtime_service import (
     get_system_lexicon_list,
     load_yaml_truth,
 )
-from app.services.booking_signal_service import (
-    extract_daypart_token as _extract_daypart_token,
-)
-from app.services.booking_signal_service import (
-    has_daypart_stem as _has_daypart_stem,
-)
-from app.services.booking_signal_service import (
-    has_pending_time_question_marker as _has_pending_time_question_marker,
-)
-from app.services.booking_signal_service import (
-    looks_like_time_preference_statement as _looks_like_time_preference_statement,
-)
 
 from . import decision as _decision
 
 _DECISION_MODULE = _decision
+ACKNOWLEDGEMENT_RESPONSE = _DECISION_MODULE.ACKNOWLEDGEMENT_RESPONSE
+Conversation = _DECISION_MODULE.Conversation
+DecisionOutcome = _DECISION_MODULE.DecisionOutcome
+DecisionSignals = _DECISION_MODULE.DecisionSignals
+DomainIntent = _DECISION_MODULE.DomainIntent
+GREETING_RESPONSE = _DECISION_MODULE.GREETING_RESPONSE
+Intent = _DECISION_MODULE.Intent
+IntentRoutingState = _DECISION_MODULE.IntentRoutingState
+Message = _DECISION_MODULE.Message
+PackDecision = _DECISION_MODULE.PackDecision
+THANKS_RESPONSE = _DECISION_MODULE.THANKS_RESPONSE
+_compact_signal_snapshot = _DECISION_MODULE._compact_signal_snapshot
+_is_env_enabled = _DECISION_MODULE._is_env_enabled
+_normalize_service_text = _DECISION_MODULE._normalize_service_text
+_record_decision_trace = _DECISION_MODULE._record_decision_trace
+_set_router_observability = _DECISION_MODULE._set_router_observability
+_should_escalate_to_pending = _DECISION_MODULE._should_escalate_to_pending
+_update_message_decision_metadata = _DECISION_MODULE._update_message_decision_metadata
+_update_message_signal_snapshot = _DECISION_MODULE._update_message_signal_snapshot
+classify_intent = _DECISION_MODULE.classify_intent
+is_bot_status_question = _DECISION_MODULE.is_bot_status_question
+is_frustration_message = _DECISION_MODULE.is_frustration_message
+is_human_request_message = _DECISION_MODULE.is_human_request_message
+is_rejection = _DECISION_MODULE.is_rejection
+logger = _DECISION_MODULE.logger
+should_escalate = _DECISION_MODULE.should_escalate
 
 
 _BOOKING_VERIFICATION_PATTERNS = (

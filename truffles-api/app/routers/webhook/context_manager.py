@@ -236,6 +236,9 @@ def _get_expected_reply_type(context: dict) -> str | None:
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         if isinstance(expected_reply_type, str) and expected_reply_type.strip():
             return expected_reply_type.strip()
+    expected_reply_type = context.get(EXPECTED_REPLY_TYPE_KEY)
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        return expected_reply_type.strip()
     return None
 
 
@@ -247,6 +250,9 @@ def _get_expected_reply_reason(context: dict) -> str | None:
         reason = pending_question_contract.get("reason")
         if isinstance(reason, str) and reason.strip():
             return reason.strip()
+    reason = context.get(EXPECTED_REPLY_REASON_KEY)
+    if isinstance(reason, str) and reason.strip():
+        return reason.strip()
     return None
 
 

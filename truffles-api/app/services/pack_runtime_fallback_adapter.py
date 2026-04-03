@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from app.services.pack_runtime_neutral_adapter import (
     _build_fact_meta,
+    _build_pack_query_price_reply,
+    _build_pack_query_service_decision,
+    _build_pack_query_truth_decision,
     _detect_promotion_intent,
     _format_service_not_found_reply,
     _has_contact_signal,
@@ -14,6 +17,11 @@ from app.services.pack_runtime_neutral_adapter import (
     _match_service,
     _matches_service_request_lexicon,
     _normalize_text,
+    _pack_query_phrase_intents,
+    _pack_query_question_classifier,
+    _resolve_pack_query_price_item,
+    _resolve_pack_query_semantic_match,
+    _resolve_pack_query_service_hint,
     build_evening_greeting,
     build_info_combined_reply,
     build_quiet_hours_notice,
@@ -25,14 +33,6 @@ from app.services.pack_runtime_neutral_adapter import (
     load_policy_pack,
     load_system_lexicons,
     load_yaml_truth,
-    _pack_query_phrase_intents,
-    _resolve_pack_query_price_item,
-    _build_pack_query_price_reply,
-    _pack_query_question_classifier,
-    _build_pack_query_service_decision,
-    _resolve_pack_query_service_hint,
-    _resolve_pack_query_semantic_match,
-    _build_pack_query_truth_decision,
 )
 
 __all__ = [

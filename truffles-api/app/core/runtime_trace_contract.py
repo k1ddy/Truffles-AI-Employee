@@ -6,8 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.binding_plan import BindingPlanV1
 from app.core.boundary_validator import BoundaryOverride
-from app.core.dialog_state_service import DialogState
 from app.core.conversation_projection import ConversationProjectionV1
+from app.core.dialog_state_service import DialogState
 from app.core.semantic_decision import SemanticDecisionV1
 from app.core.turn_journal import TurnJournalV1, resolve_turn_id
 from app.core.turn_planner import PolicyDecision

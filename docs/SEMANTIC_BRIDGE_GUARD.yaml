@@ -1,126 +1,128 @@
 version: 2026-03-30.v1
 hotspots:
-  - path: truffles-api/app/services/intent_service.py
-    active_waiver: null
-    tracked_function_names:
-      name_patterns:
-        - '^route_llm_policy_core$'
-      exact_allowlist:
-        - route_llm_policy_core
-  - path: truffles-api/app/core/turn_planner.py
-    active_waiver: null
-    tracked_function_names:
-      name_patterns:
-        - '^build_from_semantic_decision$'
-        - '^canonical_.*$'
-        - '^detect_.*semantic.*$'
-        - '^_.*semantic.*$'
-        - '^_.*pending_question.*$'
-      exact_allowlist:
-        - _build_pending_question_contract
-        - _build_semantic_contract_payload
-        - _build_semantic_frame_payload
-        - _coerce_semantic_decision
-        - _normalized_semantic_payload
-        - _strip_pending_question_payload_if_handoff
-        - build_from_semantic_decision
-        - canonical_pending_question_contract
-        - canonical_semantic_contract
-        - canonical_semantic_frame
-        - detect_missing_semantic_owner
-        - detect_semantic_mutation
-  - path: truffles-api/app/core/turn_executor.py
-    active_waiver: null
-    tracked_function_names:
-      name_patterns:
-        - '^_.*semantic.*$'
-        - '^_.*pending_question.*$'
-        - '^_resolve_policy_info_refs$'
-      exact_allowlist:
-        - _attach_semantic_contract_meta
-        - _build_execution_pending_question_contract
-        - _build_owner_only_execution_semantic_enrichment
-        - _build_execution_semantic_contract
-        - _build_execution_semantic_enrichment
-        - _has_canonical_semantic_owner
-        - _merge_pack_grounding_semantic_contract
-        - _normalize_semantic_entity_refs
-        - _normalize_semantic_referents
-        - _pack_semantic_grounding
-        - _resolve_policy_info_refs
-        - _semantic_entity_ref_key
-        - _semantic_referents
-  - path: truffles-api/app/core/consultant_runtime.py
-    active_waiver: null
-    tracked_function_names:
-      name_patterns:
-        - '^_build_policy_core_memory_profile$'
-        - '^_.*semantic.*$'
-        - '^_.*pending_question.*$'
-        - '^_record_turn_trace$'
-      exact_allowlist:
-        - _build_policy_core_memory_profile
-        - _execution_semantic_enrichment
-        - _has_canonical_semantic_owner
-        - _merge_semantic_enrichment
-        - _project_runtime_pending_question_contract
-        - _project_runtime_semantic_contract
-        - _project_runtime_semantic_frame
-        - _record_turn_trace
-        - _semantic_contract_enrichment
-  - path: truffles-api/app/core/dialog_state_service.py
-    active_waiver: null
-    tracked_function_names:
-      name_patterns:
-        - '^_build_conversation_projection$'
-        - '^_derive_dialog_state_from_projection$'
-        - '^_.*semantic.*$'
-        - '^_.*pending_question.*$'
-        - '^build_collect_owner_state$'
-        - '^project_.*semantic.*$'
-        - '^project_.*pending_question.*$'
-      exact_allowlist:
-        - _build_conversation_projection
-        - _build_runtime_semantic_contract
-        - _build_semantic_referents
-        - _build_semantic_state
-        - _canonical_decision_pending_question_contract
-        - _canonical_decision_semantic_contract
-        - _canonical_decision_semantic_frame
-        - _decision_pending_question_contract
-        - _decision_semantic_contract
-        - _derive_dialog_state_from_projection
-        - _execution_semantic_enrichment_from_contract
-        - _execution_semantic_payload
-        - _normalize_semantic_entity_refs
-        - _normalize_semantic_referents
-        - _has_canonical_semantic_owner
-        - _legacy_semantic_frame
-        - _merge_semantic_frame
-        - _pending_question_from_frame
-        - _semantic_contract_from_frame
-        - build_collect_owner_state
-        - project_context_pending_question_contract
-        - project_context_manager_pending_question_contract
-        - project_interrupt_resume_pending_question_contract
-        - project_pending_question_contract
-        - project_pending_question_contract_with_projection_fallback
-        - project_runtime_pending_question_contract
-        - project_runtime_semantic_contract
-        - project_runtime_semantic_frame
-        - project_semantic_frame
-        - project_session_memory_pending_question_contract
-  - path: truffles-api/app/routers/webhook/context_manager.py
-    active_waiver: null
-    tracked_function_names:
-      name_patterns:
-        - '^_get_.*pending_question.*$'
-        - '^_get_.*expected_reply.*$'
-        - '^_set_expected_reply_context$'
-        - '^_sync_canonical_dialog_state$'
-      exact_allowlist:
-        - _get_expected_reply_reason
-        - _get_expected_reply_type
-        - _get_pending_question_contract
-        - _set_expected_reply_context
-        - _sync_canonical_dialog_state
+- path: truffles-api/app/services/intent_service.py
+  active_waiver: null
+  tracked_function_names:
+    name_patterns:
+    - ^route_llm_policy_core$
+    exact_allowlist:
+    - route_llm_policy_core
+- path: truffles-api/app/core/turn_planner.py
+  active_waiver: null
+  tracked_function_names:
+    name_patterns:
+    - ^build_from_semantic_decision$
+    - ^canonical_.*$
+    - ^detect_.*semantic.*$
+    - ^_.*semantic.*$
+    - ^_.*pending_question.*$
+    exact_allowlist:
+    - _build_pending_question_contract
+    - _build_semantic_contract_payload
+    - _build_semantic_frame_payload
+    - _coerce_semantic_decision
+    - _normalized_semantic_payload
+    - _strip_pending_question_payload_if_handoff
+    - build_from_semantic_decision
+    - canonical_pending_question_contract
+    - canonical_semantic_contract
+    - canonical_semantic_frame
+    - detect_missing_semantic_owner
+    - detect_semantic_mutation
+- path: truffles-api/app/core/turn_executor.py
+  active_waiver: null
+  tracked_function_names:
+    name_patterns:
+    - ^_.*semantic.*$
+    - ^_.*pending_question.*$
+    - ^_resolve_policy_info_refs$
+    exact_allowlist:
+    - _attach_semantic_contract_meta
+    - _build_execution_pending_question_contract
+    - _build_owner_only_execution_semantic_enrichment
+    - _build_execution_semantic_contract
+    - _build_execution_semantic_enrichment
+    - _has_canonical_semantic_owner
+    - _merge_pack_grounding_semantic_contract
+    - _normalize_semantic_entity_refs
+    - _normalize_semantic_referents
+    - _pack_semantic_grounding
+    - _resolve_policy_info_refs
+    - _semantic_entity_ref_key
+    - _semantic_referents
+- path: truffles-api/app/core/consultant_runtime.py
+  active_waiver: null
+  tracked_function_names:
+    name_patterns:
+    - ^_build_policy_core_memory_profile$
+    - ^_.*semantic.*$
+    - ^_.*pending_question.*$
+    - ^_record_turn_trace$
+    exact_allowlist:
+    - _build_policy_core_memory_profile
+    - _execution_semantic_enrichment
+    - _has_canonical_semantic_owner
+    - _merge_semantic_enrichment
+    - _project_runtime_pending_question_contract
+    - _project_runtime_semantic_contract
+    - _project_runtime_semantic_frame
+    - _record_turn_trace
+    - _semantic_contract_enrichment
+- path: truffles-api/app/core/dialog_state_service.py
+  active_waiver: null
+  tracked_function_names:
+    name_patterns:
+    - ^_build_conversation_projection$
+    - ^_derive_dialog_state_from_projection$
+    - ^_.*semantic.*$
+    - ^_.*pending_question.*$
+    - ^build_collect_owner_state$
+    - ^project_.*semantic.*$
+    - ^project_.*pending_question.*$
+    exact_allowlist:
+    - _build_conversation_projection
+    - _build_runtime_semantic_contract
+    - _build_semantic_referents
+    - _build_semantic_state
+    - _canonical_decision_pending_question_contract
+    - _canonical_decision_semantic_contract
+    - _canonical_decision_semantic_frame
+    - _decision_pending_question_contract
+    - _decision_semantic_contract
+    - _derive_dialog_state_from_projection
+    - _execution_semantic_enrichment_from_contract
+    - _execution_semantic_payload
+    - _normalize_semantic_entity_refs
+    - _normalize_semantic_referents
+    - _has_canonical_semantic_owner
+    - _legacy_semantic_frame
+    - _merge_semantic_frame
+    - _pending_question_from_frame
+    - _semantic_contract_from_frame
+    - build_collect_owner_state
+    - project_context_pending_question_contract
+    - project_context_manager_pending_question_contract
+    - project_interrupt_resume_pending_question_contract
+    - project_pending_question_contract
+    - project_pending_question_contract_with_projection_fallback
+    - project_runtime_pending_question_contract
+    - project_runtime_semantic_contract
+    - project_runtime_semantic_frame
+    - project_semantic_frame
+    - project_session_memory_pending_question_contract
+    - _build_booking_followup_continuity_semantic_contract
+    - _build_booking_followup_continuity_semantic_state
+- path: truffles-api/app/routers/webhook/context_manager.py
+  active_waiver: null
+  tracked_function_names:
+    name_patterns:
+    - ^_get_.*pending_question.*$
+    - ^_get_.*expected_reply.*$
+    - ^_set_expected_reply_context$
+    - ^_sync_canonical_dialog_state$
+    exact_allowlist:
+    - _get_expected_reply_reason
+    - _get_expected_reply_type
+    - _get_pending_question_contract
+    - _set_expected_reply_context
+    - _sync_canonical_dialog_state

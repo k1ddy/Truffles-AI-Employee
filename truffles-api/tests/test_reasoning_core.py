@@ -374,6 +374,7 @@ def test_reasoning_core_pending_booking_reactivation_passes_canonical_runtime_me
             "contract_version": "semantic_contract.v1",
             "subject_kind": "specialist",
             "capability": "bookability",
+            "resolution_mode": "referent_followup",
             "pending_question_target": "specialist",
             "active_question_relation": "referent_followup",
             "referents": {

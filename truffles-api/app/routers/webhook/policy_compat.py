@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from app.routers.webhook.policy import (
     _detect_policy_gate_section,
-    _get_policy_section,
     _get_guard_topics,
+    _get_policy_section,
     _load_policy_pack,
     _policy_str_list,
     _resolve_hard_law_sections,

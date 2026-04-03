@@ -20,7 +20,6 @@ from app.services.pack_query_backend_service import (
     resolve_backend_candidates,
 )
 from app.services.pack_runtime_default import (
-    _resolve_adapter,
     _build_fact_meta,
     _detect_promotion_intent,
     _has_contact_signal,
@@ -31,6 +30,7 @@ from app.services.pack_runtime_default import (
     _match_service,
     _matches_service_request_lexicon,
     _normalize_text,
+    _resolve_adapter,
     build_evening_greeting,
     build_info_combined_reply,
     build_quiet_hours_notice,

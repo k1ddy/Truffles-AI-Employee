@@ -6842,7 +6842,7 @@ def test_consultant_runtime_owner_backed_pending_question_contract_drops_stale_s
     assert pending_question_contract == {}
 
 
-def test_consultant_runtime_contract_action_prefers_owner_goal_on_owner_backed_turn() -> None:
+def test_consultant_runtime_contract_action_preserves_owner_action_on_owner_backed_turn() -> None:
     runtime = ConsultantRuntime()
     planner = TurnPlanner()
     semantic_decision = SemanticDecisionV1.from_policy_core_payload(
@@ -6894,7 +6894,7 @@ def test_consultant_runtime_contract_action_prefers_owner_goal_on_owner_backed_t
         ),
     )
 
-    assert action == "booking_prompt"
+    assert action == "collect"
 
 
 def test_consultant_runtime_contract_action_does_not_promote_non_owner_binding_plan_collect() -> None:
@@ -7225,7 +7225,7 @@ def test_runtime_trace_contract_schema_and_turn_result_schema_validate() -> None
                 "retry_policy": dict(decision.binding_plan.retry_policy),
             },
             "action_transition": {
-                "contract_action": "booking_prompt",
+                "contract_action": "collect",
                 "runtime_entrypoint": "consultant_runtime",
                 "semantic_runtime_path": "consultant_core_v2",
                 "reply_kind": "collect",
@@ -7751,7 +7751,7 @@ def test_consultant_runtime_records_runtime_trace_contract_on_active_path() -> N
         runtime_trace_contract.binding_transition.selected_tool_or_workflow_ref
         == decision.binding_plan.selected_tool_or_workflow_ref
     )
-    assert runtime_trace_contract.action_transition.contract_action == "booking_prompt"
+    assert runtime_trace_contract.action_transition.contract_action == "collect"
     assert runtime_trace_contract.action_transition.execution_tool_decision == "slot_constraint"
     assert runtime_trace_contract.state_transition.current_semantic_decision_ref == decision.semantic_decision.decision_id
     assert runtime_trace_contract.state_transition.current_goal == "booking"

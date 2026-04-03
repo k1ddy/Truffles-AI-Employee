@@ -17,6 +17,45 @@ def _bind_live_response_globals() -> None:
 
 _bind_live_response_globals()
 
+AiResponseOutcome = _response.AiResponseOutcome
+Any = _response.Any
+Callable = _response.Callable
+Conversation = _response.Conversation
+ConversationState = _response.ConversationState
+LOW_CONFIDENCE_MAX_RETRIES = _response.LOW_CONFIDENCE_MAX_RETRIES
+MSG_AI_ERROR = _response.MSG_AI_ERROR
+MSG_ESCALATED = _response.MSG_ESCALATED
+MSG_HANDOVER_CONFIRM = _response.MSG_HANDOVER_CONFIRM
+MSG_LOW_CONFIDENCE_RETRY = _response.MSG_LOW_CONFIDENCE_RETRY
+MSG_PENDING_LOW_CONFIDENCE = _response.MSG_PENDING_LOW_CONFIDENCE
+Message = _response.Message
+Session = _response.Session
+User = _response.User
+WebhookResponse = _response.WebhookResponse
+_attach_llm_cache_flag = _response._attach_llm_cache_flag
+_ensure_rag_rewrite = _response._ensure_rag_rewrite
+_get_clarify_attempt_state = _response._get_clarify_attempt_state
+_get_context_manager = _response._get_context_manager
+_get_conversation_context = _response._get_conversation_context
+_get_low_confidence_retry_count = _response._get_low_confidence_retry_count
+_handle_clarify_limit_escalation = _response._handle_clarify_limit_escalation
+_record_context_manager_decision = _response._record_context_manager_decision
+_record_decision_trace = _response._record_decision_trace
+_record_knowledge_backlog = _response._record_knowledge_backlog
+_record_message_decision_meta = _response._record_message_decision_meta
+_record_rag_meta = _response._record_rag_meta
+_register_clarify_attempt = _response._register_clarify_attempt
+_reset_low_confidence_retry = _response._reset_low_confidence_retry
+_set_conversation_context = _response._set_conversation_context
+_set_handover_confirmation = _response._set_handover_confirmation
+_set_low_confidence_retry_count = _response._set_low_confidence_retry_count
+_should_escalate_for_clarify = _response._should_escalate_for_clarify
+_update_message_decision_metadata = _response._update_message_decision_metadata
+datetime = _response.datetime
+generate_bot_response = _response.generate_bot_response
+logger = _response.logger
+should_offer_low_confidence_retry = _response.should_offer_low_confidence_retry
+
 def _handle_ai_response_action(
     *,
     db: Session,

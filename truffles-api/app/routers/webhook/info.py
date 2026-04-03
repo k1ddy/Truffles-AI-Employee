@@ -15,10 +15,10 @@ from app.routers.webhook.booking_signal_runtime import (
 )
 from app.routers.webhook.class_router_runtime import (
     DomainIntent,
-    build_observer_class_router_result,
     _controller_meta_updates_from_class_router,
     _resolve_class_router_result,
     _router_observability_updates_from_class_router,
+    build_observer_class_router_result,
 )
 from app.routers.webhook.runtime_primitives import (
     BOOKING_CTA_SERVICE_INTENTS,
@@ -67,8 +67,8 @@ from app.services.pack_runtime_service import (
     get_signal_lexicon_list,
     get_system_lexicon_list,
     load_yaml_truth,
-    resolve_runtime_service_price_item,
     resolve_explicit_master_intent,
+    resolve_runtime_service_price_item,
 )
 from app.services.signal_manifest_service import get_info_regex_pattern
 from app.services.state_machine import ConversationState

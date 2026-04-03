@@ -55,7 +55,10 @@ from app.services.calendar_sync_service import enqueue_appointment_sync, get_pro
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
 from app.services.expected_reply_contract import EXPECTED_REPLY_NAME, EXPECTED_REPLY_PHONE
-from app.services.pack_runtime_service import get_pack_runtime
+from app.services.pack_runtime_service import (
+    _resolve_pack_query_service_hint,
+    get_pack_runtime,
+)
 from app.services.tool_certification_service import resolve_tool_certification_decision
 from app.services.tool_registry_snapshot_service import (
     declared_tool_action_set,
@@ -1270,6 +1273,30 @@ def _catalog_portfolio(
     return None, "portfolio_missing"
 
 
+def _prefer_message_fact_service_query(
+    *,
+    client_slug: str | None,
+    branch_id: UUID | None,
+    service_query: str | None,
+    message_text: str | None,
+    allow_message_override: bool,
+) -> str | None:
+    normalized_service_query = service_query.strip() if isinstance(service_query, str) and service_query.strip() else None
+    if not allow_message_override or not isinstance(message_text, str) or not message_text.strip():
+        return normalized_service_query
+    message_service_query = _resolve_pack_query_service_hint(
+        message_text,
+        client_slug=client_slug,
+        branch_id=str(branch_id) if isinstance(branch_id, UUID) else None,
+    )
+    normalized_message_service_query = (
+        message_service_query.strip()
+        if isinstance(message_service_query, str) and message_service_query.strip()
+        else None
+    )
+    return normalized_message_service_query or normalized_service_query
+
+
 def execute_tool_action(
     db: Session,
     *,
@@ -2295,6 +2322,13 @@ def execute_tool_action(
             hint_set & {"promotions", "promo", "promotion", "discount", "discounts"}
         )
         price_hint = allow_pricing and bool(hint_set & {"pricing", "price", "payment", "payment_info"})
+        effective_service_query = _prefer_message_fact_service_query(
+            client_slug=client_slug,
+            branch_id=branch.id,
+            service_query=service_query,
+            message_text=message_text,
+            allow_message_override=duration_hint or price_hint,
+        )
         if not service_query:
             reply = MSG_BOOKING_ASK_SERVICE
             info_sections: list[str] = []
@@ -2416,7 +2450,7 @@ def execute_tool_action(
                     )
             if duration_hint:
                 duration_reply = pack_runtime.build_runtime_service_duration_reply(
-                    service_label=service_query,
+                    service_label=effective_service_query,
                 )
                 if duration_reply:
                     return ToolExecutionResult(
@@ -2456,13 +2490,14 @@ def execute_tool_action(
         reply, error = _catalog_service_query(
             db,
             branch=branch,
-            service_query=service_query,
+            service_query=effective_service_query or service_query,
         )
         if error and client_slug:
             truth = pack_runtime.load_yaml_truth()
             service_match = (
-                pack_runtime.match_service(pack_runtime.normalize_text(service_query))
-                if isinstance(service_query, str) and service_query.strip()
+                pack_runtime.match_service(pack_runtime.normalize_text(effective_service_query or service_query))
+                if isinstance(effective_service_query or service_query, str)
+                and (effective_service_query or service_query).strip()
                 else None
             )
             if isinstance(service_match, dict):
@@ -2511,7 +2546,7 @@ def execute_tool_action(
                             },
                         )
             price_item = pack_runtime.resolve_runtime_service_price_item(
-                service_query,
+                effective_service_query or service_query,
                 truth=truth,
             )
             if isinstance(price_item, dict):

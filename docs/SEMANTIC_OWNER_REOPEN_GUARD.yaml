@@ -3,9 +3,12 @@ planner_file: truffles-api/app/core/turn_planner.py
 runtime_file: truffles-api/app/core/consultant_runtime.py
 dialog_state_file: truffles-api/app/core/dialog_state_service.py
 executor_file: truffles-api/app/core/turn_executor.py
-planner_builders:
+removed_planner_builders:
   - build_controlled_degrade
   - build_preflight_reject
+planner_signal_builders:
+  - build_controlled_degrade_signal
+  - build_preflight_reject_signal
 runtime_control_function: _handle_control_turn
 runtime_control_decision_meta_keys_required:
   - source
@@ -20,15 +23,15 @@ runtime_control_decision_meta_keys_forbidden:
   - tool_action
   - interaction_owner
 required_text_markers:
+  - path: truffles-api/app/core/turn_planner.py
+    pattern: "def build_controlled_degrade_signal("
+  - path: truffles-api/app/core/turn_planner.py
+    pattern: "def build_preflight_reject_signal("
   - path: truffles-api/app/core/consultant_runtime.py
-    pattern: "if self._is_synthetic_control_decision(decision):\\n            return {}"
-  - path: truffles-api/app/core/dialog_state_service.py
-    pattern: "if not contract and not self._is_synthetic_control_decision(decision):"
-  - path: truffles-api/app/core/dialog_state_service.py
-    pattern: "decision=None,"
-  - path: truffles-api/app/core/dialog_state_service.py
-    pattern: "if self._is_synthetic_control_decision(decision):\\n            return PendingQuestionContract()"
-  - path: truffles-api/app/core/dialog_state_service.py
-    pattern: "if self._is_synthetic_control_decision(decision):\\n            return {}"
-  - path: truffles-api/app/core/turn_executor.py
-    pattern: "if TurnExecutor._is_synthetic_control_decision(decision):\\n            return None"
+    pattern: "def _planner_override_meta("
+  - path: truffles-api/app/core/consultant_runtime.py
+    pattern: "if isinstance(plan_result.boundary_signal, PlannerBoundarySignal):"
+  - path: truffles-api/app/core/consultant_runtime.py
+    pattern: "\"planner_boundary_signal\": True,"
+  - path: truffles-api/app/core/consultant_runtime.py
+    pattern: "\"control_action\": \"session_reset\","

@@ -6,6 +6,7 @@ from app.services.owner_resolver import (
     should_preserve_specialist_followup_owner,
 )
 
+
 def test_owner_resolver_matches_m27_and_recovers_service_from_interaction_state() -> None:
     payload = build_owner_resolution_input(
         tool_action="info",

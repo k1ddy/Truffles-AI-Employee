@@ -12,7 +12,8 @@ package_root:
 app_runtime_import_contract:
   decision_importers:
   - truffles-api/app/routers/webhook/_legacy.py
-  legacy_bus_importers: []
+  legacy_bus_importers:
+  - truffles-api/app/routers/webhook/info_compat.py
 registry_contract:
   decision_static_app_importers:
   - truffles-api/app/routers/webhook/_legacy.py

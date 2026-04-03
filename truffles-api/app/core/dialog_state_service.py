@@ -1312,12 +1312,101 @@ class DialogStateService:
         *,
         booking_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        return (
+        existing_contract = (
             dict(state.meta.get("semantic_contract"))
             if isinstance(state.meta, dict)
             and isinstance(state.meta.get("semantic_contract"), dict)
-            else None
+            else {}
         )
+        frame = self.project_runtime_semantic_frame(state, booking_payload=booking_payload)
+        if not isinstance(frame, dict):
+            return existing_contract or None
+
+        pending_question_contract = self.project_runtime_pending_question_contract(
+            state,
+            booking_payload=booking_payload,
+        ) or {}
+        referents = self._normalize_semantic_referents(frame.get("referents"))
+        subject = frame.get("subject") if isinstance(frame.get("subject"), dict) else {}
+        capability_selection = (
+            frame.get("capability_selection")
+            if isinstance(frame.get("capability_selection"), dict)
+            else {}
+        )
+
+        contract: dict[str, Any] = {
+            "contract_version": self._normalize_projection_token(
+                existing_contract.get("contract_version")
+            )
+            or "semantic_contract.v1"
+        }
+
+        subject_kind = self._normalize_projection_token(subject.get("kind"))
+        if not subject_kind:
+            subject_kind = self._normalize_projection_token(contract.get("subject_kind"))
+        if subject_kind:
+            contract["subject_kind"] = subject_kind
+
+        capability = self._normalize_projection_token(capability_selection.get("capability"))
+        if not capability:
+            capability = self._normalize_projection_token(contract.get("capability"))
+        if capability:
+            contract["capability"] = capability
+
+        resolution_mode = self._normalize_projection_token(contract.get("resolution_mode"))
+        if resolution_mode not in {
+            "ask_about_requested_slot",
+            "fill_requested_slot",
+            "referent_followup",
+            "clarify_missing_time",
+            "policy_fact",
+        }:
+            resolution_mode = None
+        pending_act = self._normalize_projection_token(pending_question_contract.get("pending_question_act"))
+        pending_relation = self._normalize_projection_token(
+            pending_question_contract.get("active_question_relation")
+        )
+        if pending_act in {
+            "ask_about_requested_slot",
+            "fill_requested_slot",
+            "referent_followup",
+        }:
+            resolution_mode = pending_act
+        elif pending_relation in {
+            "ask_about_requested_slot",
+            "fill_requested_slot",
+            "referent_followup",
+        }:
+            resolution_mode = pending_relation
+        if resolution_mode:
+            contract["resolution_mode"] = resolution_mode
+
+        for key in ("pending_question_act", "pending_question_target", "active_question_relation"):
+            value = self._normalize_projection_token(pending_question_contract.get(key))
+            if value:
+                contract[key] = value
+
+        if referents:
+            contract["referents"] = referents
+        else:
+            existing_referents = self._normalize_semantic_referents(
+                existing_contract.get("referents")
+            )
+            if existing_referents:
+                contract["referents"] = existing_referents
+
+        grounding_provenance = self._normalize_grounding_provenance(
+            existing_contract.get("grounding_provenance")
+        )
+        if grounding_provenance:
+            contract["grounding_provenance"] = grounding_provenance
+
+        if not referents:
+            entity_refs = self._normalize_semantic_entity_refs(existing_contract.get("entity_refs"))
+            if entity_refs:
+                contract["entity_refs"] = entity_refs
+
+        return contract or None
 
     def project_runtime_pending_question_contract(
         self,
@@ -1325,7 +1414,30 @@ class DialogStateService:
         *,
         booking_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        return self.project_pending_question_contract(state.pending_question_contract)
+        frame_pending_question_contract = self._pending_question_from_frame(
+            state.semantic_state.materialized_frame
+        )
+        state_pending_question_contract = self.project_pending_question_contract(
+            state.pending_question_contract
+        )
+        if isinstance(frame_pending_question_contract, dict):
+            merged_contract = self.project_pending_question_contract(
+                state_pending_question_contract,
+                expected_reply_type=frame_pending_question_contract.get("expected_reply_type"),
+                expected_reply_reason=frame_pending_question_contract.get("reason"),
+                pending_question_act=frame_pending_question_contract.get("pending_question_act"),
+                pending_question_target=frame_pending_question_contract.get(
+                    "pending_question_target"
+                ),
+                active_question_relation=frame_pending_question_contract.get(
+                    "active_question_relation"
+                ),
+                next_question=frame_pending_question_contract.get("next_question"),
+                open_questions=frame_pending_question_contract.get("open_questions"),
+            )
+            if merged_contract is not None:
+                return merged_contract
+        return state_pending_question_contract
 
     def project_state_compatibility_fields(
         self,
@@ -1715,11 +1827,31 @@ class DialogStateService:
             if isinstance(canonical_state, dict)
             else None
         )
-        return (
-            self.project_pending_question_contract(pending_question_contract)
-            if pending_question_contract is not None
+        if pending_question_contract is not None:
+            return self.project_pending_question_contract(pending_question_contract)
+
+        expected_reply_contract = self.project_pending_question_contract(
+            None,
+            expected_reply_type=(
+                context.get(expected_reply_type_key)
+                if isinstance(context.get(expected_reply_type_key), str)
+                else None
+            ),
+            expected_reply_reason=(
+                context.get(expected_reply_reason_key)
+                if isinstance(context.get(expected_reply_reason_key), str)
+                else None
+            ),
+        )
+        if expected_reply_contract is not None:
+            return expected_reply_contract
+
+        session_memory = (
+            context.get(session_memory_key)
+            if isinstance(context.get(session_memory_key), dict)
             else None
         )
+        return self.project_session_memory_pending_question_contract(session_memory)
 
     def project_context_manager_pending_question_contract(
         self,
@@ -1825,6 +1957,19 @@ class DialogStateService:
             return None
 
         runtime_payload = context.get(runtime_key) if isinstance(context.get(runtime_key), dict) else None
+        runtime_projection = self.normalize_runtime_conversation_projection(
+            runtime_payload.get("conversation_projection")
+            if isinstance(runtime_payload, dict)
+            else None
+        )
+        projection_service = self._normalize_projection_token(
+            runtime_projection.semantic_slots.get("service")
+            if isinstance(runtime_projection, ConversationProjectionV1)
+            and isinstance(runtime_projection.semantic_slots, dict)
+            else None
+        )
+        if projection_service:
+            return projection_service
         runtime_dialog_state = runtime_payload.get("dialog_state") if isinstance(runtime_payload, dict) else None
         runtime_referents = (
             runtime_dialog_state.get("current_referents")
@@ -3187,6 +3332,15 @@ class DialogStateService:
         dialog_state_payload = runtime_payload.get("dialog_state")
         has_dialog_state_payload = isinstance(dialog_state_payload, dict)
         booking_payload = self.normalize_booking_payload(runtime_payload.get("booking"))
+        projection_booking_payload = self.normalize_booking_payload(
+            runtime_projection.booking_state
+            if isinstance(runtime_projection, ConversationProjectionV1)
+            else None
+        )
+        if projection_booking_payload:
+            merged_booking_payload = dict(booking_payload or {})
+            merged_booking_payload.update(projection_booking_payload)
+            booking_payload = merged_booking_payload
         if booking_payload is None:
             booking_payload = self.normalize_booking_payload(working_context.get("booking"))
         pending_contract = {}
@@ -4453,7 +4607,25 @@ class DialogStateService:
 
         restored: dict[str, Any] = {}
 
-        restored["context_manager"] = self.build_context_manager_compatibility_snapshot(pending_resume)
+        has_restore_authority_surface = isinstance(pending_resume.get("context_manager"), dict) or (
+            isinstance(pending_resume.get("booking"), dict) and bool(pending_resume.get("booking"))
+        )
+        context_manager_source = pending_resume
+        if not has_restore_authority_surface:
+            context_manager_source = {
+                key: value
+                for key, value in pending_resume.items()
+                if key
+                not in {
+                    "expected_reply_type",
+                    "expected_reply_reason",
+                    "session_memory",
+                }
+            }
+
+        restored["context_manager"] = self.build_context_manager_compatibility_snapshot(
+            context_manager_source
+        )
         pending_question_contract = self.project_context_manager_pending_question_contract(
             pending_resume
         )

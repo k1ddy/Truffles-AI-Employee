@@ -2945,6 +2945,8 @@ def apply_booking_scenario_active_time_specialist_followup_expectations(
         trace_contains.append(specialist_trace)
     if trace_contains:
         expect["trace_contains"] = trace_contains
+    if active_reply_type == "time":
+        return compile_active_time_specialist_followup_expectations(expect)
     return expect
 
 

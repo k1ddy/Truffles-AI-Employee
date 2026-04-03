@@ -16,8 +16,8 @@ from app.models import Conversation, Message, User
 from app.routers.webhook.booking import _get_booking_context, _next_booking_prompt
 from app.routers.webhook.class_router_runtime import (
     CONSULT_INTERRUPT_INTENTS,
-    build_observer_class_router_result,
     _router_observability_updates_from_class_router,
+    build_observer_class_router_result,
 )
 from app.routers.webhook.context_manager import (
     _get_context_manager,

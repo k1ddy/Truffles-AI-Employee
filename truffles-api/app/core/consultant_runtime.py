@@ -1727,22 +1727,6 @@ class ConsultantRuntime:
         execution: RuntimeExecutionResult,
         turn_result: Any,
     ) -> str:
-        owner_current_goal = (
-            self.dialog_state.project_current_goal_from_frame(
-                self.planner.canonical_semantic_frame(decision)
-            )
-            if self._has_canonical_semantic_owner(decision)
-            else None
-        )
-        pending_question_contract = (
-            self._project_runtime_pending_question_contract(
-                turn_result.dialog_state,
-                decision=decision,
-            )
-            if self._has_canonical_semantic_owner(decision)
-            else {}
-        )
-        expected_reply_type = pending_question_contract.get("expected_reply_type")
         if (
             execution.tool_action == "calendar.book_slot"
             and execution.tool_decision == "ok"
@@ -1750,10 +1734,12 @@ class ConsultantRuntime:
             and execution.meta.get("appointment_id")
         ):
             return "booking_confirm"
-        if self._decision_collects(decision) and owner_current_goal == "booking" and expected_reply_type:
-            return "booking_prompt"
         if isinstance(decision, PolicyDecision):
-            return decision.action
+            action = str(decision.action or "").strip()
+            if action:
+                # Keep canonical trace/meta aligned with the owner decision.
+                # Booking-prompt presentation can be derived by observer layers.
+                return action
         boundary_override = getattr(turn_result, "boundary_override", None)
         if boundary_override is not None and boundary_override.decision == "block":
             return "reject"
