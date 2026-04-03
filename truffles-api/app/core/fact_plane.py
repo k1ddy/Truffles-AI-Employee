@@ -172,6 +172,7 @@ def build_default_fact_manifest() -> FactManifestV1:
                 resolver_id="catalog.service_query",
                 renderer_id="catalog.service_query.reply",
                 provenance_sources=["service_catalog", "pack_manifest"],
+                companion_group_id="service_query_fact_sections",
             ),
             FactManifestEntryV1(
                 canonical_ref="promotions",
@@ -180,6 +181,7 @@ def build_default_fact_manifest() -> FactManifestV1:
                 resolver_id="catalog.service_query",
                 renderer_id="catalog.service_query.reply",
                 provenance_sources=["service_catalog", "pack_manifest"],
+                companion_group_id="service_query_fact_sections",
             ),
             FactManifestEntryV1(
                 canonical_ref="duration",
@@ -188,6 +190,7 @@ def build_default_fact_manifest() -> FactManifestV1:
                 resolver_id="catalog.service_query",
                 renderer_id="catalog.service_query.reply",
                 provenance_sources=["service_catalog", "pack_manifest"],
+                companion_group_id="service_query_fact_sections",
             ),
             FactManifestEntryV1(
                 canonical_ref="services_overview",
@@ -196,6 +199,7 @@ def build_default_fact_manifest() -> FactManifestV1:
                 resolver_id="catalog.service_query",
                 renderer_id="catalog.service_query.reply",
                 provenance_sources=["service_catalog", "pack_manifest"],
+                companion_group_id="service_query_fact_sections",
             ),
             FactManifestEntryV1(
                 canonical_ref="location",
@@ -255,9 +259,24 @@ def build_default_fact_manifest() -> FactManifestV1:
                 resolver_id="catalog.service_query",
                 renderer_id="catalog.service_query.reply",
                 provenance_sources=["service_catalog", "pack_manifest"],
+                companion_group_id="service_query_fact_sections",
             ),
         ],
         companion_groups=[
+            FactCompanionGroupV1(
+                group_id="service_query_fact_sections",
+                members=["pricing", "promotions", "duration", "services_overview", "guest_policy"],
+                requested_ref_policies={
+                    "pricing": ["pricing"],
+                    "promotions": ["promotions"],
+                    "duration": ["duration"],
+                    "services_overview": ["services_overview"],
+                    "guest_policy": ["guest_policy"],
+                },
+                composition_mode="companion_allowed",
+                renderer_id="catalog.service_query.reply",
+                provenance_sources=["service_catalog", "pack_manifest"],
+            ),
             FactCompanionGroupV1(
                 group_id="location_base_bundle",
                 members=["location", "hours", "parking"],
@@ -346,40 +365,70 @@ def _fact_scope_policy_projection(
 
 
 def collect_requested_fact_refs(decision: Any) -> list[str]:
-    requested: list[str] = []
+    coarse_refs: list[str] = []
+    pack_refs: list[str] = []
+    exact_refs: list[str] = []
 
-    def _remember(value: Any) -> None:
+    def _remember(target: list[str], value: Any) -> None:
         normalized = _normalize_fact_ref(value)
         if normalized is not None:
-            requested.append(normalized)
+            target.append(normalized)
 
-    _remember(getattr(decision, "intent", None))
-    for attr_name in ("pack_refs", "fact_refs", "capability_refs"):
-        for item in getattr(decision, attr_name, ()) or ():
-            _remember(item)
+    _remember(coarse_refs, getattr(decision, "intent", None))
+    for item in getattr(decision, "capability_refs", ()) or ():
+        _remember(coarse_refs, item)
+    for item in getattr(decision, "pack_refs", ()) or ():
+        _remember(pack_refs, item)
+    for item in getattr(decision, "fact_refs", ()) or ():
+        _remember(exact_refs, item)
 
     tool_args = getattr(decision, "tool_args", None)
     if isinstance(tool_args, Mapping):
-        _remember(tool_args.get("info_ref"))
+        _remember(exact_refs, tool_args.get("info_ref"))
         for item in tool_args.get("info_refs") or []:
-            _remember(item)
+            _remember(exact_refs, item)
 
     semantic_decision = getattr(decision, "semantic_decision", None)
     if semantic_decision is not None:
-        _remember(getattr(semantic_decision, "intent", None))
-        _remember(getattr(semantic_decision, "capability_id", None))
+        _remember(coarse_refs, getattr(semantic_decision, "intent", None))
+        _remember(coarse_refs, getattr(semantic_decision, "capability_id", None))
         grounding_requirements = getattr(semantic_decision, "grounding_requirements", None)
         if grounding_requirements is not None:
             for item in getattr(grounding_requirements, "pack_refs", ()) or ():
-                _remember(item)
+                _remember(pack_refs, item)
 
     decision_meta = getattr(decision, "meta", None)
     if isinstance(decision_meta, Mapping):
         semantic_contract = decision_meta.get("semantic_contract")
         if isinstance(semantic_contract, Mapping):
-            _remember(semantic_contract.get("capability"))
+            _remember(coarse_refs, semantic_contract.get("capability"))
 
-    return _dedupe_tokens(requested)
+    manifest = build_default_fact_manifest()
+    group_priority: dict[str, int] = {}
+    for priority, bucket in enumerate((coarse_refs, pack_refs, exact_refs)):
+        for ref in bucket:
+            entry = manifest.entry_for_ref(ref)
+            group_id = _normalize_token(entry.companion_group_id) if entry is not None else None
+            if group_id is None:
+                continue
+            current = group_priority.get(group_id, -1)
+            if priority > current:
+                group_priority[group_id] = priority
+
+    requested: list[str] = []
+    seen: set[str] = set()
+    for priority, bucket in enumerate((coarse_refs, pack_refs, exact_refs)):
+        for ref in bucket:
+            entry = manifest.entry_for_ref(ref)
+            group_id = _normalize_token(entry.companion_group_id) if entry is not None else None
+            if group_id is not None and group_priority.get(group_id, priority) != priority:
+                continue
+            if ref in seen:
+                continue
+            seen.add(ref)
+            requested.append(ref)
+
+    return requested
 
 
 def _resolve_decision_id(decision: Any) -> str:

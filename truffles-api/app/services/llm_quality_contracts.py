@@ -2780,6 +2780,74 @@ def has_booking_scenario_active_check_booking_confirm(
     return active_management_tag == "check_booking" and "confirm" in _booking_scenario_lowered_tags(tags)
 
 
+def apply_booking_scenario_check_booking_entry_expectations(
+    expect: dict[str, Any],
+    *,
+    tags: list[str],
+) -> dict[str, Any]:
+    if "check_booking" not in _booking_scenario_lowered_tags(tags):
+        return expect
+    expect["expected_reply"] = True
+    return expect
+
+
+def apply_booking_scenario_active_name_answer_expectations(
+    expect: dict[str, Any],
+    *,
+    tags: list[str],
+    active_reply_type: str | None,
+) -> dict[str, Any]:
+    if active_reply_type != "name":
+        return expect
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if not (lowered_tags & {"name", "phone"}):
+        return expect
+
+    expect["reply_type"] = None
+    expect["expected_reply"] = True
+
+    meta = deepcopy(dict(expect.get("meta") or {}))
+    meta.pop("expected_reply_type", None)
+    meta.pop("expected_reply_reason", None)
+    meta.pop("pending_question_act", None)
+    meta.pop("pending_question_target", None)
+    meta.pop("pending_question_interaction", None)
+    meta.pop("pending_question_owner", None)
+    meta.pop("active_question_relation", None)
+    if meta:
+        expect["meta"] = meta
+    elif "meta" in expect:
+        expect.pop("meta", None)
+
+    meta_any = deepcopy(dict(expect.get("meta_any") or {}))
+    meta_any.pop("expected_reply_type", None)
+    meta_any.pop("expected_reply_reason", None)
+    meta_any.pop("pending_question_act", None)
+    meta_any.pop("pending_question_target", None)
+    meta_any.pop("pending_question_interaction", None)
+    meta_any.pop("pending_question_owner", None)
+    meta_any.pop("active_question_relation", None)
+    if meta_any:
+        expect["meta_any"] = meta_any
+    elif "meta_any" in expect:
+        expect.pop("meta_any", None)
+
+    trace_contains = []
+    for entry in deepcopy(list(expect.get("trace_contains") or [])):
+        normalized_entry = dict(entry)
+        if normalized_entry.get("stage") in {
+            "question_contract",
+            "pending_question_interaction",
+        }:
+            continue
+        trace_contains.append(normalized_entry)
+    if trace_contains:
+        expect["trace_contains"] = trace_contains
+    elif "trace_contains" in expect:
+        expect.pop("trace_contains", None)
+    return expect
+
+
 def apply_booking_scenario_active_time_specialist_followup_expectations(
     expect: dict[str, Any],
     *,
@@ -3462,25 +3530,18 @@ def apply_booking_scenario_service_grounded_booking_expectations(
         return expect
 
     expect["reply_type"] = "time"
-    collect_reason = "collect:datetime"
 
     meta = deepcopy(dict(expect.get("meta") or {}))
     if meta.get("expected_reply_type") == "service_choice":
         meta["expected_reply_type"] = "time"
-    stale_reason = _normalize_lower_token(meta.get("expected_reply_reason"))
-    if stale_reason in {"booking_prompt", "collect:service"}:
-        meta["expected_reply_reason"] = collect_reason
+    meta.pop("expected_reply_reason", None)
     if meta:
         expect["meta"] = meta
 
     meta_any = deepcopy(dict(expect.get("meta_any") or {}))
     if meta_any.get("expected_reply_type"):
         meta_any["expected_reply_type"] = ["time"]
-    expected_reply_reasons = meta_any.get("expected_reply_reason")
-    if isinstance(expected_reply_reasons, list) and expected_reply_reasons:
-        normalized_reasons = {_normalize_lower_token(item) for item in expected_reply_reasons}
-        if normalized_reasons & {"booking_prompt", "collect:service"}:
-            meta_any["expected_reply_reason"] = [collect_reason]
+    meta_any.pop("expected_reply_reason", None)
     if meta_any:
         expect["meta_any"] = meta_any
 
@@ -3493,9 +3554,7 @@ def apply_booking_scenario_service_grounded_booking_expectations(
         ):
             normalized_entry["expected_reply_type"] = "time"
         if normalized_entry.get("stage") == "question_contract":
-            reason_token = _normalize_lower_token(normalized_entry.get("reason"))
-            if reason_token in {"booking_prompt", "collect:service"}:
-                normalized_entry["reason"] = collect_reason
+            normalized_entry.pop("reason", None)
         trace_contains.append(normalized_entry)
     if trace_contains:
         expect["trace_contains"] = trace_contains
@@ -4067,6 +4126,7 @@ def _booking_scenario_select_post_coverage_repair_decision(
         active_management_tag=state.active_management_tag,
     ):
         return BookingScenarioPostCoverageRepairDecision(
+            tags=effective_tags,
             expect_override=booking_scenario_check_booking_confirm_expect_override(),
         )
     if booking_scenario_looks_like_check_booking_followup(text, effective_tags):
@@ -4160,6 +4220,15 @@ def repair_booking_scenario_post_coverage_dialogs(
                 active_reply_type=state.active_reply_type,
             )
             expectations = apply_booking_scenario_active_pending_question_cancel_interrupt_expectations(
+                expectations,
+                tags=current_tags,
+                active_reply_type=state.active_reply_type,
+            )
+            expectations = apply_booking_scenario_check_booking_entry_expectations(
+                expectations,
+                tags=current_tags,
+            )
+            expectations = apply_booking_scenario_active_name_answer_expectations(
                 expectations,
                 tags=current_tags,
                 active_reply_type=state.active_reply_type,
@@ -4621,6 +4690,15 @@ def sanitize_booking_scenario_llm_turns(
             active_reply_type=state.active_reply_type,
         )
         expectations = apply_booking_scenario_active_pending_question_cancel_interrupt_expectations(
+            expectations,
+            tags=tags,
+            active_reply_type=state.active_reply_type,
+        )
+        expectations = apply_booking_scenario_check_booking_entry_expectations(
+            expectations,
+            tags=tags,
+        )
+        expectations = apply_booking_scenario_active_name_answer_expectations(
             expectations,
             tags=tags,
             active_reply_type=state.active_reply_type,

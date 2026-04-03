@@ -40,7 +40,6 @@ from app.core.semantic_decision import (
 from app.core.turn_executor import (
     BlockBoundaryRequest,
     DegradeBoundaryRequest,
-    OwnerCutoverAction,
     ToolOutcome,
     ToolStatus,
     TurnContractStatus,
@@ -88,7 +87,6 @@ __all__ = [
     "InboundTurnInput",
     "GroundingRequirementsV1",
     "MissingInformationV1",
-    "OwnerCutoverAction",
     "PendingQuestionContract",
     "PolicyDecision",
     "ReplyEnvelope",

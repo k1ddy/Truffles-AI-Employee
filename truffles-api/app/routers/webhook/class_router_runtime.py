@@ -185,6 +185,107 @@ def _build_class_controller_result(
     }
 
 
+def build_observer_class_router_result(
+    *,
+    class_name: str | None,
+    goal: str | None,
+    info_intents: set[str] | list[str] | tuple[str, ...] | None = None,
+    booking_signal: bool = False,
+    carryover_class: str | None = None,
+    carryover_intents: list[str] | tuple[str, ...] | None = None,
+    carryover_info_sections: list[str] | tuple[str, ...] | None = None,
+    in_signals: list[str] | tuple[str, ...] | None = None,
+    out_signals: list[str] | tuple[str, ...] | None = None,
+    out_of_domain_signal: bool = False,
+) -> dict[str, Any]:
+    normalized_class = (
+        _normalize_class_name(class_name)
+        if isinstance(class_name, str) and class_name.strip()
+        else None
+    )
+    normalized_carryover_class = (
+        _normalize_class_name(carryover_class)
+        if isinstance(carryover_class, str) and carryover_class.strip()
+        else None
+    )
+    classes: list[str] = []
+    if normalized_class:
+        classes.append(normalized_class)
+    if normalized_carryover_class and normalized_carryover_class not in classes:
+        classes.append(normalized_carryover_class)
+    normalized_intents = sorted(
+        {
+            item.strip().casefold()
+            for item in (info_intents or [])
+            if isinstance(item, str) and item.strip()
+        }
+    )
+    normalized_in_signals = list(
+        dict.fromkeys(
+            item.strip()
+            for item in (in_signals or [])
+            if isinstance(item, str) and item.strip()
+        )
+    )
+    normalized_out_signals = list(
+        dict.fromkeys(
+            item.strip()
+            for item in (out_signals or [])
+            if isinstance(item, str) and item.strip()
+        )
+    )
+    if booking_signal and "booking_signal" not in normalized_in_signals:
+        normalized_in_signals.append("booking_signal")
+    normalized_carryover_intents = list(
+        dict.fromkeys(
+            item.strip().casefold()
+            for item in (carryover_intents or [])
+            if isinstance(item, str) and item.strip()
+        )
+    )
+    normalized_carryover_sections = list(
+        dict.fromkeys(
+            item.strip().casefold()
+            for item in (carryover_info_sections or [])
+            if isinstance(item, str) and item.strip()
+        )
+    )
+    controller_meta = {
+        "used": False,
+        "attempted": False,
+        "fallback": False,
+        "confidence": None,
+        "reason": None,
+        "fallback_reason": None,
+        "error": "observer_only",
+        "output": None,
+        "signal_class": None,
+        "signal_match": False,
+        "used_reason": "observer_only",
+        "sla": None,
+        "goal": goal.strip() if isinstance(goal, str) and goal.strip() else None,
+        "low_confidence": False,
+        "observer_only": True,
+    }
+    return {
+        "classes": classes,
+        "intents": normalized_intents,
+        "in_signals": normalized_in_signals,
+        "out_signals": normalized_out_signals,
+        "anchors_in_hits": 0,
+        "anchors_out_hits": 0,
+        "out_of_domain_signal": bool(out_of_domain_signal),
+        "carryover_class": normalized_carryover_class,
+        "carryover_info_sections": normalized_carryover_sections,
+        "carryover_intents": normalized_carryover_intents,
+        "controller": controller_meta,
+        "controller_fallback_reason": None,
+        "router": dict(controller_meta),
+        "router_fallback_reason": None,
+        "observer_only": True,
+    }
+
+
 def _resolve_class_router_result(
     *,
     info_intents: set[str],
@@ -205,7 +306,6 @@ def _resolve_class_router_result(
         domain_meta=domain_meta,
         explicit_service_signal=explicit_service_signal,
     )
-    out_of_domain_signal = bool(result.get("out_of_domain_signal"))
 
     controller_output = router_state.get("output") if isinstance(router_state, dict) else None
     controller_used = router_state.get("used") if isinstance(router_state, dict) else False
@@ -221,7 +321,6 @@ def _resolve_class_router_result(
 
     controller_class = None
     controller_reason = None
-    controller_intents: list[str] = []
     controller_goal = None
     if isinstance(controller_output, dict):
         raw_class = controller_output.get("class")
@@ -230,9 +329,6 @@ def _resolve_class_router_result(
         raw_reason = controller_output.get("reason")
         if isinstance(raw_reason, str):
             controller_reason = raw_reason
-        raw_intents = controller_output.get("intents")
-        if isinstance(raw_intents, list):
-            controller_intents = [item for item in raw_intents if isinstance(item, str)]
         raw_goal = controller_output.get("goal")
         if isinstance(raw_goal, str):
             controller_goal = raw_goal.strip()
@@ -250,16 +346,7 @@ def _resolve_class_router_result(
     if controller_error_normalized:
         controller_fallback_reason = _normalize_controller_fallback_reason(error=controller_error_normalized)
 
-    if controller_used and controller_class and not controller_low_confidence:
-        result["classes"] = [controller_class]
-        info_controller_intents = [intent for intent in controller_intents if intent in INFO_INTENTS]
-        if controller_class == "info_bundle":
-            if info_controller_intents:
-                result["intents"] = sorted(info_controller_intents)
-        else:
-            result["intents"] = sorted(info_controller_intents)
-        controller_fallback_reason = None
-    elif controller_used and controller_class and controller_low_confidence:
+    if controller_used and controller_class and controller_low_confidence:
         controller_used_reason = "low_confidence"
         controller_used = True
         controller_fallback_reason = None
@@ -268,36 +355,6 @@ def _resolve_class_router_result(
         normalized_fallback = _normalize_controller_fallback_reason(error=controller_fallback)
         if normalized_fallback:
             controller_fallback_reason = controller_fallback_reason or normalized_fallback
-
-    if (
-        not controller_used
-        and not controller_attempted
-        and controller_error_normalized in {"skipped", "no_api_key"}
-    ):
-        fallback_goal = None
-        fallback_class = None
-        if out_of_domain_signal or "out_of_domain" in result.get("classes", []):
-            fallback_goal = "out_of_domain"
-            fallback_class = "out_of_domain"
-        elif "booking" in result.get("classes", []):
-            fallback_goal = "booking"
-            fallback_class = "booking"
-        elif "consult" in result.get("classes", []):
-            fallback_goal = "consult"
-            fallback_class = "consult"
-        elif "info_bundle" in result.get("classes", []) or "guest_policy" in result.get("classes", []):
-            fallback_goal = "info"
-            fallback_class = "info_bundle"
-        if fallback_goal:
-            controller_used = True
-            controller_used_reason = "deterministic"
-            controller_goal = fallback_goal
-            controller_class = fallback_class
-            if not isinstance(controller_output, dict):
-                controller_output = {}
-            controller_output = {**controller_output, "class": controller_class, "goal": controller_goal}
-            controller_fallback_reason = None
-            controller_fallback_flag = False
 
     result["controller"] = {
         "used": bool(controller_used),
@@ -358,6 +415,7 @@ __all__ = [
     "CONTROLLER_CONFIDENCE_THRESHOLD",
     "DomainIntent",
     "_build_controller_meta_output",
+    "build_observer_class_router_result",
     "_controller_meta_updates_from_class_router",
     "_ensure_controller_output_meta",
     "_normalize_class_name",

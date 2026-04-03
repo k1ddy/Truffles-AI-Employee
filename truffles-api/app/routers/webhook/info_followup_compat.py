@@ -1,4 +1,4 @@
-"""Narrow owner for info followup detection helpers."""
+"""Compatibility-only info followup helper exports."""
 
 from __future__ import annotations
 

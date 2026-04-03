@@ -30,6 +30,7 @@ from app.routers.webhook import http as http_router
 from app.routers.webhook import info as webhook_info
 from app.routers.webhook import policy as webhook_policy
 from app.routers.webhook import response as webhook_response
+from app.routers.webhook import response_compat as webhook_response_compat
 from app.routers.webhook.context_manager import (
     _get_expected_reply_reason,
     _get_expected_reply_type,
@@ -60,7 +61,7 @@ from app.schemas.webhook import (
 )
 from app.services import escalation_service, handover_owner_service
 from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_capabilities
-from app.services.demo_salon_knowledge import (
+from app.services.demo_salon_knowledge_compat import (
     DemoSalonDecision,
     SemanticServiceMatch,
     get_demo_salon_decision,
@@ -260,28 +261,14 @@ def _stub_generic_booking_request_lexicon():
 
 @pytest.fixture(autouse=True)
 def _stub_generic_service_hint():
-    from app.routers.webhook import decision as decision_router
-
-    original = decision_router._extract_service_hint
+    original = webhook_router._extract_service_hint
 
     def _stub(text: str | None, client_slug: str | None):
         if client_slug == "generic":
             return None
         return original(text, client_slug)
 
-    with ExitStack() as stack:
-        stack.enter_context(
-            patch(
-                "app.routers.webhook.decision._extract_service_hint",
-                side_effect=_stub,
-            )
-        )
-        stack.enter_context(
-            patch(
-                "app.routers.webhook._legacy._extract_service_hint",
-                side_effect=_stub,
-            )
-        )
+    with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_stub):
         yield
 
 
@@ -1005,11 +992,27 @@ class TestBatchBookingSignals:
                 ["маникюр", "на завтра в 5"],
                 client_slug="demo_salon",
             )
-        assert updated.get("service") == "Маникюр"
+        assert updated.get("service") is None
         assert updated.get("datetime") == "в 5"
 
 
 class TestBookingSlotGuards:
+    def test_apply_owner_service_query_sets_service_from_owner_payload(self):
+        updated = webhook_booking._apply_owner_service_query(
+            {"active": True},
+            {"service_query": "Маникюр", "service_query_source": "intent_decomp"},
+        )
+
+        assert updated.get("service") == "Маникюр"
+
+    def test_apply_owner_service_query_does_not_override_existing_service_from_context(self):
+        updated = webhook_booking._apply_owner_service_query(
+            {"active": True, "service": "Маникюр"},
+            {"service_query": "Педикюр", "service_query_source": "context"},
+        )
+
+        assert updated.get("service") == "Маникюр"
+
     def test_booking_name_skips_opt_out(self):
         booking = {"active": True, "last_question": "name"}
         updated = webhook_router._update_booking_from_messages(
@@ -1126,6 +1129,7 @@ class TestDatetimeExtraction:
             "Я хочу записаться на 3 часа.",
             allow_freeform=True,
             client_slug="demo_salon",
+            booking_context_active=True,
         )
 
         assert value == "03:00"
@@ -1135,6 +1139,7 @@ class TestDatetimeExtraction:
             "Может быть, на утро?",
             allow_freeform=True,
             client_slug="demo_salon",
+            booking_context_active=True,
         )
 
         assert value == "утром"
@@ -1144,6 +1149,7 @@ class TestDatetimeExtraction:
             "Мне подходят только утренние часы.",
             allow_freeform=True,
             client_slug="demo_salon",
+            booking_context_active=True,
         )
 
         assert value == "утром"
@@ -1158,6 +1164,17 @@ class TestDatetimeExtraction:
         assert matched is True
         assert value == "10:00"
         assert "question_like_daypart_exact_time" in flags
+
+    def test_match_expected_reply_candidates_does_not_capture_raw_service_slot_for_expected_service(self):
+        matched, value, flags = webhook_router._match_expected_reply_candidates(
+            expected_reply_type=webhook_router.EXPECTED_REPLY_SERVICE,
+            message_text="Маникюр",
+            client_slug="demo_salon",
+        )
+
+        assert matched is False
+        assert value is None
+        assert flags == []
 
     def test_validate_datetime_slot_rejects_same_day_info_phrase(self):
         value = webhook_router._validate_datetime_slot(
@@ -1224,6 +1241,39 @@ class TestDatetimeExtraction:
 
 
 class TestServiceHints:
+    def test_explicit_service_signal_ignores_parking_question_without_owner_query(self):
+        assert (
+            webhook_router._has_explicit_service_signal(
+                "У вас есть парковка?",
+                client_slug="demo_salon",
+                intent_decomp_payload=None,
+            )
+            is False
+        )
+
+    def test_explicit_service_signal_uses_owner_service_query(self):
+        assert (
+            webhook_router._has_explicit_service_signal(
+                "Сколько стоит это?",
+                client_slug="demo_salon",
+                intent_decomp_payload={
+                    "service_query": "маникюр",
+                    "service_query_source": "intent_decomp",
+                },
+            )
+            is True
+        )
+
+    def test_explicit_service_signal_ignores_raw_service_text_without_owner_query(self):
+        assert (
+            webhook_router._has_explicit_service_signal(
+                "маникюр",
+                client_slug="demo_salon",
+                intent_decomp_payload=None,
+            )
+            is False
+        )
+
     def test_service_hint_within_window(self):
         now = datetime.now(timezone.utc)
         context = webhook_router._set_service_hint({}, "маникюр", now)
@@ -1244,13 +1294,22 @@ class TestServiceHints:
         assert hint is None
 
     def test_extract_service_hint_returns_none_without_client_slug(self):
-        with patch("app.routers.webhook.decision.semantic_service_match") as semantic_match, patch(
-            "app.routers.webhook.decision.get_pack_service_hint"
-        ) as pack_hint:
-            hint = webhook_router._extract_service_hint("хочу маникюр", None)
+        assert webhook_router._extract_service_hint("хочу маникюр", None) is None
 
-        assert hint is None
-        semantic_match.assert_not_called()
+    def test_extract_service_hint_does_not_semantically_rematch_fuzzy_text(self):
+        assert webhook_router._extract_service_hint("манник?", "demo_salon") is None
+
+    def test_validate_service_slot_ignores_pack_service_hint_fallback(self):
+        with patch("app.services.pack_runtime_service.get_pack_service_hint", return_value="Маникюр") as pack_hint:
+            assert (
+                webhook_booking._validate_service_slot(
+                    "манник?",
+                    allow_freeform=True,
+                    client_slug="demo_salon",
+                )
+                is None
+            )
+
         pack_hint.assert_not_called()
 
 
@@ -1375,7 +1434,7 @@ class TestFastIntent:
 
         assert decision is None
 
-        with patch("app.routers.webhook.decision.classify_intent", return_value=Intent.QUESTION) as mock_classify:
+        with patch("app.routers.webhook._legacy.classify_intent", return_value=Intent.QUESTION) as mock_classify:
             signals = webhook_router._detect_intent_signals(message)
         assert signals.intent == Intent.QUESTION
         mock_classify.assert_called_once()
@@ -1504,11 +1563,12 @@ def test_policy_collect_interrupt_arbitration_rewrites_price_question_to_info():
     assert reason_code == "policy_collect_info_interrupt_owner"
 
 
-def test_policy_collect_interrupt_arbitration_rewrites_choose_specialist_question_to_info():
+def test_policy_collect_interrupt_arbitration_rewrites_choose_specialist_question_to_info_when_owner_marks_master():
     action, info_refs, reason_code = webhook_router._resolve_policy_collect_interrupt_arbitration(
         policy_tool_action="collect",
-        policy_intent="booking",
-        policy_pack_refs=[],
+        policy_intent="master",
+        policy_capability="master",
+        policy_pack_refs=["master"],
         message_text="Могу ли я выбрать специалиста?",
         client_slug="demo_salon",
         booking_wants_flow=True,
@@ -1517,7 +1577,7 @@ def test_policy_collect_interrupt_arbitration_rewrites_choose_specialist_questio
     )
 
     assert action == "info"
-    assert "master" in info_refs
+    assert info_refs == ["master"]
     assert reason_code == "policy_collect_info_interrupt_owner"
 
 
@@ -1869,7 +1929,7 @@ def test_strict_ood_sets_out_of_domain_without_in_signals():
     )
 
     with patch(
-        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+        "app.routers.webhook._legacy._detect_intent_signals", return_value=signals
     ), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores",
         return_value=(DomainIntent.UNKNOWN, 0.0, 0.0, {}),
@@ -1912,7 +1972,7 @@ def test_strict_ood_skips_out_of_domain_with_in_signals():
     )
 
     with patch(
-        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+        "app.routers.webhook._legacy._detect_intent_signals", return_value=signals
     ), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores",
         return_value=(DomainIntent.UNKNOWN, 0.0, 0.0, {}),
@@ -1954,7 +2014,7 @@ def test_strict_ood_skips_out_of_domain_with_service_request_signal():
     )
 
     with patch(
-        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+        "app.routers.webhook._legacy._detect_intent_signals", return_value=signals
     ), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores",
         return_value=(
@@ -2036,15 +2096,15 @@ def test_signal_snapshot_written_on_class_router():
     }
 
     with patch(
-        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+        "app.routers.webhook._legacy._detect_intent_signals", return_value=signals
     ), patch(
-        "app.routers.webhook.decision.classify_domain_with_scores",
+        "app.routers.webhook._legacy.classify_domain_with_scores",
         return_value=(DomainIntent.IN_DOMAIN, 0.77, 0.12, domain_meta),
     ), patch(
-        "app.routers.webhook.decision._resolve_class_router_result",
+        "app.routers.webhook._legacy._resolve_class_router_result",
         return_value=class_router_result,
     ), patch(
-        "app.routers.webhook.decision._has_explicit_service_signal", return_value=True
+        "app.routers.webhook._legacy._has_explicit_service_signal", return_value=True
     ):
         webhook_router._run_class_router_stage(
             conversation=conversation,
@@ -2130,7 +2190,7 @@ def test_signal_snapshot_records_pack_index_meta():
     }
 
     with patch(
-        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+        "app.routers.webhook._legacy._detect_intent_signals", return_value=signals
     ), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores",
         return_value=(DomainIntent.IN_DOMAIN, 0.77, 0.12, domain_meta),
@@ -2138,7 +2198,7 @@ def test_signal_snapshot_records_pack_index_meta():
         "app.routers.webhook._legacy._resolve_class_router_result",
         return_value=class_router_result,
     ), patch(
-        "app.routers.webhook.decision._has_explicit_service_signal", return_value=True
+        "app.routers.webhook._legacy._has_explicit_service_signal", return_value=True
     ):
         webhook_router._run_class_router_stage(
             conversation=conversation,
@@ -2523,7 +2583,7 @@ def test_context_manager_expected_reply_getters_prefer_canonical_question_contra
     )
 
 
-def test_context_manager_expected_reply_getters_prefer_conversation_projection_over_canonical_question_contract():
+def test_context_manager_expected_reply_getters_ignore_projection_and_use_canonical_question_contract():
     context = {
         "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
         "expected_reply_reason": "booking_prompt",
@@ -2555,8 +2615,8 @@ def test_context_manager_expected_reply_getters_prefer_conversation_projection_o
         },
     }
 
-    assert _get_expected_reply_type(context) == webhook_router.EXPECTED_REPLY_TIME
-    assert _get_expected_reply_reason(context) == "runtime_projection"
+    assert _get_expected_reply_type(context) == webhook_router.EXPECTED_REPLY_NAME
+    assert _get_expected_reply_reason(context) == "stale_canonical"
 
 
 def test_context_manager_set_conversation_context_preserves_simulation_and_merges_trace():
@@ -2649,7 +2709,7 @@ def test_set_expected_reply_context_records_canonical_pending_question_contract_
 
 
 
-def test_semantic_service_matcher_returns_not_found_on_empty_rag():
+def test_low_confidence_explicit_service_query_returns_not_found_on_empty_rag():
     saved_message = SimpleNamespace(id="msg-1", message_metadata={})
     conversation = SimpleNamespace(
         id=uuid4(),
@@ -2672,16 +2732,8 @@ def test_semantic_service_matcher_returns_not_found_on_empty_rag():
         "service_query_source": "intent_decomp",
     }
 
-    with patch(
-        "app.routers.webhook.response.semantic_service_match", return_value=None
-    ), patch(
-        "app.routers.webhook.response.rewrite_for_service_match", return_value=None
-    ), patch(
-        "app.routers.webhook.response._extract_service_hint", return_value=None
-    ), patch(
-        "app.routers.webhook.response._record_knowledge_backlog"
-    ):
-        outcome = webhook_response._handle_ai_response_action(
+    with patch("app.routers.webhook.response._record_knowledge_backlog"):
+        outcome = webhook_response_compat._handle_ai_response_action(
             db=Mock(),
             conversation=conversation,
             user=user,
@@ -2709,10 +2761,10 @@ def test_semantic_service_matcher_returns_not_found_on_empty_rag():
     )
 
     assert outcome.bot_response is not None
-    assert "какая услуга интересует" in outcome.bot_response.casefold()
+    assert "в списке услуг нет такой позиции" in outcome.bot_response.casefold()
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("intent") == "service_not_found"
-    assert meta.get("source") == "service_semantic_matcher"
+    assert meta.get("source") == "truth_gate"
 
 
 def test_rag_rewrite_and_scores_logged():
@@ -2764,7 +2816,7 @@ def test_rag_rewrite_and_scores_logged():
         "app.routers.webhook.response.generate_bot_response",
         side_effect=fake_generate_bot_response,
     ):
-        outcome = webhook_response._handle_ai_response_action(
+        outcome = webhook_response_compat._handle_ai_response_action(
             db=Mock(),
             conversation=conversation,
             user=user,
@@ -2973,6 +3025,17 @@ def test_expected_reply_contract_bypasses_human_request():
     conversation = SimpleNamespace(
         context={
             "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                        "reason": "booking_prompt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    }
+                },
+            },
             "session_memory": {
                 "last_question_type": webhook_router.EXPECTED_REPLY_TIME,
                 "unanswered_questions": [
@@ -3018,7 +3081,7 @@ def test_expected_reply_contract_bypasses_human_request():
     assert meta.get("session_memory_expected_reply_cleared") is True
 
 
-def test_expected_reply_contract_prefers_session_memory_pending_question_contract() -> None:
+def test_expected_reply_contract_ignores_session_memory_pending_question_contract_without_canonical_state() -> None:
     from app.routers.webhook import decision as decision_router
 
     now = datetime.now(timezone.utc)
@@ -3066,13 +3129,10 @@ def test_expected_reply_contract_prefers_session_memory_pending_question_contrac
         )
 
     assert state.memory_expected_reply_type is None
-    assert state.expected_reply_type == webhook_router.EXPECTED_REPLY_TIME
+    assert state.expected_reply_type is None
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
-    assert meta.get("pending_question_contract") == {
-        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
-        "reason": "booking_interrupt",
-    }
+    assert meta.get("expected_reply_type") is None
+    assert meta.get("pending_question_contract") is None
 
 
 def test_expected_reply_contract_prefers_canonical_context_question_contract_over_stale_projection() -> None:
@@ -3197,6 +3257,17 @@ def test_expected_reply_time_merges_datetime_and_clears_stale_intent_queue():
     conversation = SimpleNamespace(
         context={
             "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                        "reason": "booking_prompt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    }
+                },
+            },
             "intent_queue": ["pricing"],
             "booking": {
                 "active": True,
@@ -3259,6 +3330,17 @@ def test_expected_reply_time_question_like_info_does_not_match_deterministic():
     conversation = SimpleNamespace(
         context={
             "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                        "reason": "booking_prompt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    }
+                },
+            },
             "booking": {
                 "active": True,
                 "service": "чистка лица",
@@ -3311,6 +3393,17 @@ def test_expected_reply_time_slot_mismatch_captures_alternate_name_without_clear
     conversation = SimpleNamespace(
         context={
             "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                        "reason": "booking_prompt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    }
+                },
+            },
             "booking": {
                 "active": True,
                 "service": "Женская стрижка",
@@ -3408,6 +3501,17 @@ def test_expected_reply_time_slot_mismatch_captures_alternate_name_without_booki
     conversation = SimpleNamespace(
         context={
             "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "context_manager": {
+                "current_goal": "booking",
+                "canonical_dialog_state": {
+                    "pending_question_contract": {
+                        "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+                        "reason": "booking_prompt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    }
+                },
+            },
             "session_memory": {
                 "last_question_type": webhook_router.EXPECTED_REPLY_TIME,
                 "unanswered_questions": [webhook_router.EXPECTED_REPLY_TIME],
@@ -3821,82 +3925,7 @@ def test_llm_policy_core_get_booking_invalid_reference_maps_to_booking_reference
 
 
 
-def test_has_explicit_location_or_hours_request_strict_mode_ignores_derived_hours(monkeypatch):
-    from app.routers.webhook import decision as decision_router
-
-    def _fake_detect(*_args, **_kwargs):
-        return {
-            "master",
-            "hours",
-        }, {
-            "info_signals": {
-                "master": True,
-                "hours": True,
-                "location": False,
-                "parking": False,
-                "location_address_hint": False,
-            },
-            "anchor_intents": [],
-        }
-
-    monkeypatch.setattr(decision_router, "_detect_info_class_intents", _fake_detect)
-
-    assert (
-        decision_router._has_explicit_location_or_hours_request(
-            "У вас есть мастера, которые работают с долгими стрижками?",
-            client_slug="demo_salon",
-            strict=True,
-        )
-        is False
-    )
-
-
-def test_has_explicit_location_or_hours_request_strict_mode_ignores_anchor_hours_with_master(
-    monkeypatch,
-):
-    from app.routers.webhook import decision as decision_router
-
-    def _fake_detect(*_args, **_kwargs):
-        return {
-            "master",
-            "hours",
-        }, {
-            "info_signals": {
-                "master": True,
-                "hours": True,
-                "location": False,
-                "parking": False,
-                "location_address_hint": False,
-            },
-            "anchor_intents": ["hours"],
-        }
-
-    monkeypatch.setattr(decision_router, "_detect_info_class_intents", _fake_detect)
-
-    assert (
-        decision_router._has_explicit_location_or_hours_request(
-            "У вас есть мастера, которые работают с долгими стрижками?",
-            client_slug="demo_salon",
-            strict=True,
-        )
-        is False
-    )
-
-
-def test_has_explicit_location_or_hours_request_strict_mode_real_phrase_no_false_positive():
-    from app.routers.webhook import decision as decision_router
-
-    assert (
-        decision_router._has_explicit_location_or_hours_request(
-            "У вас есть мастера, которые работают с долгими стрижками?",
-            client_slug="demo_salon",
-            strict=True,
-        )
-        is False
-    )
-
-
-def test_derive_policy_info_refs_mixed_master_hours_prefers_master_without_explicit_markers():
+def test_derive_policy_info_refs_requires_owner_refs_without_message_text_fallback():
     from app.routers.webhook import decision as decision_router
 
     refs = decision_router._derive_policy_info_refs(
@@ -3905,23 +3934,58 @@ def test_derive_policy_info_refs_mixed_master_hours_prefers_master_without_expli
         client_slug="demo_salon",
     )
 
-    assert refs
-    assert "master" in refs
-    assert refs[0] == "master"
+    assert refs == []
 
 
-def test_derive_policy_info_refs_mixed_master_hours_keeps_hours_priority_when_explicit():
+def test_derive_policy_info_refs_uses_owner_capability_and_intent_ordered_exactly():
     from app.routers.webhook import decision as decision_router
 
     refs = decision_router._derive_policy_info_refs(
-        policy_intent=None,
+        policy_intent="master",
+        policy_capability="hours",
         message_text="Какие мастера работают до скольки?",
         client_slug="demo_salon",
     )
 
-    assert "master" in refs
-    assert "hours" in refs
-    assert refs.index("hours") < refs.index("master")
+    assert refs == ["hours", "master"]
+
+
+def test_expected_reply_collect_fast_path_ignores_raw_verification_text_without_owner_intent(
+    monkeypatch,
+):
+    monkeypatch.setenv("POLICY_CORE_EXPECTED_REPLY_COLLECT_FAST_PATH", "1")
+
+    assert (
+        webhook_router._should_use_expected_reply_collect_fast_path(
+            message_text="Подтвердите, пожалуйста, мою запись.",
+            expected_reply_type=webhook_router.EXPECTED_REPLY_TIME,
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_set={"other"},
+            info_class_intents=set(),
+            booking_wants_flow=True,
+            booking_slot_signal=False,
+            consult_intent=False,
+            booking_reference_present=False,
+            booking_slots_complete=False,
+            refusal_flags=None,
+            client_slug="demo_salon",
+        )
+        is False
+    )
+
+
+def test_validate_expected_reply_value_rejects_service_slot_from_raw_expected_reply():
+    from app.routers.webhook import decision as decision_router
+
+    assert (
+        decision_router._validate_expected_reply_value(
+            expected_reply_type=webhook_router.EXPECTED_REPLY_SERVICE,
+            value="Маникюр",
+            client_slug="demo_salon",
+        )
+        is None
+    )
 
 
 
@@ -4243,9 +4307,6 @@ def test_booking_interrupt_reschedule_passes_active_handover_hooks():
         return None, True, True
 
     with patch(
-        "app.routers.webhook.booking._looks_like_booking_reschedule_request",
-        return_value=True,
-    ), patch(
         "app.routers.webhook.booking._reuse_active_handover",
         side_effect=_reuse_active_handover,
     ), patch(
@@ -4265,9 +4326,14 @@ def test_booking_interrupt_reschedule_passes_active_handover_hooks():
             bypass_domain_flows=False,
             booking_wants_flow=False,
             consult_intent=None,
-            intent_decomp_used=False,
-            intent_decomp_set=set(),
-            intent_decomp_payload=None,
+            intent_decomp_used=True,
+            intent_decomp_set={"reschedule"},
+            intent_decomp_payload={
+                "action": "handoff",
+                "tool_action": "handoff",
+                "capability": "booking_manage",
+                "primary_intent": "reschedule",
+            },
             multi_intent_primary=None,
             info_class_intents=set(),
             early_domain_intent=None,
@@ -4394,6 +4460,159 @@ def test_booking_interrupt_info_escalation_passes_active_handover_hooks():
     assert response is not None
     assert response.success is True
     assert response.bot_response == legacy_router.MSG_ESCALATED
+
+
+def test_info_intent_pricing_uses_explicit_service_reply_without_pack_decision():
+    with patch(
+        "app.routers.webhook.info.build_runtime_service_truth_reply",
+        return_value="Маникюр — 2 500 ₸.",
+    ) as truth_reply, patch(
+        "app.routers.webhook.info.resolve_runtime_service_price_item",
+        return_value={"name": "Маникюр", "price": 2500},
+    ):
+        reply, meta = webhook_info._build_info_intent_reply(
+            "pricing",
+            service_query="Маникюр",
+            client_slug="demo_salon",
+            message_text="Сколько стоит маникюр?",
+            include_info_bundle=False,
+        )
+
+    assert reply == "Маникюр — 2 500 ₸."
+    assert isinstance(meta, dict)
+    assert meta.get("intent_class") == "price_query"
+    assert meta.get("action_class") == "FACT"
+    assert meta.get("service_query") == "Маникюр"
+    assert meta.get("service_query_source") == "info_intent"
+    truth_reply.assert_called_once_with("Маникюр", client_slug="demo_salon")
+
+
+def test_info_intent_duration_collects_without_pack_decision_when_service_missing():
+    with patch(
+        "app.routers.webhook.info.build_runtime_service_duration_reply",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.info.format_reply_from_truth",
+        return_value="По времени зависит от услуги. Какая именно?",
+    ):
+        reply, meta = webhook_info._build_info_intent_reply(
+            "duration",
+            service_query=None,
+            client_slug="demo_salon",
+            message_text="Сколько длится?",
+            include_info_bundle=False,
+        )
+
+    assert reply == "По времени зависит от услуги. Какая именно?"
+    assert isinstance(meta, dict)
+    assert meta.get("intent_class") == "duration_or_price_clarify"
+    assert meta.get("action_class") == "COLLECT"
+
+
+def test_info_intent_pricing_without_service_query_does_not_infer_from_message_text():
+    with patch(
+        "app.routers.webhook.info.build_runtime_service_truth_reply",
+        side_effect=AssertionError("unexpected service inference"),
+    ), patch(
+        "app.routers.webhook.info.format_reply_from_truth",
+        return_value="Цены зависят от услуги. Какая именно вас интересует?",
+    ) as clarify_reply:
+        reply, meta = webhook_info._build_info_intent_reply(
+            "pricing",
+            service_query=None,
+            client_slug="demo_salon",
+            message_text="Сколько стоит маникюр?",
+            include_info_bundle=False,
+        )
+
+    assert reply == "Цены зависят от услуги. Какая именно вас интересует?"
+    assert isinstance(meta, dict)
+    assert meta.get("service_query") is None
+    assert meta.get("service_query_source") is None
+    clarify_reply.assert_called_once_with("duration_or_price_clarify", client_slug="demo_salon")
+
+
+def test_booking_interrupt_pricing_uses_explicit_booking_service_reply_without_pack_decision():
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.services.pack_runtime_service.build_runtime_service_truth_reply",
+        return_value="Маникюр — 2 500 ₸.",
+    ) as truth_reply, patch(
+        "app.services.pack_runtime_service.resolve_runtime_service_price_item",
+        return_value={"name": "Маникюр", "price": 2500},
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta"
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ):
+        response = webhook_booking._handle_booking_interrupt(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="А сколько это стоит?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={
+                "allow_booking_flow": True,
+                "allow_handover_create": True,
+                "allow_truth_gate_reply": True,
+            },
+            has_media=False,
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            consult_intent=None,
+            intent_decomp_used=False,
+            intent_decomp_set=set(),
+            intent_decomp_payload=None,
+            multi_intent_primary=None,
+            info_class_intents={"pricing"},
+            early_domain_intent=None,
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_shortcircuit=False,
+            expected_reply_blocked_by_info=False,
+            pending_question_act=None,
+            pending_question_target=None,
+            batch_non_booking_message="А сколько это стоит?",
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            current_goal=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_type=None,
+            now=datetime.now(timezone.utc),
+            message_count=1,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+        )
+
+    assert response is not None
+    assert response.success is True
+    assert "Маникюр — 2 500 ₸." in response.bot_response
+    truth_reply.assert_called_once_with("Маникюр", client_slug="demo_salon")
 
 
 def test_booking_same_day_escalation_passes_active_handover_hooks():
@@ -5148,18 +5367,6 @@ def test_booking_verification_handoff_intent_detection():
         "booking",
         "calendar.get_booking",
     )
-    assert webhook_router._looks_like_booking_verification_request(
-        "Я хочу проверить свою запись.",
-    )
-    assert webhook_router._looks_like_booking_verification_request(
-        "Подтвердите, пожалуйста, запись.",
-    )
-    assert not webhook_router._looks_like_booking_verification_request(
-        "Мне нужно изменить время записи.",
-    )
-    assert webhook_router._looks_like_booking_verification_request(
-        "Подтвердите, пожалуйста, новую дату.",
-    )
 
 
 def test_promo_code_request_detection():
@@ -5417,6 +5624,12 @@ def test_reuse_active_handover_captures_interaction_state_in_pending_resume():
                 "canonical_dialog_state": {
                     "owner_id": "context_manager.dialog_state.v1",
                     "version": "v1",
+                    "pending_question_contract": {
+                        "expected_reply_type": "time",
+                        "reason": "booking_prompt",
+                        "next_question": "datetime",
+                        "open_questions": ["datetime"],
+                    },
                     "interaction_state": {
                         "resume_slot": "datetime",
                         "interaction_target": "time",
@@ -5483,15 +5696,16 @@ def test_reuse_active_handover_captures_interaction_state_in_pending_resume():
     context = conversation.context
     snapshot = context.get("pending_resume")
     assert isinstance(snapshot, dict)
-    assert snapshot.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
-    assert snapshot.get("expected_reply_reason") == "booking_prompt"
+    assert snapshot.get("expected_reply_type") is None
+    assert snapshot.get("expected_reply_reason") is None
     assert snapshot.get("booking", {}).get("service") == "Стрижка"
-    assert snapshot.get("session_memory", {}).get("last_question_type") is None
-    assert snapshot.get("session_memory", {}).get("pending_question_contract") == {
+    assert snapshot.get("session_memory") is None
+    assert snapshot.get("context_manager", {}).get("canonical_dialog_state", {}).get("pending_question_contract") == {
         "expected_reply_type": "time",
         "reason": "booking_prompt",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
     }
-    assert snapshot.get("session_memory", {}).get("interaction_state", {}).get("resume_slot") == "datetime"
     assert (
         snapshot.get("context_manager", {})
         .get("canonical_dialog_state", {})

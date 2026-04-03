@@ -24,22 +24,24 @@ class ResponseRealizer:
 
     def realize(
         self,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
         *,
         override: BoundaryOverride | None = None,
         text: str = "",
         channel: str = "whatsapp",
+        reply_kind_override: ReplyKind | None = None,
     ) -> ReplyEnvelope:
-        if override and override.decision == "block":
+        if reply_kind_override is not None:
+            reply_kind = reply_kind_override
+            body = text
+        elif override and override.decision == "block":
             reply_kind: ReplyKind = "system"
             body = override.public_message or text
         elif override and override.decision == "degrade":
-            requested_kind = override.meta.get("reply_kind") if isinstance(override.meta, dict) else None
-            if requested_kind in {"handoff", "system"}:
-                reply_kind = requested_kind
-            else:
-                reply_kind = "handoff"
+            reply_kind = "handoff"
             body = override.public_message or text
+        elif decision is None:
+            raise ValueError("policy_decision_required_without_boundary_override")
         elif decision.outcome == "FACT":
             reply_kind = "fact"
             body = text
@@ -49,7 +51,12 @@ class ResponseRealizer:
         else:
             reply_kind = "handoff"
             body = text
-        return ReplyEnvelope(channel=channel, reply_kind=reply_kind, text=body, meta={"outcome": decision.outcome})
+        meta: dict[str, Any] = {}
+        if decision is not None:
+            meta["outcome"] = decision.outcome
+        if override is not None:
+            meta["boundary_decision"] = override.decision
+        return ReplyEnvelope(channel=channel, reply_kind=reply_kind, text=body, meta=meta)
 
 
 __all__ = ["ReplyEnvelope", "ReplyKind", "ResponseRealizer"]

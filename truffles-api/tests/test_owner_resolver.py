@@ -1,13 +1,10 @@
 from app.services.owner_resolver import (
-    TimeoutOwnerBoundaryInput,
     build_owner_resolution_input,
     build_semantic_contract_view,
     extract_specialist_preference,
     resolve_interaction_owner,
-    resolve_timeout_owner_boundary,
     should_preserve_specialist_followup_owner,
 )
-
 
 def test_owner_resolver_matches_m27_and_recovers_service_from_interaction_state() -> None:
     payload = build_owner_resolution_input(
@@ -34,7 +31,6 @@ def test_owner_resolver_matches_m27_and_recovers_service_from_interaction_state(
     assert resolution.preserve_expected_reply_type == "time"
     assert resolution.bypass_service_clarify is True
 
-
 def test_owner_resolver_requires_grounded_service_and_booking_confirm_reject() -> None:
     payload = build_owner_resolution_input(
         tool_action="info",
@@ -51,7 +47,6 @@ def test_owner_resolver_requires_grounded_service_and_booking_confirm_reject() -
     )
 
     assert resolve_interaction_owner(payload) is None
-
 
 def test_owner_resolver_matches_m33_and_preserves_active_name_service_info_resume() -> None:
     payload = build_owner_resolution_input(
@@ -77,92 +72,6 @@ def test_owner_resolver_matches_m33_and_preserves_active_name_service_info_resum
     assert resolution.service_query is None
     assert resolution.preserve_expected_reply_type == "name"
     assert resolution.bypass_service_clarify is False
-
-
-def test_timeout_owner_boundary_prefers_matched_expected_reply_continuity() -> None:
-    resolution = resolve_timeout_owner_boundary(
-        TimeoutOwnerBoundaryInput(
-            booking_active=True,
-            current_goal="booking",
-            matched_booking_followup_state={
-                "active": True,
-                "service": "Маникюр",
-                "datetime": "завтра",
-                "name": "Динара",
-                "last_question": "datetime",
-            },
-            matched_booking_followup_prompt=(
-                "Понял, завтра по услуге «Маникюр». Подскажите, пожалуйста, точное время."
-            ),
-            matched_booking_followup_expected="time",
-            matched_booking_filled_slots=("name",),
-            slot_fill_followup_state={
-                "active": True,
-                "service": "Маникюр",
-                "datetime": "завтра",
-                "last_question": "datetime",
-            },
-            slot_fill_followup_prompt=(
-                "Понял, завтра по услуге «Маникюр». Подскажите, пожалуйста, точное время."
-            ),
-            slot_fill_followup_expected="time",
-            slot_fill_applied=("name",),
-        )
-    )
-
-    assert resolution is not None
-    assert resolution.source == "matched_expected_reply"
-    assert resolution.reason_code == "timeout_owner_boundary_matched_expected_reply"
-    assert resolution.recovery == "timeout_owner_boundary_collect"
-    assert resolution.expected_reply_type == "time"
-    assert resolution.expected_reply_reason == "policy_core_timeout_owner_boundary"
-    assert resolution.filled_slots == ("name",)
-    assert resolution.missing_slot == "datetime"
-
-
-def test_timeout_owner_boundary_requires_booking_context() -> None:
-    resolution = resolve_timeout_owner_boundary(
-        TimeoutOwnerBoundaryInput(
-            booking_active=False,
-            current_goal=None,
-            matched_booking_followup_state={
-                "active": False,
-                "service": "Маникюр",
-                "last_question": "datetime",
-            },
-            matched_booking_followup_prompt="Подскажите, пожалуйста, точное время.",
-            matched_booking_followup_expected="time",
-            matched_booking_filled_slots=("name",),
-        )
-    )
-
-    assert resolution is None
-
-
-def test_timeout_owner_boundary_uses_resume_contract_when_other_sources_missing() -> None:
-    resolution = resolve_timeout_owner_boundary(
-        TimeoutOwnerBoundaryInput(
-            booking_active=True,
-            current_goal="booking",
-            resume_contract_state={
-                "active": True,
-                "service": "Маникюр",
-                "last_question": "datetime",
-            },
-            resume_contract_prompt="На какую дату и время вам удобно?",
-            resume_contract_expected="time",
-        )
-    )
-
-    assert resolution is not None
-    assert resolution.source == "resume_contract"
-    assert resolution.reason_code == "timeout_owner_boundary_resume_contract"
-    assert resolution.recovery == "timeout_owner_boundary_collect"
-    assert resolution.expected_reply_reason == "policy_core_timeout_owner_boundary"
-    assert resolution.expected_reply_type == "time"
-    assert resolution.missing_slot == "datetime"
-    assert resolution.filled_slots == ()
-
 
 def test_build_semantic_contract_view_prefers_canonical_specialist_referent() -> None:
     semantic_view = build_semantic_contract_view(
@@ -199,7 +108,6 @@ def test_build_semantic_contract_view_prefers_canonical_specialist_referent() ->
     assert semantic_view.active_question_relation == "referent_followup"
     assert semantic_view.specialist_name == "Айгерим"
     assert semantic_view.specialist_id is None
-
 
 def test_specialist_followup_owner_preserves_canonical_referent_followup_contract() -> None:
     specialist_name, specialist_id = extract_specialist_preference(

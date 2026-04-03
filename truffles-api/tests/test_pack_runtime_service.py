@@ -1,9 +1,11 @@
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from app.services import demo_salon_knowledge as demo_runtime
 from app.services import pack_query_backend_service
+from app.services import pack_runtime_compat as compat_runtime
 from app.services import pack_runtime_default as default_runtime
 from app.services import pack_runtime_service as runtime
 from app.services.knowledge_runtime import RuntimeTruth, set_runtime_truth
@@ -39,18 +41,66 @@ def _runtime_truth(payload: dict, *, slug: str, branch_id=None):
         set_runtime_truth(None)
 
 
-def test_pack_runtime_service_keeps_active_public_surface_off_default_adapter_dispatch() -> None:
-    assert runtime.get_pack_decision is not default_runtime.get_pack_decision
-    assert runtime.get_pack_service_decision is not default_runtime.get_pack_service_decision
+def test_pack_runtime_service_routes_helper_surface_through_selected_adapter() -> None:
+    assert not hasattr(runtime, "get_pack_decision")
+    assert not hasattr(default_runtime, "get_pack_decision")
+    assert hasattr(compat_runtime, "get_pack_decision")
+    assert not hasattr(runtime, "get_pack_service_decision")
+    assert not hasattr(default_runtime, "get_pack_service_decision")
+    assert hasattr(compat_runtime, "get_pack_service_decision")
     assert not hasattr(runtime, "get_pack_adapter")
-    assert runtime.get_pack_price_reply is not default_runtime.get_pack_price_reply
-    assert runtime.get_pack_price_item is not default_runtime.get_pack_price_item
-    assert runtime.get_pack_service_hint is not default_runtime.get_pack_service_hint
-    assert runtime.semantic_service_match is not default_runtime.semantic_service_match
+    assert runtime.get_pack_runtime("demo_salon").client_slug == "demo_salon"
+
+    combined_args = {"include_parking": True, "client_slug": "demo_salon"}
+    assert runtime.build_info_combined_reply(**combined_args) == default_runtime.build_info_combined_reply(
+        **combined_args
+    )
+    assert runtime.format_reply_from_truth("hours", client_slug="demo_salon") == default_runtime.format_reply_from_truth(
+        "hours",
+        client_slug="demo_salon",
+    )
+    assert runtime.format_reply_from_truth(
+        "promotions",
+        client_slug="demo_salon",
+    ) == default_runtime.format_reply_from_truth(
+        "promotions",
+        client_slug="demo_salon",
+    )
+    now_utc = datetime(2026, 4, 1, 20, 0, 0, tzinfo=timezone.utc)
+    assert runtime.build_quiet_hours_notice(
+        client_slug="demo_salon",
+        now_utc=now_utc,
+    ) == default_runtime.build_quiet_hours_notice(
+        client_slug="demo_salon",
+        now_utc=now_utc,
+    )
+    assert runtime.build_evening_greeting(
+        client_slug="demo_salon",
+        now_utc=now_utc,
+    ) == default_runtime.build_evening_greeting(
+        client_slug="demo_salon",
+        now_utc=now_utc,
+    )
+
+
+def test_pack_runtime_boundary_binds_selected_helper_surface() -> None:
+    pack_runtime = runtime.get_pack_runtime("demo_salon")
+
+    reply, meta = pack_runtime.build_info_combined_reply(include_parking=True)
+    expected_reply, expected_meta = default_runtime.build_info_combined_reply(
+        include_parking=True,
+        client_slug="demo_salon",
+    )
+
+    assert (reply, meta) == (expected_reply, expected_meta)
+    assert pack_runtime.format_reply_from_truth("hours") == default_runtime.format_reply_from_truth(
+        "hours",
+        client_slug="demo_salon",
+    )
 
 
 def test_get_pack_decision_enriches_resolver_contract() -> None:
-    decision = runtime.get_pack_decision("Сколько стоит маникюр?", client_slug="demo_salon")
+    decision = compat_runtime.get_pack_decision("Сколько стоит маникюр?", client_slug="demo_salon")
 
     assert isinstance(decision, PackDecision)
     meta = decision.meta or {}
@@ -100,11 +150,11 @@ def test_get_pack_service_decision_enriches_collect_contract_for_escalation(monk
     )
     monkeypatch.setattr(
         runtime,
-        "_runtime_get_pack_service_decision",
+        "_adapter_service_decision",
         lambda *_args, **_kwargs: base_decision,
     )
 
-    decision = runtime.get_pack_service_decision("Классический интересует", client_slug="demo_salon")
+    decision = compat_runtime.get_pack_service_decision("Классический интересует", client_slug="demo_salon")
 
     assert isinstance(decision, PackDecision)
     meta = decision.meta or {}
@@ -224,13 +274,13 @@ def test_pack_runtime_default_routes_demo_slug_to_explicit_adapter() -> None:
 
 
 def test_pack_runtime_service_hint_can_fallback_to_price_catalog_name() -> None:
-    assert runtime.get_pack_service_hint(
+    assert compat_runtime.get_pack_service_hint(
         "Сколько времени занимает укладка?",
         client_slug="demo_salon",
     ) == "Укладка феном"
 
 
-def test_build_runtime_service_duration_reply_prefers_message_over_stale_service_label() -> None:
+def test_build_runtime_service_duration_reply_requires_explicit_service_label() -> None:
     reply = runtime.build_runtime_service_duration_reply(
         message="Сколько времени занимает укладка?",
         service_label="Маникюр",
@@ -238,8 +288,148 @@ def test_build_runtime_service_duration_reply_prefers_message_over_stale_service
     )
 
     assert isinstance(reply, str)
-    assert "укладка" in reply.lower()
-    assert "маникюр" not in reply.lower()
+    assert "маникюр" in reply.lower()
+    assert "укладка" not in reply.lower()
+
+
+def test_build_runtime_service_duration_reply_keeps_exact_price_item_without_reclarify() -> None:
+    truth = {
+        "services_catalog": {
+            "services": [
+                {
+                    "name": "Стрижка",
+                    "aliases": ["стрижка"],
+                    "duration_text": "Обычно 20–60 минут.",
+                }
+            ],
+            "duration_clarify": "По времени зависит от услуги. Какая именно?",
+        },
+        "price_list": [
+            {
+                "category": "Парикмахерский зал",
+                "items": [{"name": "Укладка феном", "price": 3500}],
+            }
+        ],
+        "team": {
+            "hair": "Колористы 5+ лет, делают блонд, балаяж и другие сложные окрашивания."
+        },
+    }
+    with _runtime_truth(truth, slug="demo_salon"):
+        reply = runtime.build_runtime_service_duration_reply(
+            message="Сколько времени занимает укладка?",
+            service_label="укладка",
+            client_slug="demo_salon",
+        )
+
+    assert reply == "Укладка феном — точная длительность зависит от объема и сложности."
+
+
+def test_resolve_runtime_service_price_item_resolves_exact_price_item_name() -> None:
+    truth = {
+        "services_catalog": {
+            "services": [
+                {
+                    "name": "Маникюр",
+                    "aliases": ["маникюр"],
+                    "price_items": ["Маникюр классический"],
+                }
+            ]
+        },
+        "price_list": [
+            {
+                "category": "Маникюр",
+                "items": [{"name": "Маникюр классический", "price": 2500}],
+            }
+        ],
+    }
+    with _runtime_truth(truth, slug="demo_salon"):
+        price_item = runtime.resolve_runtime_service_price_item(
+            "Маникюр классический",
+            client_slug="demo_salon",
+        )
+
+    assert isinstance(price_item, dict)
+    assert price_item.get("name") == "Маникюр классический"
+
+
+def test_build_master_reply_from_pack_uses_team_summary_when_profiles_are_unavailable() -> None:
+    truth = {
+        "services_catalog": {
+            "services": [
+                {
+                    "name": "Маникюр",
+                    "aliases": ["маникюр"],
+                    "price_items": ["Маникюр классический"],
+                    "duration_text": "Обычно 45–90 минут.",
+                }
+            ],
+            "duration_clarify": "По времени зависит от услуги. Какая именно?",
+        },
+        "price_list": [
+            {
+                "category": "Парикмахерский зал",
+                "items": [{"name": "Укладка феном", "price": 3500}],
+            }
+        ],
+        "team": {
+            "hair": "Колористы 5+ лет, делают блонд, балаяж и другие сложные окрашивания."
+        },
+    }
+    with _runtime_truth(truth, slug="demo_salon"):
+        resolution = compat_runtime.resolve_master_intent(
+            message_text="Кто делает укладку?",
+            client_slug="demo_salon",
+            service_query="укладка",
+            force_master_intent=True,
+        )
+        reply = runtime.build_master_reply_from_pack(
+            client_slug="demo_salon",
+            message_text="Кто делает укладку?",
+            resolution=resolution,
+        )
+
+    assert reply is not None
+    assert reply.action == "reply"
+    assert reply.intent == "master"
+    assert reply.meta.get("master_query_contract") == "team.v1"
+    assert reply.meta.get("master_reply_mode") == "team_match"
+    assert reply.meta.get("master_team_key") == "hair"
+    assert "Укладка феном" in (reply.response or "")
+    assert "администратор" not in (reply.response or "").casefold()
+
+
+def test_build_master_reply_from_pack_does_not_ground_service_from_message_text() -> None:
+    reply = runtime.build_master_reply_from_pack(
+        client_slug="demo_salon",
+        message_text="Кто делает укладку?",
+        resolution=runtime.MasterIntentResolution(
+            explicit=True,
+            service_query=None,
+            service_query_source="none",
+            needs_service_clarify=True,
+            reason="forced_master_intent",
+            matched_signals=[],
+        ),
+    )
+
+    assert reply is not None
+    assert reply.action == "collect"
+    assert reply.intent == "master"
+    assert reply.meta.get("master_reply_mode") == "service_clarify"
+    assert reply.meta.get("service_query") is None
+
+
+def test_resolve_explicit_master_intent_uses_explicit_service_query_only() -> None:
+    resolution = runtime.resolve_explicit_master_intent(
+        client_slug="demo_salon",
+        service_query="Маникюр",
+        force_master_intent=False,
+    )
+
+    assert resolution.explicit is True
+    assert resolution.service_query == "Маникюр"
+    assert resolution.service_query_source == "input"
+    assert resolution.reason == "explicit_service_query"
 
 
 def test_pack_runtime_service_semantic_match_returns_hybrid_meta() -> None:
@@ -255,7 +445,7 @@ def test_pack_runtime_service_semantic_match_returns_hybrid_meta() -> None:
         ]
     }
     with _runtime_truth(truth, slug="dental_pack", branch_id=branch_id):
-        result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+        result = compat_runtime.semantic_service_match("чистка зубов", "dental_pack")
 
     assert result is not None
     assert result.action == "match"
@@ -267,7 +457,7 @@ def test_pack_runtime_service_semantic_match_returns_hybrid_meta() -> None:
 
 
 def test_resolve_master_intent_person_service_query_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="У вас есть специалист по окрашиванию?",
         client_slug="demo_salon",
         service_query="окрашивание",
@@ -279,7 +469,7 @@ def test_resolve_master_intent_person_service_query_is_explicit() -> None:
 
 
 def test_resolve_master_intent_person_term_without_relation_stays_non_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Мастер-класс по окрашиванию будет?",
         client_slug="demo_salon",
         service_query="окрашивание",
@@ -291,7 +481,7 @@ def test_resolve_master_intent_person_term_without_relation_stays_non_explicit()
 
 
 def test_resolve_master_intent_choose_specialist_with_service_query_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Могу ли я выбрать специалиста?",
         client_slug="demo_salon",
         service_query="маникюр",
@@ -303,7 +493,7 @@ def test_resolve_master_intent_choose_specialist_with_service_query_is_explicit(
 
 
 def test_resolve_master_intent_generic_specialist_question_with_service_query_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Есть ли доступные специалисты?",
         client_slug="demo_salon",
         service_query="маникюр",
@@ -315,7 +505,7 @@ def test_resolve_master_intent_generic_specialist_question_with_service_query_is
 
 
 def test_resolve_master_intent_question_with_filler_before_master_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Какой у вас мастер?",
         client_slug="demo_salon",
         service_query="маникюр",
@@ -327,7 +517,7 @@ def test_resolve_master_intent_question_with_filler_before_master_is_explicit() 
 
 
 def test_resolve_master_intent_choose_specialist_without_service_query_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Могу ли я выбрать специалиста?",
         client_slug="demo_salon",
     )
@@ -339,7 +529,7 @@ def test_resolve_master_intent_choose_specialist_without_service_query_is_explic
 
 
 def test_resolve_master_intent_named_master_question_with_service_query_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Можно к мастеру Айгерим?",
         client_slug="demo_salon",
         service_query="маникюр",
@@ -352,7 +542,7 @@ def test_resolve_master_intent_named_master_question_with_service_query_is_expli
 
 
 def test_resolve_master_intent_bare_named_specialist_question_with_service_query_is_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Могу ли я записаться к Айгерим?",
         client_slug="demo_salon",
         service_query="маникюр",
@@ -365,7 +555,7 @@ def test_resolve_master_intent_bare_named_specialist_question_with_service_query
 
 
 def test_resolve_master_intent_named_master_booking_command_stays_non_explicit() -> None:
-    resolution = runtime.resolve_master_intent(
+    resolution = compat_runtime.resolve_master_intent(
         message_text="Запишите меня к мастеру Айгерим на маникюр завтра.",
         client_slug="demo_salon",
         service_query="маникюр",
@@ -376,11 +566,29 @@ def test_resolve_master_intent_named_master_booking_command_stays_non_explicit()
     assert resolution.service_query == "маникюр"
 
 
+def test_resolve_master_intent_pack_query_hint_uses_neutral_source_label(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "_resolve_pack_query_service_hint",
+        lambda *_args, **_kwargs: "укладка",
+    )
+
+    resolution = compat_runtime.resolve_master_intent(
+        message_text="Кто делает это?",
+        client_slug="demo_salon",
+        force_master_intent=True,
+    )
+
+    assert resolution.service_query == "укладка"
+    assert resolution.service_query_source == "pack_query_hint"
+    assert resolution.reason == "forced_master_intent"
+
+
 def test_pack_runtime_service_get_pack_service_hint_uses_runtime_fallback_when_scope_allows(monkeypatch) -> None:
     truth = {"services_catalog": []}
-    monkeypatch.setattr(runtime, "_runtime_get_pack_service_hint", lambda *_args, **_kwargs: "Fallback Service")
+    monkeypatch.setattr(runtime, "_adapter_service_hint", lambda *_args, **_kwargs: "Fallback Service")
     with _runtime_truth(truth, slug="demo_salon"):
-        service_hint = runtime.get_pack_service_hint(
+        service_hint = compat_runtime.get_pack_service_hint(
             "нужна услуга",
             client_slug="demo_salon",
         )
@@ -415,7 +623,7 @@ def test_pack_runtime_service_backend_shadow_keeps_runtime_local_contract(monkey
     }
     try:
         with _runtime_truth(truth, slug="dental_pack"):
-            result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+            result = compat_runtime.semantic_service_match("чистка зубов", "dental_pack")
     finally:
         pack_query_backend_service.clear_backend_driver_registry()
 
@@ -466,7 +674,7 @@ def test_pack_runtime_service_backend_primary_prefers_backend_candidates(monkeyp
     }
     try:
         with _runtime_truth(truth, slug="dental_pack"):
-            result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+            result = compat_runtime.semantic_service_match("чистка зубов", "dental_pack")
     finally:
         pack_query_backend_service.clear_backend_driver_registry()
 
@@ -492,7 +700,7 @@ def test_pack_runtime_service_backend_primary_fallback_is_explicit(monkeypatch) 
         ]
     }
     with _runtime_truth(truth, slug="dental_pack"):
-        result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+        result = compat_runtime.semantic_service_match("чистка зубов", "dental_pack")
 
     assert result is not None
     assert result.canonical_name == "Профессиональная чистка зубов"
@@ -530,7 +738,7 @@ def test_pack_runtime_service_backend_primary_filters_out_of_scope_backend_candi
     }
     try:
         with _runtime_truth(truth, slug="dental_pack"):
-            result = runtime.semantic_service_match("чистка зубов", "dental_pack")
+            result = compat_runtime.semantic_service_match("чистка зубов", "dental_pack")
     finally:
         pack_query_backend_service.clear_backend_driver_registry()
 

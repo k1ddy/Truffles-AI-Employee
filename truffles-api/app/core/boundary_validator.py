@@ -17,10 +17,12 @@ _BOUNDARY_OVERRIDE_PRESERVE_FIELDS = (
 )
 _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS = frozenset(
     {
+        "activate_handoff",
         "semantic_contract",
         "semantic_frame",
         "semantic_state",
         "pending_question_contract",
+        "reply_kind",
         "tool_args",
         "tool_execution_projection",
         "entity_refs",
@@ -47,7 +49,7 @@ class BoundaryOverride(BaseModel):
 class BoundaryValidationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: PolicyDecision
+    decision: PolicyDecision | None = None
     override: BoundaryOverride | None = None
 
 
@@ -71,10 +73,6 @@ class BoundaryValidator:
         for key, value in meta.items():
             if not isinstance(key, str) or key in _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS:
                 continue
-            if key == "reply_kind":
-                if value in {"handoff", "system"}:
-                    sanitized[key] = value
-                continue
             sanitized[key] = value
         return sanitized
 
@@ -97,6 +95,13 @@ class BoundaryValidator:
         path_flag: str,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        policy_decision = getattr(turn_result, "policy_decision", None)
+        interaction_owner = None
+        if isinstance(policy_decision, PolicyDecision):
+            interaction_owner = policy_decision.interaction.owner
+        else:
+            interaction_state = getattr(getattr(turn_result, "dialog_state", None), "interaction_state", None)
+            interaction_owner = getattr(interaction_state, "interaction_owner", None)
         payload = {
             "schema_version": turn_result.schema_version,
             "reason_code": reason_code,
@@ -104,12 +109,21 @@ class BoundaryValidator:
             "boundary_decision": (
                 turn_result.boundary_override.decision if turn_result.boundary_override else None
             ),
-            "interaction_owner": turn_result.policy_decision.interaction.owner,
+            "interaction_owner": interaction_owner,
             path_flag: True,
         }
-        decision_meta = getattr(turn_result.policy_decision, "meta", None)
+        decision_meta = getattr(policy_decision, "meta", None)
         if isinstance(decision_meta, dict):
             control_label = decision_meta.get("control_label")
+            if isinstance(control_label, str) and control_label.strip():
+                payload["control_label"] = control_label.strip()
+        if "control_label" not in payload and turn_result.boundary_override is not None:
+            override_meta = (
+                turn_result.boundary_override.meta
+                if isinstance(turn_result.boundary_override.meta, dict)
+                else {}
+            )
+            control_label = override_meta.get("control_label")
             if isinstance(control_label, str) and control_label.strip():
                 payload["control_label"] = control_label.strip()
         if meta:
@@ -147,11 +161,15 @@ class BoundaryValidator:
 
     def validate(
         self,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
         *,
         override: BoundaryOverride | None = None,
     ) -> BoundaryValidationResult:
-        normalized_decision = PolicyDecision.model_validate(decision.model_dump(mode="python"))
+        normalized_decision = (
+            PolicyDecision.model_validate(decision.model_dump(mode="python"))
+            if isinstance(decision, PolicyDecision)
+            else None
+        )
         normalized_override = self._normalize_override(override)
         return BoundaryValidationResult(decision=normalized_decision, override=normalized_override)
 
@@ -196,12 +214,14 @@ class BoundaryValidator:
         turn_result: Any,
         tool_action: str,
         ignored: bool = False,
+        intent: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> TurnOutcome:
         reason_code = self._resolve_reason_code(turn_result)
+        policy_decision = getattr(turn_result, "policy_decision", None)
         return TurnOutcome(
             action="ignore" if ignored else "reject",
-            intent=turn_result.policy_decision.intent,
+            intent=intent or (policy_decision.intent if isinstance(policy_decision, PolicyDecision) else None),
             source="consultant_core_runtime",
             tool_action=tool_action,
             tool_decision="blocked",
@@ -227,12 +247,18 @@ class BoundaryValidator:
         transport_reason: str | None,
         tool_action: str = "handoff",
         tool_decision: str = "runtime_exception",
+        intent: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> TurnOutcome:
         reason_code = self._resolve_reason_code(turn_result)
+        policy_decision = getattr(turn_result, "policy_decision", None)
         return TurnOutcome(
-            action=turn_result.policy_decision.action,
-            intent=turn_result.policy_decision.intent,
+            action=(
+                policy_decision.action
+                if isinstance(policy_decision, PolicyDecision)
+                else ("handoff" if tool_action == "handoff" else None)
+            ),
+            intent=intent or (policy_decision.intent if isinstance(policy_decision, PolicyDecision) else None),
             source="consultant_core_runtime",
             tool_action=tool_action,
             tool_decision=tool_decision,

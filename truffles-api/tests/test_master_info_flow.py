@@ -1,13 +1,15 @@
+from unittest.mock import patch
+
 import pytest
 
 from app.routers.webhook.info import (
     _anchor_group_hit,
     _build_info_intent_reply,
-    _detect_info_class_intents,
     _tokenize_for_matching,
 )
+from app.routers.webhook.info_compat import _detect_info_class_intents
 from app.services import demo_salon_knowledge
-from app.services.demo_salon_knowledge import get_demo_salon_decision
+from app.services.demo_salon_knowledge_compat import get_demo_salon_decision
 
 
 def test_detect_info_class_intents_master_signal():
@@ -308,7 +310,7 @@ def test_build_info_intent_reply_master_phrase_uses_team_listing():
 def test_build_info_intent_reply_master_long_hair_question_focuses_hair_team():
     reply, meta = _build_info_intent_reply(
         "master",
-        service_query=None,
+        service_query="Женская стрижка на длинные волосы",
         client_slug="demo_salon",
         message_text="У вас есть мастера, которые работают с долгими стрижками?",
     )
@@ -366,10 +368,26 @@ def test_build_info_intent_reply_location_uses_truth_address():
     )
 
     assert isinstance(reply, str) and "адрес" in reply.casefold()
+    assert "работаем" not in reply.casefold()
     fact_intents = (meta or {}).get("fact_intents") or []
     info_sections = (meta or {}).get("info_sections") or []
     assert "location" in fact_intents
     assert "address" in info_sections or "location" in info_sections
+
+
+def test_build_info_intent_reply_location_and_hours_use_explicit_requested_sections_only():
+    reply, meta = _build_info_intent_reply(
+        "location",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="Где вы находитесь и до скольки работаете?",
+        requested_info_intents=["location", "hours"],
+    )
+
+    assert isinstance(reply, str) and "адрес" in reply.casefold()
+    assert "работаем" in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    assert fact_intents == ["location", "hours"]
 
 
 def test_build_info_intent_reply_location_scoped_request_excludes_hours():
@@ -407,6 +425,24 @@ def test_build_info_intent_reply_parking_scoped_request_excludes_location_bundle
     assert info_sections == ["parking"]
 
 
+def test_build_info_intent_reply_hours_and_parking_use_exact_requested_sections_only():
+    reply, meta = _build_info_intent_reply(
+        "hours",
+        service_query=None,
+        client_slug="demo_salon",
+        message_text="До скольки работаете и есть ли парковка?",
+        requested_info_intents=["hours", "parking"],
+    )
+
+    assert isinstance(reply, str) and "работаем" in reply.casefold()
+    assert "парков" in reply.casefold()
+    assert "адрес" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert fact_intents == ["hours", "parking"]
+    assert info_sections == ["hours", "parking"]
+
+
 def test_build_info_intent_reply_promotions_uses_truth_promotions():
     reply, meta = _build_info_intent_reply(
         "promotions",
@@ -420,6 +456,70 @@ def test_build_info_intent_reply_promotions_uses_truth_promotions():
     info_sections = (meta or {}).get("info_sections") or []
     assert "promotions" in fact_intents
     assert "promotions" in info_sections
+
+
+def test_build_info_intent_reply_pricing_does_not_widen_base_info_from_message_text():
+    with patch(
+        "app.routers.webhook.info.build_runtime_service_truth_reply",
+        return_value="Маникюр — 2 500 ₸.",
+    ):
+        reply, meta = _build_info_intent_reply(
+            "pricing",
+            service_query="Маникюр",
+            client_slug="demo_salon",
+            message_text="Сколько стоит маникюр и есть ли у вас парковка?",
+            requested_info_intents=["pricing"],
+        )
+
+    assert isinstance(reply, str) and "2 500" in reply
+    assert "адрес" not in reply.casefold()
+    assert "работаем" not in reply.casefold()
+    assert "парков" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    assert fact_intents == ["pricing"]
+
+
+def test_build_info_intent_reply_pricing_includes_base_bundle_only_when_requested_explicitly():
+    with patch(
+        "app.routers.webhook.info.build_runtime_service_truth_reply",
+        return_value="Маникюр — 2 500 ₸.",
+    ):
+        reply, meta = _build_info_intent_reply(
+            "pricing",
+            service_query="Маникюр",
+            client_slug="demo_salon",
+            message_text="Сколько стоит маникюр?",
+            requested_info_intents=["pricing", "location", "hours"],
+        )
+
+    assert isinstance(reply, str) and "2 500" in reply
+    assert "адрес" in reply.casefold()
+    assert "работаем" in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    assert fact_intents == ["location", "hours", "pricing"]
+
+
+def test_build_info_intent_reply_pricing_with_hours_and_parking_prefix_keeps_exact_sections():
+    with patch(
+        "app.routers.webhook.info.build_runtime_service_truth_reply",
+        return_value="Маникюр — 2 500 ₸.",
+    ):
+        reply, meta = _build_info_intent_reply(
+            "pricing",
+            service_query="Маникюр",
+            client_slug="demo_salon",
+            message_text="Сколько стоит маникюр, до скольки вы работаете и есть ли парковка?",
+            requested_info_intents=["pricing", "hours", "parking"],
+        )
+
+    assert isinstance(reply, str) and "2 500" in reply
+    assert "работаем" in reply.casefold()
+    assert "парков" in reply.casefold()
+    assert "адрес" not in reply.casefold()
+    fact_intents = (meta or {}).get("fact_intents") or []
+    info_sections = (meta or {}).get("info_sections") or []
+    assert fact_intents == ["hours", "parking", "pricing"]
+    assert info_sections == ["hours", "parking", "pricing"]
 
 
 def test_build_info_intent_reply_contact_uses_instagram_when_phone_missing():

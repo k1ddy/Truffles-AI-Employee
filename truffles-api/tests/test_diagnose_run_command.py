@@ -30,6 +30,221 @@ def _load_module():
 _module = _load_module()
 
 
+def _write_scenarios_file(tmp_path: Path, payload: dict) -> Path:
+    path = tmp_path / "scenarios.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_send_manager_telegram_action_with_retry_uses_shared_retry_wrapper(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeRng:
+        def randint(self, a, b):
+            return 123456 if a == 100000 else 4242
+
+    def _fake_retry(url, payload, secret, timeout, retry_count, retry_backoff):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["secret"] = secret
+        captured["timeout"] = timeout
+        captured["retry_count"] = retry_count
+        captured["retry_backoff"] = retry_backoff
+        return 200, "{\"success\":true}", None, 2
+
+    monkeypatch.setattr(_module, "_send_webhook_payload_with_retry", _fake_retry)
+
+    status, body, error, attempts = _module._send_manager_telegram_action_with_retry(
+        base_url="http://127.0.0.1:18189",
+        telegram_chat_id="-100123",
+        manager_id=777,
+        action="take",
+        handover_id="handover-1",
+        topic_id=99,
+        rng=_FakeRng(),
+        timeout=30.0,
+        retry_count=2,
+        retry_backoff=0.6,
+    )
+
+    assert status == 200
+    assert body == "{\"success\":true}"
+    assert error is None
+    assert attempts == 2
+    assert captured["url"] == "http://127.0.0.1:18189/telegram-webhook"
+    assert captured["secret"] is None
+    assert captured["timeout"] == 30.0
+    assert captured["retry_count"] == 2
+    assert captured["retry_backoff"] == 0.6
+    payload = captured["payload"]
+    assert payload["callback_query"]["data"] == "take_handover-1"
+    assert payload["callback_query"]["message"]["chat"]["id"] == "-100123"
+    assert payload["callback_query"]["message"]["message_thread_id"] == 99
+    assert payload["callback_query"]["id"].startswith("sim-")
+
+
+def test_send_manager_telegram_action_with_retry_requires_chat_id(monkeypatch):
+    called = False
+
+    def _fake_retry(*args, **kwargs):
+        nonlocal called
+        called = True
+        return None, "", "should_not_run", 1
+
+    monkeypatch.setattr(_module, "_send_webhook_payload_with_retry", _fake_retry)
+
+    status, body, error, attempts = _module._send_manager_telegram_action_with_retry(
+        base_url="http://127.0.0.1:18189",
+        telegram_chat_id="",
+        manager_id=777,
+        action="take",
+        handover_id="handover-1",
+        topic_id=None,
+        rng=SimpleNamespace(randint=lambda *_: 1),
+        timeout=30.0,
+        retry_count=2,
+        retry_backoff=0.6,
+    )
+
+    assert status is None
+    assert body == ""
+    assert error == "telegram_chat_id_missing"
+    assert attempts == 0
+    assert called is False
+
+
+def test_load_dialogs_from_file_materializes_booking_contracts(tmp_path):
+    scenario_file = _write_scenarios_file(
+        tmp_path,
+        {
+            "dialogs": [
+                {
+                    "dialog_id": 2,
+                    "goal": "Booking with info interrupts and completion",
+                    "turns": [
+                        {
+                            "kind": "text",
+                            "text": "Хочу записаться на маникюр",
+                            "tags": ["booking"],
+                            "expect": {
+                                "action": "booking_prompt",
+                                "info_sections": [],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Есть ли акции?",
+                            "tags": ["promo"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": ["promotions", "promotions_rules"],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Какая цена?",
+                            "tags": ["price"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": ["pricing", "price"],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Завтра в 15:00",
+                            "tags": ["time"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": [],
+                                "reply_type": "name",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["name"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Алина",
+                            "tags": ["name"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": [],
+                                "reply_type": None,
+                                "state": "bot_active",
+                                "expected_reply": False,
+                                "allow_booking_stall": False,
+                            },
+                        },
+                    ],
+                },
+                {
+                    "dialog_id": 9,
+                    "goal": "Check and confirm sequence",
+                    "turns": [
+                        {
+                            "kind": "text",
+                            "text": "Проверьте мою запись на четверг.",
+                            "tags": ["check_booking"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": [],
+                                "reply_type": None,
+                                "state": "bot_active",
+                                "expected_reply": False,
+                                "allow_booking_stall": False,
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Подтвердите, пожалуйста, мою запись на четверг.",
+                            "tags": ["confirm"],
+                            "expect": {
+                                "action": "booking_prompt",
+                                "info_sections": [],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                    ],
+                },
+            ]
+        },
+    )
+
+    dialogs, warnings, error = _module._llm_quality_load_dialogs_from_file(str(scenario_file))
+
+    assert error is None
+    assert "scenario_file_materialization" in warnings
+    assert "sanitized_dialogs=2" in warnings["scenario_file_materialization"]
+    assert dialogs[0]["turns"][4]["expect"]["expected_reply"] is True
+    assert dialogs[1]["turns"][0]["expect"]["expected_reply"] is True
+    assert dialogs[1]["turns"][1]["expect"]["action"] is None
+    assert dialogs[1]["turns"][1]["expect"]["reply_type"] is None
+    assert dialogs[1]["turns"][1]["expect"]["meta_any"]["expected_reply_type"] == [
+        "name",
+        "time",
+    ]
+
+
 def test_run_command_passes_timeout(monkeypatch):
     captured: dict[str, object] = {}
 

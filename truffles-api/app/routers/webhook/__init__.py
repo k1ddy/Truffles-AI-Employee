@@ -1,8 +1,9 @@
-"""Webhook package exports.
+"""Adapter-only webhook package exports.
 
 Keep the mounted ingress minimal: only the real router and non-legacy runtime
 primitives load eagerly. Legacy helper names stay available as lazy
-compatibility exports for tests and shadow callers.
+compatibility exports for tests and shadow callers, but the package root does
+not re-own legacy router behavior.
 """
 
 from __future__ import annotations

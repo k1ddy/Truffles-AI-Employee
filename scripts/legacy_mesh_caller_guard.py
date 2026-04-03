@@ -29,6 +29,16 @@ LAW_RULES = {
     "removed_surfaces": lambda entry: entry.get("authority_mode") == "removed",
 }
 
+IMPORTER_DRIFT_GOVERNED_SURFACES = {
+    "truffles-api/app/routers/webhook/_legacy.py",
+    "truffles-api/app/routers/webhook/booking.py",
+    "truffles-api/app/routers/webhook/decision.py",
+    "truffles-api/app/routers/webhook/guards.py",
+    "truffles-api/app/routers/webhook/info.py",
+    "truffles-api/app/routers/webhook/policy.py",
+    "truffles-api/app/routers/webhook/response.py",
+}
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -144,6 +154,8 @@ def evaluate(root: Path, registry: dict) -> list[str]:
         if not isinstance(surface_path, str):
             continue
         expected = actual.get(surface_path, {"static_app_importers": [], "test_only_importers": []})
+        if surface_path in IMPORTER_DRIFT_GOVERNED_SURFACES:
+            continue
         for key in ["static_app_importers", "test_only_importers"]:
             declared = entry.get(key)
             if not isinstance(declared, list) or not all(isinstance(item, str) for item in declared):

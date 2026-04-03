@@ -55,24 +55,7 @@ from app.services.calendar_sync_service import enqueue_appointment_sync, get_pro
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.capability_manifest_service import resolve_tool_protocol_decision
 from app.services.expected_reply_contract import EXPECTED_REPLY_NAME, EXPECTED_REPLY_PHONE
-from app.services.pack_runtime_service import (
-    _detect_promotion_intent,
-    _has_duration_signal,
-    _has_parking_signal,
-    _has_price_signal,
-    _match_service,
-    _normalize_text,
-    build_info_combined_reply,
-    build_runtime_service_duration_reply,
-    build_runtime_service_not_found_reply,
-    build_runtime_service_presence_reply_for_name,
-    build_runtime_service_truth_reply,
-    format_reply_from_truth,
-    get_pack_price_item,
-    get_pack_price_reply,
-    get_system_lexicon_list,
-    load_yaml_truth,
-)
+from app.services.pack_runtime_service import get_pack_runtime
 from app.services.tool_certification_service import resolve_tool_certification_decision
 from app.services.tool_registry_snapshot_service import (
     declared_tool_action_set,
@@ -405,7 +388,7 @@ def _format_services_overview_reply(
     branch: Branch,
     client_slug: str | None,
 ) -> str | None:
-    reply = format_reply_from_truth("services_overview", client_slug=client_slug)
+    reply = _pack_runtime(client_slug).format_reply_from_truth("services_overview")
     if isinstance(reply, str) and reply.strip():
         return reply
 
@@ -598,17 +581,21 @@ def validate_tool_args_contract(
     )
 
 
+def _pack_runtime(client_slug: str | None = None):
+    return get_pack_runtime(client_slug)
+
+
 def _is_photo_offer_message(text: str | None) -> bool:
     if not isinstance(text, str) or not text.strip():
         return False
-    normalized = _normalize_text(text)
+    normalized = _pack_runtime().normalize_text(text)
     if not _system_any_match(normalized, "style_reference_media_terms"):
         return False
     return _system_any_match(normalized, "style_reference_send_terms")
 
 
 def _system_any_match(normalized: str, key: str) -> bool:
-    phrases = get_system_lexicon_list(key)
+    phrases = _pack_runtime().get_system_lexicon_list(key)
     return bool(phrases) and any(
         phrase and phrase in normalized for phrase in phrases if isinstance(phrase, str)
     )
@@ -1214,6 +1201,7 @@ def _catalog_location(
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     if not client_slug:
         return None, "location_missing", {}
+    pack_runtime = _pack_runtime(client_slug)
 
     allowed_fact_ref_set = _normalize_allowed_fact_ref_set(allowed_fact_refs)
     if allowed_fact_ref_set:
@@ -1228,11 +1216,11 @@ def _catalog_location(
             )
         )
     if message_text and not allowed_fact_ref_set:
-        normalized = _normalize_text(message_text)
+        normalized = pack_runtime.normalize_text(message_text)
         include_parking = bool(
             include_parking
             or (
-                normalized and _has_parking_signal(normalized, client_slug=client_slug)
+                normalized and pack_runtime.has_parking_signal(normalized)
             )
         )
 
@@ -1245,21 +1233,20 @@ def _catalog_location(
         if exact_sections:
             exact_parts: list[str] = []
             for section in exact_sections:
-                reply_part = format_reply_from_truth(section, client_slug=client_slug)
+                reply_part = pack_runtime.format_reply_from_truth(section)
                 if isinstance(reply_part, str) and reply_part.strip():
                     exact_parts.append(reply_part.strip())
             if exact_parts:
                 return " ".join(exact_parts), None, {"info_sections": exact_sections}
 
-    reply, meta = build_info_combined_reply(
+    reply, meta = pack_runtime.build_info_combined_reply(
         include_parking=include_parking,
-        client_slug=client_slug,
     )
     if reply:
         return reply, None, meta or {}
 
     intent = "parking" if include_parking else "location"
-    reply = format_reply_from_truth(intent, client_slug=client_slug)
+    reply = pack_runtime.format_reply_from_truth(intent)
     if reply:
         sections = ["parking"] if include_parking else ["location"]
         return reply, None, {"info_sections": sections}
@@ -1271,7 +1258,7 @@ def _catalog_portfolio(
     *,
     message_text: str | None = None,
 ) -> tuple[str | None, str | None]:
-    truth = load_yaml_truth(client_slug)
+    truth = _pack_runtime(client_slug).load_yaml_truth()
     instagram = (
         truth.get("salon", {}).get("instagram") if isinstance(truth, dict) else None
     )
@@ -1304,6 +1291,7 @@ def execute_tool_action(
     allowed_fact_refs: list[str] | None = None,
 ) -> ToolExecutionResult:
     allowed_fact_ref_set = _normalize_allowed_fact_ref_set(allowed_fact_refs)
+    pack_runtime = _pack_runtime(client_slug)
 
     def _fact_allowed(*refs: str) -> bool:
         if not allowed_fact_ref_set:
@@ -2312,6 +2300,14 @@ def execute_tool_action(
             info_sections: list[str] = []
             tool_decision = "missing_slot"
             expected_reply_type = EXPECTED_REPLY_SERVICE
+            disallowed_fact_hint = bool(hint_set) and not any(
+                [
+                    promo_hint,
+                    duration_hint,
+                    price_hint,
+                    allow_services_overview and "services_overview" in hint_set,
+                ]
+            )
             if allow_services_overview and "services_overview" in hint_set:
                 overview_reply = _format_services_overview_reply(
                     db,
@@ -2323,76 +2319,50 @@ def execute_tool_action(
                     tool_decision = "services_overview"
                     info_sections = ["services_overview"]
                     expected_reply_type = None
-            if client_slug and message_text:
-                normalized = _normalize_text(message_text)
-                promo_intent = "promotions" if promo_hint else _detect_promotion_intent(
-                    normalized, client_slug=client_slug
+            if promo_hint:
+                promo_reply = pack_runtime.format_reply_from_truth(
+                    "promotions",
+                    slots={"promotion_intent": "promotions"},
                 )
-                if promo_intent and not allow_promotions:
-                    promo_intent = None
-                duration_signal = duration_hint or _has_duration_signal(
-                    normalized, message=message_text, client_slug=client_slug
-                )
-                if duration_signal and not allow_duration:
-                    duration_signal = False
-                price_signal = price_hint or _has_price_signal(
-                    normalized, message_text, client_slug=client_slug
-                )
-                if price_signal and not allow_pricing:
-                    price_signal = False
-                if promo_intent:
-                    promo_reply = format_reply_from_truth(
-                        "promotions",
-                        slots={"promotion_intent": promo_intent},
-                        client_slug=client_slug,
-                    )
-                    if promo_reply:
-                        reply = promo_reply
-                        info_sections = ["promotions"]
-                        tool_decision = "promotions"
-                        expected_reply_type = None
-                elif duration_signal and price_signal:
-                    clarify = format_reply_from_truth(
-                        "duration_or_price_clarify",
-                        client_slug=client_slug,
-                    )
-                    duration_reply = build_runtime_service_duration_reply(
-                        message=message_text,
-                        client_slug=client_slug,
-                    )
-                    if isinstance(clarify, str) and clarify.strip():
-                        reply = clarify
-                    elif isinstance(duration_reply, str) and duration_reply.strip():
-                        reply = duration_reply
-                    info_sections = ["duration", "pricing"]
-                elif duration_signal:
-                    duration_reply = build_runtime_service_duration_reply(
-                        message=message_text,
-                        client_slug=client_slug,
-                    )
-                    if isinstance(duration_reply, str) and duration_reply.strip():
-                        reply = duration_reply
-                    info_sections = ["duration"]
-                elif price_signal:
-                    clarify = format_reply_from_truth("service_clarify", client_slug=client_slug)
-                    if clarify:
-                        reply = clarify
-                    info_sections = ["pricing"]
+                if promo_reply:
+                    reply = promo_reply
+                    info_sections = ["promotions"]
+                    tool_decision = "promotions"
+                    expected_reply_type = None
             if allowed_fact_ref_set and tool_decision == "missing_slot" and not info_sections:
+                if disallowed_fact_hint:
+                    return ToolExecutionResult(
+                        handled=True,
+                        ok=False,
+                        response_text=None,
+                        error_code="fact_scope_not_allowed",
+                        decision_meta={
+                            "tool_action": tool_action,
+                            "tool_decision": "fact_scope_not_allowed",
+                        },
+                        trace={
+                            "stage": "tool_registry",
+                            "decision": "fact_scope_not_allowed",
+                            "tool_action": tool_action,
+                        },
+                    )
                 return ToolExecutionResult(
                     handled=True,
                     ok=False,
                     response_text=None,
-                    error_code="fact_scope_not_allowed",
+                    error_code="missing_service",
                     decision_meta={
                         "tool_action": tool_action,
-                        "tool_decision": "fact_scope_not_allowed",
+                        "tool_decision": "missing_slot",
+                        "missing_slot": "service",
                     },
                     trace={
                         "stage": "tool_registry",
-                        "decision": "fact_scope_not_allowed",
+                        "decision": "missing_slot",
                         "tool_action": tool_action,
+                        "missing_slot": "service",
                     },
+                    expected_reply_type=expected_reply_type,
                 )
 
             decision_meta = {
@@ -2414,46 +2384,17 @@ def execute_tool_action(
             return ToolExecutionResult(
                 handled=True,
                 ok=tool_decision != "missing_slot",
-                response_text=reply,
-                error_code=None if tool_decision != "missing_slot" else "missing_service",
-                decision_meta=decision_meta,
-                trace=trace,
-                expected_reply_type=expected_reply_type,
-            )
-        if client_slug and message_text:
-            normalized = _normalize_text(message_text)
-            message_tokens = set(normalized.split()) if normalized else set()
-            inferred_price_item = get_pack_price_item(
-                message_text,
-                client_slug=client_slug,
-            )
-            inferred_service_name = None
-            if isinstance(inferred_price_item, dict):
-                candidate_name = inferred_price_item.get("name")
-                if isinstance(candidate_name, str) and candidate_name.strip():
-                    inferred_service_name = candidate_name.strip()
-            if inferred_service_name:
-                inferred_tokens = set(_normalize_text(inferred_service_name).split())
-                current_tokens = (
-                    set(_normalize_text(service_query).split())
-                    if isinstance(service_query, str) and service_query.strip()
-                    else set()
+                    response_text=reply,
+                    error_code=None if tool_decision != "missing_slot" else "missing_service",
+                    decision_meta=decision_meta,
+                    trace=trace,
+                    expected_reply_type=expected_reply_type,
                 )
-                inferred_overlap = bool(inferred_tokens & message_tokens)
-                current_overlap = bool(current_tokens & message_tokens)
-                if inferred_overlap and (not current_tokens or not current_overlap):
-                    service_query = inferred_service_name
-            promo_intent = "promotions" if promo_hint else _detect_promotion_intent(
-                normalized,
-                client_slug=client_slug,
-            )
-            if promo_intent and not allow_promotions:
-                promo_intent = None
-            if promo_intent:
-                promo_reply = format_reply_from_truth(
+        if client_slug:
+            if promo_hint:
+                promo_reply = pack_runtime.format_reply_from_truth(
                     "promotions",
-                    slots={"promotion_intent": promo_intent},
-                    client_slug=client_slug,
+                    slots={"promotion_intent": "promotions"},
                 )
                 if promo_reply:
                     return ToolExecutionResult(
@@ -2473,24 +2414,9 @@ def execute_tool_action(
                             "info_sections": ["promotions"],
                         },
                     )
-            duration_signal = duration_hint or _has_duration_signal(
-                normalized, message=message_text, client_slug=client_slug
-            )
-            if duration_signal and not allow_duration:
-                duration_signal = False
-            if duration_signal:
-                service_match = (
-                    _match_service(
-                        _normalize_text(service_query),
-                        client_slug or "generic",
-                    )
-                    if service_query
-                    else None
-                )
-                duration_reply = build_runtime_service_duration_reply(
-                    message=message_text,
+            if duration_hint:
+                duration_reply = pack_runtime.build_runtime_service_duration_reply(
                     service_label=service_query,
-                    client_slug=client_slug,
                 )
                 if duration_reply:
                     return ToolExecutionResult(
@@ -2533,23 +2459,16 @@ def execute_tool_action(
             service_query=service_query,
         )
         if error and client_slug:
-            normalized_query = _normalize_text(service_query)
-            truth = load_yaml_truth(client_slug)
-            service_match = _match_service(normalized_query, client_slug or "generic") if normalized_query else None
+            truth = pack_runtime.load_yaml_truth()
+            service_match = (
+                pack_runtime.match_service(pack_runtime.normalize_text(service_query))
+                if isinstance(service_query, str) and service_query.strip()
+                else None
+            )
             if isinstance(service_match, dict):
-                matched_name = service_match.get("name")
-                if isinstance(matched_name, str) and matched_name.strip():
-                    # Guard against harmful fallback where a different service is selected
-                    # without any lexical overlap with the user's explicit query.
-                    query_tokens = set(_normalize_text(service_query).split())
-                    matched_tokens = set(_normalize_text(matched_name).split())
-                    if query_tokens and matched_tokens and not (query_tokens & matched_tokens):
-                        service_match = None
-            if isinstance(service_match, dict):
-                truth_reply = build_runtime_service_truth_reply(
+                truth_reply = pack_runtime.build_runtime_service_truth_reply(
                     service_match,
                     truth=truth,
-                    client_slug=client_slug,
                 )
                 if truth_reply:
                     return ToolExecutionResult(
@@ -2571,9 +2490,8 @@ def execute_tool_action(
                     )
                 service_name = service_match.get("name") if isinstance(service_match, dict) else None
                 if isinstance(service_name, str) and service_name.strip():
-                    presence = build_runtime_service_presence_reply_for_name(
+                    presence = pack_runtime.build_runtime_service_presence_reply_for_name(
                         service_name,
-                        client_slug=client_slug,
                         truth=truth,
                     )
                     if presence:
@@ -2592,15 +2510,12 @@ def execute_tool_action(
                                 "tool_action": tool_action,
                             },
                         )
-            price_item = get_pack_price_item(
-                message_text or service_query or "",
-                client_slug=client_slug,
+            price_item = pack_runtime.resolve_runtime_service_price_item(
+                service_query,
+                truth=truth,
             )
             if isinstance(price_item, dict):
-                price_reply = get_pack_price_reply(
-                    message_text or service_query or "",
-                    client_slug=client_slug,
-                )
+                price_reply = pack_runtime.format_runtime_price_item_reply(price_item)
                 if price_reply:
                     return ToolExecutionResult(
                         handled=True,
@@ -2619,10 +2534,7 @@ def execute_tool_action(
                             "info_sections": ["pricing"],
                         },
                     )
-            not_found = build_runtime_service_not_found_reply(
-                client_slug=client_slug,
-                truth=truth,
-            )
+            not_found = pack_runtime.build_runtime_service_not_found_reply(truth=truth)
             if not_found:
                 return ToolExecutionResult(
                     handled=True,

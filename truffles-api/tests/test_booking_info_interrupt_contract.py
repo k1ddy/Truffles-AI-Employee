@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import decision as decision_router
-from app.routers.webhook import info as info_router
+from app.routers.webhook import info_compat as info_router
 from app.services import pack_runtime_neutral_adapter as neutral_adapter
 
 
@@ -37,11 +37,7 @@ def _named_calls(source_path: Path, function_name: str) -> list[ast.Call]:
     return calls
 
 
-def _call_has_keyword(call: ast.Call, keyword: str) -> bool:
-    return any(isinstance(item, ast.keyword) and item.arg == keyword for item in call.keywords)
-
-
-def test_expected_reply_contract_keeps_info_block_for_promotions(monkeypatch):
+def test_expected_reply_contract_no_longer_uses_legacy_info_query_for_service_choice(monkeypatch):
     conversation = SimpleNamespace(context={"expected_reply_type": legacy.EXPECTED_REPLY_SERVICE})
 
     monkeypatch.setattr(
@@ -49,7 +45,6 @@ def test_expected_reply_contract_keeps_info_block_for_promotions(monkeypatch):
         "_match_expected_reply_candidates",
         lambda **_: (False, None, []),
     )
-    monkeypatch.setattr(decision_router, "_looks_like_promotions_request", lambda *_, **__: True)
     monkeypatch.setattr(decision_router, "_is_booking_confirm_enabled", lambda: True)
 
     monkeypatch.setattr(legacy, "_get_expected_reply_type", lambda ctx: ctx.get("expected_reply_type"))
@@ -91,7 +86,7 @@ def test_expected_reply_contract_keeps_info_block_for_promotions(monkeypatch):
         client_slug="demo_salon",
     )
 
-    assert state.expected_reply_blocked_by_info is True
+    assert state.expected_reply_blocked_by_info is False
     assert state.expected_reply_shortcircuit is False
 
 
@@ -175,24 +170,22 @@ def test_promotions_signal_accepts_generic_statement():
     )
 
 
-def test_decision_detect_info_calls_pass_client_slug():
+def test_decision_no_longer_calls_info_classifier_family():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
     )
     calls = _detect_info_calls(source_path)
 
-    assert calls
-    assert all(_call_has_keyword(call, "client_slug") for call in calls)
+    assert calls == []
 
 
-def test_booking_detect_info_calls_pass_client_slug():
+def test_booking_no_longer_calls_info_classifier_family():
     source_path = (
         Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "booking.py"
     )
     calls = _detect_info_calls(source_path)
 
-    assert calls
-    assert all(_call_has_keyword(call, "client_slug") for call in calls)
+    assert calls == []
 
 
 def test_decision_no_longer_recomputes_batch_non_booking_message_after_debounce():
@@ -240,7 +233,7 @@ def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
         message_text="Сколько длится маникюр на 3 часа?",
         client_slug="demo_salon",
     )
-    assert decision_router._should_block_expected_reply_by_info(
+    assert not decision_router._should_block_expected_reply_by_info(
         expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
         message_text="Где ваш салон?",
         client_slug="demo_salon",
@@ -250,9 +243,22 @@ def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
         message_text="Я отправлю фото своей прически.",
         client_slug="demo_salon",
     )
-    assert decision_router._should_block_expected_reply_by_info(
+    assert not decision_router._should_block_expected_reply_by_info(
         expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
         message_text="Проверьте, пожалуйста, мою запись на пятницу.",
+        client_slug="demo_salon",
+    )
+
+
+def test_expected_reply_info_block_no_longer_uses_raw_price_or_duration_statements():
+    assert not decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="Интересует цена маникюра",
+        client_slug="demo_salon",
+    )
+    assert not decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="Интересует длительность маникюра",
         client_slug="demo_salon",
     )
 

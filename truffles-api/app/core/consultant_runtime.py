@@ -16,7 +16,7 @@ from app.core.dialog_state_service import DialogState, DialogStateService
 from app.core.response_realizer import ReplyEnvelope, ResponseRealizer
 from app.core.runtime_trace_contract import build_runtime_trace_contract
 from app.core.turn_executor import RuntimeExecutionResult, TurnExecutor
-from app.core.turn_planner import PolicyDecision, TurnPlanner
+from app.core.turn_planner import PlannerBoundarySignal, PolicyDecision, TurnPlanner
 from app.logging_config import get_logger, get_trace_id
 from app.models import Client, Conversation, Message, User
 from app.routers.webhook import http as http_helpers
@@ -165,15 +165,65 @@ class ConsultantRuntime:
             )
             decision = boundary_result.decision
             boundary_override = boundary_result.override
-            decision.meta.setdefault("semantic_runtime_path", self.semantic_runtime_path)
-            decision.meta.setdefault("client_id", prepared.client.id)
-            decision.meta.setdefault("conversation_id", prepared.conversation.id)
-            if outbox_ids:
-                decision.meta.setdefault("outbox_ids", list(outbox_ids))
-            if batch_messages:
-                decision.meta.setdefault("batch_messages", list(batch_messages))
-            if outbox_created_at is not None:
-                decision.meta.setdefault("outbox_created_at", outbox_created_at.isoformat())
+            if isinstance(decision, PolicyDecision):
+                decision.meta.setdefault("semantic_runtime_path", self.semantic_runtime_path)
+                decision.meta.setdefault("client_id", prepared.client.id)
+                decision.meta.setdefault("conversation_id", prepared.conversation.id)
+                if outbox_ids:
+                    decision.meta.setdefault("outbox_ids", list(outbox_ids))
+                if batch_messages:
+                    decision.meta.setdefault("batch_messages", list(batch_messages))
+                if outbox_created_at is not None:
+                    decision.meta.setdefault("outbox_created_at", outbox_created_at.isoformat())
+
+            planner_boundary_artifact = self._build_planner_boundary_artifact(
+                decision=decision,
+                boundary_override=boundary_override,
+            )
+            if planner_boundary_artifact is not None:
+                if self._should_activate_handoff(
+                    decision=decision,
+                    boundary_override=boundary_override,
+                ):
+                    self._activate_handoff(
+                        db,
+                        prepared=prepared,
+                        decision=decision,
+                        boundary_override=boundary_override,
+                        user_message_text=payload.body.message or "",
+                    )
+                else:
+                    self._resume_bot_if_needed(db, prepared=prepared)
+
+                reply = planner_boundary_artifact.turn_result.reply
+                bot_response = self._send_and_persist_reply(
+                    db,
+                    prepared=prepared,
+                    reply=reply,
+                    payload=payload,
+                    enqueue_only=enqueue_only,
+                    skip_persist=skip_persist,
+                )
+                self._record_turn_trace(
+                    conversation=prepared.conversation,
+                    user_message=prepared.user_message,
+                    bot_response=bot_response,
+                    runtime_state_before=runtime_state,
+                    decision=decision,
+                    execution=self._build_boundary_execution_result(
+                        boundary_override=boundary_override,
+                        reply=reply,
+                    ),
+                    turn_result=planner_boundary_artifact.turn_result,
+                    delivered=bool(bot_response),
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message="Handled",
+                    conversation_id=prepared.conversation.id,
+                    bot_response=reply.text,
+                )
 
             execution = self._execute_turn(
                 db,
@@ -201,11 +251,13 @@ class ConsultantRuntime:
             if self._should_activate_handoff(
                 decision=effective_decision,
                 boundary_override=boundary_override,
+                execution=execution,
             ):
                 self._activate_handoff(
                     db,
                     prepared=prepared,
                     decision=effective_decision,
+                    boundary_override=boundary_override,
                     user_message_text=payload.body.message or "",
                 )
             else:
@@ -216,6 +268,7 @@ class ConsultantRuntime:
                 override=boundary_override,
                 text=execution.text,
                 channel=prepared.conversation.channel,
+                reply_kind_override="handoff" if execution.request_handoff else None,
             )
             turn_result = self.executor.assemble(
                 decision=effective_decision,
@@ -521,119 +574,277 @@ class ConsultantRuntime:
         payload: WebhookRequest,
         prepared: PreparedConversation,
         runtime_state: LoadedRuntimeState,
-    ) -> tuple[PolicyDecision, BoundaryOverride | None]:
+    ) -> tuple[PolicyDecision | None, BoundaryOverride | None]:
+        def _planner_override_meta(
+            *,
+            reason_code: str,
+            control_label: str,
+            meta: dict[str, Any] | None = None,
+            interaction_owner: str | None = None,
+            interaction_target: str | None = None,
+            interaction_relation: str | None = None,
+            handoff_activation_requested: bool = True,
+        ) -> dict[str, Any]:
+            override_meta = {
+                "degrade_stage": "planner",
+                "planner_boundary_signal": True,
+                "control_label": control_label,
+                "handoff_activation_requested": handoff_activation_requested,
+                "earliest_failed_stage": "planner",
+                "root_reason_code": reason_code,
+            }
+            if interaction_owner:
+                override_meta["interaction_owner"] = interaction_owner
+            if interaction_target:
+                override_meta["interaction_target"] = interaction_target
+            if interaction_relation:
+                override_meta["interaction_relation"] = interaction_relation
+            if isinstance(meta, dict) and meta:
+                override_meta.update(meta)
+            return override_meta
+
         if prepared.conversation.state == ConversationState.MANAGER_ACTIVE.value:
-            decision = self.planner.build_controlled_degrade(
+            signal = self.planner.build_controlled_degrade_signal(
                 reason_code="manager_active",
                 control_label="manager_active",
                 interaction_owner="pending_gate",
-            )
-            override = self.boundary.build_degrade_override(
-                reason_code="manager_active",
                 public_message="Менеджер уже подключился к диалогу.",
                 trace_message="manager_active_gate",
+                meta={"handoff_activation_requested": False},
             )
-            return decision, override
+            signal_meta = dict(signal.meta)
+            signal_meta.setdefault("planner_boundary_signal", True)
+            signal_meta.setdefault("control_label", signal.control_label)
+            signal_meta.setdefault("interaction_owner", signal.interaction_owner)
+            if signal.interaction_target:
+                signal_meta.setdefault("interaction_target", signal.interaction_target)
+            if signal.interaction_relation:
+                signal_meta.setdefault("interaction_relation", signal.interaction_relation)
+            return None, self.boundary.build_degrade_override(
+                reason_code=signal.reason_code,
+                public_message=signal.public_message
+                or "Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
+                trace_message=signal.trace_message or signal.reason_code,
+                meta=_planner_override_meta(
+                    reason_code=signal.reason_code,
+                    control_label=signal.control_label,
+                    meta=signal_meta,
+                    interaction_owner=signal.interaction_owner,
+                    interaction_target=signal.interaction_target,
+                    interaction_relation=signal.interaction_relation,
+                    handoff_activation_requested=bool(
+                        signal_meta.pop("handoff_activation_requested", True)
+                    ),
+                ),
+            )
 
         recent_summary = self._build_memory_summary(db, prepared.conversation)
         memory_profile = self._build_policy_core_memory_profile(runtime_state)
-        decision = self.planner.plan(
+        plan_result = self.planner.plan(
             message_text=payload.body.message,
             client_slug=payload.client_slug,
             booking_state=dict(runtime_state.booking_state or {}),
             memory_summary=recent_summary,
             memory_profile=memory_profile,
         )
+        decision = plan_result.decision
         override = None
+        if isinstance(plan_result.boundary_signal, PlannerBoundarySignal):
+            signal = plan_result.boundary_signal
+            signal_meta = dict(signal.meta)
+            signal_meta.setdefault("planner_boundary_signal", True)
+            signal_meta.setdefault("control_label", signal.control_label)
+            signal_meta.setdefault("interaction_owner", signal.interaction_owner)
+            if signal.interaction_target:
+                signal_meta.setdefault("interaction_target", signal.interaction_target)
+            if signal.interaction_relation:
+                signal_meta.setdefault("interaction_relation", signal.interaction_relation)
+            if signal.decision == "block":
+                return decision, self.boundary.build_block_override(
+                    reason_code=signal.reason_code,
+                    trace_message=signal.trace_message or signal.reason_code,
+                    replan_hints=["preserve preflight block contract"],
+                    public_message=signal.public_message or "",
+                    meta=signal_meta,
+                )
+            return decision, self.boundary.build_degrade_override(
+                reason_code=signal.reason_code,
+                public_message=signal.public_message
+                or "Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
+                trace_message=signal.trace_message or signal.reason_code,
+                meta=_planner_override_meta(
+                    reason_code=signal.reason_code,
+                    control_label=signal.control_label,
+                    meta=signal_meta,
+                    interaction_owner=signal.interaction_owner,
+                    interaction_target=signal.interaction_target,
+                    interaction_relation=signal.interaction_relation,
+                    handoff_activation_requested=bool(
+                        signal_meta.pop("handoff_activation_requested", True)
+                    ),
+                ),
+            )
+        if decision is None:
+            raise ValueError("planner_decision_missing")
         missing_owner_guard = self.planner.detect_missing_semantic_owner(decision)
         if missing_owner_guard:
-            decision = self.planner.build_controlled_degrade(
-                reason_code="planner:missing_semantic_owner",
-                control_label="planner_missing_semantic_owner",
-                interaction_owner="semantic_owner_guard",
-            )
-            decision.meta["missing_semantic_owner_guard"] = missing_owner_guard
             override = self.boundary.build_degrade_override(
                 reason_code="planner:missing_semantic_owner",
                 public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
                 trace_message="missing_semantic_owner_guard_failed",
                 meta={
-                    "activate_handoff": True,
-                    "reply_kind": "handoff",
-                    "degrade_stage": "planner",
+                    **_planner_override_meta(
+                        reason_code="planner:missing_semantic_owner",
+                        control_label="planner_missing_semantic_owner",
+                    ),
                     "missing_semantic_owner_guard": missing_owner_guard,
                 },
             )
             return decision, override
         missing_binding_plan_guard = self.planner.detect_missing_binding_plan(decision)
         if missing_binding_plan_guard:
-            decision = self.planner.build_controlled_degrade(
-                reason_code="planner:missing_binding_plan",
-                control_label="planner_missing_binding_plan",
-                interaction_owner="binding_plan_guard",
-            )
-            decision.meta["missing_binding_plan_guard"] = missing_binding_plan_guard
             override = self.boundary.build_degrade_override(
                 reason_code="planner:missing_binding_plan",
                 public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
                 trace_message="missing_binding_plan_guard_failed",
                 meta={
-                    "activate_handoff": True,
-                    "reply_kind": "handoff",
-                    "degrade_stage": "planner",
+                    **_planner_override_meta(
+                        reason_code="planner:missing_binding_plan",
+                        control_label="planner_missing_binding_plan",
+                    ),
                     "missing_binding_plan_guard": missing_binding_plan_guard,
                 },
             )
             return decision, override
         if decision.outcome not in _RUNTIME_ALLOWED_OUTCOMES:
-            decision = self.planner.build_controlled_degrade(
-                reason_code="planner:invalid_outcome",
-                control_label="planner_invalid_outcome",
-                interaction_owner="turn_planner",
-            )
             override = self.boundary.build_degrade_override(
                 reason_code="planner:invalid_outcome",
                 public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
                 trace_message="planner_invalid_outcome_guard_failed",
-                meta={
-                    "activate_handoff": True,
-                    "reply_kind": "handoff",
-                    "degrade_stage": "planner",
-                },
+                meta=_planner_override_meta(
+                    reason_code="planner:invalid_outcome",
+                    control_label="planner_invalid_outcome",
+                ),
             )
             return decision, override
         mutation_guard = self.planner.detect_semantic_mutation(decision)
         if mutation_guard:
-            decision = self.planner.build_controlled_degrade(
-                reason_code="planner:semantic_decision_post_owner_mutation",
-                control_label="planner_semantic_decision_guard",
-                interaction_owner="semantic_decision_guard",
-            )
-            decision.meta["semantic_mutation_guard"] = mutation_guard
             override = self.boundary.build_degrade_override(
                 reason_code="planner:semantic_decision_post_owner_mutation",
                 public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
                 trace_message="semantic_decision_guard_failed",
                 meta={
-                    "activate_handoff": True,
-                    "reply_kind": "handoff",
-                    "degrade_stage": "planner",
+                    **_planner_override_meta(
+                        reason_code="planner:semantic_decision_post_owner_mutation",
+                        control_label="planner_semantic_decision_guard",
+                    ),
                     "semantic_mutation_guard": mutation_guard,
                 },
             )
             return decision, override
-        if decision.meta.get("degrade_path"):
-            override = self.boundary.build_degrade_override(
-                reason_code=str(decision.meta.get("reason_code") or "planner_degrade"),
-                public_message="Передаю диалог менеджеру, чтобы не потерять ваш запрос.",
-                trace_message="planner_degrade",
-                meta={
-                    "activate_handoff": True,
-                    "reply_kind": "handoff",
-                    "degrade_stage": "planner",
-                },
-            )
         return decision, override
+
+    def _build_planner_boundary_artifact(
+        self,
+        *,
+        decision: PolicyDecision | None,
+        boundary_override: BoundaryOverride | None,
+    ):
+        if boundary_override is None:
+            return None
+        override_meta = boundary_override.meta if isinstance(boundary_override.meta, dict) else {}
+        if not (
+            override_meta.get("planner_boundary_signal") is True
+            or override_meta.get("degrade_stage") == "planner"
+        ):
+            return None
+        control_label = override_meta.get("control_label")
+        interaction_owner = (
+            decision.interaction.owner
+            if isinstance(decision, PolicyDecision)
+            else override_meta.get("interaction_owner")
+        )
+        interaction_target = (
+            decision.interaction.target
+            if isinstance(decision, PolicyDecision)
+            else override_meta.get("interaction_target")
+        )
+        interaction_relation = (
+            decision.interaction.relation
+            if isinstance(decision, PolicyDecision)
+            else override_meta.get("interaction_relation")
+        )
+        artifact_meta = (
+            {"control_label": control_label}
+            if isinstance(control_label, str) and control_label.strip()
+            else None
+        )
+        if boundary_override.decision == "block":
+            dialog_state = self.dialog_state.build_blocked_state(
+                reason_code=boundary_override.reason_code,
+                interaction_owner=interaction_owner or "planner_boundary_block",
+                interaction_target=interaction_target,
+                interaction_relation=interaction_relation,
+            )
+            return self.executor.build_block_boundary_artifact(
+                decision=decision,
+                dialog_state=dialog_state,
+                boundary_override=boundary_override,
+                tool_action="noop",
+                text=boundary_override.public_message or "",
+                intent=str(control_label or boundary_override.reason_code),
+                meta=artifact_meta,
+            )
+        dialog_state = self.dialog_state.build_degraded_state(
+            reason_code=boundary_override.reason_code,
+            interaction_owner=interaction_owner or "planner_boundary_degrade",
+            interaction_target=interaction_target,
+            interaction_relation=interaction_relation,
+        )
+        return self.executor.build_degrade_boundary_artifact(
+            decision=decision,
+            dialog_state=dialog_state,
+            boundary_override=boundary_override,
+            text=boundary_override.public_message or "",
+            transport_status="skipped",
+            transport_reason=boundary_override.reason_code,
+            tool_action="handoff",
+            tool_decision="planner_boundary_override",
+            intent=str(control_label or boundary_override.reason_code),
+            meta=artifact_meta,
+        )
+
+    @staticmethod
+    def _build_boundary_execution_result(
+        *,
+        boundary_override: BoundaryOverride,
+        reply: ReplyEnvelope,
+    ) -> RuntimeExecutionResult:
+        tool_action = "handoff" if boundary_override.decision == "degrade" else "noop"
+        tool_decision = (
+            "planner_boundary_override"
+            if boundary_override.decision == "degrade"
+            else "planner_block_override"
+        )
+        execution_meta = {
+            "reason_code": boundary_override.reason_code,
+        }
+        override_meta = boundary_override.meta if isinstance(boundary_override.meta, dict) else {}
+        for field_name in (
+            "earliest_failed_stage",
+            "root_reason_code",
+            "control_label",
+        ):
+            value = override_meta.get(field_name)
+            if isinstance(value, str) and value.strip():
+                execution_meta[field_name] = value
+        return RuntimeExecutionResult(
+            text=reply.text,
+            tool_action=tool_action,
+            tool_decision=tool_decision,
+            meta=execution_meta,
+            request_handoff=bool(override_meta.get("handoff_activation_requested")),
+        )
 
     def _build_policy_core_memory_profile(
         self,
@@ -641,65 +852,49 @@ class ConsultantRuntime:
     ) -> dict[str, Any]:
         profile: dict[str, Any] = {}
         dialog_state = runtime_state.dialog_state
-        semantic_frame = self.dialog_state.project_semantic_frame(
-            dialog_state.semantic_state.materialized_frame
-        ) or {}
-        active_goal = self.dialog_state.project_current_goal_from_frame(semantic_frame)
-        if not active_goal and runtime_state.booking_state:
+        pending_contract = deepcopy(
+            self.dialog_state.project_runtime_pending_question_contract(
+                dialog_state,
+                booking_payload=runtime_state.booking_state,
+            )
+            or {}
+        )
+        active_goal = None
+        if isinstance(dialog_state.meta, dict):
+            active_goal = self.dialog_state._canonical_current_goal_token(
+                dialog_state.meta.get("current_goal")
+            )
+        if active_goal is None and self.dialog_state._pending_contract_implies_booking_followup_goal(
+            pending_contract,
+            runtime_state.booking_state,
+        ):
             active_goal = "booking"
         if isinstance(active_goal, str) and active_goal.strip():
             profile["active_goal"] = active_goal.strip()
 
-        canonical_referents: dict[str, dict[str, Any]] = {}
-        referent_map = self.dialog_state.project_grounded_referents_from_frame(semantic_frame)
-        referent_entity_types = {
-            "service": "service",
-            "specialist": "specialist",
-            "branch": "branch",
-            "booking_ref": "booking",
-            "customer": "customer",
-        }
-        for key, raw_value in referent_map.items():
-            if isinstance(raw_value, str) and raw_value.strip():
-                canonical_referents[key] = {
-                    "value": raw_value.strip(),
-                    "entity_type": referent_entity_types[key],
-                    "source_ref": "carryover",
-                }
+        slot_state: dict[str, str] = {}
+        explicit_slot_state = (
+            dict(dialog_state.meta.get("slot_state"))
+            if isinstance(dialog_state.meta, dict)
+            and isinstance(dialog_state.meta.get("slot_state"), dict)
+            else {}
+        )
+        for field_name, value in explicit_slot_state.items():
+            if field_name in {"service", "datetime", "name", "phone", "media"} and isinstance(value, str) and value.strip():
+                slot_state[field_name] = value.strip()
+        if slot_state:
+            profile["slot_state"] = slot_state
 
-        semantic_contract = self.dialog_state._semantic_contract_from_frame(
-            semantic_frame
+        semantic_contract = self.dialog_state.project_runtime_semantic_contract(
+            dialog_state,
+            booking_payload=runtime_state.booking_state,
         )
         semantic_contract = (
             deepcopy(semantic_contract) if isinstance(semantic_contract, dict) else {}
         )
         if semantic_contract:
-            semantic_referents = (
-                dict(semantic_contract.get("referents"))
-                if isinstance(semantic_contract.get("referents"), dict)
-                else {}
-            )
-            for referent_key, payload in canonical_referents.items():
-                existing = semantic_referents.get(referent_key)
-                if isinstance(existing, dict):
-                    merged = dict(existing)
-                    for field_name, field_value in payload.items():
-                        merged.setdefault(field_name, field_value)
-                    semantic_referents[referent_key] = merged
-                    continue
-                semantic_referents[referent_key] = dict(payload)
-            if semantic_referents:
-                semantic_contract["referents"] = semantic_referents
             profile["semantic_contract"] = semantic_contract
-        elif canonical_referents:
-            profile["semantic_contract"] = {
-                "contract_version": "semantic_contract.v1",
-                "referents": canonical_referents,
-            }
 
-        pending_contract = deepcopy(
-            self.dialog_state._pending_question_from_frame(semantic_frame) or {}
-        )
         if pending_contract:
             profile["pending_question_contract"] = pending_contract
             resume_pending_contract = self.dialog_state.project_interrupt_resume_pending_question_contract(
@@ -709,25 +904,6 @@ class ConsultantRuntime:
             )
             if resume_pending_contract:
                 profile["resume_pending_question_contract"] = resume_pending_contract
-
-        slot_state: dict[str, str] = {}
-        frame_continuation = semantic_frame.get("continuation") if isinstance(semantic_frame, dict) else None
-        frame_slot_values = (
-            frame_continuation.get("slot_values")
-            if isinstance(frame_continuation, dict)
-            else None
-        )
-        if isinstance(frame_slot_values, dict):
-            for field_name, value in frame_slot_values.items():
-                if field_name in {"service", "datetime", "name", "phone"} and isinstance(value, str) and value.strip():
-                    slot_state[field_name] = value.strip()
-        if not slot_state:
-            for field_name in ("service", "datetime", "name", "phone"):
-                value = runtime_state.booking_state.get(field_name)
-                if isinstance(value, str) and value.strip():
-                    slot_state[field_name] = value.strip()
-        if slot_state:
-            profile["slot_state"] = slot_state
 
         return profile
 
@@ -778,14 +954,6 @@ class ConsultantRuntime:
         decision: PolicyDecision | None,
     ) -> bool:
         return isinstance(decision, PolicyDecision) and getattr(decision, "semantic_decision", None) is not None
-
-    @staticmethod
-    def _is_synthetic_control_decision(
-        decision: PolicyDecision | None,
-    ) -> bool:
-        return bool(
-            isinstance(decision, PolicyDecision) and decision.is_synthetic_control_decision()
-        )
 
     def _semantic_contract_enrichment(
         self,
@@ -880,8 +1048,6 @@ class ConsultantRuntime:
         decision: PolicyDecision | None = None,
         execution: RuntimeExecutionResult | None = None,
     ) -> dict[str, Any]:
-        if self._is_synthetic_control_decision(decision):
-            return {}
         semantic_contract = self.dialog_state.project_runtime_semantic_contract(
             dialog_state,
             booking_payload=booking_state,
@@ -964,8 +1130,6 @@ class ConsultantRuntime:
         booking_state: dict[str, Any] | None = None,
         decision: PolicyDecision | None = None,
     ) -> dict[str, Any]:
-        if self._is_synthetic_control_decision(decision):
-            return {}
         owner_contract = self.dialog_state.project_pending_question_contract(
             (
                 self.planner.canonical_pending_question_contract(decision)
@@ -975,25 +1139,7 @@ class ConsultantRuntime:
         )
         if self._has_canonical_semantic_owner(decision):
             return dict(owner_contract) if isinstance(owner_contract, dict) and owner_contract else {}
-        pending_question_contract = self.dialog_state.project_runtime_pending_question_contract(
-            dialog_state,
-            booking_payload=booking_state,
-        ) or owner_contract
-        contract = dict(pending_question_contract) if isinstance(pending_question_contract, dict) else {}
-        if isinstance(owner_contract, dict) and owner_contract:
-            for key in (
-                "expected_reply_type",
-                "reason",
-                "pending_question_act",
-                "pending_question_target",
-                "active_question_relation",
-                "next_question",
-            ):
-                if key not in contract and key in owner_contract:
-                    contract[key] = owner_contract[key]
-            if "open_questions" not in contract and isinstance(owner_contract.get("open_questions"), list):
-                contract["open_questions"] = list(owner_contract["open_questions"])
-        return contract
+        return {}
 
     @staticmethod
     def _fresh_turn_trace_seed(existing_trace: Any) -> list[dict[str, Any]]:
@@ -1036,6 +1182,7 @@ class ConsultantRuntime:
             user_name=prepared.user.name,
             user_phone=user_phone,
             now=now,
+            conversation_id=prepared.conversation.id,
         )
 
     def _apply_execution_boundary_override(
@@ -1045,34 +1192,25 @@ class ConsultantRuntime:
         execution: RuntimeExecutionResult,
         boundary_override: BoundaryOverride | None,
     ) -> tuple[PolicyDecision, BoundaryOverride | None]:
-        if not execution.request_handoff or self._decision_requests_handoff(decision):
-            return decision, boundary_override
-        return decision, self.boundary.build_degrade_override(
-            reason_code="executor:handoff_requested",
-            public_message=execution.text,
-            trace_message="execution_requested_handoff",
-            meta={
-                "activate_handoff": True,
-                "reply_kind": "handoff",
-                "degrade_stage": "executor",
-            },
-        )
+        return decision, boundary_override
 
     @staticmethod
     def _should_activate_handoff(
         *,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
         boundary_override: BoundaryOverride | None,
+        execution: RuntimeExecutionResult | None = None,
     ) -> bool:
         if ConsultantRuntime._decision_requests_handoff(decision):
             return True
-        if not isinstance(boundary_override, BoundaryOverride):
+        if isinstance(execution, RuntimeExecutionResult) and execution.request_handoff:
+            return True
+        if boundary_override is None or boundary_override.decision != "degrade":
             return False
-        if boundary_override.decision != "degrade":
-            return False
-        if not isinstance(boundary_override.meta, dict):
-            return False
-        return bool(boundary_override.meta.get("activate_handoff"))
+        override_meta = boundary_override.meta if isinstance(boundary_override.meta, dict) else {}
+        if override_meta.get("handoff_activation_requested") is True:
+            return True
+        return boundary_override.reason_code == "executor:handoff_requested"
 
     def _write_runtime_state(
         self,
@@ -1114,9 +1252,16 @@ class ConsultantRuntime:
         db: Session,
         *,
         prepared: PreparedConversation,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
+        boundary_override: BoundaryOverride | None = None,
         user_message_text: str,
     ) -> None:
+        trigger_value = None
+        if isinstance(decision, PolicyDecision):
+            trigger_value = decision.intent
+        elif boundary_override is not None:
+            override_meta = boundary_override.meta if isinstance(boundary_override.meta, dict) else {}
+            trigger_value = override_meta.get("control_label") or boundary_override.reason_code
         handover = get_active_handover(db, prepared.conversation.id)
         if handover is None:
             handover = create_handover(
@@ -1124,7 +1269,7 @@ class ConsultantRuntime:
                 prepared.conversation,
                 prepared.user,
                 trigger_type="intent",
-                trigger_value=decision.intent,
+                trigger_value=trigger_value,
                 user_message=user_message_text,
             )
         transition_state(
@@ -1237,7 +1382,7 @@ class ConsultantRuntime:
         user_message: Message | None,
         bot_response: Message | None,
         runtime_state_before: LoadedRuntimeState | None = None,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
         execution: RuntimeExecutionResult,
         turn_result: Any,
         delivered: bool,
@@ -1260,8 +1405,10 @@ class ConsultantRuntime:
             )
         semantic_frame_after = self._project_runtime_semantic_frame(
             dialog_state,
-        ) or self.dialog_state.project_semantic_frame(
-            self.planner.canonical_semantic_frame(decision)
+        ) or (
+            self.dialog_state.project_semantic_frame(self.planner.canonical_semantic_frame(decision))
+            if isinstance(decision, PolicyDecision)
+            else None
         )
         contract_action = self._derive_contract_action(
             decision=decision,
@@ -1275,16 +1422,53 @@ class ConsultantRuntime:
         )
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         expected_reply_reason = pending_question_contract.get("reason")
+        interaction_owner = (
+            decision.interaction.owner
+            if isinstance(decision, PolicyDecision)
+            else getattr(dialog_state.interaction_state, "interaction_owner", None)
+        )
+        interaction_relation = (
+            decision.interaction.relation
+            if isinstance(decision, PolicyDecision)
+            else getattr(dialog_state.interaction_state, "interaction_relation", None)
+        )
+        interaction_target = (
+            decision.interaction.target
+            if isinstance(decision, PolicyDecision)
+            else getattr(dialog_state.interaction_state, "interaction_target", None)
+        )
+        turn_outcome = getattr(turn_result, "outcome", None)
+        if turn_outcome is None and isinstance(decision, PolicyDecision):
+            turn_outcome = decision.outcome
+        if turn_outcome is None:
+            boundary_override = getattr(turn_result, "boundary_override", None)
+            turn_outcome = "HANDOFF" if getattr(boundary_override, "decision", None) == "degrade" else "FACT"
         trace_event = {
             "stage": _RUNTIME_ENTRYPOINT_NAME,
             "semantic_runtime_path": self.semantic_runtime_path,
             "decision": contract_action,
-            "intent": decision.intent,
-            "outcome": decision.outcome,
+            "intent": (
+                decision.intent
+                if isinstance(decision, PolicyDecision)
+                else (
+                    (
+                        turn_result.boundary_override.meta.get("control_label")
+                        if getattr(turn_result, "boundary_override", None) is not None
+                        and isinstance(turn_result.boundary_override.meta, dict)
+                        else None
+                    )
+                    or (
+                        turn_result.boundary_override.reason_code
+                        if getattr(turn_result, "boundary_override", None) is not None
+                        else None
+                    )
+                )
+            ),
+            "outcome": turn_outcome,
             "tool_action": execution.tool_action,
             "tool_decision": execution.tool_decision,
             "reply_kind": turn_result.reply.reply_kind,
-            "interaction_owner": decision.interaction.owner,
+            "interaction_owner": interaction_owner,
             "source": contract_source,
             "trace_id": trace_id,
             "delivered": delivered,
@@ -1295,17 +1479,27 @@ class ConsultantRuntime:
         observability = getattr(turn_result, "observability", None)
         if observability is not None:
             reason_code = getattr(observability, "reason_code", None)
-        if not reason_code and isinstance(decision.meta, dict):
+        if not reason_code and isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             reason_code = decision.meta.get("reason_code")
         if not reason_code and isinstance(execution.meta, dict):
             reason_code = execution.meta.get("reason_code")
-        if isinstance(decision.meta, dict):
+        override_meta = (
+            dict(turn_result.boundary_override.meta)
+            if getattr(turn_result, "boundary_override", None) is not None
+            and isinstance(turn_result.boundary_override.meta, dict)
+            else {}
+        )
+        if isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             earliest_failed_stage = decision.meta.get("earliest_failed_stage")
             root_reason_code = decision.meta.get("root_reason_code")
         if not earliest_failed_stage and isinstance(execution.meta, dict):
             earliest_failed_stage = execution.meta.get("earliest_failed_stage")
         if not root_reason_code and isinstance(execution.meta, dict):
             root_reason_code = execution.meta.get("root_reason_code")
+        if not earliest_failed_stage:
+            earliest_failed_stage = override_meta.get("earliest_failed_stage")
+        if not root_reason_code:
+            root_reason_code = override_meta.get("root_reason_code")
         if not root_reason_code:
             root_reason_code = reason_code
         if isinstance(reason_code, str) and reason_code.strip():
@@ -1315,8 +1509,10 @@ class ConsultantRuntime:
         if isinstance(root_reason_code, str) and root_reason_code.strip():
             trace_event["root_reason_code"] = root_reason_code.strip()
         control_label = None
-        if isinstance(decision.meta, dict):
+        if isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             control_label = decision.meta.get("control_label")
+        if not control_label:
+            control_label = override_meta.get("control_label")
         if isinstance(control_label, str) and control_label.strip():
             trace_event["control_label"] = control_label.strip()
         if expected_reply_type:
@@ -1329,13 +1525,13 @@ class ConsultantRuntime:
         pending_question_target = None
         active_question_relation = pending_question_contract.get(
             "active_question_relation"
-        ) or decision.interaction.relation
+        ) or interaction_relation
         question_contract_active = False
         if isinstance(execution.meta, dict):
             pending_question_act = execution.meta.get("pending_question_act")
             pending_question_target = execution.meta.get("pending_question_target")
             question_contract_active = bool(execution.meta.get("question_contract"))
-        if isinstance(decision.meta, dict):
+        if isinstance(decision, PolicyDecision) and isinstance(decision.meta, dict):
             pending_question_act = pending_question_act or decision.meta.get("pending_question_act")
             pending_question_target = pending_question_target or decision.meta.get(
                 "pending_question_target"
@@ -1348,7 +1544,7 @@ class ConsultantRuntime:
         if not pending_question_target:
             pending_question_target = pending_question_contract.get(
                 "pending_question_target"
-            ) or decision.interaction.target
+            ) or interaction_target
         if not question_contract_active and pending_question_contract:
             question_contract_active = self._decision_collects(decision) or bool(
                 pending_question_act and expected_reply_type
@@ -1381,6 +1577,8 @@ class ConsultantRuntime:
             runtime_entrypoint=_RUNTIME_ENTRYPOINT_NAME,
             semantic_runtime_path=self.semantic_runtime_path,
             decision=decision,
+            boundary_override=getattr(turn_result, "boundary_override", None),
+            dialog_state=dialog_state,
             contract_source=contract_source,
             contract_action=contract_action,
             reply_kind=turn_result.reply.reply_kind,
@@ -1406,10 +1604,13 @@ class ConsultantRuntime:
         trace = self._fresh_turn_trace_seed(context.get(_RUNTIME_TRACE_KEY))
         policy_core_trace = (
             dict(decision.meta.get("policy_core_trace"))
-            if isinstance(decision.meta, dict)
+            if isinstance(decision, PolicyDecision)
+            and isinstance(decision.meta, dict)
             and isinstance(decision.meta.get("policy_core_trace"), dict)
             else None
         )
+        if policy_core_trace is None and isinstance(override_meta.get("policy_core_trace"), dict):
+            policy_core_trace = dict(override_meta["policy_core_trace"])
         if isinstance(policy_core_trace, dict):
             policy_core_entry = {
                 "stage": "policy_core",
@@ -1456,11 +1657,11 @@ class ConsultantRuntime:
             "runtime_entrypoint": _RUNTIME_ENTRYPOINT_NAME,
             "semantic_runtime_path": self.semantic_runtime_path,
             "action": contract_action,
-            "intent": decision.intent,
-            "outcome": decision.outcome,
+            "intent": trace_event["intent"],
+            "outcome": turn_outcome,
             "tool_action": execution.tool_action,
             "tool_decision": execution.tool_decision,
-            "interaction_owner": decision.interaction.owner,
+            "interaction_owner": interaction_owner,
             "decision_trace": trace_event,
         }
         if isinstance(reason_code, str) and reason_code.strip():
@@ -1491,7 +1692,7 @@ class ConsultantRuntime:
             decision_meta["semantic_state_before"] = semantic_frame_before
         if semantic_frame_after:
             decision_meta["semantic_state_after"] = semantic_frame_after
-        if contract_source != decision.source:
+        if isinstance(decision, PolicyDecision) and contract_source != decision.source:
             decision_meta["source_detail"] = decision.source
         if policy_core_trace:
             decision_meta["policy_core_trace"] = policy_core_trace
@@ -1522,11 +1723,10 @@ class ConsultantRuntime:
     def _derive_contract_action(
         self,
         *,
-        decision: PolicyDecision,
+        decision: PolicyDecision | None,
         execution: RuntimeExecutionResult,
         turn_result: Any,
     ) -> str:
-        dialog_state = turn_result.dialog_state
         owner_current_goal = (
             self.dialog_state.project_current_goal_from_frame(
                 self.planner.canonical_semantic_frame(decision)
@@ -1534,12 +1734,13 @@ class ConsultantRuntime:
             if self._has_canonical_semantic_owner(decision)
             else None
         )
-        current_goal = owner_current_goal or self.dialog_state.project_runtime_current_goal(
-            dialog_state
-        )
-        pending_question_contract = self._project_runtime_pending_question_contract(
-            dialog_state,
-            decision=decision,
+        pending_question_contract = (
+            self._project_runtime_pending_question_contract(
+                turn_result.dialog_state,
+                decision=decision,
+            )
+            if self._has_canonical_semantic_owner(decision)
+            else {}
         )
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         if (
@@ -1549,27 +1750,36 @@ class ConsultantRuntime:
             and execution.meta.get("appointment_id")
         ):
             return "booking_confirm"
-        if self._decision_collects(decision) and current_goal == "booking" and expected_reply_type:
+        if self._decision_collects(decision) and owner_current_goal == "booking" and expected_reply_type:
             return "booking_prompt"
-        return decision.action
+        if isinstance(decision, PolicyDecision):
+            return decision.action
+        boundary_override = getattr(turn_result, "boundary_override", None)
+        if boundary_override is not None and boundary_override.decision == "block":
+            return "reject"
+        if boundary_override is not None and boundary_override.decision == "degrade":
+            return "handoff"
+        return execution.tool_action or "boundary_override"
 
     @staticmethod
-    def _binding_outcome_type(decision: PolicyDecision) -> str | None:
+    def _binding_outcome_type(decision: PolicyDecision | None) -> str | None:
         binding_plan = getattr(decision, "binding_plan", None)
         if isinstance(binding_plan, BindingPlanV1):
             return binding_plan.binding_outcome_type
         return None
 
     @classmethod
-    def _decision_requests_handoff(cls, decision: PolicyDecision) -> bool:
+    def _decision_requests_handoff(cls, decision: PolicyDecision | None) -> bool:
         return cls._binding_outcome_type(decision) in {"handoff", "degrade"}
 
     @classmethod
-    def _decision_collects(cls, decision: PolicyDecision) -> bool:
+    def _decision_collects(cls, decision: PolicyDecision | None) -> bool:
         return cls._binding_outcome_type(decision) in {"workflow_start", "workflow_advance"}
 
     @staticmethod
-    def _derive_contract_source(decision: PolicyDecision) -> str:
+    def _derive_contract_source(decision: PolicyDecision | None) -> str:
+        if decision is None:
+            return _RUNTIME_ENTRYPOINT_NAME
         if isinstance(decision.source, str) and decision.source.strip():
             source = decision.source.strip()
             if source == "policy_core" or source.startswith("turn_planner"):
@@ -1632,17 +1842,40 @@ class ConsultantRuntime:
             .first()
         )
 
+    def _is_reset_boundary_message(self, message: Message) -> bool:
+        metadata = message.message_metadata if isinstance(message.message_metadata, dict) else {}
+        decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else None
+        if isinstance(decision_meta, dict):
+            control_action = decision_meta.get("control_action")
+            if isinstance(control_action, str) and control_action.strip() == "session_reset":
+                return True
+            session_memory_reset = decision_meta.get("session_memory_reset")
+            if isinstance(session_memory_reset, str) and session_memory_reset.strip() == "explicit_reset":
+                return True
+        return _is_session_reset_only_message(message.content)
+
+    def _trim_messages_after_last_reset(self, messages: list[Message]) -> list[Message]:
+        last_reset_index: int | None = None
+        for index, message in enumerate(messages):
+            if self._is_reset_boundary_message(message):
+                last_reset_index = index
+        if last_reset_index is None:
+            return messages
+        return messages[last_reset_index + 1 :]
+
     def _build_memory_summary(self, db: Session, conversation: Conversation) -> str | None:
         messages = (
             db.query(Message)
             .filter(Message.conversation_id == conversation.id)
             .order_by(Message.created_at.desc())
-            .limit(6)
+            .limit(24)
             .all()
         )
         if not messages:
             return None
-        recent = list(reversed(messages))
+        recent = self._trim_messages_after_last_reset(list(reversed(messages)))
+        if len(recent) > 6:
+            recent = recent[-6:]
         parts: list[str] = []
         for message in recent:
             role = "user" if message.role == "user" else "assistant"

@@ -19,9 +19,10 @@ from app.logging_config import get_trace_id, start_span
 from app.models import Client, Conversation, Message, User
 from app.routers.webhook.booking import _resolve_datetime_offline
 from app.routers.webhook.http import _find_message_by_message_id
-from app.routers.webhook.info import _is_short_reply, _looks_like_info_query
+from app.routers.webhook.info import _is_short_reply
+from app.routers.webhook.info_compat import _looks_like_info_query
 from app.routers.webhook.media import _extract_media_info
-from app.routers.webhook.policy import _looks_like_policy_topic
+from app.routers.webhook.policy_compat import _looks_like_policy_topic
 from app.routers.webhook.runtime_primitives import (
     EXPECTED_REPLY_NAME,
     EXPECTED_REPLY_SERVICE,

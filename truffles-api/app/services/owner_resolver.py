@@ -6,7 +6,6 @@ from uuid import UUID
 
 from app.services.interaction_owner_matrix_service import load_interaction_owner_matrix
 
-_TIMEOUT_BOUNDARY_EXPECTED_REPLY_TYPES = frozenset({"service", "time", "name", "phone"})
 _SEMANTIC_ENTITY_TYPES_SPECIALIST = frozenset({"specialist", "master"})
 _SEMANTIC_EXPECTED_REPLY_TIME = "time"
 _SEMANTIC_EXPECTED_REPLY_NAME = "name"
@@ -103,38 +102,6 @@ class OwnerResolutionInput:
     interaction_state: dict[str, Any] | None
     booking_state: dict[str, Any] | None
     service_query: str | None
-
-
-@dataclass(frozen=True)
-class TimeoutOwnerBoundaryInput:
-    booking_active: bool
-    current_goal: str | None
-    matched_booking_followup_state: dict[str, Any] | None = None
-    matched_booking_followup_prompt: str | None = None
-    matched_booking_followup_expected: str | None = None
-    matched_booking_filled_slots: tuple[str, ...] = ()
-    slot_fill_followup_state: dict[str, Any] | None = None
-    slot_fill_followup_prompt: str | None = None
-    slot_fill_followup_expected: str | None = None
-    slot_fill_applied: tuple[str, ...] = ()
-    resume_contract_state: dict[str, Any] | None = None
-    resume_contract_prompt: str | None = None
-    resume_contract_expected: str | None = None
-
-
-@dataclass(frozen=True)
-class TimeoutOwnerBoundaryResolution:
-    source: str
-    execution_owner: str
-    reason_code: str
-    recovery: str
-    trace_decision: str
-    expected_reply_type: str
-    expected_reply_reason: str
-    prompt: str
-    booking_state: dict[str, Any]
-    filled_slots: tuple[str, ...]
-    missing_slot: str | None
 
 
 @dataclass(frozen=True)
@@ -526,120 +493,6 @@ def resolve_interaction_owner(payload: OwnerResolutionInput) -> OwnerResolution 
             bypass_service_clarify=bool(runtime_effects.get("bypass_service_clarify")),
         )
     return None
-
-
-def _build_timeout_owner_boundary_resolution(
-    *,
-    source: str,
-    booking_active: bool,
-    current_goal: str | None,
-    booking_state: dict[str, Any] | None,
-    prompt: str | None,
-    expected_reply_type: str | None,
-    filled_slots: Any,
-) -> TimeoutOwnerBoundaryResolution | None:
-    cleaned_prompt = _clean_text(prompt)
-    cleaned_expected_reply_type = _normalize_token(expected_reply_type)
-    cleaned_booking_state = _clean_mapping(booking_state)
-    if (
-        not cleaned_prompt
-        or cleaned_expected_reply_type not in _TIMEOUT_BOUNDARY_EXPECTED_REPLY_TYPES
-        or not isinstance(cleaned_booking_state, dict)
-    ):
-        return None
-    booking_active_effective = bool(
-        booking_active
-        or current_goal == "booking"
-        or cleaned_booking_state.get("active") is True
-    )
-    if not booking_active_effective:
-        return None
-
-    if source == "matched_expected_reply":
-        return TimeoutOwnerBoundaryResolution(
-            source=source,
-            execution_owner="timeout matched booking collect owner boundary",
-            reason_code="timeout_owner_boundary_matched_expected_reply",
-            recovery="timeout_owner_boundary_collect",
-            trace_decision="timeout_owner_boundary_collect",
-            expected_reply_type=cleaned_expected_reply_type,
-            expected_reply_reason="policy_core_timeout_owner_boundary",
-            prompt=cleaned_prompt,
-            booking_state=cleaned_booking_state,
-            filled_slots=_normalize_slot_tokens(filled_slots),
-            missing_slot=_clean_text(cleaned_booking_state.get("last_question")),
-        )
-    if source == "slot_fill_followup":
-        return TimeoutOwnerBoundaryResolution(
-            source=source,
-            execution_owner="timeout booking slot-fill owner boundary",
-            reason_code="timeout_owner_boundary_slot_fill_followup",
-            recovery="timeout_booking_slot_fill_followup",
-            trace_decision="timeout_booking_slot_fill_followup",
-            expected_reply_type=cleaned_expected_reply_type,
-            expected_reply_reason="policy_core_timeout_booking_slot_fill_followup",
-            prompt=cleaned_prompt,
-            booking_state=cleaned_booking_state,
-            filled_slots=_normalize_slot_tokens(filled_slots),
-            missing_slot=_clean_text(cleaned_booking_state.get("last_question")),
-        )
-    if source == "resume_contract":
-        return TimeoutOwnerBoundaryResolution(
-            source=source,
-            execution_owner="timeout booking resume contract boundary",
-            reason_code="timeout_owner_boundary_resume_contract",
-            recovery="timeout_owner_boundary_collect",
-            trace_decision="timeout_owner_boundary_collect",
-            expected_reply_type=cleaned_expected_reply_type,
-            expected_reply_reason="policy_core_timeout_owner_boundary",
-            prompt=cleaned_prompt,
-            booking_state=cleaned_booking_state,
-            filled_slots=_normalize_slot_tokens(filled_slots),
-            missing_slot=_clean_text(cleaned_booking_state.get("last_question")),
-        )
-    return None
-
-
-def resolve_timeout_owner_boundary(
-    payload: TimeoutOwnerBoundaryInput,
-) -> TimeoutOwnerBoundaryResolution | None:
-    for source, booking_state, prompt, expected_reply_type, filled_slots in (
-        (
-            "matched_expected_reply",
-            payload.matched_booking_followup_state,
-            payload.matched_booking_followup_prompt,
-            payload.matched_booking_followup_expected,
-            payload.matched_booking_filled_slots,
-        ),
-        (
-            "slot_fill_followup",
-            payload.slot_fill_followup_state,
-            payload.slot_fill_followup_prompt,
-            payload.slot_fill_followup_expected,
-            payload.slot_fill_applied,
-        ),
-        (
-            "resume_contract",
-            payload.resume_contract_state,
-            payload.resume_contract_prompt,
-            payload.resume_contract_expected,
-            (),
-        ),
-    ):
-        resolution = _build_timeout_owner_boundary_resolution(
-            source=source,
-            booking_active=payload.booking_active,
-            current_goal=payload.current_goal,
-            booking_state=booking_state,
-            prompt=prompt,
-            expected_reply_type=expected_reply_type,
-            filled_slots=filled_slots,
-        )
-        if resolution is not None:
-            return resolution
-    return None
-
-
 def build_owner_resolution_input(
     *,
     tool_action: str | None,
@@ -668,13 +521,10 @@ __all__ = [
     "OwnerResolution",
     "OwnerResolutionInput",
     "SemanticContractView",
-    "TimeoutOwnerBoundaryInput",
-    "TimeoutOwnerBoundaryResolution",
     "build_semantic_contract_view",
     "build_owner_resolution_input",
     "extract_specialist_preference",
     "resolve_interaction_owner",
-    "resolve_timeout_owner_boundary",
     "should_preserve_active_name_time_availability_followup_owner",
     "should_preserve_service_choice_specialist_availability_followup_owner",
     "should_preserve_specialist_availability_followup_owner",

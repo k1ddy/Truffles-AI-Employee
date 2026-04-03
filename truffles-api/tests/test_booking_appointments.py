@@ -19,6 +19,7 @@ from app.services.capabilities_runtime import RuntimeCapabilities, set_runtime_c
 pytest.importorskip("dateparser")
 from app.routers.webhook import _legacy as legacy
 from app.routers.webhook import booking as booking_router
+from app.routers.webhook import booking_compat as booking_compat_router
 
 
 def _make_query(result):
@@ -277,7 +278,7 @@ def test_resolve_booking_info_intents_prefers_info_class_over_intent_decomp():
     assert resolved == ["location", "pricing"]
 
 
-def test_resolve_booking_info_intents_uses_anchor_fallback_when_empty():
+def test_resolve_booking_info_intents_requires_owner_info_refs_when_empty():
     resolved = booking_router._resolve_booking_info_intents(
         intent_decomp_used=False,
         intent_decomp_set=set(),
@@ -289,10 +290,10 @@ def test_resolve_booking_info_intents_uses_anchor_fallback_when_empty():
         client_slug="demo_salon",
     )
 
-    assert "parking" in resolved
+    assert resolved == []
 
 
-def test_resolve_booking_info_intents_uses_duration_signal_when_empty():
+def test_resolve_booking_info_intents_requires_owner_duration_ref_when_empty():
     resolved = booking_router._resolve_booking_info_intents(
         intent_decomp_used=False,
         intent_decomp_set=set(),
@@ -304,13 +305,13 @@ def test_resolve_booking_info_intents_uses_duration_signal_when_empty():
         client_slug="demo_salon",
     )
 
-    assert "duration" in resolved
+    assert resolved == []
 
 
-def test_resolve_booking_info_intents_uses_duration_signal_with_expected_reply_shortcircuit():
+def test_resolve_booking_info_intents_uses_owner_duration_ref_with_expected_reply_shortcircuit():
     resolved = booking_router._resolve_booking_info_intents(
         intent_decomp_used=True,
-        intent_decomp_set={"other"},
+        intent_decomp_set={"duration"},
         info_class_intents=set(),
         expected_reply_type=legacy.EXPECTED_REPLY_TIME,
         booking_time_service_candidate=False,
@@ -322,10 +323,10 @@ def test_resolve_booking_info_intents_uses_duration_signal_with_expected_reply_s
     assert "duration" in resolved
 
 
-def test_resolve_booking_info_intents_uses_parking_signal_with_expected_reply_shortcircuit():
+def test_resolve_booking_info_intents_uses_owner_parking_ref_with_expected_reply_shortcircuit():
     resolved = booking_router._resolve_booking_info_intents(
         intent_decomp_used=True,
-        intent_decomp_set={"other"},
+        intent_decomp_set={"parking"},
         info_class_intents=set(),
         expected_reply_type=legacy.EXPECTED_REPLY_TIME,
         booking_time_service_candidate=False,
@@ -338,31 +339,31 @@ def test_resolve_booking_info_intents_uses_parking_signal_with_expected_reply_sh
 
 
 def test_looks_like_booking_reschedule_request_detects_change_time_phrase():
-    assert booking_router._looks_like_booking_reschedule_request(
+    assert booking_compat_router._looks_like_booking_reschedule_request(
         "Я хочу изменить время на утро."
     )
 
 
 def test_looks_like_booking_reschedule_request_detects_change_to_specific_time_phrase():
-    assert booking_router._looks_like_booking_reschedule_request(
+    assert booking_compat_router._looks_like_booking_reschedule_request(
         "Можно поменять на 16:00?"
     )
 
 
 def test_looks_like_booking_reschedule_request_detects_hypothetical_change_time_phrase():
-    assert booking_router._looks_like_booking_reschedule_request(
+    assert booking_compat_router._looks_like_booking_reschedule_request(
         "Что если я захочу изменить время?"
     )
 
 
 def test_looks_like_booking_reschedule_request_skips_regular_duration_question():
-    assert not booking_router._looks_like_booking_reschedule_request(
+    assert not booking_compat_router._looks_like_booking_reschedule_request(
         "Сколько длится процедура маникюра?"
     )
 
 
 def test_looks_like_booking_reschedule_request_detects_cancel_phrase():
-    assert booking_router._looks_like_booking_reschedule_request(
+    assert booking_compat_router._looks_like_booking_reschedule_request(
         "Можете сбросить мою запись?"
     )
 

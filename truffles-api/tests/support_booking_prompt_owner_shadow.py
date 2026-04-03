@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app.core.dialog_state_service import DialogStateService
 from app.core.semantic_decision import SemanticDecisionV1
+from app.routers.webhook import _legacy as legacy_router
 from app.routers.webhook import decision as decision_router
 from app.schemas.webhook import WebhookRequest
 from app.services.owner_resolver import (
@@ -80,7 +81,7 @@ def resolve_initial_booking_timeout_collect_candidate(
 ) -> dict[str, object] | None:
     if not isinstance(message_text, str) or not message_text.strip():
         return None
-    if not decision_router._is_booking_request(
+    if not legacy_router._is_booking_request(
         message_text,
         client_slug=payload.client_slug,
     ):
@@ -182,7 +183,7 @@ def _build_pending_booking_reactivation_seed(
     if not (
         has_resume_boundary
         or has_booking_memory
-        or decision_router._is_booking_request(
+        or legacy_router._is_booking_request(
             message_text,
             client_slug=payload.client_slug,
         )
@@ -243,7 +244,7 @@ def resolve_llm_booking_prompt_candidate(
     if not semantic_booking_state.get("service"):
         service_hint = None
         if fresh_initial_booking_entry:
-            service_hint = decision_router._extract_service_hint(
+            service_hint = legacy_router._extract_service_hint(
                 message_text,
                 payload.client_slug,
             )
@@ -282,8 +283,10 @@ def resolve_llm_booking_prompt_candidate(
         if loaded_dialog_state is not None
         else None
     )
-    runtime_semantic_contract = dialog_state_service._semantic_contract_from_frame(
-        semantic_frame
+    runtime_semantic_contract = (
+        dialog_state_service.project_runtime_semantic_contract(loaded_dialog_state)
+        if loaded_dialog_state is not None
+        else None
     )
     runtime_current_referents: dict[str, str] = {}
     if loaded_dialog_state is not None:

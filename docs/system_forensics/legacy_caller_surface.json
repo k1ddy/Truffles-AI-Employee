@@ -1,9 +1,9 @@
 {
   "schema_version": "v1",
   "status": "machine_readable_system_reproof_base",
-  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "active_block": "Consultant Core Block H.1B — File Replay Scenario Contract Materialization",
   "current_practical_truth": "r35f",
-  "scope_note": "Broader live-code reproof is complete repo-side. Router shadow surfaces remain outside live app runtime, and acceptance stays blocked pending replay and full human semantic audit.",
+  "scope_note": "Active docs now track post-booking-manage follow-up runtime closeout; legacy webhook surfaces keep exact final fates on live import/caller proof, the operational outbox seam is now deduped on one shared runtime boundary, and acceptance stays blocked pending Block H fresh replay plus full human semantic audit after the focused booking-manage blocker family proof.",
   "freeze_policy": {
     "policy": "Router shadow and legacy surfaces may not regain live semantic, continuity, fact-scope, boundary, or operational authority while the live-code reproof block is active and acceptance remains pending.",
     "frozen_adapter_only_modules": [
@@ -29,7 +29,18 @@
     "shadow_only_modules": [
       "truffles-api/app/routers/webhook/_legacy.py",
       "truffles-api/app/routers/webhook/decision.py"
-    ]
+    ],
+    "final_fate_set": [
+      "adapter_only",
+      "observer_only",
+      "unreachable",
+      "removed"
+    ],
+    "exact_module_fates": {
+      "truffles-api/app/routers/webhook/decision.py": "unreachable",
+      "truffles-api/app/routers/webhook/info.py": "unreachable",
+      "truffles-api/app/routers/webhook/context_manager.py": "unreachable"
+    }
   },
   "entries": [
     {
@@ -97,7 +108,8 @@
         "truffles-api/app/routers/webhook/__init__.py",
         "truffles-api/app/routers/webhook/context_manager.py"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "final_fate": "unreachable"
     },
     {
       "module_path": "truffles-api/app/routers/webhook/decision.py",
@@ -137,7 +149,8 @@
         "truffles-api/app/routers/webhook/_legacy.py",
         "truffles-api/app/routers/webhook/decision.py"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "final_fate": "unreachable"
     },
     {
       "module_path": "truffles-api/app/routers/webhook/info.py",
@@ -168,7 +181,8 @@
         "scripts/legacy_drain_closure_guard.py",
         "truffles-api/app/routers/webhook/info.py"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "final_fate": "unreachable"
     },
     {
       "module_path": "truffles-api/app/routers/webhook/response.py",

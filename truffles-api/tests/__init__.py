@@ -41,10 +41,7 @@ def build_test_policy_override_decision(
         entity_refs=entity_refs,
         pending_question=pending_question,
     )
-    meta: dict[str, Any] = {
-        "planner_source": "turn_planner",
-        "synthetic_policy_decision": True,
-    }
+    meta: dict[str, Any] = {"planner_source": "turn_planner"}
     for key in (
         "reason",
         "goal",

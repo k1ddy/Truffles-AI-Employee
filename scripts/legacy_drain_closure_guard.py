@@ -63,6 +63,49 @@ def _module_name_from_path(rel_path: str) -> str | None:
     return None
 
 
+def _resolve_import(current_module: str, module: str | None, level: int) -> str:
+    if level == 0:
+        return module or ""
+    parts = current_module.split(".")[:-1]
+    base = parts[: len(parts) - level + 1]
+    if module:
+        base.extend(module.split("."))
+    return ".".join(base)
+
+
+def _collect_importers(
+    *,
+    search_root: Path,
+    target_module: str,
+    target_member: str | None = None,
+) -> list[str]:
+    importers: list[str] = []
+    repo_root = search_root.parents[1]
+    for path in sorted(search_root.rglob("*.py")):
+        current_module = _module_name_from_path(str(path.relative_to(repo_root)))
+        if current_module is None:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        matched = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == target_module:
+                        matched = True
+                        break
+            elif isinstance(node, ast.ImportFrom):
+                resolved = _resolve_import(current_module, node.module, node.level)
+                if resolved == target_module:
+                    if target_member is None:
+                        matched = True
+                    elif any(alias.name == target_member for alias in node.names):
+                        matched = True
+            if matched:
+                importers.append(str(path.relative_to(repo_root)))
+                break
+    return importers
+
+
 def _iter_import_modules(tree: ast.AST) -> list[str]:
     modules: list[str] = []
     for node in ast.walk(tree):
@@ -82,9 +125,20 @@ def _validate_package_root(root: Path, config: dict[str, Any], violations: list[
     package_module = _module_name_from_path(str(config["package_root"]))
     assert package_module is not None
     top_level_modules = set(_top_level_import_modules(tree, package_module=package_module))
+    allowed_modules = set(config.get("package_root_allowed_eager_import_modules") or [])
     for module in config.get("package_root_forbidden_eager_import_modules", []):
         if module in top_level_modules:
             violations.append(f"{config['package_root']}: forbidden eager legacy import remains -> {module}")
+    unexpected_modules = sorted(top_level_modules - allowed_modules)
+    missing_allowed_modules = sorted(allowed_modules - top_level_modules)
+    if unexpected_modules:
+        violations.append(
+            f"{config['package_root']}: package-root adapter seam gained unexpected eager imports -> {unexpected_modules!r}"
+        )
+    if missing_allowed_modules:
+        violations.append(
+            f"{config['package_root']}: package-root adapter seam lost required eager imports -> {missing_allowed_modules!r}"
+        )
     if "def __getattr__(name: str):" not in source:
         violations.append(f"{config['package_root']}: missing __getattr__ lazy compatibility export gate")
     if "import_module(" not in source:
@@ -92,6 +146,8 @@ def _validate_package_root(root: Path, config: dict[str, Any], violations: list[
     for name in config.get("required_lazy_exports", []):
         if f'"{name}"' not in source and f"'{name}'" not in source:
             violations.append(f"{config['package_root']}: lazy export missing -> {name}")
+    if config.get("package_root_final_fate") != "adapter_only":
+        violations.append("docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml package_root_final_fate must remain adapter_only")
 
 
 def _validate_core_import_seam(root: Path, config: dict[str, Any], violations: list[str]) -> None:
@@ -159,6 +215,50 @@ def _validate_adapter_surfaces(root: Path, config: dict[str, Any], violations: l
                 violations.append(f"{rel}: adapter-only surface still contains touched-envelope token -> {token}")
 
 
+def _validate_surface_fates(root: Path, config: dict[str, Any], violations: list[str]) -> None:
+    allowed_fates = set(config.get("final_fate_set") or [])
+    app_root = root / "truffles-api" / "app"
+    runtime_roots = ("truffles-api/app/core/", "truffles-api/app/main.py")
+    for spec_name, spec in (config.get("surface_fates") or {}).items():
+        if not isinstance(spec, dict):
+            violations.append(f"surface_fates.{spec_name} must be a mapping")
+            continue
+        surface_path = str(spec.get("surface_path") or "")
+        final_fate = str(spec.get("final_fate") or "")
+        if final_fate not in allowed_fates:
+            violations.append(f"{surface_path}: final_fate must belong to {sorted(allowed_fates)!r}")
+            continue
+        module_name = _module_name_from_path(surface_path)
+        if module_name is None:
+            violations.append(f"{surface_path}: unsupported surface path for import proof")
+            continue
+        member_name = Path(surface_path).stem
+        direct_importers = _collect_importers(search_root=app_root, target_module=module_name)
+        via_package_importers = _collect_importers(
+            search_root=app_root,
+            target_module="app.routers.webhook",
+            target_member=member_name,
+        )
+        app_importers = sorted(set(direct_importers + via_package_importers))
+        expected_app_importers = list(spec.get("expected_app_importers") or [])
+        if app_importers != expected_app_importers:
+            violations.append(
+                f"{surface_path}: app importers drift -> expected {expected_app_importers!r}, got {app_importers!r}"
+            )
+        runtime_importers = [
+            rel for rel in app_importers if rel == runtime_roots[1] or rel.startswith(runtime_roots[0])
+        ]
+        expected_runtime_importers = list(spec.get("expected_runtime_importers") or [])
+        if runtime_importers != expected_runtime_importers:
+            violations.append(
+                f"{surface_path}: runtime importers drift -> expected {expected_runtime_importers!r}, got {runtime_importers!r}"
+            )
+        if final_fate == "unreachable" and runtime_importers:
+            violations.append(f"{surface_path}: unreachable surface regained runtime importers -> {runtime_importers!r}")
+        if final_fate == "adapter_only" and not expected_runtime_importers:
+            violations.append(f"{surface_path}: adapter_only fate must name its runtime importer seam explicitly")
+
+
 def _validate_registry(config: dict[str, Any], registry: dict[str, Any], violations: list[str]) -> None:
     if registry.get("active_block") != config.get("active_block"):
         violations.append(
@@ -221,6 +321,7 @@ def evaluate(root: Path, config: dict[str, Any], registry: dict[str, Any] | None
     _validate_package_root(root, config, violations)
     _validate_core_import_seam(root, config, violations)
     _validate_adapter_surfaces(root, config, violations)
+    _validate_surface_fates(root, config, violations)
     _validate_registry(config, resolved_registry, violations)
     _validate_lazy_exports_runtime(root, config, violations)
     return violations

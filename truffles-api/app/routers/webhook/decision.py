@@ -1,4 +1,4 @@
-"""Intent and decision helpers for webhook routing."""
+"""Legacy decision helper reservoir kept unreachable from the live runtime path."""
 
 from __future__ import annotations
 
@@ -77,7 +77,6 @@ from app.routers.webhook.booking import (
     _is_booking_slot_signal,
     _is_booking_time_service_decision,
     _is_datetime_grounded_for_prompt,
-    _looks_like_booking_reschedule_request,
     _match_expected_reply,
     _next_booking_prompt,
     _resolve_datetime_offline,
@@ -100,7 +99,6 @@ from app.routers.webhook.booking_runtime import (
     NAME_NOISE_TOKENS,
     NAME_PATTERN,
     _is_booking_cancel,
-    _matches_guest_policy_lexicon,
 )
 from app.routers.webhook.booking_signal_runtime import (
     BOOKING_INFO_QUESTION_TYPES,
@@ -113,13 +111,8 @@ from app.routers.webhook.booking_signal_runtime import (
     TIME_ONLY_AMPM_PATTERN,
     TIME_PATTERN,
     _collect_booking_request_lexicon,
-    _evaluate_booking_signal,
     _extract_datetime,
-    _extract_service_hint,
-    _has_booking_signal,
     _has_explicit_service_signal,
-    _is_booking_request,
-    _looks_like_time_only_request,
     _matches_booking_request_lexicon,
 )
 from app.routers.webhook.branch_selection import (
@@ -240,16 +233,10 @@ from app.routers.webhook.dedup import (
     should_process_debounced_message,
 )
 from app.routers.webhook.expected_reply_interrupt_runtime import (
-    _has_explicit_location_or_hours_request as _interrupt_runtime_has_explicit_location_or_hours_request,
-)
-from app.routers.webhook.expected_reply_interrupt_runtime import (
     _is_question_like_time_slot_constraint_candidate as _interrupt_runtime_is_question_like_time_slot_constraint_candidate,
 )
 from app.routers.webhook.expected_reply_interrupt_runtime import (
     _is_time_slot_constraint_candidate as _interrupt_runtime_is_time_slot_constraint_candidate,
-)
-from app.routers.webhook.expected_reply_interrupt_runtime import (
-    _looks_like_booking_verification_request as _interrupt_runtime_looks_like_booking_verification_request,
 )
 from app.routers.webhook.expected_reply_interrupt_runtime import (
     _should_block_expected_reply_by_info as _interrupt_runtime_should_block_expected_reply_by_info,
@@ -288,19 +275,10 @@ from app.routers.webhook.guards import (
 from app.routers.webhook.info import (
     _build_info_intent_reply,
     _count_anchor_hits,
-    _detect_info_class_intents,
     _extract_truth_gate_info_intents,
-    _handle_info_flow,
-    _handle_offline_info_class,
     _handle_truth_gate_fallback,
     _is_short_reply,
-    _looks_like_info_query,
-    _looks_like_services_overview_message,
     _tokenize_for_matching,
-)
-from app.routers.webhook.info_followup_runtime import (
-    _looks_like_carryover_followup,
-    _looks_like_hours_followup,
 )
 from app.routers.webhook.knowledge_runtime import (
     _DEFAULT_RAG_SCORES,
@@ -363,11 +341,8 @@ from app.routers.webhook.pending_runtime import (
     is_handover_status_question,
 )
 from app.routers.webhook.policy import (
-    _POLICY_HANDLERS,
     _detect_booking_cancel,
     _detect_llm_guard_topics,
-    _format_discounts_policy_reply,
-    _get_policy_handler,
     _get_policy_pack,
     _get_policy_type,
     _get_routing_policy,
@@ -375,10 +350,6 @@ from app.routers.webhook.policy import (
     _handle_policy_escalation_gate,
     _has_discount_policy_rules,
     _is_hygiene_context_text,
-    _looks_like_policy_topic,
-    _looks_like_promotions_request,
-    _pack_escalation_gate,
-    _pack_price_sidecar,
     _resolve_hard_law_sections,
     _should_escalate_to_pending,
     _should_run_booking_flow,
@@ -387,7 +358,6 @@ from app.routers.webhook.policy import (
 from app.routers.webhook.response import (
     _compose_fact_response,
     _ensure_rag_rewrite,
-    _handle_ai_response_action,
     _handle_consult_flow,
     _handle_llm_primary,
     _maybe_apply_consult_return,
@@ -417,7 +387,6 @@ from app.routers.webhook.runtime_primitives import (
     EXPECTED_REPLY_SERVICE,
     EXPECTED_REPLY_TIME,
     INFO_ANCHOR_GROUPS,
-    INFO_INTENT_PRIORITY_GENERIC,
     INFO_INTENT_PRIORITY_SERVICE,
     INFO_INTENTS,
     INFO_NON_SERVICE_INTENTS,
@@ -557,7 +526,6 @@ from app.services.intent_service import (
     POLICY_CORE_TIMEOUT_SECONDS,
     DomainIntent,
     Intent,
-    classify_domain_with_scores,
     classify_intent,
     extract_customer_name_hint_llm,
     extract_service_query_hint_llm,
@@ -567,7 +535,6 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
-    is_strong_out_of_domain,
     route_dialogue_controller,
     route_llm_policy_core,
     should_escalate,
@@ -604,31 +571,8 @@ from app.services.owner_resolver import (
 )
 from app.services.pack_runtime_service import (
     PackDecision,
-    _detect_promotion_intent,
-    _format_service_not_found_reply,
-    _has_duration_signal,
-    _has_parking_signal,
-    _has_price_signal,
-    _match_service,
     _matches_service_request_lexicon,
-    build_capability_question_contract,
-    build_evening_greeting,
-    build_quiet_hours_notice,
-    compose_multi_truth_reply,
-    format_reply_from_truth,
-    get_pack_decision,
-    get_pack_price_item,
-    get_pack_service_decision,
-    get_pack_service_hint,
     get_signal_lexicon_list,
-    get_system_lexicon_list,
-    has_walkin_without_booking_signal,
-    is_timeout_fact_fallback_candidate,
-    load_system_lexicons,
-    load_yaml_truth,
-    resolve_master_intent,
-    semantic_question_type,
-    semantic_service_match,
 )
 from app.services.pack_runtime_service import (
     _normalize_text as _normalize_service_text,
@@ -694,20 +638,8 @@ from app.services.state_service import (
     transition_state,
 )
 from app.services.telegram_service import TelegramService
-from app.services.timeout_owner_boundary_service import (
-    TimeoutOwnerBoundaryApplyOverrides,
-    TimeoutOwnerBoundaryInput,
-    TimeoutOwnerBoundaryRuntimeHooks,
-    TimeoutOwnerBoundaryRuntimeInput,
-    resolve_and_apply_timeout_owner_boundary,
-)
 from app.services.transport_adapter import TransportSendRequest, resolve_transport_adapter
 
-# Backward-compatible exports for tests and legacy imports.
-get_demo_salon_decision = get_pack_decision
-get_demo_salon_service_decision = get_pack_service_decision
-get_demo_salon_price_item = get_pack_price_item
-get_demo_salon_service_hint = get_pack_service_hint
 _should_run_demo_truth_gate = _should_run_truth_gate
 
 
@@ -740,189 +672,6 @@ def _has_lateness_signal(message_text: str | None, *, client_slug: str | None) -
     return any(marker in normalized for marker in ("опозд", "опаздыв", "задерж"))
 
 
-def _extract_pack_index_meta(client_config: dict | None) -> dict[str, Any] | None:
-    if not isinstance(client_config, dict):
-        return None
-    pack_index = client_config.get("pack_index")
-    if not isinstance(pack_index, dict):
-        return None
-    meta = _compact_signal_snapshot(
-        {
-            "schema_version": pack_index.get("schema_version"),
-            "hash": pack_index.get("hash"),
-            "version_id": pack_index.get("version_id"),
-            "compiled_at": pack_index.get("compiled_at"),
-            "source": pack_index.get("source"),
-        }
-    )
-    return meta or None
-
-
-def _extract_compiled_pack_meta(client_config: dict | None) -> dict[str, Any] | None:
-    if not isinstance(client_config, dict):
-        return None
-    compiled_pack = client_config.get("compiled_pack")
-    if not isinstance(compiled_pack, dict):
-        return None
-    meta = _compact_signal_snapshot(
-        {
-            "schema_version": compiled_pack.get("schema_version"),
-            "hash": compiled_pack.get("hash"),
-            "version_id": compiled_pack.get("version_id"),
-            "compiled_at": compiled_pack.get("compiled_at"),
-            "source": compiled_pack.get("source"),
-        }
-    )
-    return meta or None
-
-
-def _detect_fast_intent(
-    message_text: str,
-    *,
-    policy_type: str | None,
-    booking_wants_flow: bool,
-    bypass_domain_flows: bool,
-) -> PackDecision | None:
-    if not message_text or booking_wants_flow or bypass_domain_flows:
-        return None
-
-    if is_greeting_message(message_text):
-        return PackDecision(action="smalltalk", response=GREETING_RESPONSE, intent="greeting")
-    if is_thanks_message(message_text):
-        return PackDecision(action="smalltalk", response=THANKS_RESPONSE, intent="thanks")
-    if is_acknowledgement_message(message_text):
-        return PackDecision(
-            action="smalltalk",
-            response=ACKNOWLEDGEMENT_RESPONSE,
-            intent="ack",
-        )
-    return None
-
-
-def _detect_intent_signals(message_text: str, *, timing_context: dict | None = None) -> DecisionSignals:
-    intent_hint = None
-    if isinstance(timing_context, dict):
-        hinted = timing_context.get("short_intent_hint")
-        if isinstance(hinted, str):
-            try:
-                intent_hint = Intent(hinted)
-            except ValueError:
-                intent_hint = None
-
-    is_greeting = is_greeting_message(message_text)
-    is_thanks = is_thanks_message(message_text)
-    is_ack = is_acknowledgement_message(message_text)
-    is_low_signal = is_low_signal_message(message_text)
-    is_status_question = is_bot_status_question(message_text)
-    is_human_request = is_human_request_message(message_text)
-
-    if is_human_request:
-        intent = Intent.HUMAN_REQUEST
-        logger.info("Intent shortcut: human_request (lexicon)")
-    elif intent_hint == Intent.GREETING:
-        intent = Intent.GREETING
-        logger.info("Intent shortcut: greeting (llm hint)")
-    elif intent_hint == Intent.THANKS:
-        intent = Intent.THANKS
-        logger.info("Intent shortcut: thanks (llm hint)")
-    elif intent_hint == Intent.QUESTION:
-        intent = Intent.QUESTION
-        logger.info("Intent shortcut: question (llm hint)")
-    elif is_greeting:
-        intent = Intent.GREETING
-        logger.info("Intent shortcut: greeting")
-    elif is_thanks:
-        intent = Intent.THANKS
-        logger.info("Intent shortcut: thanks")
-    elif is_ack or is_low_signal:
-        intent = Intent.OTHER
-        logger.info("Intent shortcut: acknowledgement/low-signal -> other")
-    else:
-        intent = classify_intent(message_text, timing_context=timing_context)
-        logger.info(f"Intent classified: {intent.value}")
-
-    if intent_hint in {Intent.GREETING, Intent.THANKS, Intent.QUESTION} and intent != Intent.HUMAN_REQUEST:
-        is_greeting = intent_hint == Intent.GREETING
-        is_thanks = intent_hint == Intent.THANKS
-        is_ack = False
-        is_low_signal = False
-        is_status_question = False
-
-    return DecisionSignals(
-        intent=intent,
-        is_greeting=is_greeting,
-        is_thanks=is_thanks,
-        is_ack=is_ack,
-        is_low_signal=is_low_signal,
-        is_status_question=is_status_question,
-    )
-
-
-def _resolve_action(
-    *,
-    routing: dict[str, bool],
-    state: str,
-    signals: DecisionSignals,
-    is_pending_status_question: bool,
-    style_reference: bool,
-    in_domain_override: bool = False,
-    out_of_domain_signal: bool,
-    rag_confident: bool = False,
-    llm_first_firebreak: bool = False,
-) -> DecisionOutcome:
-    if routing["allow_bot_reply"] and (signals.is_greeting or signals.is_thanks):
-        return DecisionOutcome("smalltalk")
-    if routing["allow_bot_reply"] and state == ConversationState.PENDING.value and is_pending_status_question:
-        return DecisionOutcome("pending_status")
-    if routing["allow_bot_reply"] and signals.is_status_question:
-        return DecisionOutcome("bot_status")
-    if routing["allow_bot_reply"] and style_reference:
-        return DecisionOutcome("style_reference")
-    if routing["allow_bot_reply"] and in_domain_override:
-        return DecisionOutcome("ai_response")
-    firebreak_reasons = _llm_first_firebreak_semantic_reasons(
-        routing=routing,
-        signals=signals,
-        out_of_domain_signal=out_of_domain_signal,
-        rag_confident=rag_confident,
-        llm_first_firebreak=llm_first_firebreak,
-    )
-    if firebreak_reasons:
-        return DecisionOutcome("ai_response")
-    if routing["allow_bot_reply"] and (out_of_domain_signal or signals.is_low_signal) and not rag_confident:
-        return DecisionOutcome("out_of_domain")
-    if _should_escalate_to_pending(routing, signals.intent):
-        return DecisionOutcome("escalate")
-    if should_escalate(signals.intent) and not routing["allow_handover_create"]:
-        return DecisionOutcome("pending_escalation")
-    if is_rejection(signals.intent):
-        return DecisionOutcome("rejection")
-    if routing["allow_bot_reply"]:
-        return DecisionOutcome("ai_response")
-    return DecisionOutcome("unknown_state")
-
-
-def _llm_first_firebreak_semantic_reasons(
-    *,
-    routing: dict[str, bool],
-    signals: DecisionSignals,
-    out_of_domain_signal: bool,
-    rag_confident: bool,
-    llm_first_firebreak: bool,
-) -> list[str]:
-    if not llm_first_firebreak or not routing.get("allow_bot_reply", False):
-        return []
-
-    reasons: list[str] = []
-    if (out_of_domain_signal or signals.is_low_signal) and not rag_confident:
-        reasons.append("out_of_domain_signal" if out_of_domain_signal else "low_signal")
-    if _should_escalate_to_pending(routing, signals.intent):
-        reasons.append("escalate_to_pending_intent")
-    if should_escalate(signals.intent) and not routing.get("allow_handover_create", False):
-        reasons.append("pending_without_handover_create")
-    if is_rejection(signals.intent):
-        reasons.append("rejection_intent")
-    return reasons
 def _project_pending_question_evidence(
     dialog_state_service: DialogStateService,
     *,
@@ -1289,85 +1038,7 @@ def _apply_expected_reply_contract(
         expected_reply_reason=expected_reply_reason,
     )
     intent_queue = _get_intent_queue(context)
-    session_memory = _get_session_memory(context)
-    re_entry_required = _is_re_entry_required(context)
     memory_expected_reply_type = None
-    memory_pending_question_contract = dialog_state_service.project_session_memory_pending_question_contract(
-        session_memory
-    )
-    memory_expected_reply_reason = (
-        memory_pending_question_contract.get("reason")
-        if isinstance(memory_pending_question_contract, dict)
-        else None
-    )
-    if (
-        not expected_reply_type
-        and session_memory
-        and not re_entry_required
-        and not _is_session_memory_expired(session_memory, now)
-    ):
-        memory_active_goal = session_memory.get("active_goal")
-        last_question_type = (
-            memory_pending_question_contract.get("expected_reply_type")
-            if isinstance(memory_pending_question_contract, dict)
-            else None
-        )
-        is_short_reply = _is_short_reply(message_text)
-        if (
-            not is_short_reply
-            and last_question_type == EXPECTED_REPLY_TIME
-            and _extract_datetime(message_text)
-        ):
-            is_short_reply = True
-        if (
-            (not memory_active_goal or not current_goal or memory_active_goal == current_goal)
-            and last_question_type
-            in {
-                EXPECTED_REPLY_SERVICE,
-                EXPECTED_REPLY_TIME,
-                EXPECTED_REPLY_NAME,
-            }
-            and is_short_reply
-            and not _looks_like_info_query(message_text, client_slug=client_slug)
-            and not _looks_like_policy_topic(
-                message_text,
-                policy_type=policy_type,
-                policy_pack=policy_pack,
-            )
-        ):
-            expected_reply_type = last_question_type
-            memory_expected_reply_type = last_question_type
-            if not expected_reply_reason and memory_expected_reply_reason:
-                expected_reply_reason = memory_expected_reply_reason
-            active_pending_question_contract = _project_pending_question_evidence(
-                dialog_state_service,
-                contract=(
-                    memory_pending_question_contract
-                    if isinstance(memory_pending_question_contract, dict)
-                    else None
-                ),
-                expected_reply_type=last_question_type,
-                expected_reply_reason=memory_expected_reply_reason,
-            )
-            fallback_trace = {
-                "stage": "session_memory",
-                "decision": "expected_reply_fallback",
-                "expected_reply_type": last_question_type,
-                "expected_reply_reason": memory_expected_reply_reason,
-            }
-            if active_pending_question_contract:
-                fallback_trace["pending_question_contract"] = active_pending_question_contract
-            _record_decision_trace(
-                conversation,
-                fallback_trace,
-            )
-            if saved_message:
-                updates = {"session_memory_expected_reply": last_question_type}
-                if memory_expected_reply_reason:
-                    updates["session_memory_expected_reply_reason"] = memory_expected_reply_reason
-                if active_pending_question_contract:
-                    updates["session_memory_pending_question_contract"] = active_pending_question_contract
-                _update_message_decision_metadata(saved_message, updates)
 
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False
@@ -1423,63 +1094,6 @@ def _apply_expected_reply_contract(
                 "expected_reply_type": None,
                 "expected_reply_matched": False,
                 "expected_reply_bypassed": "human_request",
-                "session_memory_expected_reply_cleared": memory_cleared,
-            }
-            if active_pending_question_contract:
-                bypass_updates["pending_question_contract"] = active_pending_question_contract
-            _update_message_decision_metadata(saved_message, bypass_updates)
-        context = _get_conversation_context(conversation)
-        context_manager = _get_context_manager(context)
-        return ExpectedReplyState(
-            context=context,
-            context_manager=context_manager,
-            expected_reply_type=None,
-            intent_queue=_get_intent_queue(context),
-            expected_reply_matched=False,
-            expected_reply_shortcircuit=False,
-            expected_reply_blocked_by_info=False,
-            memory_expected_reply_type=memory_expected_reply_type,
-            current_goal=current_goal,
-        )
-    booking_verification_bypass = bool(
-        expected_reply_type
-        in {
-            EXPECTED_REPLY_SERVICE,
-            EXPECTED_REPLY_TIME,
-            EXPECTED_REPLY_NAME,
-        }
-        and message_text
-        and _looks_like_booking_verification_request(message_text)
-    )
-    if booking_verification_bypass:
-        context = _set_expected_reply_type(context, None)
-        context, memory_payload, memory_cleared = _clear_session_memory_expected_reply(
-            context,
-            expected_reply_type=expected_reply_type,
-            now=now,
-        )
-        _set_conversation_context(conversation, context)
-        bypass_trace = {
-            "stage": "question_contract",
-            "decision": "bypass",
-            "expected_reply_type": expected_reply_type,
-            "expected_reply_bypassed": "booking_verification",
-        }
-        if active_pending_question_contract:
-            bypass_trace["pending_question_contract"] = active_pending_question_contract
-        _record_decision_trace(conversation, bypass_trace)
-        if memory_cleared:
-            _record_session_memory_update(
-                conversation,
-                saved_message,
-                memory=memory_payload,
-                reason="expected_reply_bypass",
-            )
-        if saved_message:
-            bypass_updates = {
-                "expected_reply_type": None,
-                "expected_reply_matched": False,
-                "expected_reply_bypassed": "booking_verification",
                 "session_memory_expected_reply_cleared": memory_cleared,
             }
             if active_pending_question_contract:
@@ -2132,13 +1746,8 @@ def _run_intent_decomposition(
             }
         )
     )
-    direct_booking_request = bool(
-        message_text and _is_booking_request(message_text, client_slug=client_slug)
-    )
-    if booking_expected_reply_turn and message_text and _looks_like_info_query(
-        message_text,
-        client_slug=client_slug,
-    ):
+    direct_booking_request = bool(booking_signal or booking_slot_signal)
+    if booking_expected_reply_turn and expected_reply_blocked_by_info:
         booking_expected_reply_turn = False
     intent_decomp_skipped_reason = None
     intent_decomp_budget_required_ms = WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS
@@ -2375,29 +1984,12 @@ def _run_intent_decomposition(
         if intent_decomp_used
         else set()
     )
-    info_class_intents: set[str] = set()
+    info_class_intents: set[str] = (
+        set(intent_decomp_set & INFO_INTENTS) if intent_decomp_used else set()
+    )
     info_class_meta: dict[str, Any] = {}
-    if message_text:
-        info_class_intents, info_class_meta = _detect_info_class_intents(
-            message_text,
-            intent_decomp_set=intent_decomp_set,
-            client_slug=client_slug,
-        )
-        if _matches_guest_policy_lexicon(message_text, client_slug=client_slug):
-            if not isinstance(info_class_meta, dict):
-                info_class_meta = {}
-            info_signals = info_class_meta.get("info_signals")
-            if not isinstance(info_signals, dict):
-                info_signals = {}
-            info_signals["guest"] = True
-            info_class_meta["info_signals"] = info_signals
-    openai_key_missing = not _current_openai_api_key()
     if not info_class_intents and isinstance(class_carryover, dict):
-        use_carryover_intents = bool(
-            expected_reply_shortcircuit and current_goal != "booking"
-        )
-        if not use_carryover_intents and _looks_like_carryover_followup(message_text):
-            use_carryover_intents = True
+        use_carryover_intents = bool(expected_reply_shortcircuit and current_goal != "booking")
         if use_carryover_intents:
             carryover_intents = class_carryover.get("intents")
             if isinstance(carryover_intents, list):
@@ -2418,14 +2010,8 @@ def _run_intent_decomposition(
         if isinstance(info_class_meta, dict)
         else None
     )
-    guest_policy_signal = bool(
-        isinstance(info_signals, dict) and info_signals.get("guest")
-    )
-    carryover_followup = _looks_like_carryover_followup(message_text)
-    hours_followup = _looks_like_hours_followup(message_text)
-    expected_reply_followup = bool(
-        expected_reply_shortcircuit and current_goal != "booking"
-    )
+    guest_policy_signal = bool("guest_policy" in intent_decomp_set)
+    expected_reply_followup = bool(expected_reply_shortcircuit and current_goal != "booking")
     normalized_carryover = normalize_for_matching(message_text) if message_text else ""
     service_request_signal = bool(
         normalized_carryover
@@ -2440,72 +2026,36 @@ def _run_intent_decomposition(
             intent_decomp_payload=intent_decomp_payload,
         )
     )
-    guest_lexicon_hit = bool(
-        message_text
-        and client_slug
-        and _matches_guest_policy_lexicon(message_text, client_slug=client_slug)
-    )
-    if explicit_service_signal and guest_policy_signal and not guest_lexicon_hit:
-        guest_policy_signal = False
-        if isinstance(info_signals, dict):
-            info_signals["guest"] = False
-            info_class_meta["info_signals"] = info_signals
-    basic_info_message = bool(
-        {"location", "hours"} & info_class_intents
-        or (
-            isinstance(info_signals, dict)
-            and (info_signals.get("parking") or info_signals.get("guest"))
-        )
-    )
+    basic_info_message = bool({"location", "hours", "parking"} & info_class_intents)
     allow_service_carryover = bool(
-        (carryover_followup or expected_reply_followup)
+        expected_reply_followup
         and not basic_info_message
         and not service_request_signal
         and not explicit_service_signal
     )
-    short_noisy_followup = False
-    if (
-        openai_key_missing
-        and isinstance(class_carryover, dict)
-        and class_carryover.get("class") == "info_bundle"
-        and class_carryover.get("info_sections")
-        and message_text
-    ):
-        normalized = normalize_for_matching(message_text)
-        tokens = _tokenize_for_matching(normalized)
-        if tokens and len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
-            has_digits = any(ch.isdigit() for ch in message_text)
-            has_service_hint = bool(
-                get_pack_service_hint(message_text, client_slug=client_slug)
-            )
-            short_noisy_followup = not has_digits and "?" not in message_text and not has_service_hint
     preserve_info_carryover = bool(
-        (carryover_followup or hours_followup or (openai_key_missing and short_noisy_followup))
+        expected_reply_followup
         and not explicit_service_signal
         and isinstance(class_carryover, dict)
         and class_carryover.get("class") == "info_bundle"
         and class_carryover.get("info_sections")
     )
     if not allow_service_carryover:
-        force_keep_info_carryover = bool(
-            isinstance(class_carryover, dict)
-            and class_carryover.get("class") == "info_bundle"
-            and hours_followup
-        )
         existing_service_carryover = _get_service_carryover(
             context_manager, message_count=message_count
         )
         if (
             (basic_info_message or class_carryover or existing_service_carryover)
             and not preserve_info_carryover
-            and not force_keep_info_carryover
         ):
             if service_request_signal:
                 carryover_reason = "service_request"
             elif explicit_service_signal:
                 carryover_reason = "explicit_service"
             else:
-                carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
+                carryover_reason = (
+                    "basic_info_lock" if basic_info_message else "no_expected_reply_followup"
+                )
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -2522,7 +2072,7 @@ def _run_intent_decomposition(
                     "reason": carryover_reason,
                 },
             )
-        if not preserve_info_carryover and not force_keep_info_carryover:
+        if not preserve_info_carryover:
             class_carryover = None
     consult_interrupt_intents = (
         intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
@@ -2535,12 +2085,7 @@ def _run_intent_decomposition(
             or consult_context.get("questions")
         )
     )
-    consult_booking_signal = bool(booking_signal)
-    if not consult_booking_signal and message_text:
-        consult_booking_signal = _is_booking_request(
-            message_text,
-            client_slug=client_slug,
-        )
+    consult_booking_signal = bool(booking_signal or booking_slot_signal)
     if (
         consult_context_active
         and not consult_intent
@@ -2603,25 +2148,16 @@ def _run_intent_decomposition(
         and intent_decomp_set & SERVICE_CARRYOVER_INTENTS
         and allow_service_carryover
     ):
-        skip_service_carryover = False
-        if isinstance(class_carryover, dict) and _looks_like_hours_followup(message_text):
-            raw_sections = class_carryover.get("info_sections")
-            if isinstance(raw_sections, list):
-                for section in raw_sections:
-                    if isinstance(section, str) and section.strip().casefold() == "hours":
-                        skip_service_carryover = True
-                        break
-        if not skip_service_carryover:
-            context = _get_conversation_context(conversation)
-            context_manager = _get_context_manager(context)
-            carryover = _get_service_carryover(context_manager, message_count=message_count)
-            if carryover and isinstance(intent_decomp_payload, dict):
-                intent_decomp_payload = dict(intent_decomp_payload)
-                intent_decomp_payload["service_query"] = carryover["service_query"]
-                intent_decomp_payload["service_query_source"] = "context"
-                carryover_score = carryover.get("service_query_score")
-                if isinstance(carryover_score, (int, float)):
-                    intent_decomp_payload["service_query_score"] = carryover_score
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
+        carryover = _get_service_carryover(context_manager, message_count=message_count)
+        if carryover and isinstance(intent_decomp_payload, dict):
+            intent_decomp_payload = dict(intent_decomp_payload)
+            intent_decomp_payload["service_query"] = carryover["service_query"]
+            intent_decomp_payload["service_query_source"] = "context"
+            carryover_score = carryover.get("service_query_score")
+            if isinstance(carryover_score, (int, float)):
+                intent_decomp_payload["service_query_score"] = carryover_score
                 intent_decomp_service_query = carryover["service_query"]
                 service_query_score = (
                     float(carryover_score)
@@ -2866,477 +2402,6 @@ def _run_intent_decomposition(
         context_manager=context_manager,
         current_goal=current_goal,
     )
-
-
-def _build_router_state(
-    *,
-    routing: dict[str, bool],
-    bypass_domain_flows: bool,
-    message_text: str | None,
-    booking_wants_flow: bool,
-    expected_reply_shortcircuit: bool,
-    expected_reply_blocked_by_info: bool,
-    expected_reply_type: str | None,
-    class_carryover: dict | None,
-    client_slug: str | None,
-    client_config: dict | None,
-    timing_context: dict,
-    intent_decomp_set: set[str],
-    booking_signal: bool,
-    record_llm_budget_trace: Callable[[], None],
-) -> dict[str, Any]:
-    controller_signal_class = _resolve_controller_signal_class(
-        intent_decomp_set=intent_decomp_set,
-        booking_signal=booking_signal,
-    )
-    controller_state: dict[str, Any] | None = {
-        "used": False,
-        "confidence": 0.0,
-        "output": _build_controller_meta_output(error="skipped"),
-        "error": "skipped",
-        "fallback_reason": "skipped",
-        "signal_class": controller_signal_class,
-        "signal_match": False,
-        "used_reason": None,
-        "attempted": False,
-        "sla": None,
-    }
-    booking_interrupt_controller_eligible = bool(
-        booking_wants_flow and expected_reply_blocked_by_info
-    )
-    controller_should_attempt = bool(
-        routing["allow_bot_reply"]
-        and not bypass_domain_flows
-        and message_text
-        and (not booking_wants_flow or booking_interrupt_controller_eligible)
-        and not expected_reply_shortcircuit
-        and _current_openai_api_key()
-    )
-    controller_budget_remaining_ms = _remaining_pipeline_budget_ms(timing_context)
-    if (
-        controller_should_attempt
-        and controller_budget_remaining_ms is not None
-        and controller_budget_remaining_ms <= WEBHOOK_CONTROLLER_MIN_BUDGET_MS
-    ):
-        controller_should_attempt = False
-        controller_state["error"] = "budget_reserved"
-        controller_state["fallback_reason"] = "budget_reserved"
-        controller_state["used_reason"] = "budget_guard"
-        controller_state["budget_remaining_ms"] = round(controller_budget_remaining_ms, 2)
-        controller_state["budget_required_ms"] = round(WEBHOOK_CONTROLLER_MIN_BUDGET_MS, 2)
-        controller_state["output"] = _build_controller_meta_output(error="budget_exceeded")
-    if controller_should_attempt:
-        controller_state["attempted"] = True
-        controller_state["error"] = None
-        controller_state["fallback_reason"] = "skipped"
-        controller_result = route_dialogue_controller(
-            message_text,
-            carryover=class_carryover,
-            expected_reply_type=expected_reply_type,
-            client_slug=client_slug,
-            client_config=client_config,
-            timing_context=timing_context,
-        )
-        if isinstance(controller_result, dict) and controller_result.get("ok") is True:
-            controller_output = controller_result.get("payload")
-            if isinstance(controller_output, dict):
-                controller_state["output"] = _ensure_controller_output_meta(
-                    controller_output,
-                    error=None,
-                )
-                confidence = controller_output.get("confidence")
-                if isinstance(confidence, (int, float)):
-                    controller_state["confidence"] = float(confidence)
-            controller_class = controller_output.get("class")
-            normalized_class = (
-                _normalize_class_name(controller_class)
-                if isinstance(controller_class, str) and controller_class.strip()
-                else None
-            )
-            signal_match = bool(controller_signal_class and normalized_class == controller_signal_class)
-            controller_state["signal_match"] = signal_match
-            if normalized_class:
-                controller_state["used"] = True
-                controller_state["used_reason"] = "controller"
-                controller_state["fallback_reason"] = None
-            else:
-                controller_state["used"] = False
-                controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
-                    error="invalid_class"
-                )
-        else:
-            controller_state["error"] = (
-                controller_result.get("error")
-                if isinstance(controller_result, dict)
-                else "controller_failed"
-            )
-            controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
-                error=controller_state["error"]
-            )
-            controller_state["confidence"] = 0.0
-            controller_output = controller_result.get("payload") if isinstance(controller_result, dict) else None
-            if isinstance(controller_output, dict):
-                controller_state["output"] = _ensure_controller_output_meta(
-                    controller_output, error=controller_state["error"]
-                )
-            else:
-                controller_state["output"] = _build_controller_meta_output(
-                    error=controller_state["error"]
-                )
-
-    record_llm_budget_trace()
-    if isinstance(controller_state, dict):
-        controller_output = controller_state.get("output")
-        if isinstance(controller_output, dict):
-            controller_output = _ensure_controller_output_meta(
-                controller_output, error=controller_state.get("error")
-            )
-            controller_state["output"] = controller_output
-            controller_error_value = controller_output.get("controller_error")
-        else:
-            controller_state["output"] = _build_controller_meta_output(
-                error=str(controller_state.get("error") or "controller_failed")
-            )
-            controller_error_value = controller_state["output"].get("controller_error")
-        controller_timeout = (
-            isinstance(controller_error_value, str) and controller_error_value == "timeout"
-        )
-        controller_fallback_reason = controller_state.get("fallback_reason")
-        if (
-            isinstance(controller_fallback_reason, str)
-            and controller_fallback_reason.strip().casefold() == "low_confidence"
-        ):
-            controller_state["fallback_reason"] = None
-            controller_fallback_reason = None
-        controller_fallback = controller_fallback_reason not in (None, "skipped")
-        controller_state["timeout"] = controller_timeout
-        controller_state["fallback"] = controller_fallback
-        controller_state["sla"] = _update_router_sla(  # reuse SLA tracker
-            attempted=bool(controller_state.get("attempted")),
-            fallback=bool(controller_fallback),
-            timeout=bool(controller_timeout),
-        )
-    return controller_state
-
-
-def _run_class_router_stage(
-    *,
-    conversation: Conversation,
-    saved_message: Message | None,
-    message_text: str | None,
-    client_slug: str | None,
-    client_config: dict | None,
-    remote_jid: str | None,
-    timing_context: dict | None,
-    info_class_intents: set[str],
-    info_class_meta: dict[str, Any],
-    booking_signal: bool,
-    class_carryover: dict | None,
-    router_state: dict | None,
-    intent_decomp_payload: dict[str, Any] | None,
-    expected_reply_shortcircuit: bool,
-    log_timing: Callable[[str, float, dict | None], None],
-) -> IntentRoutingState:
-    intent_t0 = time.monotonic()
-    decision_text = _normalize_message_text(message_text)
-    signals = _detect_intent_signals(decision_text, timing_context=timing_context)
-    intent = signals.intent
-    intent_contract, intent_error = build_intent_contract(signals, intent_decomp_payload)
-    _record_decision_trace(
-        conversation,
-        {
-            "stage": "contract",
-            "decision": "intent",
-            "contract_ok": intent_error is None,
-            "contract_error": intent_error,
-            "contract": intent_contract,
-        },
-    )
-
-    domain_intent = DomainIntent.UNKNOWN
-    domain_in_score = 0.0
-    domain_out_score = 0.0
-    domain_meta: dict = {}
-    if (
-        conversation.state == ConversationState.BOT_ACTIVE.value
-        and not (signals.is_greeting or signals.is_thanks or signals.is_ack or signals.is_low_signal)
-        and not signals.is_status_question
-    ):
-        domain_intent, domain_in_score, domain_out_score, domain_meta = classify_domain_with_scores(
-            message_text, client_config
-        )
-        log_scores = _is_env_enabled(
-            os.environ.get("DOMAIN_ROUTER_LOG_SCORES"), default=False
-        )
-        if log_scores and (domain_intent != DomainIntent.UNKNOWN or max(domain_in_score, domain_out_score) >= 0.45):
-            logger.info(
-                "Domain scores",
-                extra={
-                    "context": {
-                        "client_slug": client_slug,
-                        "remote_jid": remote_jid,
-                        "intent": intent.value,
-                        "domain_intent": domain_intent.value,
-                        "in_score": round(domain_in_score, 4),
-                        "out_score": round(domain_out_score, 4),
-                        "in_threshold": domain_meta.get("in_threshold"),
-                        "out_threshold": domain_meta.get("out_threshold"),
-                        "margin": domain_meta.get("margin"),
-                        "out_hits": domain_meta.get("out_hits"),
-                        "strict_in_hits": domain_meta.get("strict_in_hits"),
-                        "matched_in": domain_meta.get("matched_in"),
-                        "matched_out": domain_meta.get("matched_out"),
-                        "matched_strict_in": domain_meta.get("matched_strict_in"),
-                        "anchors_in": domain_meta.get("anchors_in"),
-                        "anchors_out": domain_meta.get("anchors_out"),
-                        "strict_in_anchors": domain_meta.get("strict_in_anchors"),
-                        "message_len": len(message_text),
-                        "message_preview": message_text[:80],
-                    }
-                },
-            )
-
-    domain_out_hits = int(domain_meta.get("out_hits") or 0)
-    domain_strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
-    explicit_service_signal = _has_explicit_service_signal(
-        message_text,
-        client_slug=client_slug,
-        intent_decomp_payload=intent_decomp_payload,
-    )
-    class_router_result = _resolve_class_router_result(
-        info_intents=info_class_intents,
-        info_meta=info_class_meta,
-        booking_signal=booking_signal,
-        class_carryover=class_carryover,
-        domain_intent=domain_intent,
-        domain_meta=domain_meta,
-        router_state=router_state,
-        explicit_service_signal=explicit_service_signal,
-    )
-    out_of_domain_signal = class_router_result["out_of_domain_signal"]
-    in_signals = class_router_result.get("in_signals") or []
-    if not in_signals and message_text and not expected_reply_shortcircuit:
-        fallback_info_intents, fallback_info_meta = _detect_info_class_intents(
-            message_text,
-            intent_decomp_set=set(),
-            client_slug=client_slug,
-        )
-        if fallback_info_intents:
-            class_router_result = _resolve_class_router_result(
-                info_intents=fallback_info_intents,
-                info_meta=fallback_info_meta,
-                booking_signal=booking_signal,
-                class_carryover=class_carryover,
-                domain_intent=domain_intent,
-                domain_meta=domain_meta,
-                router_state=router_state,
-                explicit_service_signal=explicit_service_signal,
-            )
-            out_of_domain_signal = class_router_result["out_of_domain_signal"]
-            in_signals = class_router_result.get("in_signals") or []
-    controller_booking_hint = False
-    controller_meta_hint = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
-    controller_output_hint = (
-        controller_meta_hint.get("output") if isinstance(controller_meta_hint, dict) else None
-    )
-    if isinstance(controller_output_hint, dict):
-        controller_goal_hint = controller_output_hint.get("goal")
-        controller_class_hint = controller_output_hint.get("class")
-        controller_booking_hint = (
-            isinstance(controller_goal_hint, str)
-            and controller_goal_hint.strip().casefold() in {"booking", "reschedule", "cancel_request"}
-        ) or (
-            isinstance(controller_class_hint, str)
-            and controller_class_hint.strip().casefold() == "booking"
-        )
-    if (
-        conversation.state == ConversationState.BOT_ACTIVE.value
-        and intent == Intent.OTHER
-        and not expected_reply_shortcircuit
-        and not in_signals
-        and not out_of_domain_signal
-        and not controller_booking_hint
-    ):
-        out_of_domain_signal = True
-        out_signals = list(class_router_result.get("out_signals") or [])
-        if "intent_other" not in out_signals:
-            out_signals.append("intent_other")
-        class_router_result["out_signals"] = out_signals
-        classes = list(class_router_result.get("classes") or [])
-        if "out_of_domain" not in classes:
-            classes.append("out_of_domain")
-        class_router_result["classes"] = classes
-        class_router_result["out_of_domain_signal"] = True
-    log_timing(
-        "intent_ms",
-        (time.monotonic() - intent_t0) * 1000,
-        {
-            "intent": intent.value,
-            "domain_intent": domain_intent.value,
-            "out_of_domain_signal": out_of_domain_signal,
-            "out_hits": domain_out_hits,
-            "strict_in_hits": domain_strict_in_hits,
-            "class_router": class_router_result,
-        },
-    )
-
-    router_meta = _set_router_observability(
-        saved_message,
-        eligible=not expected_reply_shortcircuit,
-        reason="expected_reply_shortcircuit" if expected_reply_shortcircuit else "none",
-    )
-    controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
-    controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
-    controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
-    controller_fallback = bool(controller_meta.get("fallback")) if isinstance(controller_meta, dict) else False
-    controller_low_confidence = (
-        bool(controller_meta.get("low_confidence")) if isinstance(controller_meta, dict) else False
-    )
-    controller_used_reason = (
-        controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None
-    )
-    controller_confidence = (
-        controller_meta.get("confidence") if isinstance(controller_meta, dict) else None
-    )
-    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
-    controller_goal = controller_meta.get("goal") if isinstance(controller_meta, dict) else None
-    trace_payload = {
-        "stage": "class_router",
-        "classes": class_router_result.get("classes"),
-        "intents": class_router_result.get("intents"),
-        "carryover_intents": class_router_result.get("carryover_intents"),
-        "in_signals": class_router_result.get("in_signals"),
-        "out_signals": class_router_result.get("out_signals"),
-        "anchors_in_hits": class_router_result.get("anchors_in_hits"),
-        "anchors_out_hits": class_router_result.get("anchors_out_hits"),
-        "out_of_domain_signal": out_of_domain_signal,
-        "explicit_service_signal": explicit_service_signal,
-        "carryover_class": class_router_result.get("carryover_class"),
-        "carryover_info_sections": class_router_result.get("carryover_info_sections"),
-        "router_fallback_reason": class_router_result.get("router_fallback_reason"),
-        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
-        "router": class_router_result.get("router"),
-        "controller": controller_meta,
-        "controller_used": controller_used,
-        "controller_attempted": controller_attempted,
-        "controller_fallback": controller_fallback,
-        "controller_low_confidence": controller_low_confidence,
-        "controller_used_reason": controller_used_reason,
-        "controller_confidence": controller_confidence,
-        "controller_error": controller_error,
-        "controller_goal": controller_goal,
-    }
-    trace_payload.update(router_meta)
-    _record_decision_trace(conversation, trace_payload)
-    if saved_message:
-        _update_message_decision_metadata(
-            saved_message,
-            {
-                "class_router": class_router_result,
-                "carryover_class": class_router_result.get("carryover_class"),
-                "router_fallback_reason": class_router_result.get("router_fallback_reason"),
-                "controller_used": controller_used,
-                "controller_attempted": controller_attempted,
-                "controller_fallback": controller_fallback,
-                "controller_low_confidence": controller_low_confidence,
-                "controller_used_reason": controller_used_reason,
-                "controller_confidence": controller_confidence,
-                "controller_error": controller_error,
-                "controller_goal": controller_goal,
-                "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
-            },
-        )
-        intent_value = getattr(signals.intent, "value", None)
-        domain_snapshot = _compact_signal_snapshot(
-            {
-                "intent": getattr(domain_intent, "value", None),
-                "in_score": domain_in_score,
-                "out_score": domain_out_score,
-                "in_hits": domain_meta.get("in_hits"),
-                "out_hits": domain_meta.get("out_hits"),
-                "strict_in_hits": domain_meta.get("strict_in_hits"),
-                "matched_in": domain_meta.get("matched_in"),
-                "matched_out": domain_meta.get("matched_out"),
-                "matched_strict_in": domain_meta.get("matched_strict_in"),
-                "in_threshold": domain_meta.get("in_threshold"),
-                "out_threshold": domain_meta.get("out_threshold"),
-                "margin": domain_meta.get("margin"),
-                "in_hit_threshold": domain_meta.get("in_hit_threshold"),
-                "out_hit_threshold": domain_meta.get("out_hit_threshold"),
-                "strict_in_hit_threshold": domain_meta.get("strict_in_hit_threshold"),
-                "anchors_in": domain_meta.get("anchors_in"),
-                "anchors_out": domain_meta.get("anchors_out"),
-                "strict_in_anchors": domain_meta.get("strict_in_anchors"),
-            }
-        )
-        controller_snapshot = _compact_signal_snapshot(
-            {
-                "used": controller_used,
-                "attempted": controller_attempted,
-                "fallback": controller_fallback,
-                "low_confidence": controller_low_confidence,
-                "confidence": controller_confidence,
-                "goal": controller_goal,
-                "error": controller_error,
-                "fallback_reason": class_router_result.get("controller_fallback_reason"),
-            }
-        )
-        class_router_snapshot = _compact_signal_snapshot(
-            {
-                "classes": class_router_result.get("classes"),
-                "intents": class_router_result.get("intents"),
-                "in_signals": class_router_result.get("in_signals"),
-                "out_signals": class_router_result.get("out_signals"),
-                "explicit_service_signal": explicit_service_signal,
-                "out_of_domain_signal": out_of_domain_signal,
-                "router_fallback_reason": class_router_result.get("router_fallback_reason"),
-                "controller": controller_snapshot or None,
-            }
-        )
-        signal_snapshot = _compact_signal_snapshot(
-            {
-                "intent_signals": _compact_signal_snapshot(
-                    {
-                        "intent": intent_value,
-                        "is_greeting": signals.is_greeting,
-                        "is_thanks": signals.is_thanks,
-                        "is_ack": signals.is_ack,
-                        "is_low_signal": signals.is_low_signal,
-                        "is_status_question": signals.is_status_question,
-                    }
-                ),
-                "domain_router": domain_snapshot,
-                "class_router": class_router_snapshot,
-                "pack_index": _extract_pack_index_meta(client_config),
-                "compiled_pack": _extract_compiled_pack_meta(client_config),
-            }
-        )
-        _update_message_signal_snapshot(saved_message, signal_snapshot)
-
-    _record_decision_trace(
-        conversation,
-        {
-            "stage": "intent",
-            "decision": intent.value,
-            "state": conversation.state,
-            "domain_intent": domain_intent.value,
-            "out_of_domain_signal": out_of_domain_signal,
-            "rag_confident": False,
-            "out_hits": domain_out_hits,
-            "strict_in_hits": domain_strict_in_hits,
-            "info_intents": sorted(info_class_intents),
-        },
-    )
-
-    return IntentRoutingState(
-        signals=signals,
-        intent=intent,
-        domain_intent=domain_intent,
-        domain_meta=domain_meta,
-        class_router_result=class_router_result,
-        out_of_domain_signal=out_of_domain_signal,
-    )
-
 # Legacy webhook orchestrator + helpers moved from _py.
 
 logger = get_logger("webhook")
@@ -3374,7 +2439,6 @@ ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
 WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 18000
 WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_DEFAULT_MS = 4500.0
 WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS = 2200.0
-WEBHOOK_CONTROLLER_MIN_BUDGET_DEFAULT_MS = 2600.0
 WEBHOOK_SECONDARY_LLM_MIN_BUDGET_DEFAULT_MS = 1200.0
 
 
@@ -3411,10 +2475,6 @@ WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_MS = _get_positive_float_env(
 WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS = _get_positive_float_env(
     "WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS",
     WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS,
-)
-WEBHOOK_CONTROLLER_MIN_BUDGET_MS = _get_positive_float_env(
-    "WEBHOOK_CONTROLLER_MIN_BUDGET_MS",
-    WEBHOOK_CONTROLLER_MIN_BUDGET_DEFAULT_MS,
 )
 WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS = _get_positive_float_env(
     "WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS",
@@ -3915,6 +2975,8 @@ def _match_expected_reply_candidates(
     message_text: str,
     client_slug: str | None,
 ) -> tuple[bool, str | None, list[str]]:
+    if expected_reply_type == EXPECTED_REPLY_SERVICE:
+        return False, None, []
     matched, value, inner_flags = _match_expected_reply(
         expected_reply_type=expected_reply_type,
         message_text=message_text,
@@ -4234,155 +3296,6 @@ def _has_timeout_slot_question_info_lock_surface(
     return True
 
 
-def _is_timeout_pending_time_slot_question(
-    *,
-    message_text: str | None,
-    client_slug: str | None,
-    expected_reply_type: str | None,
-    expected_reply_matched: bool | None,
-    expected_reply_blocked_by_info: bool,
-    booking_service: str | None,
-    intent_decomp_payload: dict[str, Any] | None,
-    now: datetime,
-) -> bool:
-    if (
-        expected_reply_type != EXPECTED_REPLY_TIME
-        or not isinstance(message_text, str)
-        or not message_text.strip()
-        or expected_reply_matched is True
-        or not expected_reply_blocked_by_info
-    ):
-        return False
-    normalized_message = normalize_for_matching(message_text)
-    if not normalized_message:
-        return False
-    time_preference_statement = _looks_like_time_preference_statement(
-        message_text,
-        normalized_text=normalized_message,
-    )
-    question_like = "?" in message_text
-    if not question_like:
-        tokens = normalized_message.split()
-        if tokens:
-            question_like = any(tokens[0].startswith(prefix) for prefix in QUESTION_WORD_PREFIXES)
-    if not question_like and not time_preference_statement:
-        return False
-    time_only_request = _looks_like_time_only_request(message_text)
-    # Keep the first-time requested-slot row alive when the question is phrased
-    # as "в какое время..." and still carries pending-slot markers.
-    if time_only_request and not _has_pending_time_question_marker(normalized_message):
-        return False
-    if _validate_expected_reply_value(
-        expected_reply_type=expected_reply_type,
-        value=message_text,
-        client_slug=client_slug,
-    ):
-        return False
-    normalized_service_message = _normalize_service_text(message_text)
-    if _has_price_signal(normalized_service_message, message_text):
-        return False
-    if (
-        _has_duration_signal(normalized_service_message, message_text)
-        and not time_preference_statement
-    ):
-        return False
-    if _has_explicit_location_or_hours_request(
-        message_text,
-        client_slug=client_slug,
-        strict=True,
-    ):
-        return False
-    if _is_style_reference_request(message_text, has_media=False):
-        return False
-    if _looks_like_booking_verification_request(message_text):
-        return False
-    if _looks_like_booking_reschedule_request(
-        message_text,
-        client_slug=client_slug,
-    ):
-        return False
-    try:
-        if _extract_datetime(
-            message_text,
-            client_slug=client_slug,
-            relative_base=now,
-        ):
-            return False
-    except TypeError:
-        if _extract_datetime(message_text, client_slug=client_slug):
-            return False
-    master_resolution = resolve_master_intent(
-        message_text=message_text,
-        client_slug=client_slug,
-        service_query=booking_service,
-        intent_decomp=intent_decomp_payload,
-    )
-    if master_resolution.explicit:
-        return False
-    return bool(
-        time_preference_statement
-        or
-        _has_daypart_stem(normalized_message)
-        or _has_pending_time_question_marker(normalized_message)
-    )
-
-
-def _is_timeout_master_info_interrupt_candidate(
-    *,
-    message_text: str | None,
-    client_slug: str | None,
-    expected_reply_type: str | None,
-    expected_reply_matched: bool | None,
-    expected_reply_blocked_by_info: bool,
-    booking_service: str | None,
-    intent_decomp_payload: dict[str, Any] | None,
-) -> bool:
-    if (
-        expected_reply_type != EXPECTED_REPLY_NAME
-        or not isinstance(message_text, str)
-        or not message_text.strip()
-        or expected_reply_matched is True
-        or not expected_reply_blocked_by_info
-    ):
-        return False
-    master_resolution = resolve_master_intent(
-        message_text=message_text,
-        client_slug=client_slug,
-        service_query=booking_service,
-        intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
-        force_master_intent=False,
-    )
-    return bool(master_resolution.explicit)
-
-
-def _is_timeout_active_time_specialist_interrupt_candidate(
-    *,
-    message_text: str | None,
-    client_slug: str | None,
-    expected_reply_type: str | None,
-    expected_reply_matched: bool | None,
-    expected_reply_blocked_by_info: bool,
-    booking_service: str | None,
-    intent_decomp_payload: dict[str, Any] | None,
-) -> bool:
-    if (
-        expected_reply_type != EXPECTED_REPLY_TIME
-        or not isinstance(message_text, str)
-        or not message_text.strip()
-        or expected_reply_matched is True
-        or not expected_reply_blocked_by_info
-    ):
-        return False
-    master_resolution = resolve_master_intent(
-        message_text=message_text,
-        client_slug=client_slug,
-        service_query=booking_service,
-        intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
-        force_master_intent=False,
-    )
-    return bool(master_resolution.explicit)
-
-
 TOOL_INFO_SECTION_MAP = {
     "catalog.location": ["location"],
     "catalog.portfolio": ["portfolio"],
@@ -4546,65 +3459,6 @@ def _is_booking_verification_handoff_intent(policy_intent: str | None, policy_to
     if tool_action == "calendar.book_slot" and intent in {"confirm_booking", "booking_confirmation"}:
         return True
     return False
-
-
-def _looks_like_booking_verification_request(message_text: str | None) -> bool:
-    return _interrupt_runtime_looks_like_booking_verification_request(message_text)
-
-
-def _looks_like_promo_code_request(message_text: str | None, *, client_slug: str | None = None) -> bool:
-    if not message_text:
-        return False
-    normalized = _normalize_service_text(message_text).replace("-", " ")
-    if not normalized:
-        return False
-    promo_code_terms = get_signal_lexicon_list(client_slug, "promotion_promo_code_terms")
-    fallback_terms = (
-        "промокод",
-        "промо код",
-        "promo code",
-        "promo code",
-    )
-    terms = [
-        token.strip().casefold()
-        for token in [*(promo_code_terms or []), *fallback_terms]
-        if isinstance(token, str) and token.strip()
-    ]
-    return any(token in normalized for token in terms)
-
-
-def _format_discounts_reply_for_message(
-    *,
-    message_text: str | None,
-    policy_pack: dict | None,
-    policy_type: str | None,
-    client_slug: str | None = None,
-    promo_code_request: bool | None = None,
-) -> str | None:
-    reply = _format_discounts_policy_reply(
-        policy_pack=policy_pack,
-        policy_type=policy_type,
-    )
-    if not (isinstance(reply, str) and reply.strip()):
-        return None
-    if promo_code_request is None:
-        promo_code_request = _looks_like_promo_code_request(
-            message_text,
-            client_slug=client_slug,
-        )
-    if not promo_code_request:
-        return reply
-    discounts_policy = policy_pack.get("discounts") if isinstance(policy_pack, dict) else None
-    promo_code = None
-    if isinstance(discounts_policy, dict):
-        for key in ("promo_code", "promoCode", "special_promo_code", "code"):
-            raw = discounts_policy.get(key)
-            if isinstance(raw, str) and raw.strip():
-                promo_code = raw.strip()
-                break
-    if promo_code:
-        return f"Сейчас действует промокод {promo_code}. {reply}"
-    return f"Специальный промокод в правилах не указан. {reply}"
 
 
 def _resolve_policy_check_confirm_mode(policy_intent: str | None) -> str | None:
@@ -5349,28 +4203,6 @@ def _derive_policy_info_refs(
         if normalized_ref:
             _append_ref(normalized_ref)
 
-    if isinstance(message_text, str) and message_text.strip():
-        fallback_intents, _ = _detect_info_class_intents(
-            message_text,
-            intent_decomp_set=set(),
-            client_slug=client_slug,
-            service_query=service_query,
-        )
-
-        # Always keep fallback info refs deterministic to avoid cross-process drift.
-        fallback_refs = sorted(
-            (ref for ref in fallback_intents if ref in INFO_INTENTS),
-            key=lambda ref: (
-                INFO_INTENT_PRIORITY_GENERIC.index(ref)
-                if ref in INFO_INTENT_PRIORITY_GENERIC
-                else len(INFO_INTENT_PRIORITY_GENERIC),
-                ref,
-            ),
-        )
-
-        for ref in fallback_refs:
-            _append_ref(ref)
-
     return derived
 
 
@@ -5483,7 +4315,6 @@ def _resolve_policy_collect_interrupt_arbitration(
         policy_pending_question_act=policy_pending_question_act,
         policy_pending_question_target=policy_pending_question_target,
         policy_active_question_relation=policy_active_question_relation,
-        message_text=message_text,
         info_refs=info_refs,
     ):
         return policy_tool_action, [], None
@@ -5554,9 +4385,6 @@ def _resolve_active_time_collect_service_info_interrupt_query(
     if not effective_service_query and isinstance(booking_state, dict):
         effective_service_query = _clean(booking_state.get("service"))
     if not effective_service_query:
-        return None
-
-    if not _looks_like_services_overview_message(message_text, client_slug=client_slug):
         return None
 
     return effective_service_query
@@ -5921,7 +4749,6 @@ def _should_admit_active_time_duration_info_interrupt(
     policy_pending_question_act: str | None,
     policy_pending_question_target: str | None,
     policy_active_question_relation: str | None,
-    message_text: str | None,
     info_refs: list[str] | None,
 ) -> bool:
     if not _should_preserve_active_time_slot_question_owner(
@@ -5943,23 +4770,7 @@ def _should_admit_active_time_duration_info_interrupt(
         if isinstance(policy_capability, str) and policy_capability.strip()
         else None
     )
-    if normalized_capability != "duration":
-        if not isinstance(message_text, str) or not message_text.strip():
-            return False
-        normalized_service_message = _normalize_service_text(message_text)
-        if not _has_duration_signal(normalized_service_message, message_text):
-            return False
-    normalized_message = (
-        normalize_for_matching(message_text)
-        if isinstance(message_text, str) and message_text.strip()
-        else None
-    )
-    if normalized_message and _looks_like_time_preference_statement(
-        message_text,
-        normalized_text=normalized_message,
-    ):
-        return False
-    return True
+    return normalized_capability in {None, "", "duration"}
 
 
 def _resolve_specialist_name_hint_with_trace(
@@ -6220,41 +5031,6 @@ def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str 
         return [], error or "consult_playbook_missing"
     refs = [topic.id for topic in playbook.topics if getattr(topic, "id", None)]
     return refs, None
-
-
-
-
-def _preflight_booking_block(
-    *,
-    message_text: str | None,
-    client_config: dict | None,
-    booking_active: bool,
-) -> dict | None:
-    if booking_active or not message_text:
-        return None
-    if (
-        is_greeting_message(message_text)
-        or is_thanks_message(message_text)
-        or is_acknowledgement_message(message_text)
-        or is_low_signal_message(message_text)
-    ):
-        return {"booking_blocked_reason": "intent_signal"}
-    domain_intent, in_score, out_score, _ = classify_domain_with_scores(
-        message_text,
-        client_config,
-    )
-    strong_out, _ = is_strong_out_of_domain(
-        message_text,
-        domain_intent,
-        in_score,
-        out_score,
-        client_config,
-    )
-    if strong_out:
-        return {"booking_blocked_reason": "out_of_domain_signal"}
-    return None
-
-
 def _should_suppress_booking_slot_signal(
     *,
     message_text: str | None,
@@ -6287,19 +5063,6 @@ def _should_suppress_booking_slot_signal(
     ):
         return False
     return True
-def _has_explicit_location_or_hours_request(
-    message_text: str | None,
-    *,
-    client_slug: str | None,
-    strict: bool = False,
-) -> bool:
-    return _interrupt_runtime_has_explicit_location_or_hours_request(
-        message_text,
-        client_slug=client_slug,
-        strict=strict,
-    )
-
-
 
 
 def _policy_core_reason_supports_info_rescue(reason: str | None) -> bool:
@@ -6381,136 +5144,10 @@ def _is_policy_core_rescue_critical_turn(
     }
     booking_flow = bool(
         booking_wants_flow
-        and message_text
-        and _is_booking_request(message_text, client_slug=client_slug)
         and not (intent_decomp_set & INFO_INTENTS)
         and not consult_intent
     )
     return bool(expected_reply_active or pending_flow or booking_flow)
-
-
-def _should_use_expected_reply_collect_fast_path(
-    *,
-    message_text: str | None,
-    expected_reply_type: str | None,
-    expected_reply_matched: bool | None,
-    expected_reply_blocked_by_info: bool,
-    intent_decomp_set: set[str],
-    info_class_intents: set[str] | list[str] | tuple[str, ...] | None,
-    booking_wants_flow: bool,
-    booking_slot_signal: bool,
-    consult_intent: bool,
-    booking_reference_present: bool,
-    booking_slots_complete: bool,
-    refusal_flags: dict[str, bool] | None,
-    client_slug: str | None,
-) -> bool:
-    fast_path_enabled = str(
-        os.environ.get("POLICY_CORE_EXPECTED_REPLY_COLLECT_FAST_PATH", "0")
-    ).strip().lower() in {"1", "true", "yes", "on"}
-    if not fast_path_enabled:
-        return False
-    if expected_reply_type not in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
-        return False
-    if expected_reply_matched is not False or expected_reply_blocked_by_info:
-        return False
-    normalized_text = message_text.strip() if isinstance(message_text, str) else ""
-    if not normalized_text:
-        return False
-    if not booking_wants_flow or consult_intent:
-        return False
-    if info_class_intents:
-        return False
-    verification_text_signal = _looks_like_booking_verification_request(normalized_text)
-    allow_intent_override = False
-    if (
-        verification_text_signal
-        and expected_reply_type in {EXPECTED_REPLY_NAME, EXPECTED_REPLY_TIME}
-        and not booking_reference_present
-    ):
-        allow_intent_override = True
-    if intent_decomp_set != {"other"}:
-        verification_intents = {
-            "check_booking",
-            "verify_booking",
-            "confirm_booking",
-            "booking_confirmation",
-        }
-        allow_verification_collect = bool(
-            intent_decomp_set
-            and intent_decomp_set <= verification_intents
-            and expected_reply_type in {EXPECTED_REPLY_NAME, EXPECTED_REPLY_TIME}
-            and not booking_reference_present
-        )
-        allow_booking_collect = bool(
-            intent_decomp_set == {"booking"}
-            and expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
-            and not booking_reference_present
-            and (
-                not booking_slots_complete
-                or expected_reply_type in {EXPECTED_REPLY_NAME, EXPECTED_REPLY_TIME}
-            )
-        )
-        if not (allow_verification_collect or allow_booking_collect):
-            return False
-        allow_intent_override = True
-    if booking_slot_signal and not allow_intent_override:
-        return False
-    if _looks_like_info_query(normalized_text, client_slug=client_slug):
-        return False
-    if expected_reply_type == EXPECTED_REPLY_TIME and isinstance(client_slug, str) and client_slug.strip():
-        normalized_service = _normalize_service_text(normalized_text)
-        if normalized_service and (
-            _match_service(normalized_service, client_slug)
-            or _matches_service_request_lexicon(normalized_service, client_slug)
-        ):
-            return False
-    if is_human_request_message(normalized_text) or is_frustration_message(normalized_text):
-        return False
-    if isinstance(refusal_flags, dict) and any(bool(value) for value in refusal_flags.values()):
-        return False
-    return True
-
-
-def _build_expected_reply_collect_fast_policy_result(
-    *,
-    expected_reply_type: str | None,
-    booking_state: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    collect_slot = _expected_reply_slot_key(expected_reply_type)
-    if collect_slot not in {"service", "datetime", "name"}:
-        return None
-    slot_state: dict[str, str] = {}
-    if isinstance(booking_state, dict):
-        for slot_key in BOOKING_SLOT_ORDER:
-            value = booking_state.get(slot_key)
-            if isinstance(value, str) and value.strip():
-                slot_state[slot_key] = value.strip()
-    payload = {
-        "intent": "booking",
-        "action": "collect",
-        "tool_action": "collect",
-        "tool_args": {},
-        "pack_refs": [],
-        "confidence": 1.0,
-        "reason": "expected_reply_pending_collect_fast_path",
-        "goal": "booking",
-        "slots": slot_state,
-        "next_question": collect_slot,
-        "open_questions": [collect_slot],
-        "needs_manager": False,
-        "risk_signals": [],
-    }
-    return {
-        "ok": True,
-        "payload": payload,
-        "error": None,
-        "raw": None,
-        "attempted": False,
-        "elapsed_ms": 0.0,
-        "compact_input_used": False,
-        "compact_retry_used": False,
-    }
 
 
 def _should_attempt_policy_core_llm_rescue(
@@ -6658,45 +5295,6 @@ def _policy_has_style_reference_hint(
         if "style" in normalized_reason:
             return True
     return False
-
-
-
-
-
-
-def _controller_meta_updates_from_router_state(router_state: dict | None) -> dict[str, Any]:
-    if not isinstance(router_state, dict):
-        return {}
-    controller_output = router_state.get("output")
-    controller_goal = controller_output.get("goal") if isinstance(controller_output, dict) else None
-    controller_confidence = router_state.get("confidence")
-    controller_used = bool(router_state.get("used"))
-    controller_low_confidence = bool(
-        controller_used
-        and isinstance(controller_confidence, (int, float))
-        and controller_confidence < CONTROLLER_CONFIDENCE_THRESHOLD
-    )
-    controller_fallback_reason = router_state.get("fallback_reason")
-    if isinstance(controller_fallback_reason, str):
-        normalized = controller_fallback_reason.strip().casefold()
-        if not normalized or normalized == "skipped":
-            controller_fallback_reason = None
-    else:
-        controller_fallback_reason = None
-    return {
-        "controller_used": controller_used,
-        "controller_attempted": bool(router_state.get("attempted")),
-        "controller_fallback": bool(router_state.get("fallback")),
-        "controller_low_confidence": controller_low_confidence,
-        "controller_used_reason": router_state.get("used_reason"),
-        "controller_confidence": controller_confidence,
-        "controller_error": router_state.get("error"),
-        "controller_goal": controller_goal,
-        "controller_fallback_reason": controller_fallback_reason,
-    }
-
-
-
 
 
 def _detect_name_provided(message_text: str, *, client_slug: str | None) -> bool:

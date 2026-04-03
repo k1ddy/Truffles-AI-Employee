@@ -28,7 +28,7 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
         },
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Алина",
         client_slug="demo_salon",
         booking_state={
@@ -38,6 +38,7 @@ def test_plan_returns_policy_core_payload_without_expected_reply_rescue(monkeypa
             "last_question": "name",
         },
     )
+    decision = result.require_decision()
 
     assert decision.action == "fact"
     assert decision.intent == "other"
@@ -72,19 +73,21 @@ def test_plan_degrades_when_policy_core_success_is_missing_binding(monkeypatch):
         },
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Алина",
         client_slug="demo_salon",
         booking_state=None,
     )
+    signal = result.boundary_signal
 
-    assert decision.action == "handoff"
-    assert decision.intent == "system_control"
-    assert decision.meta["control_label"] == "planner_degrade"
-    assert decision.meta["reason_code"] == "planner:invalid_projection"
-    assert decision.meta["earliest_failed_stage"] == "policy_projection"
-    assert decision.meta["root_reason_code"] == "policy_projection:binding_tool_action_missing"
-    assert decision.meta["policy_core_trace"]["projection_verdict"] == "binding_tool_action_missing"
+    assert result.decision is None
+    assert signal is not None
+    assert signal.decision == "degrade"
+    assert signal.control_label == "planner_degrade"
+    assert signal.reason_code == "planner:invalid_projection"
+    assert signal.meta["earliest_failed_stage"] == "policy_projection"
+    assert signal.meta["root_reason_code"] == "policy_projection:binding_tool_action_missing"
+    assert signal.meta["policy_core_trace"]["projection_verdict"] == "binding_tool_action_missing"
 
 
 def test_plan_degrades_when_policy_core_success_uses_legacy_policy_payload(monkeypatch):
@@ -111,7 +114,7 @@ def test_plan_degrades_when_policy_core_success_uses_legacy_policy_payload(monke
         },
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Алина",
         client_slug="demo_salon",
         booking_state={
@@ -121,14 +124,16 @@ def test_plan_degrades_when_policy_core_success_uses_legacy_policy_payload(monke
             "last_question": "name",
         },
     )
+    signal = result.boundary_signal
 
-    assert decision.action == "handoff"
-    assert decision.intent == "system_control"
-    assert decision.meta["control_label"] == "planner_degrade"
-    assert decision.meta["reason_code"] == "planner:invalid_projection"
-    assert decision.meta["earliest_failed_stage"] == "policy_projection"
-    assert decision.meta["root_reason_code"] == "policy_projection:semantic_decision_required"
-    assert decision.meta["policy_core_trace"]["projection_verdict"] == "semantic_decision_required"
+    assert result.decision is None
+    assert signal is not None
+    assert signal.decision == "degrade"
+    assert signal.control_label == "planner_degrade"
+    assert signal.reason_code == "planner:invalid_projection"
+    assert signal.meta["earliest_failed_stage"] == "policy_projection"
+    assert signal.meta["root_reason_code"] == "policy_projection:semantic_decision_required"
+    assert signal.meta["policy_core_trace"]["projection_verdict"] == "semantic_decision_required"
 
 
 
@@ -144,21 +149,23 @@ def test_plan_degrades_when_policy_core_is_unavailable_instead_of_routing_fallba
         lambda *args, **kwargs: {"error": "policy_timeout"},
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Подтвердите, пожалуйста, мою запись на четверг.",
         client_slug="demo_salon",
         booking_state=None,
     )
+    signal = result.boundary_signal
 
-    assert decision.action == "handoff"
-    assert decision.intent == "system_control"
-    assert decision.meta["control_label"] == "planner_degrade"
-    assert decision.interaction.owner == "turn_planner_degrade"
-    assert decision.meta["reason_code"] == "planner:policy_timeout"
-    assert decision.meta["earliest_failed_stage"] == "policy_core"
-    assert decision.meta["root_reason_code"] == "policy_core:policy_timeout"
-    assert decision.meta["policy_core_trace"]["status"] == "error"
-    assert decision.meta["policy_core_trace"]["projection_verdict"] == "skipped"
+    assert result.decision is None
+    assert signal is not None
+    assert signal.decision == "degrade"
+    assert signal.control_label == "planner_degrade"
+    assert signal.interaction_owner == "turn_planner_degrade"
+    assert signal.reason_code == "planner:policy_timeout"
+    assert signal.meta["earliest_failed_stage"] == "policy_core"
+    assert signal.meta["root_reason_code"] == "policy_core:policy_timeout"
+    assert signal.meta["policy_core_trace"]["status"] == "error"
+    assert signal.meta["policy_core_trace"]["projection_verdict"] == "skipped"
 
 
 def test_plan_records_policy_core_schema_failure_bundle(monkeypatch):
@@ -184,16 +191,19 @@ def test_plan_records_policy_core_schema_failure_bundle(monkeypatch):
         },
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Когда запись?",
         client_slug="demo_salon",
         booking_state=None,
     )
+    signal = result.boundary_signal
 
-    assert decision.meta["reason_code"] == "planner:invalid_schema"
-    assert decision.meta["earliest_failed_stage"] == "policy_core"
-    assert decision.meta["root_reason_code"] == "policy_core:invalid_schema"
-    assert decision.meta["policy_core_trace"] == {
+    assert result.decision is None
+    assert signal is not None
+    assert signal.reason_code == "planner:invalid_schema"
+    assert signal.meta["earliest_failed_stage"] == "policy_core"
+    assert signal.meta["root_reason_code"] == "policy_core:invalid_schema"
+    assert signal.meta["policy_core_trace"] == {
         "attempted": True,
         "status": "error",
         "schema_verdict": "invalid_schema",
@@ -240,24 +250,27 @@ def test_plan_records_policy_projection_failure_bundle(monkeypatch):
         },
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Можно завтра?",
         client_slug="demo_salon",
         booking_state=None,
     )
+    signal = result.boundary_signal
 
-    assert decision.meta["reason_code"] == "planner:invalid_projection"
-    assert decision.meta["earliest_failed_stage"] == "policy_projection"
+    assert result.decision is None
+    assert signal is not None
+    assert signal.reason_code == "planner:invalid_projection"
+    assert signal.meta["earliest_failed_stage"] == "policy_projection"
     assert (
-        decision.meta["root_reason_code"]
+        signal.meta["root_reason_code"]
         == "policy_projection:collect_tool_action_hint_conflict"
     )
-    assert decision.meta["policy_core_trace"]["schema_verdict"] == "ok"
+    assert signal.meta["policy_core_trace"]["schema_verdict"] == "ok"
     assert (
-        decision.meta["policy_core_trace"]["projection_verdict"]
+        signal.meta["policy_core_trace"]["projection_verdict"]
         == "collect_tool_action_hint_conflict"
     )
-    assert decision.meta["policy_core_trace"]["projection"] == {
+    assert signal.meta["policy_core_trace"]["projection"] == {
         "status": "error",
         "projection_source": "policy_tool_projector",
         "tool_action_hint": "handoff",
@@ -304,7 +317,7 @@ def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monk
         _route_llm_policy_core,
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Есть ли место завтра в 15:00?",
         client_slug="demo_salon",
         booking_state={
@@ -313,6 +326,7 @@ def test_plan_no_longer_short_circuits_question_contract_before_policy_core(monk
             "last_question": "datetime",
         },
     )
+    decision = result.require_decision()
 
     assert policy_calls == ["Есть ли место завтра в 15:00?"]
     assert decision.source == "llm_policy_core"
@@ -351,12 +365,13 @@ def test_plan_delegates_context_assembly_to_policy_core_route(monkeypatch):
         _route_llm_policy_core,
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Хочу записаться на маникюр",
         client_slug="demo_salon",
         booking_state={"active": True, "service": "Маникюр"},
         memory_summary="Клиент хочет маникюр",
     )
+    decision = result.require_decision()
 
     assert decision.source == "llm_policy_core"
     assert captured_kwargs["message_text"] == "Хочу записаться на маникюр"
@@ -397,11 +412,12 @@ def test_plan_preserves_consult_media_followup_contract(monkeypatch):
         },
     )
 
-    decision = planner.plan(
+    result = planner.plan(
         message_text="Я могу прислать фото своих ногтей.",
         client_slug="demo_salon",
         booking_state=None,
     )
+    decision = result.require_decision()
 
     assert decision.source == "llm_policy_core"
     assert decision.intent == "consult"

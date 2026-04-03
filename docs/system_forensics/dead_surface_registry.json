@@ -3,7 +3,7 @@
   "status": "machine_readable_system_reproof_base",
   "current_practical_truth": "r35f",
   "external_packet_status": "ready_for_external_handoff",
-  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "active_block": "Consultant Core Block H.1B — File Replay Scenario Contract Materialization",
   "caller_proof_law": {
     "policy": "No legacy mesh surface may be treated as adapter-only, shadow-only, unmounted, or delete-ready without exact caller proof from live code while the live-code reproof block is active and acceptance remains pending.",
     "behavior_owning_surfaces": [
@@ -88,7 +88,20 @@
       "truffles-api/app/routers/webhook/pending.py",
       "truffles-api/app/routers/webhook/policy.py",
       "truffles-api/app/routers/webhook/response.py"
-    ]
+    ],
+    "final_fate_set": [
+      "adapter_only",
+      "observer_only",
+      "unreachable",
+      "removed"
+    ],
+    "exact_surface_fates": {
+      "truffles-api/app/routers/webhook/__init__.py": "adapter_only",
+      "truffles-api/app/routers/webhook/session_memory.py": "adapter_only",
+      "truffles-api/app/routers/webhook/decision.py": "unreachable",
+      "truffles-api/app/routers/webhook/info.py": "unreachable",
+      "truffles-api/app/routers/webhook/context_manager.py": "unreachable"
+    }
   },
   "entries": [
     {
@@ -148,7 +161,7 @@
       "surface_id": "webhook_package_surface",
       "surface_kind": "package_surface",
       "classification": "mounted_live_package_surface",
-      "current_role": "live package export surface that exposes the mounted webhook router and startup-loaded compatibility helpers",
+      "current_role": "adapter-only mounted package surface that exposes the real router plus lazy compatibility exports",
       "authority_mode": "package_export_only",
       "caller_proof_status": "live_code_verified",
       "live_runtime_callers": [
@@ -163,7 +176,8 @@
       "evidence": [
         "truffles-api/app/main.py",
         "truffles-api/app/routers/webhook/__init__.py"
-      ]
+      ],
+      "final_fate": "adapter_only"
     },
     {
       "surface_path": "truffles-api/app/routers/webhook/_legacy.py",
@@ -266,7 +280,7 @@
       "surface_id": "legacy_context_manager_helpers",
       "surface_kind": "frozen_legacy_helper_module",
       "classification": "lazy_export_only_unmounted_legacy_helper",
-      "current_role": "legacy helper reachable only through lazy compatibility export or sibling legacy imports; no eager startup load on the mounted package root",
+      "current_role": "legacy helper surface kept unreachable from the live runtime boundary",
       "authority_mode": "lazy_export_legacy_helper",
       "caller_proof_status": "startup_drain_verified",
       "live_runtime_callers": [],
@@ -281,7 +295,8 @@
         "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
       ],
       "startup_load_mode": "lazy_export_only",
-      "family_envelope_status": "unreachable_for_touched_envelope"
+      "family_envelope_status": "unreachable_for_touched_envelope",
+      "final_fate": "unreachable"
     },
     {
       "surface_path": "truffles-api/app/routers/webhook/decision.py",
@@ -309,7 +324,7 @@
       "surface_id": "decision_router_surface",
       "surface_kind": "frozen_legacy_router_module",
       "classification": "shadow_only_test_compatibility_surface",
-      "current_role": "frozen compatibility reservoir no longer on the mounted ingress path; reachable only through lazy package export or shadow importers",
+      "current_role": "legacy helper surface kept unreachable from the live runtime boundary",
       "authority_mode": "shadow_only_test_router",
       "caller_proof_status": "live_code_verified",
       "live_runtime_callers": [],
@@ -324,7 +339,8 @@
         "scripts/legacy_drain_closure_guard.py",
         "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
       ],
-      "family_envelope_status": "unreachable_for_touched_envelope"
+      "family_envelope_status": "unreachable_for_touched_envelope",
+      "final_fate": "unreachable"
     },
     {
       "surface_path": "truffles-api/app/routers/webhook/dedup.py",
@@ -455,7 +471,7 @@
       "surface_id": "legacy_info_helpers",
       "surface_kind": "frozen_legacy_helper_module",
       "classification": "unmounted_legacy_helper_surface",
-      "current_role": "legacy info helper surface with only sibling legacy and shadow importers in app code",
+      "current_role": "legacy helper surface kept unreachable from the live runtime boundary",
       "authority_mode": "legacy_sibling_helper",
       "caller_proof_status": "live_code_verified",
       "live_runtime_callers": [],
@@ -468,7 +484,8 @@
         "scripts/legacy_drain_closure_guard.py",
         "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
       ],
-      "family_envelope_status": "unreachable_for_touched_envelope"
+      "family_envelope_status": "unreachable_for_touched_envelope",
+      "final_fate": "unreachable"
     },
     {
       "surface_path": "truffles-api/app/routers/webhook/pending.py",
@@ -584,7 +601,7 @@
       "surface_id": "webhook_session_memory",
       "surface_kind": "legacy_helper_module",
       "classification": "live_legacy_control_turn_helper",
-      "current_role": "legacy session-memory helper now limited to reset-only control-turn and observability support; adapter-only for the touched canary envelope",
+      "current_role": "adapter-only live control-turn helper limited to reset/session-memory compatibility on the touched seam",
       "authority_mode": "behavior_owning_legacy_control_helper",
       "caller_proof_status": "live_code_verified",
       "live_runtime_callers": [
@@ -601,7 +618,8 @@
         "scripts/legacy_drain_closure_guard.py",
         "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
       ],
-      "family_envelope_status": "adapter_only_for_touched_envelope"
+      "family_envelope_status": "adapter_only_for_touched_envelope",
+      "final_fate": "adapter_only"
     },
     {
       "surface_path": "truffles-api/app/routers/webhook/trace.py",
@@ -780,7 +798,7 @@
       ]
     }
   ],
-  "scope_note": "Whole-system Governance Closure is active. Runtime shadow wrapper files remain removed, router shadow surfaces remain outside live app runtime, and operational entry surfaces remain deduped on shared runtime owners.",
+  "scope_note": "Block G and the focused booking-manage follow-up block are now closed_proven. Runtime shadow wrapper files remain removed, router shadow surfaces remain outside live app runtime, and live outbox admin/service/console/worker surfaces now share one canonical runtime boundary for scoped preview and execute semantics.",
   "authority_freeze_scope": {
     "policy": "Frozen legacy surfaces may only transport, adapt, shadow, or remain unmounted while caller proof is completed; they may not regain semantic, continuity, fact, or boundary authority.",
     "frozen_adapter_only_modules": [

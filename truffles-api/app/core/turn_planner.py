@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Literal
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -9,7 +8,6 @@ from app.core.binding_plan import BindingPlanV1
 from app.core.semantic_decision import SemanticDecisionV1
 
 DecisionOutcome = Literal["FACT", "COLLECT", "HANDOFF"]
-_SYSTEM_CONTROL_INTENT = "system_control"
 _PLANNER_SLOT_ALIASES = {
     "service_query": "service",
     "time": "datetime",
@@ -80,27 +78,9 @@ class PolicyDecision(BaseModel):
 
     @model_validator(mode="after")
     def _validate_binding_contract(self) -> PolicyDecision:
-        is_synthetic = bool(
-            isinstance(self.meta, dict) and self.meta.get("synthetic_policy_decision")
-        )
         if self.semantic_decision is not None and self.binding_plan is None:
             raise ValueError("binding_plan_required_for_semantic_decision")
-        if is_synthetic and self.binding_plan is None:
-            raise ValueError("binding_plan_required_for_synthetic_decision")
         return self
-
-    def is_synthetic_control_decision(self) -> bool:
-        if not (isinstance(self.meta, dict) and self.meta.get("synthetic_policy_decision")):
-            return False
-        source = str(self.source or "").strip().casefold()
-        intent = str(self.intent or "").strip().casefold()
-        if source == "planner_control" or intent == "system_control":
-            return True
-        return bool(
-            self.meta.get("control_label")
-            or self.meta.get("degrade_path")
-            or self.meta.get("preflight_path")
-        )
 
 
 class InboundTurnInput(BaseModel):
@@ -149,6 +129,39 @@ class InboundTurnInput(BaseModel):
         return self.media_placeholder()
 
 
+class PlannerBoundarySignal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = "planner_boundary_signal.v1"
+    decision: Literal["block", "degrade"]
+    reason_code: str
+    control_label: str
+    interaction_owner: str
+    interaction_target: str | None = None
+    interaction_relation: str | None = None
+    public_message: str | None = None
+    trace_message: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlannerPlanResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: PolicyDecision | None = None
+    boundary_signal: PlannerBoundarySignal | None = None
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> PlannerPlanResult:
+        if self.decision is None and self.boundary_signal is None:
+            raise ValueError("planner_result_requires_decision_or_boundary_signal")
+        return self
+
+    def require_decision(self) -> PolicyDecision:
+        if not isinstance(self.decision, PolicyDecision):
+            raise ValueError("planner_decision_missing")
+        return self.decision
+
+
 class TurnPlanner:
     """Typed seam for the future policy-core planner cutover."""
 
@@ -177,15 +190,17 @@ class TurnPlanner:
         memory_summary: str | None = None,
         memory_profile: dict[str, Any] | None = None,
         timing_context: dict[str, Any] | None = None,
-    ) -> PolicyDecision:
+    ) -> PlannerPlanResult:
         from app.services.intent_service import route_llm_policy_core
 
         normalized_message = self._normalize_token(message_text)
         if not normalized_message:
-            return self.build_preflight_reject(
+            return PlannerPlanResult(
+                boundary_signal=self.build_preflight_reject_signal(
                 reason_code="empty_message",
                 control_label="empty_message",
                 interaction_owner="turn_planner_preflight",
+                )
             )
 
         normalized_booking_state = self._normalize_booking_state(booking_state)
@@ -221,19 +236,22 @@ class TurnPlanner:
                 )
             except ValueError as exc:
                 projection_error = self._normalize_token(str(exc)) or "invalid_projection"
-                decision = self.build_controlled_degrade(
+                return PlannerPlanResult(
+                    boundary_signal=self.build_controlled_degrade_signal(
                     reason_code="planner:invalid_projection",
                     control_label="planner_degrade",
                     interaction_owner="turn_planner_degrade",
+                    meta={
+                        "earliest_failed_stage": "policy_projection",
+                        "root_reason_code": f"policy_projection:{projection_error}",
+                        "policy_core_trace": self._build_policy_core_trace_payload(
+                            policy_result,
+                            schema_verdict="ok",
+                            projection_verdict=projection_error,
+                        ),
+                    },
+                    )
                 )
-                decision.meta["earliest_failed_stage"] = "policy_projection"
-                decision.meta["root_reason_code"] = f"policy_projection:{projection_error}"
-                decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
-                    policy_result,
-                    schema_verdict="ok",
-                    projection_verdict=projection_error,
-                )
-                return decision
             decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
                 policy_result,
                 schema_verdict="ok",
@@ -244,7 +262,7 @@ class TurnPlanner:
                     or "ok"
                 ),
             )
-            return decision
+            return PlannerPlanResult(decision=decision)
 
         degrade_reason = self._normalize_token(
             policy_result.get("error") if isinstance(policy_result, dict) else None
@@ -266,19 +284,22 @@ class TurnPlanner:
                 if degrade_reason == "invalid_schema"
                 else degrade_reason
             )
-        decision = self.build_controlled_degrade(
+        return PlannerPlanResult(
+            boundary_signal=self.build_controlled_degrade_signal(
             reason_code=f"planner:{degrade_reason}",
             control_label="planner_degrade",
             interaction_owner="turn_planner_degrade",
+            meta={
+                "earliest_failed_stage": earliest_failed_stage,
+                "root_reason_code": root_reason_code,
+                "policy_core_trace": self._build_policy_core_trace_payload(
+                    policy_result,
+                    schema_verdict=schema_verdict,
+                    projection_verdict=projection_verdict,
+                ),
+            },
+            )
         )
-        decision.meta["earliest_failed_stage"] = earliest_failed_stage
-        decision.meta["root_reason_code"] = root_reason_code
-        decision.meta["policy_core_trace"] = self._build_policy_core_trace_payload(
-            policy_result,
-            schema_verdict=schema_verdict,
-            projection_verdict=projection_verdict,
-        )
-        return decision
 
     def build_from_semantic_decision(
         self,
@@ -489,15 +510,12 @@ class TurnPlanner:
         if isinstance(decision.semantic_decision, SemanticDecisionV1):
             return None
         meta = dict(decision.meta) if isinstance(decision.meta, dict) else {}
-        if meta.get("degrade_path") or meta.get("preflight_path"):
-            return None
         return {
             "reason_code": "missing_semantic_owner",
             "source": decision.source,
             "outcome": decision.outcome,
             "action": decision.action,
             "tool_action": decision.tool_action,
-            "synthetic_policy_decision": bool(meta.get("synthetic_policy_decision")),
         }
 
     def detect_missing_binding_plan(
@@ -509,8 +527,6 @@ class TurnPlanner:
         if isinstance(decision.binding_plan, BindingPlanV1):
             return None
         meta = dict(decision.meta) if isinstance(decision.meta, dict) else {}
-        if meta.get("degrade_path") or meta.get("preflight_path"):
-            return None
         return {
             "reason_code": "missing_binding_plan",
             "semantic_decision_id": decision.semantic_decision.decision_id,
@@ -701,7 +717,7 @@ class TurnPlanner:
             return "retrieve_booking"
         return "deliver_grounded_fact"
 
-    def build_controlled_degrade(
+    def build_controlled_degrade_signal(
         self,
         *,
         reason_code: str,
@@ -709,35 +725,23 @@ class TurnPlanner:
         interaction_owner: str,
         interaction_target: str | None = None,
         interaction_relation: str | None = None,
-    ) -> PolicyDecision:
-        synthetic_decision_id = uuid4().hex
-        binding_plan = BindingPlanV1.build_degrade(
-            decision_id=synthetic_decision_id,
-            degrade_reason_code=reason_code,
-        )
-        return PolicyDecision(
-            outcome="HANDOFF",
-            action="handoff",
-            intent=_SYSTEM_CONTROL_INTENT,
-            source="planner_control",
-            tool_action="handoff",
-            interaction=InteractionContract(
-                owner=interaction_owner,
-                target=interaction_target,
-                relation=interaction_relation,
-            ),
-            meta={
-                "reason_code": reason_code,
-                "control_label": control_label,
-                "degrade_path": True,
-                "synthetic_policy_decision": True,
-                "binding_plan_id": binding_plan.binding_id,
-                "binding_plan_schema_version": binding_plan.schema_version,
-            },
-            binding_plan=binding_plan,
+        public_message: str | None = None,
+        trace_message: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> PlannerBoundarySignal:
+        return PlannerBoundarySignal(
+            decision="degrade",
+            reason_code=reason_code,
+            control_label=control_label,
+            interaction_owner=interaction_owner,
+            interaction_target=interaction_target,
+            interaction_relation=interaction_relation,
+            public_message=public_message,
+            trace_message=trace_message,
+            meta=self._normalize_dict(meta),
         )
 
-    def build_preflight_reject(
+    def build_preflight_reject_signal(
         self,
         *,
         reason_code: str,
@@ -745,32 +749,20 @@ class TurnPlanner:
         interaction_owner: str,
         interaction_target: str | None = None,
         interaction_relation: str | None = None,
-    ) -> PolicyDecision:
-        synthetic_decision_id = uuid4().hex
-        binding_plan = BindingPlanV1.build_deny(
-            decision_id=synthetic_decision_id,
-            deny_reason_code=reason_code,
-        )
-        return PolicyDecision(
-            outcome="FACT",
-            action="preflight_reject",
-            intent=_SYSTEM_CONTROL_INTENT,
-            source="planner_control",
-            tool_action="noop",
-            interaction=InteractionContract(
-                owner=interaction_owner,
-                target=interaction_target,
-                relation=interaction_relation,
-            ),
-            meta={
-                "reason_code": reason_code,
-                "control_label": control_label,
-                "preflight_path": True,
-                "synthetic_policy_decision": True,
-                "binding_plan_id": binding_plan.binding_id,
-                "binding_plan_schema_version": binding_plan.schema_version,
-            },
-            binding_plan=binding_plan,
+        public_message: str | None = None,
+        trace_message: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> PlannerBoundarySignal:
+        return PlannerBoundarySignal(
+            decision="block",
+            reason_code=reason_code,
+            control_label=control_label,
+            interaction_owner=interaction_owner,
+            interaction_target=interaction_target,
+            interaction_relation=interaction_relation,
+            public_message=public_message,
+            trace_message=trace_message,
+            meta=self._normalize_dict(meta),
         )
 
     @staticmethod
@@ -1155,6 +1147,8 @@ __all__ = [
     "InboundTurnInput",
     "InteractionContract",
     "PendingQuestionContract",
+    "PlannerBoundarySignal",
+    "PlannerPlanResult",
     "PolicyDecision",
     "SemanticDecisionV1",
     "SemanticFrame",

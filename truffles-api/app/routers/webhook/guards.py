@@ -10,7 +10,6 @@ from app.core import DialogStateService
 from app.logging_config import get_logger
 from app.models import Conversation, Message, User
 from app.routers.webhook.booking import _get_booking_context, _set_booking_context
-from app.routers.webhook.booking_signal_runtime import _evaluate_booking_signal
 from app.routers.webhook.context_manager import (
     _get_context_manager,
     _get_conversation_context,
@@ -70,6 +69,22 @@ logger = get_logger("webhook")
 
 DECISION_TRACE_KEY = "decision_trace"
 _DIALOG_STATE_SERVICE = DialogStateService()
+
+
+def _canonical_booking_resume_signal(
+    *,
+    booking_active: bool,
+    expected_reply_shortcircuit: bool = False,
+    reengage_confirmation: dict | None = None,
+) -> bool:
+    if expected_reply_shortcircuit:
+        return True
+    if booking_active:
+        return True
+    if isinstance(reengage_confirmation, dict):
+        stored_messages = reengage_confirmation.get("booking_messages")
+        return bool(isinstance(stored_messages, list) and stored_messages)
+    return False
 
 
 
@@ -422,19 +437,18 @@ def _handle_reengage_and_mute_gate(
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
     signal_messages = list(batch_messages)
     opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
-    booking_signal, _ = _evaluate_booking_signal(
-        signal_messages,
-        client_slug=client_slug,
-        message_text=message_text,
-    )
-    if expected_reply_shortcircuit:
-        booking_signal = True
 
     context = _get_conversation_context(conversation)
     booking_state = _get_booking_context(context)
     booking_active = bool(booking_state.get("active"))
     reengage_override = False
     normalized_remote_jid = normalize_remote_jid(remote_jid)
+    reengage_confirmation = _get_reengage_confirmation(context)
+    booking_signal = _canonical_booking_resume_signal(
+        booking_active=booking_active,
+        expected_reply_shortcircuit=expected_reply_shortcircuit,
+        reengage_confirmation=reengage_confirmation,
+    )
 
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value
@@ -504,7 +518,6 @@ def _handle_reengage_and_mute_gate(
             )
 
     if conversation.state == ConversationState.BOT_ACTIVE.value:
-        reengage_confirmation = _get_reengage_confirmation(context)
         if reengage_confirmation:
             if not _is_reengage_confirmation_active(reengage_confirmation, now):
                 context = _set_reengage_confirmation(context, None)
@@ -518,15 +531,11 @@ def _handle_reengage_and_mute_gate(
                     conversation.bot_muted_until = None
                     conversation.no_count = 0
                     reengage_override = True
-                    stored_messages = reengage_confirmation.get("booking_messages")
-                    if isinstance(stored_messages, list) and stored_messages:
-                        batch_messages = _coerce_batch_messages("", stored_messages)
-                        signal_messages = list(batch_messages)
-                        booking_signal, _ = _evaluate_booking_signal(
-                            signal_messages,
-                            client_slug=client_slug,
-                            message_text=signal_messages[-1] if signal_messages else message_text,
-                        )
+                    booking_signal = _canonical_booking_resume_signal(
+                        booking_active=booking_active,
+                        expected_reply_shortcircuit=expected_reply_shortcircuit,
+                        reengage_confirmation=reengage_confirmation,
+                    )
                     _record_decision_trace(
                         conversation,
                         {
@@ -716,14 +725,13 @@ def _handle_post_debounce_muted_state_gate(
 
     signal_messages = _coerce_batch_messages(message_text, batch_messages)
     opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
-    booking_signal, _ = _evaluate_booking_signal(
-        signal_messages,
-        client_slug=client_slug,
-        message_text=message_text,
-    )
     context = _get_conversation_context(conversation)
     booking_active = bool(_get_booking_context(context).get("active"))
     reengage_confirmation = _get_reengage_confirmation(context)
+    booking_signal = _canonical_booking_resume_signal(
+        booking_active=booking_active,
+        reengage_confirmation=reengage_confirmation,
+    )
 
     if reengage_confirmation and _is_reengage_confirmation_active(reengage_confirmation, now):
         conversation.bot_status = "active"

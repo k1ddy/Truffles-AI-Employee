@@ -5492,6 +5492,115 @@ def _llm_quality_compile_active_time_specialist_followup_expectations(expectatio
     return expectations
 
 
+def _llm_quality_load_booking_scenario_contract_helpers():
+    loader = globals().get("_llm_quality_repo_root")
+    if not callable(loader):
+        return False
+    cached = globals().get("_LLM_QUALITY_BOOKING_SCENARIO_CONTRACT_HELPERS")
+    if cached is None:
+        repo_root = loader()
+        api_root = os.path.join(repo_root, "truffles-api")
+        if api_root not in sys.path:
+            sys.path.insert(0, api_root)
+        try:
+            from app.services.llm_quality_contracts import (
+                BookingScenarioPostCoverageRepairCallbacks,
+                merge_booking_scenario_expectations,
+                repair_booking_scenario_post_coverage_dialogs,
+                sanitize_booking_scenario_llm_turns,
+            )
+        except Exception:
+            globals()["_LLM_QUALITY_BOOKING_SCENARIO_CONTRACT_HELPERS"] = False
+            return False
+        cached = (
+            BookingScenarioPostCoverageRepairCallbacks,
+            merge_booking_scenario_expectations,
+            repair_booking_scenario_post_coverage_dialogs,
+            sanitize_booking_scenario_llm_turns,
+        )
+        globals()["_LLM_QUALITY_BOOKING_SCENARIO_CONTRACT_HELPERS"] = cached
+    return cached
+
+
+def _llm_quality_materialize_file_dialog_contracts(dialogs):
+    helpers = _llm_quality_load_booking_scenario_contract_helpers()
+    if helpers is False:
+        return dialogs, {}
+
+    (
+        repair_callbacks_cls,
+        merge_expectations,
+        repair_dialogs,
+        sanitize_turns,
+    ) = helpers
+
+    materialized_dialogs = []
+    changed_dialogs = 0
+    changed_turns = 0
+    rng = random.Random(0)
+    for dialog in dialogs:
+        if not isinstance(dialog, dict):
+            continue
+        normalized_dialog = dict(dialog)
+        raw_turns = normalized_dialog.get("turns") or []
+        prepared_turns = []
+        original_turn_fingerprints = []
+        for turn in raw_turns:
+            if not isinstance(turn, dict):
+                continue
+            normalized_turn = dict(turn)
+            original_turn_fingerprints.append(
+                json.dumps(normalized_turn, ensure_ascii=False, sort_keys=True)
+            )
+            normalized_turn["expect"] = merge_expectations(
+                list(normalized_turn.get("tags") or []),
+                normalized_turn.get("expect"),
+                text=str(normalized_turn.get("text") or ""),
+            )
+            prepared_turns.append(normalized_turn)
+
+        sanitized_turns = sanitize_turns(prepared_turns, {}, rng)
+        normalized_dialog["turns"] = sanitized_turns
+        materialized_dialogs.append(normalized_dialog)
+
+        dialog_changed = False
+        for original, materialized in zip(original_turn_fingerprints, sanitized_turns):
+            if original != json.dumps(materialized, ensure_ascii=False, sort_keys=True):
+                changed_turns += 1
+                dialog_changed = True
+        if dialog_changed or len(original_turn_fingerprints) != len(sanitized_turns):
+            changed_dialogs += 1
+
+    repaired_dialogs = repair_dialogs(
+        materialized_dialogs,
+        callbacks=repair_callbacks_cls(),
+    )
+    post_repair_changed_dialogs = 0
+    post_repair_changed_turns = 0
+    for before_dialog, after_dialog in zip(materialized_dialogs, repaired_dialogs):
+        before_turns = before_dialog.get("turns") or []
+        after_turns = after_dialog.get("turns") or []
+        dialog_changed = False
+        for before_turn, after_turn in zip(before_turns, after_turns):
+            if json.dumps(before_turn, ensure_ascii=False, sort_keys=True) != json.dumps(
+                after_turn, ensure_ascii=False, sort_keys=True
+            ):
+                post_repair_changed_turns += 1
+                dialog_changed = True
+        if dialog_changed or len(before_turns) != len(after_turns):
+            post_repair_changed_dialogs += 1
+
+    warnings = {}
+    if changed_dialogs or changed_turns or post_repair_changed_dialogs or post_repair_changed_turns:
+        warnings["scenario_file_materialization"] = [
+            f"sanitized_dialogs={changed_dialogs}",
+            f"sanitized_turns={changed_turns}",
+            f"post_repair_dialogs={post_repair_changed_dialogs}",
+            f"post_repair_turns={post_repair_changed_turns}",
+        ]
+    return repaired_dialogs, warnings
+
+
 def _llm_quality_extract_expectations(turn):
     def _normalize_mapping(value):
         helper = globals().get("_llm_quality_normalize_expect_mapping")
@@ -7079,7 +7188,12 @@ def _llm_quality_load_dialogs_from_file(path):
         return None, None, "scenario file has no valid dialogs with turns"
     if dropped:
         warnings["scenario_file"] = [f"dropped_invalid_dialogs={dropped}"]
-    return normalized, warnings, None
+    materialized_dialogs, materialization_warnings = _llm_quality_materialize_file_dialog_contracts(
+        normalized
+    )
+    if isinstance(materialization_warnings, dict):
+        warnings.update(materialization_warnings)
+    return materialized_dialogs, warnings, None
 
 
 def _llm_quality_top_failure_reasons(failure_counts, limit=3):
@@ -18091,6 +18205,46 @@ def _send_webhook_payload_with_retry(url, payload, secret, timeout, retry_count,
     return status, body, error, attempts
 
 
+def _send_manager_telegram_action_with_retry(
+    *,
+    base_url,
+    telegram_chat_id,
+    manager_id,
+    action,
+    handover_id,
+    topic_id,
+    rng,
+    timeout,
+    retry_count,
+    retry_backoff,
+):
+    if not telegram_chat_id:
+        return None, "", "telegram_chat_id_missing", 0
+    payload = {
+        "update_id": rng.randint(100000, 999999),
+        "callback_query": {
+            "id": f"sim-{uuid.uuid4().hex[:10]}",
+            "from": {"id": manager_id, "is_bot": False, "first_name": "Sim"},
+            "data": f"{action}_{handover_id}",
+            "message": {
+                "message_id": rng.randint(1, 99999),
+                "date": int(time.time()),
+                "chat": {"id": telegram_chat_id, "type": "group"},
+            },
+        },
+    }
+    if topic_id:
+        payload["callback_query"]["message"]["message_thread_id"] = topic_id
+    return _send_webhook_payload_with_retry(
+        f"{base_url}/telegram-webhook",
+        payload,
+        None,
+        timeout,
+        retry_count,
+        retry_backoff,
+    )
+
+
 def _chaos_preflight(base_url, timeout):
     checks = {}
     endpoints = {
@@ -19681,25 +19835,19 @@ def _run_llm_quality(args):
         return True, None
 
     def _send_telegram_action(action, handover_id, conv_meta):
-        if not telegram_chat_id:
-            return None, "", "telegram_chat_id_missing"
         topic_id = (conv_meta or {}).get("telegram_topic_id")
-        payload = {
-            "update_id": rng.randint(100000, 999999),
-            "callback_query": {
-                "id": f"sim-{uuid.uuid4().hex[:10]}",
-                "from": {"id": manager_id, "is_bot": False, "first_name": "Sim"},
-                "data": f"{action}_{handover_id}",
-                "message": {
-                    "message_id": rng.randint(1, 99999),
-                    "date": int(time.time()),
-                    "chat": {"id": telegram_chat_id, "type": "group"},
-                },
-            },
-        }
-        if topic_id:
-            payload["callback_query"]["message"]["message_thread_id"] = topic_id
-        return _send_webhook_payload(f"{base_url}/telegram-webhook", payload, None, args.timeout)
+        return _send_manager_telegram_action_with_retry(
+            base_url=base_url,
+            telegram_chat_id=telegram_chat_id,
+            manager_id=manager_id,
+            action=action,
+            handover_id=handover_id,
+            topic_id=topic_id,
+            rng=rng,
+            timeout=args.timeout,
+            retry_count=args.retry_count,
+            retry_backoff=args.retry_backoff,
+        )
 
     def _send_console_action(action, handover_id):
         if args.console_mode == "skip":
@@ -19726,10 +19874,13 @@ def _run_llm_quality(args):
             expected_state, expected_status = _llm_quality_expected_manager_state(
                 action, state_before
             )
+            attempts = 1
             if args.manager_channel == "console":
                 status, body, error = _send_console_action(action, handover_id)
             else:
-                status, body, error = _send_telegram_action(action, handover_id, conv_meta)
+                status, body, error, attempts = _send_telegram_action(
+                    action, handover_id, conv_meta
+                )
             if error and error not in {"console_skipped"}:
                 manager_stats["errors"] += 1
             if args.manager_wait and args.manager_wait > 0:
@@ -19755,6 +19906,7 @@ def _run_llm_quality(args):
                 manager_stats["actions_ok"] += 1
             action_record = {
                 "action": action,
+                "attempts": attempts,
                 "status": status,
                 "error": error,
                 "response": (body or "")[:200] if body else None,

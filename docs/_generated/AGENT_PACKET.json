@@ -1,20 +1,20 @@
 {
-  "active_block_tp": "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+  "active_block_tp": "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md",
   "active_canon": "docs/ACTIVE_CANON.md",
   "active_dec": "docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md",
-  "active_master_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "active_master_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
   "active_master_tp": "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md",
   "current_runtime_cutover_status": {
-    "authority_topology": "continuity_boundary_pack_runtime_legacy_and_operational_reproof_is_complete_repo_side_pending_acceptance",
-    "boundary": "reply_envelope_narrowing_and_boundary_restore_constraints_are_reproven_against_live_code",
-    "continuity": "canonical_runtime_reprojection_and_pending_resume_restore_now_require_canonical_pending_contract_only",
-    "fact_plane": "typed_fact_contract_and_first_family_cutover_remain_reproven_on_active_runtime_paths",
-    "legacy_mesh": "runtime_shadow_wrappers_remain_removed_and_legacy_router_surfaces_stay_non_authoritative_on_live_paths",
-    "pack_runtime_split": "public_pack_runtime_seam_remains_reproven_and_active_behavior_stays_on_public_runtime_helpers",
-    "quality_governance": "replay_and_human_audit_are_now_the_only_admissible_acceptance_lane",
-    "semantic_owner": "hot_path_single_semantic_owner_remains_reproven_after_live_code_reproof"
+    "authority_topology": "block_plan_execution_has_block_a_block_b_block_c_block_c5_block_d_block_e_block_e5_block_e6_block_f_block_g_booking_manage_temporal_clue_followup_continuity_block_h1_oracle_scenario_contract_alignment_and_block_h1b_file_replay_scenario_contract_materialization_closed_proven_block_h_is_next",
+    "boundary": "block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue",
+    "continuity": "block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only",
+    "fact_plane": "block_b_exact_fact_scope_and_block_c5_policy_info_interrupt_delivery_are_closed_proven",
+    "legacy_mesh": "block_f_legacy_mesh_final_fate_contract_is_closed_proven_on_live_import_caller_topology_and_block_g_operational_boundary_is_now_closed_on_shared_runtime_seam",
+    "pack_runtime_split": "block_e_pack_runtime_separation_and_block_e6_post_grounding_service_reply_exactness_are_closed_on_touched_hot_fact_path_selected_adapter_boundary_is_now_canonical",
+    "quality_governance": "block_h_final_acceptance_remains_the_only_lane_for_fresh_locked_replay_plus_full_human_semantic_audit_before_product_closure_now_that_block_h1b_file_replay_scenario_contract_materialization_is_closed",
+    "semantic_owner": "owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial"
   },
-  "historical_residue_rule": "later_r36_star_and_invalidated_whole_system_closure_claims_remain_non_governing_history_while_the_live_code_reproof_block_is_active",
+  "historical_residue_rule": "older_whole_system_reproof_and_invalidated_closure_claims_remain_non_governing_history_while_the_block_plan_is_active",
   "legacy_sunset": {
     "continuity_guard": {
       "allowed_writer_paths": [
@@ -3798,7 +3798,7 @@
   },
   "machine_readable_governance": {
     "authority_registry": {
-      "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+      "active_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
       "current_practical_truth": "r35f",
       "entries": [
         {
@@ -3839,7 +3839,13 @@
             "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
             "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
             "scripts/semantic_owner_reopen_guard.py",
-            "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py"
+            "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py",
+            "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e5-owner-service-referent-grounding-a922.md",
+            "truffles-api/app/services/policy_context_snapshot_service.py",
+            "truffles-api/app/services/policy_prompt_snapshot_service.py",
+            "prompts/llm_policy_core.md",
+            "truffles-api/tests/test_intent.py",
+            "truffles-api/tests/test_consultant_core_runtime_contracts.py"
           ],
           "full_closure_phase": "semantic_owner_and_post_owner_reconstruction_reopen",
           "mechanism_class": "semantic_writer",
@@ -3993,9 +3999,9 @@
         },
         {
           "closure_criteria": [
-            "docs/BOUNDARY_DEGRADE_GUARD.yaml freezes the live boundary/degrade hotspot files, override-meta reads, and boundary-author callsites",
-            "degrade reply-kind forcing is narrowed to boundary-safe kinds only on the live path",
-            "planner:invalid_outcome is emitted through an explicit typed boundary override path instead of an implicit later fallback"
+            "docs/BOUNDARY_DEGRADE_GUARD.yaml freezes the live boundary/degrade hotspot files, override-meta reads, and stale boundary-helper caller proofs",
+            "boundary override meta no longer carries visible handoff or reply business-control keys on the live path",
+            "executor-requested handoff is realized through an explicit controlled-degrade HANDOFF decision instead of boundary meta minting handoff semantics"
           ],
           "confidence": "high",
           "current_competing_writer_paths": [
@@ -4012,11 +4018,12 @@
           "current_truth_carriers": [
             "BoundaryOverride.reason_code / decision / preserve_fields",
             "BoundaryOverride.public_message",
-            "BoundaryOverride.meta.reply_kind / activate_handoff / degrade_stage",
+            "BoundaryOverride.meta.degrade_stage / executor_requested_handoff",
             "TurnResult.contract_status",
             "TurnOutcome.meta.reason_code / boundary_decision"
           ],
           "evidence": [
+            "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-d-boundary-purification-a922.md",
             "docs/BOUNDARY_DEGRADE_GUARD.yaml",
             "docs/REPORTS/2026-03-30-consultant-core-boundary-degrade-constriction-a922.md",
             "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md",
@@ -4203,7 +4210,12 @@
             "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
             "docs/SYSTEM_REPROOF_GUARD.yaml",
             "scripts/system_reproof_guard.py",
-            "truffles-api/tests/architecture/test_system_reproof_guard.py"
+            "truffles-api/tests/architecture/test_system_reproof_guard.py",
+            "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-g-operational-final-dedupe-a922.md",
+            "truffles-api/app/services/outbox_runtime_service.py",
+            "truffles-api/app/routers/console.py",
+            "truffles-api/tests/test_console_ops_jobs.py",
+            "truffles-api/tests/test_outbox_worker_settings.py"
           ],
           "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
           "mechanism_class": "legacy_mesh",
@@ -4298,11 +4310,11 @@
         ]
       },
       "schema_version": "v2",
-      "scope_note": "Hot-path semantic owner remains reproven, and the adjacent continuity, boundary, pack/runtime, legacy, and operational claims are now reproven against live code repo-side. Acceptance remains a separate lane.",
+      "scope_note": "Hot-path semantic owner remains reproven, and the adjacent continuity, boundary, pack/runtime, legacy, and operational claims are now closed on the live-code runtime seam one block at a time. Final acceptance remains a separate lane.",
       "status": "machine_readable_system_reproof_base"
     },
     "compatibility_carrier_inventory": {
-      "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+      "active_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
       "authority_freeze_scope": {
         "evidence": [
           "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-authority-freeze-a922.md",
@@ -5420,7 +5432,7 @@
       "status": "machine_readable_system_reproof_base"
     },
     "dead_surface_registry": {
-      "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+      "active_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
       "authority_freeze_scope": {
         "delete_or_drain_candidates": [
           "truffles-api/app/routers/webhook/info.py",
@@ -5479,6 +5491,19 @@
           "docs/REPORTS/2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md",
           "scripts/operational_entrypoint_dedupe_guard.py",
           "truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py"
+        ],
+        "exact_surface_fates": {
+          "truffles-api/app/routers/webhook/__init__.py": "adapter_only",
+          "truffles-api/app/routers/webhook/context_manager.py": "unreachable",
+          "truffles-api/app/routers/webhook/decision.py": "unreachable",
+          "truffles-api/app/routers/webhook/info.py": "unreachable",
+          "truffles-api/app/routers/webhook/session_memory.py": "adapter_only"
+        },
+        "final_fate_set": [
+          "adapter_only",
+          "observer_only",
+          "unreachable",
+          "removed"
         ],
         "mounted_ingress_surfaces": [
           "truffles-api/app/main.py",
@@ -5585,11 +5610,12 @@
           "caller_proof_status": "live_code_verified",
           "classification": "mounted_live_package_surface",
           "confidence": "high",
-          "current_role": "live package export surface that exposes the mounted webhook router and startup-loaded compatibility helpers",
+          "current_role": "adapter-only mounted package surface that exposes the real router plus lazy compatibility exports",
           "evidence": [
             "truffles-api/app/main.py",
             "truffles-api/app/routers/webhook/__init__.py"
           ],
+          "final_fate": "adapter_only",
           "hot_path_reachable": true,
           "live_runtime_callers": [
             "truffles-api/app/main.py"
@@ -5687,7 +5713,7 @@
           "caller_proof_status": "startup_drain_verified",
           "classification": "lazy_export_only_unmounted_legacy_helper",
           "confidence": "high",
-          "current_role": "legacy helper reachable only through lazy compatibility export or sibling legacy imports; no eager startup load on the mounted package root",
+          "current_role": "legacy helper surface kept unreachable from the live runtime boundary",
           "evidence": [
             "truffles-api/app/routers/webhook/context_manager.py",
             "truffles-api/app/routers/webhook/__init__.py",
@@ -5696,6 +5722,7 @@
             "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
           ],
           "family_envelope_status": "unreachable_for_touched_envelope",
+          "final_fate": "unreachable",
           "hot_path_reachable": false,
           "live_runtime_callers": [],
           "path_exists_expected": true,
@@ -5729,7 +5756,7 @@
           "caller_proof_status": "live_code_verified",
           "classification": "shadow_only_test_compatibility_surface",
           "confidence": "high",
-          "current_role": "frozen compatibility reservoir no longer on the mounted ingress path; reachable only through lazy package export or shadow importers",
+          "current_role": "legacy helper surface kept unreachable from the live runtime boundary",
           "evidence": [
             "truffles-api/app/routers/webhook/decision.py",
             "truffles-api/app/routers/webhook/__init__.py",
@@ -5739,6 +5766,7 @@
             "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
           ],
           "family_envelope_status": "unreachable_for_touched_envelope",
+          "final_fate": "unreachable",
           "hot_path_reachable": false,
           "live_runtime_callers": [],
           "path_exists_expected": true,
@@ -5880,7 +5908,7 @@
           "caller_proof_status": "live_code_verified",
           "classification": "unmounted_legacy_helper_surface",
           "confidence": "high",
-          "current_role": "legacy info helper surface with only sibling legacy and shadow importers in app code",
+          "current_role": "legacy helper surface kept unreachable from the live runtime boundary",
           "evidence": [
             "truffles-api/app/routers/webhook/info.py",
             "docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml",
@@ -5888,6 +5916,7 @@
             "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
           ],
           "family_envelope_status": "unreachable_for_touched_envelope",
+          "final_fate": "unreachable",
           "hot_path_reachable": false,
           "live_runtime_callers": [],
           "path_exists_expected": true,
@@ -6014,7 +6043,7 @@
           "caller_proof_status": "live_code_verified",
           "classification": "live_legacy_control_turn_helper",
           "confidence": "high",
-          "current_role": "legacy session-memory helper now limited to reset-only control-turn and observability support; adapter-only for the touched canary envelope",
+          "current_role": "adapter-only live control-turn helper limited to reset/session-memory compatibility on the touched seam",
           "evidence": [
             "truffles-api/app/routers/webhook/session_memory.py",
             "truffles-api/app/core/consultant_runtime.py",
@@ -6024,6 +6053,7 @@
             "docs/REPORTS/2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md"
           ],
           "family_envelope_status": "adapter_only_for_touched_envelope",
+          "final_fate": "adapter_only",
           "hot_path_reachable": true,
           "live_runtime_callers": [
             "truffles-api/app/core/consultant_runtime.py"
@@ -6223,29 +6253,21 @@
       ],
       "external_packet_status": "ready_for_external_handoff",
       "schema_version": "v4",
-      "scope_note": "Whole-system Governance Closure is active. Runtime shadow wrapper files remain removed, router shadow surfaces remain outside live app runtime, and operational entry surfaces remain deduped on shared runtime owners.",
+      "scope_note": "Block G and the focused booking-manage follow-up block are now closed_proven. Runtime shadow wrapper files remain removed, router shadow surfaces remain outside live app runtime, and live outbox admin/service/console/worker surfaces now share one canonical runtime boundary for scoped preview and execute semantics.",
       "status": "machine_readable_system_reproof_base"
     },
     "governance_delta": {
-      "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
-      "block_tp": "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
+      "active_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
+      "block_tp": "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md",
       "current_practical_truth": "r35f",
       "deferred_next_blocks": [
-        "replay_and_human_audit_acceptance"
+        "block_h_final_acceptance"
       ],
-      "delta_summary": "Reproved continuity, boundary restore, pack/runtime, legacy, and operational closure claims against live code and converged live outbox execution surfaces on one canonical runtime helper.",
+      "delta_summary": "Closed the reopened Block H.1B file-replay scenario contract materialization block on the shared evaluation seam: ops/diagnose.py now materializes --scenarios-file dialogs through the shared booking scenario contract pipeline before evaluation, and the next admissible lane is Block H final acceptance.",
       "evidence": [
-        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
-        "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
-        "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
-        "scripts/semantic_owner_reopen_guard.py",
-        "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py",
-        "docs/system_forensics/authority_registry.json",
-        "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-        "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-        "docs/SYSTEM_REPROOF_GUARD.yaml",
-        "scripts/system_reproof_guard.py",
-        "truffles-api/tests/architecture/test_system_reproof_guard.py"
+        "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1-oracle-scenario-contract-alignment-a922.md",
+        "truffles-api/app/services/llm_quality_contracts.py",
+        "truffles-api/tests/test_booking_dialog_scenarios_script.py"
       ],
       "frozen_modules": [
         "truffles-api/app/routers/webhook/info.py",
@@ -6262,14 +6284,12 @@
         "fact_scope",
         "legacy_behavior_authority"
       ],
-      "new_machine_readable_artifacts": [
-        "docs/SYSTEM_REPROOF_GUARD.yaml"
-      ],
+      "new_machine_readable_artifacts": [],
       "schema_version": "v1",
       "status": "machine_readable_system_reproof_delta"
     },
     "legacy_caller_surface": {
-      "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+      "active_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
       "current_practical_truth": "r35f",
       "entries": [
         {
@@ -6313,6 +6333,7 @@
             "truffles-api/app/routers/webhook/__init__.py",
             "truffles-api/app/routers/webhook/context_manager.py"
           ],
+          "final_fate": "unreachable",
           "freeze_mode": "adapter_only_after_shadow_lane_elimination",
           "hot_path_status": "lazy_export_only_unmounted_legacy_helper",
           "live_runtime_callers": [],
@@ -6352,6 +6373,7 @@
             "truffles-api/app/routers/webhook/_legacy.py",
             "truffles-api/app/routers/webhook/decision.py"
           ],
+          "final_fate": "unreachable",
           "freeze_mode": "shadow_only_after_shadow_lane_elimination",
           "hot_path_status": "shadow_only_test_compatibility_surface",
           "live_runtime_callers": [],
@@ -6390,6 +6412,7 @@
             "scripts/legacy_drain_closure_guard.py",
             "truffles-api/app/routers/webhook/info.py"
           ],
+          "final_fate": "unreachable",
           "freeze_mode": "adapter_only_after_shadow_lane_elimination",
           "hot_path_status": "unmounted_legacy_helper_surface",
           "live_runtime_callers": [],
@@ -6450,6 +6473,17 @@
           "docs/system_forensics/final/SYSTEM_FINAL_ANALYSIS.md",
           "docs/system_forensics/dead_surface_registry.json"
         ],
+        "exact_module_fates": {
+          "truffles-api/app/routers/webhook/context_manager.py": "unreachable",
+          "truffles-api/app/routers/webhook/decision.py": "unreachable",
+          "truffles-api/app/routers/webhook/info.py": "unreachable"
+        },
+        "final_fate_set": [
+          "adapter_only",
+          "observer_only",
+          "unreachable",
+          "removed"
+        ],
         "forbidden_new_authority_classes": [
           "semantic",
           "continuity",
@@ -6470,14 +6504,15 @@
         "shadow_or_wrapper_candidates": []
       },
       "schema_version": "v1",
-      "scope_note": "Broader live-code reproof is complete repo-side. Router shadow surfaces remain outside live app runtime, and acceptance stays blocked pending replay and full human semantic audit.",
+      "scope_note": "Active docs now track post-booking-manage follow-up runtime closeout; legacy webhook surfaces keep exact final fates on live import/caller proof, the operational outbox seam is now deduped on one shared runtime boundary, and acceptance stays blocked pending Block H fresh replay plus full human semantic audit after the focused booking-manage blocker family proof.",
       "status": "machine_readable_system_reproof_base"
     }
   },
   "open_blockers": [
     "fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim",
-    "current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement",
-    "whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes"
+    "current_practical_truth_remains_r35f_until_block_h_final_acceptance_refreshes_it",
+    "whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes",
+    "block_h_final_acceptance_replay_and_full_human_semantic_audit_remain_open_after_block_h1b_file_replay_scenario_contract_materialization_closeout"
   ],
   "recovery_execution_lock_map": {
     "allowed_work_classes": [
@@ -6491,8 +6526,20 @@
     "authority_precedence": [
       "explicit_user_or_owner_instruction",
       "docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md",
-      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-a-interrupt-arbitration-and-continuation-law-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-b-fact-scope-exactness-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-c-continuity-carrier-collapse-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-c5-policy-info-interrupt-fact-delivery-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-d-boundary-purification-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e-real-pack-runtime-separation-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e5-owner-service-referent-grounding-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e6-post-grounding-service-reply-exactness-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-f-legacy-mesh-final-drain-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-g-operational-final-dedupe-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-booking-manage-temporal-clue-grounding-followup-continuity-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1-oracle-scenario-contract-alignment-a922.md",
+      "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md",
       "docs/SOURCE_OF_TRUTH.yaml",
       "docs/ACTIVE_CANON.md",
       "docs/ACTIVE_PROGRAM.md",
@@ -6505,7 +6552,7 @@
         "current_practical_truth_differs_from_lock",
         "product_or_practical_closure_is_claimed_before_acceptance_passes",
         "generated_packet_claims_done_or_green_before_acceptance",
-        "current_non_negotiable_next_move_drifts_away_from_replay_and_human_audit_acceptance",
+        "current_non_negotiable_next_move_drifts_away_from_block_h_final_acceptance",
         "state_or_canon_is_updated_after_micro_fix_inside_an_unfinished_block"
       ]
     },
@@ -6519,9 +6566,8 @@
     ],
     "phase_advance": {
       "blocked_until": [
-        "continuity_boundary_pack_runtime_legacy_and_operational_reproof_is_accepted",
-        "replay_and_human_audit_acceptance_is_completed",
-        "practical_or_product_closure_claims_remain_blocked_until_acceptance_passes"
+        "block_h_final_acceptance_remains_open_until_closed_with_fresh_locked_replay_and_full_human_semantic_audit",
+        "product_or_practical_closure_claims_remain_blocked_until_block_h_acceptance_passes"
       ],
       "requires_explicit_owner_or_architect_waiver": true,
       "waiver_file": "docs/RECOVERY_PHASE_WAIVER.yaml"
@@ -6534,58 +6580,41 @@
       "docs/_generated/AGENT_PACKET.json"
     ],
     "root_first_context": {
-      "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
-      "active_block_tp": "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-      "current_non_negotiable_next_move": "run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim",
+      "active_block": "Consultant Core Block H.1B \u2014 File Replay Scenario Contract Materialization",
+      "active_block_tp": "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md",
+      "current_non_negotiable_next_move": "rerun_block_h_final_acceptance_after_closing_block_h1b_file_replay_scenario_contract_materialization_20260401",
       "current_practical_report": "docs/REPORTS/2026-03-30-consultant-core-r35f-human-semantic-audit-a922.md",
       "current_practical_truth": "r35f",
       "external_packet_status": "ready_for_external_handoff",
-      "historical_residue_rule": "later_r36_star_and_invalidated_whole_system_closure_claims_remain_non_governing_history_while_the_live_code_reproof_block_is_active",
-      "runtime_implementation_status": "broader_live_code_reproof_block_closed_repo_side_acceptance_is_next"
+      "historical_residue_rule": "older_whole_system_reproof_and_invalidated_closure_claims_remain_non_governing_history_while_the_block_plan_is_active",
+      "runtime_implementation_status": "block_a_block_b_block_c_block_c5_block_d_block_e_block_e5_block_e6_block_f_block_g_booking_manage_temporal_clue_followup_continuity_block_h1_oracle_scenario_contract_alignment_and_block_h1b_file_replay_scenario_contract_materialization_closed_proven_block_h_final_acceptance_is_next"
     },
     "root_first_order": [
-      "governing_decision_freeze",
-      "authority_freeze",
-      "fact_contract_schema",
-      "narrow_fact_family_cutover",
-      "continuity_state_normalization",
-      "post_owner_semantic_constriction",
-      "boundary_constriction",
-      "pack_runtime_separation_completion",
-      "legacy_mesh_drain",
-      "shadow_lane_elimination",
-      "operational_entrypoint_dedupe",
-      "closure_claim_truth_correction_and_semantic_owner_reopen",
-      "semantic_owner_and_post_owner_reconstruction_reopen",
-      "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
-      "replay_and_human_audit_acceptance"
+      "block_a_interrupt_arbitration_and_continuation_law",
+      "block_b_fact_scope_exactness",
+      "block_c_continuity_carrier_collapse",
+      "block_c5_policy_info_interrupt_fact_delivery",
+      "block_d_boundary_purification",
+      "block_e_real_pack_runtime_separation",
+      "block_e5_owner_service_referent_grounding",
+      "block_e6_post_grounding_service_reply_exactness",
+      "block_f_legacy_mesh_final_drain",
+      "block_g_operational_final_dedupe",
+      "booking_manage_temporal_clue_grounding_followup_continuity",
+      "block_h1_oracle_scenario_contract_alignment",
+      "block_h1b_file_replay_scenario_contract_materialization",
+      "block_h_final_acceptance"
     ],
-    "summary": "Whole-system consultant-core architecture closure execution lock. This file outranks active derived docs when they drift.",
-    "version": "2026-03-31.v1"
+    "summary": "Consultant-core block execution lock after proven Block H.1B file-replay scenario contract materialization closeout. This file outranks active derived docs when they drift.",
+    "version": "2026-04-01.v10"
   },
   "required_checks": [
     "python3 scripts/build_agent_packet.py",
     "python3 scripts/build_agent_packet.py --check",
     "python3 scripts/recovery_execution_guard.py",
-    "python3 scripts/continuity_state_normalization_guard.py",
-    "python3 scripts/boundary_degrade_guard.py",
-    "python3 scripts/pack_runtime_separation_guard.py",
-    "python3 scripts/legacy_mesh_drain_guard.py",
-    "python3 scripts/operational_entrypoint_dedupe_guard.py",
-    "python3 scripts/system_reproof_guard.py",
-    "python3 scripts/arch_guard.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_state_service.py -k \"restore_pending_resume_payload or prepare_pending_handoff_resume_boundary_restore or prepare_resolved_handoff_resume_boundary_restore or resolve_resolved_handoff_resume_boundary_restore or resolve_pending_resume_boundary_activation\"",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_dialog_state_service.py -k \"pending_resume_payload\"",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py -k \"provider_unavailable_human_request_pending_resume\"",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_worker_settings.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_service_app.py truffles-api/tests/test_admin_legacy_auth.py -k \"outbox_service or admin_outbox_process\"",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_console_ops_jobs.py -k \"run_outbox_process_job_execute\"",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_arch_guard_packet.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_authority_registry.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_recovery_execution_guard.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_continuity_state_normalization_guard.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py",
-    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_system_reproof_guard.py",
+    "python3 -m py_compile ops/diagnose.py",
+    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_diagnose_run_command.py -k \"scenarios_file or materialize\"",
+    "PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_recovery_execution_guard.py truffles-api/tests/architecture/test_arch_guard_packet.py truffles-api/tests/architecture/test_authority_registry.py",
     "git diff --check"
   ],
   "source_of_truth_map": {
@@ -6602,6 +6631,19 @@
     },
     "authority_recovery_program": {
       "phases": [
+        "block_a_interrupt_arbitration_and_continuation_law",
+        "block_b_fact_scope_exactness",
+        "block_c_continuity_carrier_collapse",
+        "block_c5_policy_info_interrupt_fact_delivery",
+        "block_d_boundary_purification",
+        "block_e_real_pack_runtime_separation",
+        "block_e5_owner_service_referent_grounding",
+        "block_e6_post_grounding_service_reply_exactness",
+        "block_f_legacy_mesh_final_drain",
+        "block_g_operational_final_dedupe",
+        "block_h1_oracle_scenario_contract_alignment",
+        "block_h1b_file_replay_scenario_contract_materialization",
+        "block_h_final_acceptance",
         "governing_decision_freeze",
         "authority_freeze",
         "fact_contract_schema",
@@ -6627,7 +6669,7 @@
         "truffles-api/app/core/consultant_runtime.py",
         "truffles-api/app/core/response_realizer.py"
       ],
-      "cutover_status": "boundary_reply_envelope_and_restore_constraints_are_reproven_against_live_code_pending_acceptance",
+      "cutover_status": "block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue",
       "target_primary_files": [
         "contracts/runtime/boundary_override.v1.jsonschema",
         "truffles-api/app/core/boundary_validator.py"
@@ -6640,7 +6682,7 @@
         "truffles-api/app/core/dialog_state_service.py",
         "truffles-api/app/routers/webhook/context_manager.py"
       ],
-      "cutover_status": "canonical_runtime_continuity_and_boundary_resume_restore_are_reproven_against_live_code_pending_acceptance",
+      "cutover_status": "block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only",
       "target_primary_files": [
         "contracts/runtime/dialog_state.v1.jsonschema",
         "truffles-api/app/core/dialog_state_service.py",
@@ -6648,11 +6690,11 @@
         "truffles-api/app/core/turn_journal.py"
       ]
     },
-    "current_non_negotiable_next_move": "run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim",
+    "current_non_negotiable_next_move": "rerun_block_h_final_acceptance_after_closing_block_h1b_file_replay_scenario_contract_materialization_20260401",
     "dead_surface_registry": "docs/system_forensics/dead_surface_registry.json",
     "execution_strategy": {
       "block_closeout_rule": "state_canon_packet_and_report_sync_only_after_full_block_completion_never_after_micro_actions",
-      "current_nonnegotiable_next_move": "run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim",
+      "current_nonnegotiable_next_move": "rerun_block_h_final_acceptance_after_closing_block_h1b_file_replay_scenario_contract_materialization_20260401",
       "forbidden_shortcuts": [
         "start_from_visible_family_symptom_before_authority_and_fact_contract_freeze",
         "boundary_cleanup_before_explicit_fact_scope_contract",
@@ -6662,6 +6704,19 @@
         "canon_or_state_updates_after_micro_fix_inside_unfinished_block"
       ],
       "mandatory_sequence": [
+        "block_a_interrupt_arbitration_and_continuation_law",
+        "block_b_fact_scope_exactness",
+        "block_c_continuity_carrier_collapse",
+        "block_c5_policy_info_interrupt_fact_delivery",
+        "block_d_boundary_purification",
+        "block_e_real_pack_runtime_separation",
+        "block_e5_owner_service_referent_grounding",
+        "block_e6_post_grounding_service_reply_exactness",
+        "block_f_legacy_mesh_final_drain",
+        "block_g_operational_final_dedupe",
+        "block_h1_oracle_scenario_contract_alignment",
+        "block_h1b_file_replay_scenario_contract_materialization",
+        "block_h_final_acceptance",
         "governing_decision_freeze",
         "authority_freeze",
         "fact_contract_schema",
@@ -6829,7 +6884,7 @@
         "truffles-api/app/services/intent_service.py",
         "truffles-api/app/core/turn_planner.py"
       ],
-      "cutover_status": "hot_path_single_semantic_owner_remains_reproven_and_adjacent_runtime_reproof_is_complete_repo_side_pending_acceptance",
+      "cutover_status": "owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial",
       "target_primary_files": [
         "contracts/runtime/semantic_decision.v1.jsonschema",
         "truffles-api/app/core/semantic_decision.py"
@@ -6844,69 +6899,32 @@
     }
   },
   "touch_list_allowed": [
-    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-    "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-replay-and-full-human-semantic-audit-acceptance-a922.md",
-    "docs/SYSTEM_REPROOF_GUARD.yaml",
-    "docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml",
-    "docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml",
-    "docs/RECOVERY_EXECUTION_LOCK.yaml",
-    "docs/RECOVERY_PHASE_WAIVER.yaml",
-    "docs/SOURCE_OF_TRUTH.yaml",
-    "docs/ACTIVE_CANON.md",
-    "docs/ACTIVE_PROGRAM.md",
-    "docs/_generated/AGENT_PACKET.md",
-    "docs/_generated/AGENT_PACKET.json",
-    "docs/system_forensics/authority_registry.json",
-    "docs/system_forensics/compatibility_carrier_inventory.json",
-    "docs/system_forensics/dead_surface_registry.json",
-    "docs/system_forensics/legacy_caller_surface.json",
-    "docs/system_forensics/governance_delta.json",
-    "STATE.md",
-    "STRUCTURE.md",
-    "scripts/recovery_execution_guard.py",
-    "scripts/arch_guard.py",
-    "scripts/system_reproof_guard.py",
-    "scripts/continuity_state_normalization_guard.py",
-    "truffles-api/app/core/dialog_state_service.py",
-    "truffles-api/app/services/state_service.py",
-    "truffles-api/app/services/outbox_runtime_service.py",
-    "truffles-api/tests/test_state_service.py",
-    "truffles-api/tests/test_dialog_state_service.py",
-    "truffles-api/tests/test_message_endpoint.py",
-    "truffles-api/tests/test_outbox_worker_settings.py",
-    "truffles-api/tests/test_outbox_service_app.py",
-    "truffles-api/tests/test_admin_legacy_auth.py",
-    "truffles-api/tests/test_console_ops_jobs.py",
-    "truffles-api/tests/architecture/test_arch_guard_packet.py",
-    "truffles-api/tests/architecture/test_authority_registry.py",
-    "truffles-api/tests/architecture/test_recovery_execution_guard.py",
-    "truffles-api/tests/architecture/test_continuity_state_normalization_guard.py",
-    "truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py",
-    "truffles-api/tests/architecture/test_system_reproof_guard.py",
-    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
-    "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
-    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md"
+    "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md",
+    "ops/diagnose.py",
+    "truffles-api/tests/test_diagnose_run_command.py"
   ],
   "touch_list_forbidden": [
-    "truffles-api/app/routers/webhook/dedup.py",
-    "truffles-api/app/routers/webhook/_legacy.py",
-    "truffles-api/app/routers/admin.py",
-    "truffles-api/app/routers/webhook/policy.py",
+    "STATE.md",
+    "docs/ACTIVE_CANON.md",
+    "docs/ACTIVE_PROGRAM.md",
+    "docs/RECOVERY_EXECUTION_LOCK.yaml",
+    "docs/SOURCE_OF_TRUTH.yaml",
+    "docs/_generated/AGENT_PACKET.json",
+    "docs/_generated/AGENT_PACKET.md",
+    "prompts/llm_policy_core.md",
+    "truffles-api/app/core/consultant_runtime.py",
+    "truffles-api/app/core/dialog_state_service.py",
+    "truffles-api/app/services/state_service.py",
     "truffles-api/app/services/tool_registry_service.py",
-    "truffles-api/app/routers/webhook/response.py",
-    "truffles-api/app/services/intent_service.py",
-    "truffles-api/app/routers/webhook/info.py",
-    "truffles-api/app/routers/console.py",
-    "truffles-api/app/services/pack_runtime_service.py",
-    "truffles-api/app/routers/webhook/context_manager.py",
-    "truffles-api/app/routers/webhook/guards.py",
-    "truffles-api/app/routers/webhook/booking.py",
-    "truffles-api/app/core/response_realizer.py",
-    "truffles-api/app/routers/webhook/pending.py",
-    "truffles-api/app/outbox_service_app.py",
     "truffles-api/app/routers/webhook/decision.py",
-    "truffles-api/app/workers/outbox.py",
-    "truffles-api/app/routers/outbox_service.py"
+    "truffles-api/app/routers/webhook/_legacy.py",
+    "truffles-api/app/routers/webhook/context_manager.py",
+    "truffles-api/app/routers/webhook/response.py",
+    "truffles-api/app/routers/webhook/booking.py",
+    "truffles-api/app/routers/webhook/info.py",
+    "truffles-api/app/routers/webhook/pending.py",
+    "truffles-api/app/routers/webhook/policy.py",
+    "truffles-api/app/routers/webhook/guards.py",
+    "truffles-api/app/routers/webhook/dedup.py"
   ]
 }

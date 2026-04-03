@@ -22,7 +22,7 @@ def test_authority_registry_matches_truth_correction_block_and_hot_path() -> Non
 
     assert authority_registry['schema_version'] == 'v2'
     assert authority_registry['status'] == 'machine_readable_system_reproof_base'
-    assert authority_registry['active_block'] == 'Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof'
+    assert authority_registry['active_block'] == 'Consultant Core Block H.1B — File Replay Scenario Contract Materialization'
     assert authority_registry['current_practical_truth'] == 'r35f'
     assert authority_registry['mounted_runtime_topology']['hot_path'] == [
         'truffles-api/app/core/consultant_core_v2.py',
@@ -61,12 +61,12 @@ def test_compatibility_carrier_inventory_and_truth_show_reopened_status() -> Non
     truth = _load_yaml('docs/SOURCE_OF_TRUTH.yaml')
     inventory = _load_json(truth['compatibility_carrier_inventory'])
 
-    assert truth['semantic_owner']['cutover_status'] == 'hot_path_single_semantic_owner_remains_reproven_and_adjacent_runtime_reproof_is_complete_repo_side_pending_acceptance'
-    assert truth['continuity_owner']['cutover_status'] == 'canonical_runtime_continuity_and_boundary_resume_restore_are_reproven_against_live_code_pending_acceptance'
-    assert truth['boundary_owner']['cutover_status'] == 'boundary_reply_envelope_and_restore_constraints_are_reproven_against_live_code_pending_acceptance'
-    assert truth['program']['current_block'] == 'Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof'
+    assert truth['semantic_owner']['cutover_status'] == 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial'
+    assert truth['continuity_owner']['cutover_status'] == 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only'
+    assert truth['boundary_owner']['cutover_status'] == 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue'
+    assert truth['program']['current_block'] == 'Consultant Core Block H.1B — File Replay Scenario Contract Materialization'
     assert inventory['status'] == 'machine_readable_system_reproof_base'
-    assert inventory['active_block'] == 'Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof'
+    assert inventory['active_block'] == 'Consultant Core Block H.1B — File Replay Scenario Contract Materialization'
 
 
 def test_dead_surface_and_legacy_caller_registries_no_longer_claim_final_closure() -> None:
@@ -78,5 +78,5 @@ def test_dead_surface_and_legacy_caller_registries_no_longer_claim_final_closure
     assert dead['status'] == 'machine_readable_system_reproof_base'
     assert callers['status'] == 'machine_readable_system_reproof_base'
     assert delta['status'] == 'machine_readable_system_reproof_delta'
-    assert delta['active_block'] == 'Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof'
-    assert delta['deferred_next_blocks'] == ['replay_and_human_audit_acceptance']
+    assert delta['active_block'] == 'Consultant Core Block H.1B — File Replay Scenario Contract Materialization'
+    assert delta['deferred_next_blocks'] == ['block_h_final_acceptance']

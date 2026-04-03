@@ -232,6 +232,7 @@ def build_policy_core_response_format(allowed_tool_actions: Iterable[str]) -> di
             "subject_kind": nullable_string_enum(snapshot.subject_kinds),
             "capability": nullable_string_enum(snapshot.capabilities),
             "temporal_scope": nullable_string_enum(snapshot.temporal_scopes),
+            "alternate_datetime": nullable_string,
             "resolution_mode": nullable_string_enum(snapshot.resolution_modes),
             "pending_question_act": nullable_string_enum(snapshot.pending_question_acts),
             "pending_question_target": nullable_string_enum(snapshot.pending_question_targets),

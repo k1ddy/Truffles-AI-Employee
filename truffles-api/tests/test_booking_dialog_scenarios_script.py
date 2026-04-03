@@ -555,14 +555,13 @@ def test_shared_booking_progress_helpers_shape_multi_service_and_service_grounde
 
     assert grounded["reply_type"] == "time"
     assert grounded["meta"]["expected_reply_type"] == "time"
-    assert grounded["meta"]["expected_reply_reason"] == "collect:datetime"
+    assert "expected_reply_reason" not in grounded["meta"]
     assert grounded["meta_any"]["expected_reply_type"] == ["time"]
-    assert grounded["meta_any"]["expected_reply_reason"] == ["collect:datetime"]
+    assert "expected_reply_reason" not in grounded["meta_any"]
     assert grounded["trace_contains"] == [
         {
             "stage": "question_contract",
             "expected_reply_type": "time",
-            "reason": "collect:datetime",
         }
     ]
 
@@ -2034,6 +2033,74 @@ def test_sanitize_llm_turns_rewrites_check_booking_like_query_without_prior_mana
     assert followup_expect.get("expected_reply") is True
     assert followup_expect.get("reply_type") is None
     assert (followup_expect.get("meta_any") or {}).get("expected_reply_type") is None
+
+
+def test_sanitize_llm_turns_marks_check_booking_entry_as_reply_required():
+    ctx = _module._build_context(random.Random(145))
+    turns = [
+        {
+            "kind": "text",
+            "text": "Проверьте мою запись на четверг.",
+            "tags": ["check_booking"],
+            "expect": {"expected_reply": False},
+        }
+    ]
+
+    sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(145))
+
+    expect = sanitized[0].get("expect") or {}
+    assert sanitized[0]["tags"] == ["check_booking"]
+    assert expect.get("expected_reply") is True
+    assert expect.get("reply_type") is None
+
+
+def test_sanitize_llm_turns_marks_active_name_answer_as_reply_required():
+    ctx = _module._build_context(random.Random(146))
+    turns = [
+        {
+            "kind": "text",
+            "text": f"Хочу записаться на {ctx['service']}.",
+            "tags": ["booking"],
+            "expect": {"reply_type": "time", "expected_reply": True},
+        },
+        {
+            "kind": "text",
+            "text": "Завтра в 15:00",
+            "tags": ["time"],
+            "expect": {
+                "reply_type": "name",
+                "expected_reply": True,
+                "meta_any": {"expected_reply_type": ["name"]},
+                "trace_contains": [
+                    {"stage": "question_contract", "expected_reply_type": "name"}
+                ],
+            },
+        },
+        {
+            "kind": "text",
+            "text": "Алина",
+            "tags": ["name"],
+            "expect": {
+                "expected_reply": False,
+                "meta_any": {"expected_reply_type": ["name"]},
+                "trace_contains": [
+                    {"stage": "question_contract", "expected_reply_type": "name"}
+                ],
+            },
+        },
+    ]
+
+    sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(146))
+
+    expect = sanitized[2].get("expect") or {}
+    assert sanitized[2]["tags"] == ["name"]
+    assert expect.get("expected_reply") is True
+    assert expect.get("reply_type") is None
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") is None
+    assert not any(
+        entry.get("stage") in {"question_contract", "pending_question_interaction"}
+        for entry in (expect.get("trace_contains") or [])
+    )
 
 
 def test_sanitize_llm_turns_rewrites_reschedule_followup_slot_compare_to_reschedule():
@@ -4462,6 +4529,28 @@ def test_repair_post_coverage_orphan_pending_question_turns_rewrites_check_booki
     )
 
 
+def test_repair_post_coverage_orphan_pending_question_turns_marks_check_booking_entry_as_reply_required():
+    dialogs = [
+        {
+            "dialog_id": 1,
+            "turns": [
+                {
+                    "kind": "text",
+                    "text": "Проверьте мою запись на четверг.",
+                    "tags": ["check_booking"],
+                    "expect": {"expected_reply": False},
+                }
+            ],
+        }
+    ]
+
+    repaired = _module._repair_post_coverage_orphan_pending_question_turns(dialogs)
+
+    expect = repaired[0]["turns"][0].get("expect") or {}
+    assert expect.get("expected_reply") is True
+    assert expect.get("reply_type") is None
+
+
 def test_sanitize_llm_turns_relaxes_confirm_after_active_check_booking():
     ctx = _module._build_context(random.Random(531))
     turns = [
@@ -4521,10 +4610,63 @@ def test_repair_post_coverage_orphan_pending_question_turns_relaxes_confirm_afte
 
     repaired = _module._repair_post_coverage_orphan_pending_question_turns(dialogs)
 
+    assert repaired[0]["turns"][1]["tags"] == ["confirm"]
     expect = repaired[0]["turns"][1]["expect"]
     assert expect.get("expected_reply") is True
     assert expect.get("reply_type") is None
     assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name", "time"]
+
+
+def test_repair_post_coverage_orphan_pending_question_turns_marks_active_name_answer_as_reply_required():
+    dialogs = [
+        {
+            "dialog_id": 1,
+            "turns": [
+                {
+                    "kind": "text",
+                    "text": "Хочу записаться на маникюр.",
+                    "tags": ["booking"],
+                    "expect": {"reply_type": "time", "expected_reply": True},
+                },
+                {
+                    "kind": "text",
+                    "text": "Завтра в 15:00",
+                    "tags": ["time"],
+                    "expect": {
+                        "reply_type": "name",
+                        "expected_reply": True,
+                        "meta_any": {"expected_reply_type": ["name"]},
+                        "trace_contains": [
+                            {"stage": "question_contract", "expected_reply_type": "name"}
+                        ],
+                    },
+                },
+                {
+                    "kind": "text",
+                    "text": "Алина",
+                    "tags": ["name"],
+                    "expect": {
+                        "expected_reply": False,
+                        "meta_any": {"expected_reply_type": ["name"]},
+                        "trace_contains": [
+                            {"stage": "question_contract", "expected_reply_type": "name"}
+                        ],
+                    },
+                },
+            ],
+        }
+    ]
+
+    repaired = _module._repair_post_coverage_orphan_pending_question_turns(dialogs)
+
+    expect = repaired[0]["turns"][2].get("expect") or {}
+    assert expect.get("expected_reply") is True
+    assert expect.get("reply_type") is None
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") is None
+    assert not any(
+        entry.get("stage") in {"question_contract", "pending_question_interaction"}
+        for entry in (expect.get("trace_contains") or [])
+    )
 
 
 def test_repair_post_coverage_orphan_pending_question_turns_restores_slot_question_after_malformed_check_booking():

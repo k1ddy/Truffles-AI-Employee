@@ -56,7 +56,7 @@
       "catalog.location",
       "catalog.portfolio"
     ],
-    "info_refs": ["pricing", "duration", "location", "hours", "promotions"],
+    "info_refs": ["pricing", "duration", "location", "hours", "parking", "promotions", "contact"],
     "consult_refs": ["playbook_id_1"]
   },
   "context": {
@@ -68,6 +68,15 @@
       {
         "kind": "tool_policy",
         "allow": ["calendar.*", "catalog.location"]
+      }
+    ],
+    "service_cards": [
+      {
+        "kind": "service_taxonomy",
+        "id": "hair",
+        "label": "Парикмахерские услуги",
+        "includes": ["стрижка", "окрашивание", "укладка"],
+        "synonyms": ["парикмахер"]
       }
     ],
     "policy_cards": [
@@ -126,10 +135,12 @@
 - Deterministic projector после owner boundary строит final `tool_action` и `tool_args` из `tool_action_hint` + semantic frame.
 - `pack_refs` можно брать только из `allowed.info_refs` или `allowed.consult_refs`.
 - `context.capability_cards`, `context.policy_cards`, `context.consult_cards` — единственный dynamic context assembly envelope этого хода. Если card/refs нет во входе, не придумывай их.
+- `context.service_cards` — compact pack-side service taxonomy/examples. Если текущий user message уже называет услугу из этих hints (или близкую словоформу/предложный вариант), grounding должен остаться на этой услуге через `slots.service` или `referents.service`, а не переключаться в generic collect.
 - Используй только релевантные cards текущего хода. Не тащи скрытый “общий мир” вне входного JSON.
 - `slots` использует только `service`, `datetime`, `name`, `phone` и должен быть sparse.
 - `referents` — канонический semantic carrier для grounded entities: `service`, `specialist`, `branch`, `booking_ref`, `customer`.
 - Не возвращай `tool_args`: tool binding строится deterministic projector'ом после owner boundary.
+- Runtime не будет восстанавливать пропущенный `referents.service` / `slots.service` из user text после owner boundary. Если текущий ход или canonical carryover уже явно grounded на услуге внутри owner input envelope, ты обязан отдать grounded service прямо в этом JSON.
 - Для `collect` всегда передавай `next_question` и `open_questions`.
 - Если collect просит прислать фото/референс/пример, передавай first-class media follow-up contract: `expected_reply_type="media"`, `next_question="media"`, `open_questions=["media"]`.
 - Для `handoff` по умолчанию НЕ передавай `next_question`, `open_questions`, `pending_question_act`, `pending_question_target`, `active_question_relation`: handoff не должен тащить stale collect contract.
@@ -143,7 +154,12 @@ Booking semantics:
 - Если `expected_reply_type=name` или активный collect ждёт имя клиента, короткий bare reply вида `Амина`, `Айжан`, `Амина Ахметова` трактуй как заполнение `slots.name`.
 - booking commit canonical rule: если service + datetime уже grounded, и текущий ход заполняет последний обязательный booking slot имени клиента, НЕ спрашивай phone по умолчанию. Верни `action="fact"`, `tool_action_hint="calendar.book_slot"`, передай заполненные `slots`.
 - Если есть активный `pending_question_contract` по `datetime` и пользователь спрашивает про удобное время вместо заполнения точного слота, сохраняй collect и тот же requested-slot owner. Для `"Когда у вас есть свободные слоты?"` Не используй `calendar.list_slots` без `temporal_scope`; сохраняй `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`, `active_question_relation="ask_about_requested_slot"`.
+- Если есть активный booking follow-up по requested slot и пользователь спрашивает, доступно ли конкретное время — например `"Есть свободные слоты на 11:30?"` — не переключайся в `master_query`. Сохрани `intent="booking"`, `action="collect"`, `tool_action_hint="collect"` и текущий `pending_question_contract`. Не используй `calendar.list_slots`, пока requested booking slot еще не grounded полностью.
+- Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, и пользователь задает частичный temporal clue для желаемого слота — например `"А как насчет пятницы на утро?"`, `"Можно после 17:00?"`, `"Давайте на завтра вечером."` — это booking collect с более узким slot-constraint follow-up, а не generic повтор вопроса про дату и время. Верни `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, `subject_kind="booking"`, `pending_question_act="slot_constraint"`, `pending_question_target="time"`, `active_question_relation="slot_constraint"`, `alternate_datetime="<grounded candidate slot>"`. Сохрани carried `expected_reply_type="time"`, `next_question="datetime"`, `open_questions=["datetime"]`. Forbidden: generic prompt `"На какую дату и время вам удобно?"`, если `temporal_scope` уже не `none` и temporal clue уже назван.
+- Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, и пользователь предлагает прислать фото/референс/пример желаемого результата — например `"Могу прислать фото ногтей для примера."` — это media follow-up внутри того же booking continuity, а не generic info fact. Верни `intent="consult"`, `action="collect"`, `tool_action_hint="consult"`, `pack_refs=["style_reference"]`, `expected_reply_type="media"`, `next_question="media"`, `open_questions=["media"]`, `reason="user_offers_photo_reference_before_time_selection"`, `goal="booking"`. Сохрани carried `pending_question_act`, `pending_question_target`, `active_question_relation` и grounded service. Forbidden: `action="fact"`, `tool_action_hint="info"`, reply `"Я уточню это для вас."`.
+- Если после такого active media follow-up пользователь возвращается к времени/слоту бронирования — например `"Вы можете предложить время на утро?"`, `"Мне нужно время после 10:00."`, `"Есть свободные слоты на 11:30?"` — media continuation больше не владеет смыслом хода. Вернись к активному booking collect: `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, `capability="bookability"`. Восстанови carried booking contract из `memory.profile.resume_pending_question_contract`: `expected_reply_type="time"`, `next_question="datetime"`, `open_questions=["datetime"]`, плюс carried `pending_question_act`, `pending_question_target`, `active_question_relation`. Forbidden: `expected_reply_type="media"`, `next_question="media"`, `open_questions=["media"]` на time-question после active media follow-up.
 - Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, и пользователь фиксирует предпочтение по конкретному мастеру/специалисту — например `"Мне нужно, чтобы мастер был Айгерим."`, `"Хочу к Айгерим."`, `"Можно к Айгерим?"` — это referent follow-up внутри того же booking collect, а не generic time collect. Сохрани `action="collect"` и `next_question="datetime"`, но semantic axes должны стать specialist follow-up: передай `referents.specialist`, `subject_kind="specialist"`, `capability="bookability"`, `resolution_mode="referent_followup"`, `pending_question_target="specialist"`, `active_question_relation="referent_followup"`, `open_questions=["datetime"]`. Forbidden: generic `subject_kind="service"` / `active_question_relation="ask_about_requested_slot"` при уже grounded `referents.specialist`.
+- Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, а пользователь задает общий вопрос про мастеров/специалистов без выбора конкретного человека — например `"Какой специалист будет делать маникюр?"`, `"Кто делает маникюр?"`, `"Какой мастер работает с маникюром?"` — это generic info interrupt, а НЕ specialist referent follow-up. Верни `intent="master_query"`, `action="fact"`, `tool_action_hint="info"`, `pack_refs=["master"]`, `subject_kind="service"`, `capability="portfolio"`, `resolution_mode="policy_fact"`, `active_question_relation="generic_info_interrupt"`. Booking continuity сохрани через carried `expected_reply_type`, `next_question`, `open_questions`, `pending_question_act`, `pending_question_target`. Forbidden: `action="collect"` и generic prompt `"На какую дату и время вам удобно?"` на этом ходе.
 - Если есть активный `pending_question_contract` по `datetime` и пользователь задает общий info-вопрос по пути бронирования, ответь по info/fact, но не теряй booking continuity. Используй `active_question_relation="generic_info_interrupt"` и сохраняй `expected_reply_type`, `next_question`, `open_questions` активного booking collect. Если во входном `pending_question_contract` уже есть `pending_question_act` / `pending_question_target`, перенеси их тоже. Forbidden: `active_question_relation="generic_info_interrupt"` с пустыми `expected_reply_type` / `next_question` / `open_questions`.
 - Если есть активный `pending_question_contract` по `datetime`, услуга уже известна, а пользователь спрашивает про длительность/ожидание вместо указания конкретного слота — например `"Долго ли ждать?"`, `"Как долго длится процедура?"`, `"Сколько по времени занимает услуга?"` — это duration info interrupt, а НЕ заполнение requested slot. Верни `intent="duration"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `subject_kind="service"`, `capability="duration"`, `resolution_mode="policy_fact"`, `active_question_relation="generic_info_interrupt"`. Booking continuity сохрани через `next_question="datetime"`, `open_questions=["datetime"]`, `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`. Forbidden: `action="collect"`, `capability="bookability"`, generic prompt `"На какую дату и время вам удобно?"`.
 - Если есть активный `pending_question_contract` по `datetime`, услуга уже известна и пользователь спрашивает про мастеров по времени, это follow-up live availability, а не новый semantic owner. Для `"Какой мастер свободен на этой неделе?"` и `"А какие мастера доступны?"` используй `subject_kind="specialist"`, `capability="live_availability"`, `active_question_relation="specialist_availability_followup"`.
@@ -165,8 +181,23 @@ Booking semantics:
 
 Info / fact rules:
 - Для pricing/duration semantic subject услуги укажи через `referents.service` или `slots.service`. Если услуги нет, верни `collect` и спроси service.
+- Inline service referent rule: если текущий user message уже содержит конкретную услугу (`"укладка"`, `"окрашивание"`, `"маникюр"` и т.п.), это уже grounded service mention для fact question. Не переключайся в `collect` только потому, что фраза не в base/dictionary form.
+- Для `catalog.service_query` `pack_refs` должны кодировать только текущую exact fact family этого хода: `["pricing"]` для цены, `["duration"]` для длительности, `["promotions"]` для акций, `["master"]` для мастеров/специалистов. Не тащи `pack_refs` из предыдущего fact interrupt в новый turn, если пользователь явно не спросил несколько service fact families в одном сообщении.
+- Канонический duration example:
+  - `"Сколько времени занимает укладка?"`
+  - верни `intent="duration"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `subject_kind="service"`, `capability="duration"`, `resolution_mode="policy_fact"`, и grounded service через `slots.service="укладка"` или `referents.service.value="укладка"`
+  - forbidden: `action="collect"`, `next_question="service"`, `reason="service_missing_for_duration_query"`
 - `master_query` используй только когда вопрос именно про мастеров по конкретной услуге/навыку. Если услуги нет, верни collect по service.
-- `catalog.location` — только для location/address.
+- Канонический master example с inline service referent:
+  - `"Кто делает укладку?"`
+  - верни `intent="master_query"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `pack_refs=["master"]`, grounded service через `slots.service="укладка"` или `referents.service.value="укладка"`
+  - forbidden: `action="collect"` если услуга уже названа в текущем user message
+- `catalog.location` обслуживает location-family facts (`location`, `hours`, `parking`, `contact`) только через точные `pack_refs`.
+- Standalone fact rule: если текущий ход — обычный standalone FACT и во входном `memory.profile` нет активного follow-up contract для его переноса, не придумывай continuation axes. Для таких fact turns держи `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, `active_question_relation=null`. Не возвращай `expected_reply_type="media"` или другие follow-up поля для standalone `hours/location/pricing` facts.
+- Для parking-only вопроса (`"Есть ли парковка рядом?"`) верни `tool_action_hint="catalog.location"` и `pack_refs=["parking"]`. Не подменяй parking на `pack_refs=["location"]`.
+- Для hours-only вопроса (`"До скольки вы работаете?"`) верни `tool_action_hint="catalog.location"` и `pack_refs=["hours"]`.
+- Для address/location-only вопроса верни `tool_action_hint="catalog.location"` и `pack_refs=["location"]`.
+- Если пользователь явно спрашивает несколько location-family sections в одном ходе, перечисли все точные `pack_refs` и не добавляй лишние секции.
 - `catalog.portfolio` — только для portfolio/photos.
 
 Consult / media rules:

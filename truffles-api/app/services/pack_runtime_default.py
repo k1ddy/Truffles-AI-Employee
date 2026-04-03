@@ -165,25 +165,6 @@ def _has_contact_signal(
     )
 
 
-def semantic_question_type(
-    text: str,
-    *,
-    include_kinds: set[str] | None = None,
-    return_multi: bool = False,
-    client_slug: str | None = "generic",
-):
-    return _resolve_adapter(client_slug).semantic_question_type(
-        text,
-        include_kinds=include_kinds,
-        return_multi=return_multi,
-        client_slug=client_slug,
-    )
-
-
-def semantic_service_match(text: str, client_slug: str):
-    return _resolve_adapter(client_slug).semantic_service_match(text, client_slug)
-
-
 def compose_multi_truth_reply(
     message: str,
     client_slug: str | None,
@@ -263,52 +244,6 @@ def _detect_promotion_intent(normalized: str, *, client_slug: str | None = None)
         client_slug=client_slug,
     )
 
-
-def get_pack_decision(
-    message: str,
-    *,
-    client_slug: str | None = None,
-    intent_decomp: dict | None = None,
-):
-    return _resolve_adapter(client_slug).get_pack_decision(
-        message,
-        client_slug=client_slug,
-        intent_decomp=intent_decomp,
-    )
-
-
-def get_pack_service_decision(
-    message: str,
-    *,
-    client_slug: str | None = None,
-    intent_decomp: dict | None = None,
-):
-    return _resolve_adapter(client_slug).get_pack_service_decision(
-        message,
-        client_slug=client_slug,
-        intent_decomp=intent_decomp,
-    )
-
-
-def get_pack_price_reply(message: str, *, client_slug: str | None = None) -> str | None:
-    return _resolve_adapter(client_slug).get_pack_price_reply(message, client_slug=client_slug)
-
-
-def get_pack_price_item(message: str, *, client_slug: str | None = None) -> str | None:
-    return _resolve_adapter(client_slug).get_pack_price_item(message, client_slug=client_slug)
-
-
-def get_pack_service_hint(message: str, *, client_slug: str | None = None) -> str | None:
-    return _resolve_adapter(client_slug).get_pack_service_hint(message, client_slug=client_slug)
-
-
-def phrase_match_intent(text: str, client_slug: str | None = "generic") -> set[str]:
-    return _resolve_adapter(client_slug).phrase_match_intent(
-        text,
-        client_slug=client_slug,
-    )
-
-
 __all__ = [
     "_build_fact_meta",
     "_detect_promotion_intent",
@@ -326,18 +261,10 @@ __all__ = [
     "compose_multi_truth_reply",
     "format_reply_from_truth",
     "get_pack_adapter",
-    "get_pack_decision",
-    "get_pack_price_item",
-    "get_pack_price_reply",
-    "get_pack_service_decision",
-    "get_pack_service_hint",
     "get_signal_lexicon_list",
     "get_system_anchor_groups",
     "get_system_lexicon_list",
     "load_policy_pack",
     "load_system_lexicons",
     "load_yaml_truth",
-    "phrase_match_intent",
-    "semantic_question_type",
-    "semantic_service_match",
 ]

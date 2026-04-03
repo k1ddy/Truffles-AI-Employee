@@ -19,10 +19,6 @@ from app.services.handover_owner_service import (
 from app.services.intent_service import Intent, _normalize_text, should_escalate
 from app.services.pack_runtime_service import (
     PackDecision,
-    get_pack_decision,
-    get_pack_price_item,
-    get_pack_price_reply,
-    get_pack_service_decision,
     load_policy_pack,
 )
 from app.services.policy_snapshot_service import (
@@ -442,28 +438,6 @@ def _is_hard_law_intent(
     return normalized in {value.casefold() for value in intents}
 
 
-def _looks_like_policy_topic(
-    message_text: str | None,
-    *,
-    policy_type: str | None = None,
-    policy_pack: dict | None = None,
-    client_slug: str | None = None,
-) -> bool:
-    policy_pack = (
-        policy_pack
-        if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
-    )
-    hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
-    return bool(
-        _detect_policy_gate_section(
-            message_text,
-            policy_pack=policy_pack,
-            hard_law_sections=hard_law_sections,
-        )
-    )
-
-
 def _detect_llm_guard_topics(
     response_text: str,
     *,
@@ -487,38 +461,6 @@ def _detect_llm_guard_topics(
         if any(keyword in normalized for keyword in keywords):
             hits.append(topic)
     return hits
-
-
-def _looks_like_promotions_request(
-    message_text: str | None,
-    *,
-    policy_type: str | None = None,
-    policy_pack: dict | None = None,
-    client_slug: str | None = None,
-) -> bool:
-    if not message_text:
-        return False
-    normalized = _normalize_text(message_text)
-    if not normalized:
-        return False
-    policy_pack = (
-        policy_pack
-        if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
-    )
-    discounts = _get_policy_section(policy_pack, "discounts")
-    keywords = _policy_str_list(discounts.get("keywords") if isinstance(discounts, dict) else None)
-    if keywords and _contains_any(normalized, keywords):
-        return True
-    birthday_window = discounts.get("birthday_window") if isinstance(discounts, dict) else None
-    if isinstance(birthday_window, dict):
-        phrase = birthday_window.get("phrase")
-        day_words = _policy_str_list(birthday_window.get("day_words"))
-        if isinstance(phrase, str) and phrase.strip():
-            if phrase in normalized and _contains_any(normalized, day_words):
-                return True
-    return False
-
 
 def _load_discount_policy_payload(
     *,
@@ -609,13 +551,73 @@ def _format_discounts_policy_reply(
 
 
 def _pack_escalation_gate(messages: list[str], *, client_slug: str | None):
-    for message in messages:
-        decision = get_pack_decision(message, client_slug=client_slug)
-        if not decision or decision.action != "escalate":
+    return None
+
+
+def _pack_truth_gate(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    intent_decomp: dict | None = None,
+) -> PackDecision | None:
+    if not isinstance(message, str) or not message.strip():
+        return None
+    from app.routers.webhook import info as info_router
+
+    intent_decomp_set: set[str] = set()
+    service_query = None
+    if isinstance(intent_decomp, dict):
+        primary_intent = intent_decomp.get("primary_intent")
+        if isinstance(primary_intent, str) and primary_intent.strip():
+            intent_decomp_set.add(primary_intent.strip())
+        raw_intents = intent_decomp.get("intents")
+        if isinstance(raw_intents, list):
+            for raw_intent in raw_intents:
+                if isinstance(raw_intent, str) and raw_intent.strip():
+                    intent_decomp_set.add(raw_intent.strip())
+        raw_service_query = intent_decomp.get("service_query")
+        if isinstance(raw_service_query, str) and raw_service_query.strip():
+            service_query = raw_service_query.strip()
+
+    info_intents = {
+        intent_name.strip().casefold()
+        for intent_name in intent_decomp_set
+        if isinstance(intent_name, str)
+        and intent_name.strip()
+        and intent_name.strip().casefold() in info_router.INFO_INTENTS
+    }
+    if not info_intents:
+        return None
+
+    ordered_intents = [
+        intent_name
+        for intent_name in info_router.INFO_INTENT_PRIORITY_GENERIC
+        if intent_name in info_intents
+    ]
+    for intent_name in sorted(info_intents):
+        if intent_name not in ordered_intents:
+            ordered_intents.append(intent_name)
+
+    for intent_name in ordered_intents:
+        reply, meta = info_router._build_info_intent_reply(
+            intent_name,
+            service_query=service_query,
+            client_slug=client_slug,
+            message_text=message,
+            requested_info_intents=info_intents,
+        )
+        if not isinstance(reply, str) or not reply.strip():
             continue
-        if decision.intent in {"medical"} and _is_hygiene_context_text(message):
-            continue
-        return decision
+        resolved_meta = meta if isinstance(meta, dict) else {}
+        action_class = str(resolved_meta.get("action_class") or "").strip().upper()
+        action = "collect" if action_class == "COLLECT" else "reply"
+        resolved_intent = resolved_meta.get("intent_class")
+        return PackDecision(
+            action=action,
+            response=reply.strip(),
+            intent=resolved_intent if isinstance(resolved_intent, str) and resolved_intent.strip() else intent_name,
+            meta=resolved_meta,
+        )
     return None
 
 
@@ -624,10 +626,8 @@ def _pack_price_sidecar(
     *,
     client_slug: str | None,
 ) -> tuple[str | None, str | None]:
-    for message in messages:
-        price_reply = get_pack_price_reply(message, client_slug=client_slug)
-        if price_reply:
-            return price_reply, get_pack_price_item(message, client_slug=client_slug)
+    del messages
+    del client_slug
     return None, None
 
 
@@ -654,9 +654,7 @@ def _is_hygiene_context_text(text: str) -> bool:
 
 _DEFAULT_POLICY_HANDLER = {
     "escalation_gate": _pack_escalation_gate,
-    "service_matcher": get_pack_service_decision,
-    "truth_gate": get_pack_decision,
-    "price_item": get_pack_price_item,
+    "truth_gate": _pack_truth_gate,
     "price_sidecar": _pack_price_sidecar,
 }
 

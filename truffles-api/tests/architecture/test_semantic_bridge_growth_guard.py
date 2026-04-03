@@ -123,6 +123,23 @@ def test_semantic_bridge_growth_guard_blocks_new_policy_snapshot_reason(tmp_path
     assert "new_reason" in violations[0]
 
 
+def test_semantic_bridge_growth_guard_allows_snapshot_shrink_for_removed_residue(tmp_path: Path) -> None:
+    module = load_module("semantic_bridge_growth_guard", SCRIPTS / "semantic_bridge_growth_guard.py")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = write_config(repo)
+    write_hotspots(
+        repo,
+        info_text='''
+def detect_known_followup():
+    return None
+''',
+        snapshot_text=BASE_SNAPSHOT,
+    )
+
+    assert module.evaluate(repo, config) == []
+
+
 def test_repo_post_owner_reconstruction_hotspots_match_current_snapshot() -> None:
     module = load_module("semantic_bridge_growth_guard", SCRIPTS / "semantic_bridge_growth_guard.py")
     config = yaml.safe_load((ROOT / "docs" / "SEMANTIC_BRIDGE_GUARD.yaml").read_text(encoding="utf-8"))

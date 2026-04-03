@@ -53,6 +53,7 @@ class PolicyCoreContextSnapshotV1(BaseModel):
     consult_refs: tuple[str, ...] = ()
     capability_cards: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
     policy_cards: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
+    service_cards: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
     consult_cards: tuple[dict[str, Any], ...] = Field(default_factory=tuple)
 
     def as_allowed_payload(self) -> dict[str, Any]:
@@ -68,6 +69,8 @@ class PolicyCoreContextSnapshotV1(BaseModel):
             payload["capability_cards"] = [dict(card) for card in self.capability_cards]
         if self.policy_cards:
             payload["policy_cards"] = [dict(card) for card in self.policy_cards]
+        if self.service_cards:
+            payload["service_cards"] = [dict(card) for card in self.service_cards]
         if self.consult_cards:
             payload["consult_cards"] = [dict(card) for card in self.consult_cards]
         return payload or None
@@ -244,6 +247,87 @@ def _filter_fact_refs(namespace: str, refs: list[str]) -> list[str]:
     return filtered
 
 
+def _build_service_cards(client_slug: str | None) -> list[dict[str, Any]]:
+    normalized_client_slug = _trim_policy_core_context_text(client_slug, max_chars=64)
+    if not normalized_client_slug:
+        return []
+
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        truth = get_pack_runtime(normalized_client_slug).load_yaml_truth()
+    except Exception:
+        return []
+
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    taxonomy = domain_pack.get("service_taxonomy") if isinstance(domain_pack, dict) else None
+    categories = taxonomy.get("categories") if isinstance(taxonomy, dict) else None
+    if not isinstance(categories, list):
+        return []
+
+    cards: list[dict[str, Any]] = []
+    for raw_category in categories:
+        if not isinstance(raw_category, dict):
+            continue
+        card: dict[str, Any] = {
+            "kind": "service_taxonomy",
+            "source": "pack_runtime",
+        }
+        category_id = _trim_policy_core_context_text(raw_category.get("id"), max_chars=32)
+        if category_id:
+            card["id"] = category_id.casefold()
+        label = (
+            _trim_policy_core_context_text(raw_category.get("label_ru"), max_chars=64)
+            or _trim_policy_core_context_text(raw_category.get("label_kk"), max_chars=64)
+            or _trim_policy_core_context_text(raw_category.get("label"), max_chars=64)
+        )
+        if label:
+            card["label"] = label
+
+        includes: list[str] = []
+        seen_includes: set[str] = set()
+        for raw_value in list(raw_category.get("includes_ru") or []) + list(
+            raw_category.get("includes_kk") or []
+        ):
+            token = _trim_policy_core_context_text(raw_value, max_chars=40)
+            if not token:
+                continue
+            fingerprint = token.casefold()
+            if fingerprint in seen_includes:
+                continue
+            seen_includes.add(fingerprint)
+            includes.append(token)
+            if len(includes) >= POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX:
+                break
+        if includes:
+            card["includes"] = includes
+
+        synonyms: list[str] = []
+        seen_synonyms: set[str] = set()
+        for raw_value in list(raw_category.get("synonyms_ru") or []) + list(
+            raw_category.get("synonyms_kk") or []
+        ):
+            token = _trim_policy_core_context_text(raw_value, max_chars=40)
+            if not token:
+                continue
+            fingerprint = token.casefold()
+            if fingerprint in seen_synonyms:
+                continue
+            seen_synonyms.add(fingerprint)
+            synonyms.append(token)
+            if len(synonyms) >= POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX:
+                break
+        if synonyms:
+            card["synonyms"] = synonyms
+
+        if len(card) <= 2:
+            continue
+        cards.append(card)
+        if len(cards) >= POLICY_CORE_CONTEXT_CARD_LIMIT:
+            break
+    return cards
+
+
 def build_policy_core_context_snapshot(
     *,
     client_slug: str | None,
@@ -285,6 +369,7 @@ def build_policy_core_context_snapshot(
             tool_actions.append(tool_action)
 
     capability_cards = _build_capability_cards(runtime)
+    service_cards = _build_service_cards(client_slug)
     consult_cards = [
         consult_card_catalog[ref]
         for ref in allowed_consult_refs
@@ -298,6 +383,7 @@ def build_policy_core_context_snapshot(
         consult_refs=tuple(allowed_consult_refs),
         capability_cards=tuple(dict(card) for card in capability_cards),
         policy_cards=tuple(dict(card) for card in policy_cards),
+        service_cards=tuple(dict(card) for card in service_cards),
         consult_cards=tuple(dict(card) for card in consult_cards),
     )
 

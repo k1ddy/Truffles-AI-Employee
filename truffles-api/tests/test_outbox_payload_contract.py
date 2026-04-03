@@ -167,6 +167,7 @@ def test_outbox_payload_contract_rejects_invalid_tenant_context_source():
 
 def test_semantic_service_match_passes_client_slug(monkeypatch):
     from app.services import demo_salon_knowledge as knowledge
+    from app.services import demo_salon_knowledge_compat as knowledge_compat
 
     def fake_search(text, client_slug, limit):
         return [
@@ -185,7 +186,7 @@ def test_semantic_service_match_passes_client_slug(monkeypatch):
     monkeypatch.setattr(knowledge, "_search_services_index", fake_search)
     monkeypatch.setattr(knowledge, "_format_semantic_service_reply", fake_format)
 
-    result = knowledge.semantic_service_match("test service?", "demo_salon")
+    result = knowledge_compat.semantic_service_match("test service?", "demo_salon")
     assert result is not None
     assert captured.get("client_slug") == "demo_salon"
 

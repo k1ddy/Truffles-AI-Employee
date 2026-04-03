@@ -49,7 +49,7 @@ def write_config(repo: Path) -> dict:
                 "path": "truffles-api/app/core/realizer_hotspot.py",
                 "active_waiver": None,
                 "tracked_override_meta_get_keys": {
-                    "exact_allowlist": ["reply_kind"],
+                    "exact_allowlist": [],
                 },
             },
         ],
@@ -58,7 +58,12 @@ def write_config(repo: Path) -> dict:
                 "search_roots": ["truffles-api/app"],
                 "call_names": ["build_degrade_override"],
                 "exact_allowlist": ["truffles-api/app/core/runtime_hotspot.py"],
-            }
+            },
+            {
+                "search_roots": ["truffles-api/app"],
+                "call_names": ["_resolve_pending_resume_boundary_activation"],
+                "exact_allowlist": [],
+            },
         ],
     }
     path = repo / "docs" / "BOUNDARY_DEGRADE_GUARD.yaml"
@@ -67,7 +72,13 @@ def write_config(repo: Path) -> dict:
     return config
 
 
-def write_hotspots(repo: Path, *, extra_meta_key: str | None = None, extra_callsite: bool = False) -> None:
+def write_hotspots(
+    repo: Path,
+    *,
+    extra_meta_key: str | None = None,
+    extra_callsite: bool = False,
+    extra_boundary_restore_callsite: bool = False,
+) -> None:
     boundary_path = repo / "truffles-api" / "app" / "core" / "boundary_hotspot.py"
     boundary_path.parent.mkdir(parents=True, exist_ok=True)
     boundary_path.write_text(
@@ -83,7 +94,7 @@ def write_hotspots(repo: Path, *, extra_meta_key: str | None = None, extra_calls
         encoding="utf-8",
     )
 
-    meta_lines = ["override.meta.get('reply_kind')"]
+    meta_lines: list[str] = []
     if extra_meta_key:
         meta_lines.append(f"override.meta.get('{extra_meta_key}')")
     realizer_path = repo / "truffles-api" / "app" / "core" / "realizer_hotspot.py"
@@ -98,6 +109,12 @@ def write_hotspots(repo: Path, *, extra_meta_key: str | None = None, extra_calls
         extra_path = repo / "truffles-api" / "app" / "core" / "extra_hotspot.py"
         extra_path.write_text(
             "def drift(boundary):\n    return boundary.build_degrade_override()\n",
+            encoding="utf-8",
+        )
+    if extra_boundary_restore_callsite:
+        restore_path = repo / "truffles-api" / "app" / "core" / "restore_hotspot.py"
+        restore_path.write_text(
+            "def drift():\n    return _resolve_pending_resume_boundary_activation()\n",
             encoding="utf-8",
         )
 
@@ -117,12 +134,34 @@ def test_boundary_degrade_guard_blocks_new_override_meta_key_and_callsite(tmp_pa
     repo = tmp_path / "repo"
     repo.mkdir()
     config = write_config(repo)
-    write_hotspots(repo, extra_meta_key="expected_reply_type", extra_callsite=True)
+    write_hotspots(
+        repo,
+        extra_meta_key="expected_reply_type",
+        extra_callsite=True,
+        extra_boundary_restore_callsite=True,
+    )
 
     violations = module.evaluate(repo, config)
     assert violations
     assert any("override.meta key read set grew without waiver" in item for item in violations)
     assert any("repo callsite set for build_degrade_override grew without waiver" in item for item in violations)
+    assert any(
+        "repo callsite set for _resolve_pending_resume_boundary_activation grew without waiver" in item
+        for item in violations
+    )
+
+
+def test_boundary_degrade_guard_allows_snapshot_shrink_for_stricter_boundary(tmp_path: Path) -> None:
+    module = load_module("boundary_degrade_guard", SCRIPTS / "boundary_degrade_guard.py")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config = write_config(repo)
+    write_hotspots(repo)
+
+    runtime_path = repo / "truffles-api" / "app" / "core" / "runtime_hotspot.py"
+    runtime_path.write_text("def plan_turn(boundary):\n    return None\n", encoding="utf-8")
+
+    assert module.evaluate(repo, config) == []
 
 
 def test_repo_boundary_degrade_snapshot_matches_current_repo() -> None:

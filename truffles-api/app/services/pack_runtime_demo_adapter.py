@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from app.services.demo_salon_knowledge import (
     _build_fact_meta,
+    _pack_query_phrase_intents,
+    _resolve_pack_query_price_item,
+    _build_pack_query_price_reply,
+    _pack_query_question_classifier,
+    _build_pack_query_service_decision,
+    _resolve_pack_query_service_hint,
+    _resolve_pack_query_semantic_match,
+    _build_pack_query_truth_decision,
     _detect_promotion_intent,
     _find_best_price_item,
     _format_price_reply,
@@ -25,21 +33,25 @@ from app.services.demo_salon_knowledge import (
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
-    get_pack_decision,
-    get_pack_price_item,
-    get_pack_price_reply,
-    get_pack_service_decision,
-    get_pack_service_hint,
     get_signal_lexicon_list,
     get_system_anchor_groups,
     get_system_lexicon_list,
     load_policy_pack,
     load_system_lexicons,
     load_yaml_truth,
-    phrase_match_intent,
-    semantic_question_type,
-    semantic_service_match,
 )
+
+
+_COMPAT_EXPORTS = [
+    "_pack_query_phrase_intents",
+    "_resolve_pack_query_price_item",
+    "_build_pack_query_price_reply",
+    "_pack_query_question_classifier",
+    "_build_pack_query_service_decision",
+    "_resolve_pack_query_service_hint",
+    "_resolve_pack_query_semantic_match",
+    "_build_pack_query_truth_decision",
+]
 
 __all__ = [
     "_build_fact_meta",
@@ -64,18 +76,10 @@ __all__ = [
     "build_quiet_hours_notice",
     "compose_multi_truth_reply",
     "format_reply_from_truth",
-    "get_pack_decision",
-    "get_pack_price_item",
-    "get_pack_price_reply",
-    "get_pack_service_decision",
-    "get_pack_service_hint",
     "get_signal_lexicon_list",
     "get_system_anchor_groups",
     "get_system_lexicon_list",
     "load_policy_pack",
     "load_system_lexicons",
     "load_yaml_truth",
-    "phrase_match_intent",
-    "semantic_question_type",
-    "semantic_service_match",
 ]

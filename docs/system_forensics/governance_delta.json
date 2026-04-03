@@ -1,10 +1,10 @@
 {
   "schema_version": "v1",
   "status": "machine_readable_system_reproof_delta",
-  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "active_block": "Consultant Core Block H.1B — File Replay Scenario Contract Materialization",
   "current_practical_truth": "r35f",
-  "block_tp": "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-  "delta_summary": "Reproved continuity, boundary restore, pack/runtime, legacy, and operational closure claims against live code and converged live outbox execution surfaces on one canonical runtime helper.",
+  "block_tp": "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md",
+  "delta_summary": "Closed the reopened Block H.1B file-replay scenario contract materialization block on the shared evaluation seam: ops/diagnose.py now materializes --scenarios-file dialogs through the shared booking scenario contract pipeline before evaluation, and the next admissible lane is Block H final acceptance.",
   "locked_mechanisms": [
     "semantic_turn_meaning",
     "post_owner_semantic_reconstruction",
@@ -20,23 +20,13 @@
     "truffles-api/app/routers/webhook/response.py",
     "truffles-api/app/routers/webhook/context_manager.py"
   ],
-  "new_machine_readable_artifacts": [
-    "docs/SYSTEM_REPROOF_GUARD.yaml"
-  ],
+  "new_machine_readable_artifacts": [],
   "deferred_next_blocks": [
-    "replay_and_human_audit_acceptance"
+    "block_h_final_acceptance"
   ],
   "evidence": [
-    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
-    "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
-    "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
-    "scripts/semantic_owner_reopen_guard.py",
-    "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py",
-    "docs/system_forensics/authority_registry.json",
-    "docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-    "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
-    "docs/SYSTEM_REPROOF_GUARD.yaml",
-    "scripts/system_reproof_guard.py",
-    "truffles-api/tests/architecture/test_system_reproof_guard.py"
+    "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1-oracle-scenario-contract-alignment-a922.md",
+    "truffles-api/app/services/llm_quality_contracts.py",
+    "truffles-api/tests/test_booking_dialog_scenarios_script.py"
   ]
 }

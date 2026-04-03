@@ -46,12 +46,11 @@ def test_consult_return_not_attached_for_booking_reason_family(monkeypatch):
     assert called["value"] is False
 
 
-def test_consult_followup_suppressed_without_booking_signal(monkeypatch):
-    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: False)
-
+def test_consult_followup_suppressed_without_booking_signal():
     assert (
         webhook_response._should_append_booking_followup_for_consult(
             booking_goal_locked=True,
+            booking_signal_active=False,
             consult_action="consult_reply",
             message_text="Какую стрижку вы рекомендуете?",
             expected_reply_type="name",
@@ -61,12 +60,11 @@ def test_consult_followup_suppressed_without_booking_signal(monkeypatch):
     )
 
 
-def test_consult_followup_kept_with_booking_signal(monkeypatch):
-    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: True)
-
+def test_consult_followup_kept_with_booking_signal():
     assert (
         webhook_response._should_append_booking_followup_for_consult(
             booking_goal_locked=True,
+            booking_signal_active=True,
             consult_action="consult_reply",
             message_text="Подтвердите запись, пожалуйста.",
             expected_reply_type="name",
@@ -76,12 +74,11 @@ def test_consult_followup_kept_with_booking_signal(monkeypatch):
     )
 
 
-def test_consult_followup_kept_for_service_expected_reply(monkeypatch):
-    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: False)
-
+def test_consult_followup_kept_for_service_expected_reply():
     assert (
         webhook_response._should_append_booking_followup_for_consult(
             booking_goal_locked=True,
+            booking_signal_active=False,
             consult_action="consult_reply",
             message_text="Что посоветуете?",
             expected_reply_type="service_choice",
@@ -91,12 +88,11 @@ def test_consult_followup_kept_for_service_expected_reply(monkeypatch):
     )
 
 
-def test_locked_consult_topic_shift_replaces_stale_time_resume(monkeypatch):
-    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: False)
-
+def test_locked_consult_topic_shift_replaces_stale_time_resume():
     assert (
         webhook_response._should_shift_locked_consult_topic_to_service_choice(
             booking_goal_locked=True,
+            booking_signal_active=False,
             booking_followup_appended=False,
             consult_action="consult_reply",
             consult_meta={
@@ -111,12 +107,11 @@ def test_locked_consult_topic_shift_replaces_stale_time_resume(monkeypatch):
     )
 
 
-def test_locked_consult_topic_shift_does_not_replace_booking_signal(monkeypatch):
-    monkeypatch.setattr(legacy, "_is_booking_request", lambda _text, client_slug=None: True)
-
+def test_locked_consult_topic_shift_does_not_replace_booking_signal():
     assert (
         webhook_response._should_shift_locked_consult_topic_to_service_choice(
             booking_goal_locked=True,
+            booking_signal_active=True,
             booking_followup_appended=False,
             consult_action="consult_reply",
             consult_meta={

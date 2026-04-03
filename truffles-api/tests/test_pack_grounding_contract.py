@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services import pack_runtime_compat as compat_runtime
 from app.services import pack_runtime_service as runtime
 
 _TARGET_SERVICES = ("Маникюр", "Стрижка")
@@ -83,9 +84,9 @@ def _with_typo(value: str) -> str:
 
 
 def _resolve_variant(message_text: str, *, client_slug: str):
-    decision = runtime.get_pack_service_decision(message_text, client_slug=client_slug)
+    decision = compat_runtime.get_pack_service_decision(message_text, client_slug=client_slug)
     if decision is None:
-        decision = runtime.get_pack_decision(message_text, client_slug=client_slug)
+        decision = compat_runtime.get_pack_decision(message_text, client_slug=client_slug)
     assert decision is not None
     assert isinstance(decision.meta, dict)
     return decision

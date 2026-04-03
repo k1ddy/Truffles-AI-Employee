@@ -39,7 +39,7 @@ def test_dead_surface_registry_marks_touched_envelope_adapter_and_unreachable_su
     entries = {item["surface_path"]: item for item in registry["entries"]}
 
     assert registry["status"] == "machine_readable_system_reproof_base"
-    assert registry["active_block"] == "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof"
+    assert registry["active_block"] == "Consultant Core Block G — Operational Final Dedupe"
     assert registry["caller_proof_law"]["adapter_only_for_touched_envelope"] == [
         "truffles-api/app/routers/webhook/http.py",
         "truffles-api/app/routers/webhook/session_memory.py",
@@ -53,9 +53,14 @@ def test_dead_surface_registry_marks_touched_envelope_adapter_and_unreachable_su
     assert entries["truffles-api/app/routers/webhook/http.py"]["family_envelope_status"] == (
         "adapter_only_for_touched_envelope"
     )
+    assert entries["truffles-api/app/routers/webhook/__init__.py"]["final_fate"] == "adapter_only"
+    assert entries["truffles-api/app/routers/webhook/session_memory.py"]["final_fate"] == "adapter_only"
     assert entries["truffles-api/app/routers/webhook/session_memory.py"]["family_envelope_status"] == (
         "adapter_only_for_touched_envelope"
     )
+    assert entries["truffles-api/app/routers/webhook/decision.py"]["final_fate"] == "unreachable"
+    assert entries["truffles-api/app/routers/webhook/info.py"]["final_fate"] == "unreachable"
+    assert entries["truffles-api/app/routers/webhook/context_manager.py"]["final_fate"] == "unreachable"
     assert entries["truffles-api/app/routers/webhook/context_manager.py"]["family_envelope_status"] == (
         "unreachable_for_touched_envelope"
     )
@@ -67,6 +72,7 @@ def test_dead_surface_registry_marks_touched_envelope_adapter_and_unreachable_su
 
 def test_webhook_package_root_uses_lazy_legacy_compat_exports_only() -> None:
     init_text = (ROOT / "truffles-api/app/routers/webhook/__init__.py").read_text(encoding="utf-8")
+    config = _load_config()
 
     assert "from app.routers.webhook.booking import" not in init_text
     assert "from app.routers.webhook.context_manager import" not in init_text
@@ -74,3 +80,19 @@ def test_webhook_package_root_uses_lazy_legacy_compat_exports_only() -> None:
     assert "from .response import _apply_quiet_hours_notice, _maybe_append_booking_cta" not in init_text
     assert "_LAZY_COMPAT_EXPORTS" in init_text
     assert "import_module(" in init_text
+    assert config["package_root_final_fate"] == "adapter_only"
+
+
+def test_block_f_surface_fate_contract_matches_live_import_topology() -> None:
+    module = load_module("legacy_drain_closure_guard", SCRIPTS / "legacy_drain_closure_guard.py")
+    config = _load_config()
+
+    assert config["final_fate_set"] == ["adapter_only", "observer_only", "unreachable", "removed"]
+    assert config["surface_fates"]["session_memory"]["final_fate"] == "adapter_only"
+    assert config["surface_fates"]["decision"]["final_fate"] == "unreachable"
+    assert config["surface_fates"]["info"]["final_fate"] == "unreachable"
+    assert config["surface_fates"]["context_manager"]["final_fate"] == "unreachable"
+
+    violations: list[str] = []
+    module._validate_surface_fates(ROOT, config, violations)
+    assert violations == []
