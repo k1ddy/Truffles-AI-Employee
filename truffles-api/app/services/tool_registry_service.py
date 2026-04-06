@@ -438,6 +438,22 @@ def _normalize_expected_reply_hint(expected_reply_type: str | None) -> str | Non
     return None
 
 
+def _calendar_get_booking_not_found_followup_text(
+    expected_reply_type: str | None,
+) -> str:
+    normalized = _normalize_expected_reply_hint(expected_reply_type)
+    if normalized == "name":
+        return "Чтобы найти запись, подскажите, пожалуйста, как вас зовут."
+    if normalized == "time":
+        return "Подскажите, пожалуйста, примерную дату и время записи."
+    if normalized == "service_choice":
+        return "Подскажите, пожалуйста, о какой записи идёт речь."
+    return (
+        "Если нужно перенести, подтвердить или отменить запись, "
+        "подскажите номер телефона и примерную дату/время, и я помогу найти."
+    )
+
+
 def _map_tool_args_shape_error(error: str) -> tuple[str, str]:
     if error == "tool_args_invalid":
         return "tool_args_not_dict", "tool_args"
@@ -1625,7 +1641,6 @@ def execute_tool_action(
             conversation_id=conversation_id,
         )
         if error:
-            followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
             response_parts: list[str] = []
             if requested_reference:
                 response_parts.append(
@@ -1638,11 +1653,8 @@ def execute_tool_action(
                     "Да, конечно, можно прислать фото/референс. Это поможет менеджеру уточнить детали."
                 )
             response_parts.append(
-                "Если нужно перенести, подтвердить или отменить запись, "
-                "подскажите номер телефона и примерную дату/время, и я помогу найти."
+                _calendar_get_booking_not_found_followup_text(expected_reply_type)
             )
-            if followup_prompt:
-                response_parts.append(followup_prompt)
             return ToolExecutionResult(
                 handled=True,
                 ok=False,

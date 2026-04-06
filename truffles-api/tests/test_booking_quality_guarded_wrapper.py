@@ -383,6 +383,120 @@ def test_guarded_wrapper_allows_fresh_lock_after_audited_non_canonical_latest_ru
     assert diagnose_log.exists()
 
 
+def test_guarded_wrapper_allows_fresh_full_after_audited_invalid_preflight_latest_run(tmp_path):
+    repo_root = _repo_root()
+    wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"
+    if not wrapper.exists():
+        pytest.skip("llm_quality_guarded.sh not present")
+
+    controller_log = tmp_path / "controller_full.log"
+    diagnose_log = tmp_path / "diagnose_full.log"
+    fake_controller = tmp_path / "fake_controller_full.sh"
+    fake_diagnose = tmp_path / "fake_diagnose_full.py"
+    pg_checklist = tmp_path / "pg_checklist_full.json"
+    index_root = tmp_path / "quality_index"
+    latest_by_mode = index_root / "latest_by_mode"
+    latest_by_mode.mkdir(parents=True, exist_ok=True)
+    (latest_by_mode / "full.json").write_text(
+        json.dumps(
+            {
+                "run_id": "old-full",
+                "status": "incomplete",
+                "stop_reason": "invalid_preflight",
+                "manual_audit_status": "done",
+                "artifact_integrity_valid": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_fake_controller(fake_controller, controller_log)
+    _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
+
+    run_id = f"booking-full-wrapper-{uuid4().hex[:8]}"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_CONTROLLER_BIN"] = str(fake_controller)
+    env["LLM_QUALITY_DIAGNOSE_BIN"] = "python3"
+    env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
+    env["LLM_QUALITY_INDEX_ROOT"] = str(index_root)
+
+    result = subprocess.run(
+        _guarded_base_cmd(
+            wrapper,
+            run_id,
+            pg_checklist,
+            mode="full",
+            allow_pending_previous=False,
+        ),
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "latest prior full is preflight-invalid but audited" in result.stderr
+    assert diagnose_log.exists()
+
+
+def test_guarded_wrapper_still_blocks_full_after_noncanonical_latest_non_preflight_run(tmp_path):
+    repo_root = _repo_root()
+    wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"
+    if not wrapper.exists():
+        pytest.skip("llm_quality_guarded.sh not present")
+
+    controller_log = tmp_path / "controller_full_block.log"
+    diagnose_log = tmp_path / "diagnose_full_block.log"
+    fake_controller = tmp_path / "fake_controller_full_block.sh"
+    fake_diagnose = tmp_path / "fake_diagnose_full_block.py"
+    pg_checklist = tmp_path / "pg_checklist_full_block.json"
+    index_root = tmp_path / "quality_index"
+    latest_by_mode = index_root / "latest_by_mode"
+    latest_by_mode.mkdir(parents=True, exist_ok=True)
+    (latest_by_mode / "full.json").write_text(
+        json.dumps(
+            {
+                "run_id": "old-full",
+                "status": "failed",
+                "stop_reason": "runtime_failure",
+                "manual_audit_status": "done",
+                "artifact_integrity_valid": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_fake_controller(fake_controller, controller_log)
+    _write_fake_diagnose(fake_diagnose, diagnose_log)
+    _write_pg_checklist(pg_checklist)
+
+    run_id = f"booking-full-wrapper-{uuid4().hex[:8]}"
+    env = dict(os.environ)
+    env["LLM_QUALITY_CHAIN_CONTROLLER_BIN"] = str(fake_controller)
+    env["LLM_QUALITY_DIAGNOSE_BIN"] = "python3"
+    env["LLM_QUALITY_DIAGNOSE_SCRIPT"] = str(fake_diagnose)
+    env["LLM_QUALITY_INDEX_ROOT"] = str(index_root)
+
+    result = subprocess.run(
+        _guarded_base_cmd(
+            wrapper,
+            run_id,
+            pg_checklist,
+            mode="full",
+            allow_pending_previous=False,
+        ),
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "previous run not canonical" in result.stderr
+    assert not diagnose_log.exists()
+
+
 def test_guarded_wrapper_still_blocks_replay_after_non_canonical_latest_run(tmp_path):
     repo_root = _repo_root()
     wrapper = repo_root / "scripts" / "llm_quality_guarded.sh"

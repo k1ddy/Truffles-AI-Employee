@@ -1,4 +1,5 @@
 import json
+import random
 import shlex
 import subprocess
 from importlib.util import module_from_spec, spec_from_file_location
@@ -243,6 +244,143 @@ def test_load_dialogs_from_file_materializes_booking_contracts(tmp_path):
         "name",
         "time",
     ]
+
+
+@pytest.mark.parametrize(
+    "builder_name",
+    [
+        "_chaos_build_booking_case",
+        "_chaos_build_consult_case",
+        "_chaos_build_info_case",
+        "_chaos_build_ood_case",
+    ],
+)
+def test_chaos_booking_progression_builders_emit_canonical_collect_actions(builder_name):
+    builder = getattr(_module, builder_name)
+
+    case = builder(random.Random(7), case_id="case-1", min_turns=6, max_turns=6, noise=0.0)
+
+    collect_turns = [
+        turn
+        for turn in case["turns"]
+        if (turn.get("expected") or {}).get("expected_reply_type") in {"service_choice", "time", "name"}
+        and (turn.get("expected") or {}).get("state") == "bot_active"
+    ]
+
+    assert collect_turns
+    assert all((turn.get("expected") or {}).get("action_any") == ["collect"] for turn in collect_turns)
+
+
+def test_llm_quality_extract_expectations_canonicalizes_booking_time_collect_contract():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["booking"],
+            "expect": {
+                "action": "booking_prompt",
+                "reply_type": "time",
+                "state": "bot_active",
+                "expected_reply": True,
+                "meta": {
+                    "action": "booking_prompt",
+                    "expected_reply_type": "time",
+                },
+                "meta_any": {
+                    "action": ["booking_prompt"],
+                    "expected_reply_type": ["time"],
+                },
+                "trace_contains": [
+                    {
+                        "stage": "question_contract",
+                        "expected_reply_type": "time",
+                        "reason": "booking_prompt",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert expectations["action"] == "collect"
+    assert expectations["meta"]["action"] == "collect"
+    assert expectations["meta"]["source"] == "llm_policy_core"
+    assert expectations["meta"]["tool_action"] == "collect"
+    assert expectations["meta"]["expected_reply_type"] == "time"
+    assert "expected_reply_reason" not in expectations["meta"]
+    assert expectations["meta_any"]["action"] == ["collect"]
+    assert expectations["meta_any"]["source"] == ["llm_policy_core"]
+    assert expectations["meta_any"]["tool_action"] == ["collect"]
+    assert expectations["meta_any"]["expected_reply_type"] == ["time"]
+    assert "expected_reply_reason" not in expectations["meta_any"]
+    assert expectations["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+        }
+    ]
+
+
+def test_llm_quality_extract_expectations_moves_pending_question_act_to_trace_only():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["ask_about_requested_slot"],
+            "expect": {
+                "reply_type": "time",
+                "state": "bot_active",
+                "expected_reply": True,
+                "meta_any": {
+                    "pending_question_act": ["ask_about_requested_slot"],
+                    "pending_question_target": ["time"],
+                    "expected_reply_type": ["time"],
+                },
+                "trace_contains": [
+                    {
+                        "stage": "pending_question_interaction",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                    {
+                        "stage": "question_contract",
+                        "expected_reply_type": "time",
+                    },
+                ],
+            },
+        }
+    )
+
+    assert expectations["action"] == "collect"
+    assert expectations["meta"]["action"] == "collect"
+    assert expectations["meta_any"]["action"] == ["collect"]
+    assert expectations["meta_any"]["pending_question_target"] == ["time"]
+    assert expectations["meta_any"].get("pending_question_act") is None
+    assert expectations["trace_contains"] == [
+        {
+            "stage": "pending_question_interaction",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+        },
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+        },
+    ]
+
+
+def test_llm_quality_extract_expectations_keeps_name_reply_type_out_of_collect_materialization():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["time"],
+            "expect": {
+                "reply_type": "name",
+                "state": "bot_active",
+                "expected_reply": None,
+            },
+        }
+    )
+
+    assert expectations["action"] is None
+    assert expectations["reply_type"] == "name"
+    assert expectations["meta"] == {}
+    assert expectations["meta_any"] == {}
+    assert expectations["trace_contains"] == []
 
 
 def test_run_command_passes_timeout(monkeypatch):
@@ -561,7 +699,7 @@ def test_llm_quality_structured_meta_expectation_is_strong_oracle():
                 "expected_reply": None,
                 "allow_booking_stall": False,
                 "meta": {
-                    "action": "booking_prompt",
+                    "action": "collect",
                     "expected_reply_type": "time",
                 },
                 "trace_contains": [
@@ -580,7 +718,7 @@ def test_llm_quality_structured_meta_expectation_is_strong_oracle():
     assert _module._llm_quality_is_weak_oracle_expectation(expectations) is False
 
 
-def test_llm_quality_service_choice_booking_prompt_contract_catches_wrong_handoff_path():
+def test_llm_quality_service_choice_booking_collect_contract_catches_wrong_handoff_path():
     expectations = _module._llm_quality_extract_expectations(
         {
             "tags": ["booking"],
@@ -597,18 +735,18 @@ def test_llm_quality_service_choice_booking_prompt_contract_catches_wrong_handof
 
     good_reasons = _module._llm_quality_evaluate_turn(
         meta={
-            "action": "booking_prompt",
+            "action": "collect",
             "source": "llm_policy_core",
             "tool_action": "collect",
             "expected_reply_type": "service_choice",
-            "expected_reply_reason": "booking_prompt",
+            "expected_reply_reason": "collect:service",
         },
         trace_entries=[
             {
                 "stage": "question_contract",
                 "decision": "set",
                 "expected_reply_type": "service_choice",
-                "reason": "booking_prompt",
+                "reason": "collect:service",
             }
         ],
         trace_error=None,

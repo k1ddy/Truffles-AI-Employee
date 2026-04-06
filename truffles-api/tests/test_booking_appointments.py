@@ -338,6 +338,1094 @@ def test_resolve_booking_info_intents_uses_owner_parking_ref_with_expected_reply
     assert "parking" in resolved
 
 
+def test_booking_interrupt_slot_guidance_records_canonical_collect_action():
+    captured: dict[str, list[dict]] = {
+        "decision_trace": [],
+        "message_meta": [],
+        "metadata_updates": [],
+    }
+    master_resolution = SimpleNamespace(explicit=False, service_query=None)
+
+    class _ContextRuntime:
+        def _get_conversation_context(self, conversation):
+            return dict(getattr(conversation, "context", {}) or {})
+
+        def _set_conversation_context(self, conversation, context):
+            conversation.context = context
+            return context
+
+        def _set_expected_reply_context(self, **kwargs):
+            context = dict(kwargs["context"])
+            context["expected_reply_type"] = kwargs["expected_reply_type"]
+            context["expected_reply_reason"] = kwargs.get("reason")
+            return context
+
+        def _apply_consult_return(self, **kwargs):
+            return kwargs["bot_response"]
+
+        def _reset_low_confidence_retry(self, _conversation):
+            return None
+
+        def _get_context_manager(self, _context):
+            return {}
+
+        def _maybe_store_service_carryover(self, **_kwargs):
+            return None
+
+        def _maybe_store_class_carryover(self, **_kwargs):
+            return None
+
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_ContextRuntime(),
+    ), patch(
+        "app.routers.webhook.booking.should_mark_booking_time_service_candidate",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook.booking._resolve_booking_info_intents",
+        return_value=[],
+    ), patch(
+        "app.services.pack_runtime_service.resolve_explicit_master_intent",
+        return_value=master_resolution,
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace",
+        side_effect=lambda _conversation, payload: captured["decision_trace"].append(payload),
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured["message_meta"].append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata",
+        side_effect=lambda _message, payload: captured["metadata_updates"].append(payload),
+    ), patch(
+        "app.routers.webhook.booking._update_booking_from_messages",
+        side_effect=lambda booking_state, *_args, **_kwargs: booking_state,
+    ), patch(
+        "app.routers.webhook.booking._apply_owner_service_query",
+        side_effect=lambda booking_state, *_args, **_kwargs: booking_state,
+    ), patch(
+        "app.routers.webhook.booking._next_booking_prompt",
+        side_effect=lambda booking_state, **_kwargs: (
+            {**booking_state, "last_question": "datetime"},
+            "Когда вам удобно?",
+        ),
+    ), patch(
+        "app.routers.webhook.booking._apply_collect_all_prompt",
+        side_effect=lambda booking_state, prompt, *_args, **_kwargs: (booking_state, prompt),
+    ), patch(
+        "app.services.pack_runtime_service.compose_multi_truth_reply",
+        return_value=None,
+    ), patch(
+        "app.services.pack_runtime_service.format_reply_from_truth",
+        return_value=None,
+    ), patch(
+        "app.services.pack_runtime_service.build_runtime_service_truth_reply",
+        return_value=None,
+    ), patch(
+        "app.services.pack_runtime_service.resolve_runtime_service_price_item",
+        return_value=None,
+    ):
+        response = booking_router._handle_booking_interrupt(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Когда у вас есть свободные слоты?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={
+                "allow_booking_flow": True,
+                "allow_handover_create": True,
+                "allow_truth_gate_reply": True,
+            },
+            has_media=False,
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            consult_intent=None,
+            intent_decomp_used=False,
+            intent_decomp_set=set(),
+            intent_decomp_payload={},
+            multi_intent_primary=None,
+            info_class_intents=set(),
+            early_domain_intent=None,
+            expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+            expected_reply_matched=False,
+            expected_reply_shortcircuit=False,
+            expected_reply_blocked_by_info=True,
+            pending_question_act="ask_about_requested_slot",
+            pending_question_target="time",
+            batch_non_booking_message="Когда у вас есть свободные слоты?",
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            current_goal="booking",
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_type=None,
+            now=datetime(2026, 4, 3, 20, 10, tzinfo=timezone.utc),
+            message_count=2,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+        )
+
+    assert response is not None
+    assert response.success is True
+    assert response.message == "Booking slot guidance sent"
+    assert captured["message_meta"] == [
+        {
+            "action": "collect",
+            "intent": "booking",
+            "source": "booking_slot_guidance",
+            "fast_intent": False,
+        }
+    ]
+    assert captured["decision_trace"] == [
+        {
+            "stage": "pending_question_interaction",
+            "decision": "booking_slot_guidance",
+            "state": legacy.ConversationState.BOT_ACTIVE.value,
+            "source": "booking_interrupt",
+            "pending_question_act": "ask_about_requested_slot",
+            "observer_pending_question_target": "time",
+            "requested_slot": "datetime",
+            "observer_expected_reply_type": legacy.EXPECTED_REPLY_TIME,
+        }
+    ]
+    assert captured["metadata_updates"] == [
+        {
+            "pending_question_act": "ask_about_requested_slot",
+            "observer_pending_question_target": "time",
+            "pending_question_interaction": "ask_about_requested_slot",
+            "pending_question_owner": "booking_slot_guidance",
+        }
+    ]
+
+
+def test_canonicalize_booking_info_action_maps_reply_variants_to_canonical_actions():
+    assert (
+        booking_router._canonicalize_booking_info_action(
+            "reply",
+            intent="pricing",
+            info_meta={"action_class": "FACT"},
+        )
+        == "fact"
+    )
+    assert (
+        booking_router._canonicalize_booking_info_action(
+            "reply",
+            intent="service_clarify",
+            info_meta={"action_class": "COLLECT"},
+        )
+        == "collect"
+    )
+    assert (
+        booking_router._canonicalize_booking_info_action(
+            "escalate",
+            intent="pricing",
+            info_meta={"action_class": "HANDOFF"},
+        )
+        == "handoff"
+    )
+
+
+def test_booking_interrupt_info_clarify_records_canonical_collect_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ), patch(
+        "app.routers.webhook.booking._resolve_booking_info_intents",
+        return_value=[],
+    ), patch(
+        "app.services.pack_runtime_service.resolve_explicit_master_intent",
+        return_value=SimpleNamespace(explicit=False, service_query=None),
+    ), patch(
+        "app.services.pack_runtime_service.compose_multi_truth_reply",
+        return_value=None,
+    ), patch(
+        "app.services.pack_runtime_service.format_reply_from_truth",
+        return_value=None,
+    ), patch(
+        "app.services.pack_runtime_service.build_runtime_service_truth_reply",
+        return_value=None,
+    ):
+        response = booking_router._handle_booking_interrupt(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="А сколько это стоит?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={
+                "allow_booking_flow": True,
+                "allow_handover_create": True,
+                "allow_truth_gate_reply": True,
+            },
+            has_media=False,
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            consult_intent=None,
+            intent_decomp_used=False,
+            intent_decomp_set=set(),
+            intent_decomp_payload=None,
+            multi_intent_primary=None,
+            info_class_intents={"pricing"},
+            early_domain_intent=None,
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_shortcircuit=False,
+            expected_reply_blocked_by_info=True,
+            pending_question_act=None,
+            pending_question_target=None,
+            batch_non_booking_message="А сколько это стоит?",
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            current_goal=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_type=None,
+            now=datetime.now(timezone.utc),
+            message_count=1,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+        )
+
+    assert response is not None
+    assert response.success is True
+    assert captured[-1]["action"] == "collect"
+    assert captured[-1]["intent"] == "info_clarify"
+
+
+def test_booking_interrupt_pricing_reply_records_canonical_fact_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.services.pack_runtime_service.build_runtime_service_truth_reply",
+        return_value="Маникюр — 2 500 ₸.",
+    ), patch(
+        "app.services.pack_runtime_service.resolve_runtime_service_price_item",
+        return_value={"name": "Маникюр", "price": 2500},
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ):
+        response = booking_router._handle_booking_interrupt(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="А сколько это стоит?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={
+                "allow_booking_flow": True,
+                "allow_handover_create": True,
+                "allow_truth_gate_reply": True,
+            },
+            has_media=False,
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            consult_intent=None,
+            intent_decomp_used=False,
+            intent_decomp_set=set(),
+            intent_decomp_payload=None,
+            multi_intent_primary=None,
+            info_class_intents={"pricing"},
+            early_domain_intent=None,
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_shortcircuit=False,
+            expected_reply_blocked_by_info=False,
+            pending_question_act=None,
+            pending_question_target=None,
+            batch_non_booking_message="А сколько это стоит?",
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            current_goal=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_type=None,
+            now=datetime.now(timezone.utc),
+            message_count=1,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+        )
+
+    assert response is not None
+    assert response.success is True
+    assert "Маникюр — 2 500 ₸." in response.bot_response
+    assert captured[-1]["action"] == "fact"
+    assert captured[-1]["intent"] == "pricing"
+
+
+class _BookingRuntimeStub:
+    def _get_conversation_context(self, conversation):
+        return dict(getattr(conversation, "context", {}) or {})
+
+    def _set_conversation_context(self, conversation, context):
+        conversation.context = context
+        return context
+
+    def _set_expected_reply_context(self, **kwargs):
+        context = dict(kwargs["context"])
+        context["expected_reply_type"] = kwargs["expected_reply_type"]
+        context["expected_reply_reason"] = kwargs.get("reason")
+        return context
+
+    def _apply_consult_return(self, **kwargs):
+        return kwargs["bot_response"]
+
+    def _reset_low_confidence_retry(self, _conversation):
+        return None
+
+    def _get_context_manager(self, _context):
+        return {}
+
+    def _maybe_store_service_carryover(self, **_kwargs):
+        return None
+
+    def _maybe_store_class_carryover(self, **_kwargs):
+        return None
+
+    def _get_service_carryover(self, _context_manager, *, message_count):
+        del message_count
+        return None
+
+    def _record_context_manager_decision(self, *_args, **_kwargs):
+        return None
+
+
+def _make_overlap_integrity_error() -> IntegrityError:
+    return IntegrityError(
+        "INSERT INTO appointments ...",
+        {},
+        Exception('conflicting key value violates exclusion constraint "appointments_no_overlap"'),
+    )
+
+
+def test_booking_interrupt_reschedule_records_canonical_handoff_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.routers.webhook.booking._reuse_active_handover",
+        return_value=(None, True, True),
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ):
+        response = booking_router._handle_booking_interrupt(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Хотелось бы перенести на следующий понедельник.",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={"allow_handover_create": True, "allow_truth_gate_reply": False},
+            has_media=False,
+            bypass_domain_flows=False,
+            booking_wants_flow=False,
+            consult_intent=None,
+            intent_decomp_used=True,
+            intent_decomp_set={"reschedule"},
+            intent_decomp_payload={
+                "action": "handoff",
+                "tool_action": "handoff",
+                "capability": "booking_manage",
+                "primary_intent": "reschedule",
+            },
+            multi_intent_primary=None,
+            info_class_intents=set(),
+            early_domain_intent=None,
+            expected_reply_type=None,
+            expected_reply_matched=None,
+            expected_reply_shortcircuit=False,
+            expected_reply_blocked_by_info=False,
+            pending_question_act=None,
+            pending_question_target=None,
+            batch_non_booking_message=None,
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            current_goal=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_type=None,
+            now=datetime.now(timezone.utc),
+            message_count=1,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+        )
+
+    assert response is not None
+    assert response.success is True
+    assert response.bot_response == legacy.MSG_ESCALATED
+    assert captured == [
+        {
+            "action": "handoff",
+            "intent": "reschedule_request",
+            "source": "booking_interrupt",
+            "fast_intent": False,
+        }
+    ]
+
+
+def test_booking_human_request_conflict_fallback_records_handoff_then_collect():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.rollback = Mock()
+    db.commit = Mock(side_effect=[_make_overlap_integrity_error(), None])
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.routers.webhook.booking._reuse_active_handover",
+        return_value=(None, True, True),
+    ), patch(
+        "app.routers.webhook.booking.is_human_request_message",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Позовите, пожалуйста, менеджера",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True, "allow_handover_create": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=False,
+            booking_active=True,
+            booking_signal=False,
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр", "datetime": "2026-04-12 15:00"},
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 3, 20, 25, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.success is True
+    assert outcome.response.message == "Booking conflict prompt sent"
+    assert outcome.response.bot_response == "Похоже, это время уже занято. На какую дату и время вам удобно?"
+    assert captured == [
+        {
+            "action": "handoff",
+            "intent": "human_request",
+            "source": "booking",
+            "fast_intent": False,
+        },
+        {
+            "action": "collect",
+            "intent": "booking",
+            "source": "booking",
+            "fast_intent": False,
+        },
+    ]
+
+
+def test_booking_confirm_reject_records_canonical_collect_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.services.ai_service.classify_confirmation",
+        return_value="no",
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.booking._next_booking_prompt",
+        side_effect=lambda booking_state, **_kwargs: (
+            {**booking_state, "last_question": "datetime"},
+            "На какую дату и время вам удобно?",
+        ),
+    ), patch(
+        "app.routers.webhook.booking._apply_collect_all_prompt",
+        side_effect=lambda booking_state, prompt, *_args, **_kwargs: (booking_state, prompt),
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="нет",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            booking_active=True,
+            booking_signal=False,
+            booking_messages=[],
+            booking_context={},
+            booking={
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-04-12 15:00",
+                "confirmation": {
+                    "slot": "datetime",
+                    "value": "2026-04-12 15:00",
+                    "confidence": 0.9,
+                    "source": "booking_prompt",
+                },
+            },
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 3, 20, 30, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.success is True
+    assert outcome.response.message == "Booking slot requested"
+    assert outcome.response.bot_response == "На какую дату и время вам удобно?"
+    assert captured == [
+        {
+            "action": "collect",
+            "intent": "booking",
+            "source": "booking_confirm",
+            "fast_intent": False,
+        }
+    ]
+
+
+def test_canonicalize_booking_flow_action_maps_lifecycle_variants_to_canonical_actions() -> None:
+    assert booking_router._canonicalize_booking_flow_action("booking_cancelled") == "fact"
+    assert booking_router._canonicalize_booking_flow_action("booking_paused") == "fact"
+    assert booking_router._canonicalize_booking_flow_action("booking_confirm") == "collect"
+    assert booking_router._canonicalize_booking_flow_action("booking_captured_pending") == "handoff"
+
+
+def test_booking_cancel_records_canonical_fact_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._is_booking_cancel",
+        return_value=True,
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=Mock(commit=Mock()),
+            conversation=conversation,
+            user=SimpleNamespace(id="user-123"),
+            message_text="отмена",
+            saved_message=SimpleNamespace(id="msg-1", message_metadata={}),
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            booking_active=True,
+            booking_signal=False,
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            expected_reply_type=None,
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 5, 12, 15, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.bot_response == "Хорошо, если передумаете — пишите."
+    assert captured[-1]["action"] == "fact"
+
+
+def test_booking_pause_records_canonical_fact_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=Mock(commit=Mock()),
+            conversation=conversation,
+            user=SimpleNamespace(id="user-123"),
+            message_text="спасибо",
+            saved_message=SimpleNamespace(id="msg-1", message_metadata={}),
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=False,
+            booking_active=True,
+            booking_signal=False,
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            expected_reply_type=None,
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 5, 12, 15, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.bot_response == "Хотите продолжить запись? Если да — напишите услугу."
+    assert captured[-1]["action"] == "fact"
+
+
+def test_booking_confirm_prompt_records_canonical_collect_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.services.ai_service.classify_confirmation",
+        return_value="maybe",
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=Mock(commit=Mock()),
+            conversation=conversation,
+            user=SimpleNamespace(id="user-123"),
+            message_text="наверное",
+            saved_message=SimpleNamespace(id="msg-1", message_metadata={}),
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            booking_active=True,
+            booking_signal=False,
+            booking_messages=[],
+            booking_context={},
+            booking={
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-04-12 15:00",
+                "confirmation": {
+                    "slot": "datetime",
+                    "value": "2026-04-12 15:00",
+                    "confidence": 0.9,
+                    "source": "booking_prompt",
+                },
+            },
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 5, 12, 15, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.bot_response == "Я понял дату и время: 2026-04-12 15:00. Верно?"
+    assert captured[-1]["action"] == "collect"
+
+
+def test_booking_captured_pending_records_canonical_handoff_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.booking._update_booking_from_messages",
+        side_effect=lambda booking_state, *_args, **_kwargs: booking_state,
+    ), patch(
+        "app.routers.webhook.booking._apply_owner_service_query",
+        side_effect=lambda booking_state, *_args, **_kwargs: booking_state,
+    ), patch(
+        "app.routers.webhook.booking._create_booking_appointment",
+        return_value=(None, {}),
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=Mock(commit=Mock()),
+            conversation=conversation,
+            user=SimpleNamespace(id="user-123"),
+            message_text="Хочу записаться",
+            saved_message=SimpleNamespace(id="msg-1", message_metadata={}),
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True, "allow_handover_create": False},
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            booking_active=True,
+            booking_signal=True,
+            booking_messages=["Хочу записаться"],
+            booking_context={},
+            booking={
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-04-12 15:00",
+                "name": "Алия",
+            },
+            expected_reply_type="name",
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 5, 12, 15, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert "администратору" in outcome.response.bot_response
+    assert captured[-1]["action"] == "handoff"
+
+
+def test_booking_flow_prompt_records_canonical_collect_action():
+    captured: list[dict] = []
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=legacy.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+
+    with patch(
+        "app.routers.webhook.booking._context_runtime",
+        return_value=_BookingRuntimeStub(),
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.booking._record_message_decision_meta",
+        side_effect=lambda _message, **kwargs: captured.append(kwargs),
+    ), patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.booking._update_booking_from_messages",
+        side_effect=lambda booking_state, *_args, **_kwargs: booking_state,
+    ), patch(
+        "app.routers.webhook.booking._apply_owner_service_query",
+        side_effect=lambda booking_state, *_args, **_kwargs: booking_state,
+    ), patch(
+        "app.routers.webhook.booking._next_booking_prompt",
+        side_effect=lambda booking_state, **_kwargs: (
+            {**booking_state, "last_question": "datetime"},
+            "Когда вам удобно?",
+        ),
+    ), patch(
+        "app.routers.webhook.booking._apply_collect_all_prompt",
+        side_effect=lambda booking_state, prompt, *_args, **_kwargs: (booking_state, prompt),
+    ), patch(
+        "app.routers.webhook.booking.should_repeat_booking_prompt",
+        return_value=False,
+    ):
+        outcome = booking_router._handle_booking_flow(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Хочу записаться на маникюр.",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={"allow_booking_flow": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            booking_active=False,
+            booking_signal=True,
+            booking_messages=["Хочу записаться на маникюр."],
+            booking_context={},
+            booking={},
+            expected_reply_type=None,
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            intent_decomp_payload=None,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler=None,
+            policy_pack=None,
+            now=datetime(2026, 4, 3, 20, 35, tzinfo=timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.success is True
+    assert outcome.response.message == "Booking slot requested"
+    assert outcome.response.bot_response == "Когда вам удобно?"
+    assert captured == [
+        {
+            "action": "collect",
+            "intent": "booking",
+            "source": "booking",
+            "fast_intent": False,
+        }
+    ]
+
+
 def test_looks_like_booking_reschedule_request_detects_change_time_phrase():
     assert booking_compat_router._looks_like_booking_reschedule_request(
         "Я хочу изменить время на утро."
@@ -582,6 +1670,70 @@ def test_tool_registry_get_booking_not_found_verification_skips_service_followup
     assert result.decision_meta.get("tool_decision") == "not_found"
     assert result.decision_meta.get("requested_time") == "15:00"
     assert result.trace.get("decision") == "not_found"
+
+
+def test_tool_registry_get_booking_not_found_name_followup_asks_name_only():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Подтвердите, что я записан на маникюр.",
+            expected_reply_type="name",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+    lowered = (result.response_text or "").casefold()
+    assert "как вас зовут" in lowered
+    assert "номер телефона" not in lowered
+
+
+def test_tool_registry_get_booking_not_found_time_followup_asks_datetime_only():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Меня зовут Амина.",
+            expected_reply_type="time",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+    lowered = (result.response_text or "").casefold()
+    assert "примерную дату и время записи" in lowered
+    assert "номер телефона" not in lowered
 
 
 def test_tool_registry_book_slot_conflict_verification_mentions_confirmation_failure():

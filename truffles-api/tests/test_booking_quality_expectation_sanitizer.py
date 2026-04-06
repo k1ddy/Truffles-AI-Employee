@@ -44,7 +44,7 @@ def test_extract_expectations_drops_info_sections_without_info_tags():
     assert expect["info_sections"] == []
 
 
-def test_extract_expectations_compiles_booking_prompt_contract_for_service_choice_booking():
+def test_extract_expectations_compiles_canonical_collect_contract_for_service_choice_booking():
     expect = extract_expectations(
         {
             "tags": ["booking"],
@@ -57,13 +57,13 @@ def test_extract_expectations_compiles_booking_prompt_contract_for_service_choic
         }
     )
 
-    assert expect["action"] == "booking_prompt"
-    assert expect["meta"]["action"] == "booking_prompt"
+    assert expect["action"] == "collect"
+    assert expect["meta"]["action"] == "collect"
     assert expect["meta"]["source"] == "llm_policy_core"
     assert expect["meta"]["tool_action"] == "collect"
     assert expect["meta"]["expected_reply_type"] == "service_choice"
     assert expect["meta"]["expected_reply_reason"] == "collect:service"
-    assert expect["meta_any"]["action"] == ["booking_prompt"]
+    assert expect["meta_any"]["action"] == ["collect"]
     assert expect["meta_any"]["expected_reply_type"] == ["service_choice"]
     assert expect["trace_contains"] == [
         {

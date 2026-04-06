@@ -403,6 +403,12 @@ def collect_requested_fact_refs(decision: Any) -> list[str]:
         if isinstance(semantic_contract, Mapping):
             _remember(coarse_refs, semantic_contract.get("capability"))
 
+    tool_action = _normalize_token(getattr(decision, "tool_action", None))
+    if tool_action == "catalog.service_query":
+        exact_service_pack_refs = _dedupe_tokens(pack_refs)
+        if exact_service_pack_refs:
+            return exact_service_pack_refs
+
     manifest = build_default_fact_manifest()
     group_priority: dict[str, int] = {}
     for priority, bucket in enumerate((coarse_refs, pack_refs, exact_refs)):

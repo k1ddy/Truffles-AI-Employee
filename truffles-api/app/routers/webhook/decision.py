@@ -416,6 +416,7 @@ from app.routers.webhook.runtime_primitives import (
     _append_followup,
     _combine_sidecar,
     _contains_any,
+    _freeze_legacy_semantic_payload,
     should_offer_low_confidence_retry,
 )
 from app.routers.webhook.session_memory import (
@@ -1078,12 +1079,14 @@ def _apply_expected_reply_contract(
             now=now,
         )
         _set_conversation_context(conversation, context)
-        bypass_trace = {
+        bypass_trace = _freeze_legacy_semantic_payload(
+            {
             "stage": "question_contract",
             "decision": "bypass",
             "expected_reply_type": expected_reply_type,
             "expected_reply_bypassed": "human_request",
-        }
+            }
+        )
         if active_pending_question_contract:
             bypass_trace["pending_question_contract"] = active_pending_question_contract
         _record_decision_trace(conversation, bypass_trace)
@@ -1095,12 +1098,14 @@ def _apply_expected_reply_contract(
                 reason="expected_reply_bypass",
             )
         if saved_message:
-            bypass_updates = {
+            bypass_updates = _freeze_legacy_semantic_payload(
+                {
                 "expected_reply_type": None,
                 "expected_reply_matched": False,
                 "expected_reply_bypassed": "human_request",
                 "session_memory_expected_reply_cleared": memory_cleared,
-            }
+                }
+            )
             if active_pending_question_contract:
                 bypass_updates["pending_question_contract"] = active_pending_question_contract
             _update_message_decision_metadata(saved_message, bypass_updates)
@@ -1383,14 +1388,16 @@ def _apply_expected_reply_contract(
                 alternate_slot_captured = True
                 _record_decision_trace(
                     conversation,
-                    {
+                    _freeze_legacy_semantic_payload(
+                        {
                         "stage": "slot_validate",
                         "decision": "alternate_slot_captured",
                         "expected_reply_type": expected_reply_type,
                         "slot": alternate_slot_key,
                         "value": alternate_slot_value,
                         "detected_slot": answer_detected_slot,
-                    },
+                        }
+                    ),
                 )
         slot_confirmation_required = False
         if matched and slot_source == "llm" and use_llm_slot:
@@ -1477,11 +1484,13 @@ def _apply_expected_reply_contract(
                 intent_queue = None
                 _record_decision_trace(
                     conversation,
-                    {
+                    _freeze_legacy_semantic_payload(
+                        {
                         "stage": "intent_queue",
                         "decision": "reset_for_booking_reply",
                         "expected_reply_type": expected_reply_type,
-                    },
+                        }
+                    ),
                 )
                 if saved_message:
                     _update_message_decision_metadata(
@@ -1582,7 +1591,8 @@ def _apply_expected_reply_contract(
                 pending_question_act="slot_constraint",
                 pending_question_target="time",
             )
-            interaction_trace = {
+            interaction_trace = _freeze_legacy_semantic_payload(
+                {
                 "stage": "pending_question_interaction",
                 "decision": "slot_constraint",
                 "state": conversation.state,
@@ -1590,7 +1600,8 @@ def _apply_expected_reply_contract(
                 "pending_question_act": "slot_constraint",
                 "pending_question_target": "time",
                 "expected_reply_type": current_expected_reply or expected_reply_type,
-            }
+                }
+            )
             if interaction_pending_question_contract:
                 interaction_trace["pending_question_contract"] = interaction_pending_question_contract
             _record_decision_trace(
@@ -1598,21 +1609,25 @@ def _apply_expected_reply_contract(
                 interaction_trace,
             )
             if saved_message:
-                interaction_updates = {
+                interaction_updates = _freeze_legacy_semantic_payload(
+                    {
                     "pending_question_act": "slot_constraint",
                     "pending_question_target": "time",
                     "pending_question_interaction": "slot_constraint",
                     "pending_question_owner": "question_contract",
-                }
+                    }
+                )
                 if interaction_pending_question_contract:
                     interaction_updates["pending_question_contract"] = interaction_pending_question_contract
                 _update_message_decision_metadata(saved_message, interaction_updates)
-        trace_payload = {
+        trace_payload = _freeze_legacy_semantic_payload(
+            {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
             "expected_reply_type": expected_reply_type,
             "value": value,
-        }
+            }
+        )
         if active_pending_question_contract:
             trace_payload["pending_question_contract"] = active_pending_question_contract
         if expected_reply_shortcircuit:
@@ -1631,11 +1646,13 @@ def _apply_expected_reply_contract(
             trace_payload["expected_reply_value_validated"] = False
         _record_decision_trace(conversation, trace_payload)
         if saved_message:
-            updates = {
+            updates = _freeze_legacy_semantic_payload(
+                {
                 "expected_reply_type": expected_reply_type,
                 "expected_reply_matched": matched,
                 "expected_reply_value": value,
-            }
+                }
+            )
             if active_pending_question_contract:
                 updates["pending_question_contract"] = active_pending_question_contract
             if expected_reply_shortcircuit:
@@ -1801,10 +1818,10 @@ def _run_intent_decomposition(
         )
         if isinstance(expected_reply_type, str) and expected_reply_type.strip():
             meta_updates["intent_decomp_expected_reply_type"] = expected_reply_type.strip()
-            trace_payload["expected_reply_type"] = expected_reply_type.strip()
+            trace_payload["observer_expected_reply_type"] = expected_reply_type.strip()
         if isinstance(expected_reply_reason, str) and expected_reply_reason.strip():
             meta_updates["intent_decomp_expected_reply_reason"] = expected_reply_reason.strip()
-            trace_payload["expected_reply_reason"] = expected_reply_reason.strip()
+            trace_payload["observer_expected_reply_reason"] = expected_reply_reason.strip()
         if intent_decomp_pending_question_contract:
             meta_updates["intent_decomp_pending_question_contract"] = (
                 intent_decomp_pending_question_contract
@@ -1975,14 +1992,16 @@ def _run_intent_decomposition(
         else:
             pending_intent_queue = []
             pending_expected_reply_type = None
-            intent_queue_event = {
+            intent_queue_event = _freeze_legacy_semantic_payload(
+                {
                 "decision": "drop",
                 "expected_reply_type": expected_reply_type,
                 "intent_queue": intent_queue,
                 "intents": intent_decomp_intents,
                 "expected_reply_matched": False,
                 "expected_reply_next": None,
-            }
+                }
+            )
 
     intent_decomp_set = (
         {intent.strip().casefold() for intent in intent_decomp_intents if intent}
@@ -2237,12 +2256,14 @@ def _run_intent_decomposition(
                 if preserve_booking_signal_on_expected_service_turn:
                     _record_decision_trace(
                         conversation,
-                        {
+                        _freeze_legacy_semantic_payload(
+                            {
                             "stage": "booking_gate",
                             "decision": "booking_expected_reply_turn_preserved",
                             "expected_reply_type": expected_reply_type,
                             "reason": "direct_booking_request",
-                        },
+                            }
+                        ),
                     )
                     if saved_message:
                         _update_message_decision_metadata(
@@ -5598,7 +5619,7 @@ def _handle_minimum_data_safe_mode_gate(
         )
         _record_message_decision_meta(
             saved_message,
-            action="pending_wait",
+            action="handoff",
             intent=None,
             source="minimum_data_safe_mode",
             fast_intent=False,
@@ -5640,7 +5661,7 @@ def _handle_minimum_data_safe_mode_gate(
         )
         _record_message_decision_meta(
             saved_message,
-            action="pending_escalation",
+            action="handoff",
             intent=None,
             source="minimum_data_safe_mode",
             fast_intent=False,
@@ -5685,7 +5706,7 @@ def _handle_minimum_data_safe_mode_gate(
         )
         _record_message_decision_meta(
             saved_message,
-            action="pending_escalation",
+            action="handoff",
             intent=None,
             source="minimum_data_safe_mode",
             fast_intent=False,
@@ -5721,7 +5742,7 @@ def _handle_minimum_data_safe_mode_gate(
     )
     _record_message_decision_meta(
         saved_message,
-        action="pending_escalation",
+        action="handoff",
         intent=None,
         source="minimum_data_safe_mode",
         fast_intent=False,
@@ -5773,7 +5794,7 @@ def _handle_knowledge_safe_mode_gate(
         )
         _record_message_decision_meta(
             saved_message,
-            action="pending_wait",
+            action="handoff",
             intent=None,
             source="knowledge_safe_mode",
             fast_intent=False,
@@ -5814,7 +5835,7 @@ def _handle_knowledge_safe_mode_gate(
         )
         _record_message_decision_meta(
             saved_message,
-            action="pending_escalation",
+            action="handoff",
             intent=None,
             source="knowledge_safe_mode",
             fast_intent=False,
@@ -5858,7 +5879,7 @@ def _handle_knowledge_safe_mode_gate(
         )
         _record_message_decision_meta(
             saved_message,
-            action="pending_escalation",
+            action="handoff",
             intent=None,
             source="knowledge_safe_mode",
             fast_intent=False,
@@ -5893,7 +5914,7 @@ def _handle_knowledge_safe_mode_gate(
     )
     _record_message_decision_meta(
         saved_message,
-        action="pending_escalation",
+        action="handoff",
         intent=None,
         source="knowledge_safe_mode",
         fast_intent=False,

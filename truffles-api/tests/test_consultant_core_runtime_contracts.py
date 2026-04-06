@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -38,12 +38,14 @@ from app.core import (
 from app.core.consultant_runtime import ConsultantRuntime, LoadedRuntimeState
 from app.core.policy_tool_projector import build_binding_plan
 from app.core.turn_executor import RuntimeExecutionResult
+from app.routers.webhook import guards as webhook_guards
 from app.services.knowledge_runtime import RuntimeTruth, use_runtime_truth_override
 from app.services.policy_validation_boundary_service import (
     PolicyValidationBoundaryRuntimeHooks,
     PolicyValidationBoundaryRuntimeInput,
     handle_policy_validation_boundary,
 )
+from app.services.state_machine import ConversationState
 from app.services.tool_registry_service import ToolExecutionResult
 from tests import build_test_policy_override_decision, build_test_semantic_decision_payload
 
@@ -1231,6 +1233,90 @@ def test_fact_plan_prefers_owner_exact_service_query_ref_over_coarse_pricing_ali
     assert fact_plan.allowed_emitted_fact_refs == ["promotions"]
 
 
+def test_fact_plan_prefers_owner_exact_pack_ref_over_booking_capability_alias() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions"],
+            "reason": "user_asked_promotions_during_booking_continuity",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    fact_request = FactRequestV1.build_from_policy_decision(decision)
+    fact_plan = FactPlanV1.build_from_request(fact_request, decision=decision)
+
+    assert fact_request.requested_fact_refs == ["promotions"]
+    assert fact_request.requested_scopes == ["info.promotions"]
+    assert fact_request.supporting_pack_refs == ["promotions"]
+    assert fact_plan.allowed_emitted_sets == [["promotions"]]
+    assert fact_plan.allowed_emitted_fact_refs == ["promotions"]
+
+
+def test_fact_plan_prefers_owner_exact_pack_ref_over_master_query_alias() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions"],
+            "reason": "user_asked_promotions_during_booking_continuity",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "promotions",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core",
+        interaction_relation="generic_info_interrupt",
+        source="llm_policy_core",
+    )
+
+    fact_request = FactRequestV1.build_from_policy_decision(decision)
+    fact_plan = FactPlanV1.build_from_request(fact_request, decision=decision)
+
+    assert fact_request.requested_fact_refs == ["promotions"]
+    assert fact_request.requested_scopes == ["info.promotions"]
+    assert fact_request.supporting_pack_refs == ["promotions"]
+    assert fact_plan.allowed_emitted_sets == [["promotions"]]
+    assert fact_plan.allowed_emitted_fact_refs == ["promotions"]
+
+
 def test_policy_decision_schema_requires_binding_plan_for_semantic_decision() -> None:
     payload = _policy_payload() | {
         "semantic_decision": build_test_semantic_decision_payload(
@@ -2199,6 +2285,54 @@ def test_policy_validation_boundary_fact_guard_escalates_at_limit() -> None:
     assert "committed" not in captured
 
 
+def test_clarify_limit_escalation_records_canonical_handoff_action() -> None:
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=ConversationState.BOT_ACTIVE.value,
+    )
+    saved_message = SimpleNamespace(id="msg-1", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+    record_message_meta = Mock()
+
+    with patch(
+        "app.routers.webhook.guards._reuse_active_handover",
+        return_value=(None, True, True),
+    ), patch(
+        "app.routers.webhook.guards._reset_low_confidence_retry"
+    ), patch(
+        "app.routers.webhook.guards._record_decision_trace"
+    ), patch(
+        "app.routers.webhook.guards._record_message_decision_meta",
+        record_message_meta,
+    ), patch(
+        "app.routers.webhook.guards._update_message_decision_metadata"
+    ), patch(
+        "app.routers.webhook.guards.save_message"
+    ):
+        response = webhook_guards._handle_clarify_limit_escalation(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="нужен человек",
+            saved_message=saved_message,
+            source="truth_gate",
+            allow_handover=False,
+            send_response=lambda *_args, **_kwargs: True,
+        )
+
+    assert response.success is True
+    record_message_meta.assert_called_once_with(
+        saved_message,
+        action="handoff",
+        intent="clarify_limit",
+        source="truth_gate",
+        fast_intent=False,
+    )
+
+
 def _capture_boundary_message_meta(captured: dict[str, object]):
     def _record_message_decision_meta(_saved_message, **payload):
         captured["message_meta"] = payload
@@ -2783,6 +2917,9 @@ def test_turn_executor_check_booking_fact_preserves_tool_registry_not_found_repl
             "subject_kind": "booking",
             "capability": "booking_manage",
             "resolution_mode": "direct",
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
         },
         interaction_owner="llm_policy_core",
         interaction_relation="grounded_fact",
@@ -2826,6 +2963,9 @@ def test_turn_executor_check_booking_fact_preserves_tool_registry_not_found_repl
     assert result.tool_action == "calendar.get_booking"
     assert result.tool_decision == "not_found"
     assert "booking_verification_prompt" not in result.meta
+    _, kwargs = mock_execute.call_args
+    assert kwargs["message_text"] == "Проверьте мою запись."
+    assert kwargs["expected_reply_type"] == "time"
 
 
 def test_turn_executor_semantic_decision_emits_enrichment_only_meta() -> None:
@@ -3030,6 +3170,7 @@ def test_turn_executor_keeps_slot_constraint_collect_contract() -> None:
     )
 
     assert "15:00" in result.text
+    assert "автоматически не подтверждаю" in result.text
     assert result.tool_decision == "slot_constraint"
     assert result.meta.get("pending_question_act") == "slot_constraint"
     assert result.meta.get("pending_question_target") == "time"
@@ -3094,6 +3235,236 @@ def test_turn_executor_realizes_slot_constraint_collect_from_canonical_owner_con
     assert result.meta.get("question_contract") is True
 
 
+def test_turn_executor_slot_constraint_prompt_normalizes_prepositional_alternate_datetime() -> None:
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "bookability",
+            "tool_action_hint": "collect",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "temporal_scope": "weekday",
+            "resolution_mode": "slot_constraint",
+            "expected_reply_type": "time",
+            "reason": "active_booking_availability_followup",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "active_question_relation": "slot_constraint",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "alternate_datetime": "в понедельник",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        binding_tool_args={},
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Какое время доступно?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert "на в понедельник" not in result.text
+    assert "в понедельник" in result.text
+    assert "точное время" in result.text.casefold()
+    assert "автоматически не подтверждаю" not in result.text
+    assert result.tool_decision == "slot_constraint"
+    assert result.meta.get("alternate_datetime") == "в понедельник"
+
+
+def test_turn_executor_slot_constraint_with_day_only_anchor_asks_precise_time() -> None:
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "bookability",
+            "tool_action_hint": "collect",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "temporal_scope": "today",
+            "resolution_mode": "slot_constraint",
+            "expected_reply_type": "time",
+            "reason": "active_booking_same_day_availability_followup",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "active_question_relation": "slot_constraint",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "alternate_datetime": "сегодня",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        binding_tool_args={},
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="У вас есть время на сегодня?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert "сегодня" in result.text
+    assert "точное время" in result.text.casefold()
+    assert "автоматически не подтверждаю" not in result.text
+    assert result.tool_decision == "slot_constraint"
+    assert result.meta.get("pending_question_act") == "slot_constraint"
+    assert result.meta.get("pending_question_target") == "time"
+    assert result.meta.get("alternate_datetime") == "сегодня"
+
+
+def test_turn_executor_requested_slot_availability_with_carried_day_asks_time_only() -> None:
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "bookability",
+            "tool_action_hint": "collect",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "temporal_scope": "weekday",
+            "resolution_mode": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+            "reason": "active_booking_requested_slot_availability_followup",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        binding_tool_args={},
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Какое время доступно?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == "На какое время вам удобно?"
+    assert result.tool_decision == "datetime"
+
+
+def test_turn_executor_service_refinement_keeps_time_collect_without_slot_confirmation_fallback() -> None:
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "bookability",
+            "tool_action_hint": "collect",
+            "slots": {"service": "Маникюр с укреплением ногтей"},
+            "subject_kind": "booking",
+            "temporal_scope": "day",
+            "resolution_mode": "ask_about_requested_slot",
+            "expected_reply_type": "time",
+            "reason": "service_refinement_keeps_active_time_continuity",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "active_question_relation": "slot_constraint",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "alternate_datetime": "завтра",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = TurnPlanner().build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        binding_tool_args={},
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Мне нужны услуги с укреплением ногтей.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert "Маникюр с укреплением ногтей" in result.text
+    assert "завтра" in result.text
+    assert "автоматически не подтверждаю" not in result.text
+    assert result.tool_decision == "slot_constraint"
+    assert result.meta.get("pending_question_act") == "slot_constraint"
+    assert result.meta.get("pending_question_target") == "time"
+    assert result.meta.get("alternate_datetime") == "завтра"
+    assert result.meta.get("question_contract") is True
+
+
 def test_turn_executor_realizes_specialist_followup_collect_prompt_from_canonical_contract() -> None:
     decision = build_test_policy_override_decision(
         {
@@ -3147,6 +3518,7 @@ def test_turn_executor_realizes_specialist_followup_collect_prompt_from_canonica
     assert result.tool_decision == "datetime"
     assert result.meta["pending_question_contract"]["pending_question_target"] == "specialist"
     assert result.meta["pending_question_contract"]["active_question_relation"] == "referent_followup"
+    assert "semantic_contract" not in result.meta
 
 
 def test_turn_executor_adds_pricing_info_sections_for_price_reply() -> None:
@@ -3278,12 +3650,7 @@ def test_turn_executor_routes_booking_info_interrupts_through_catalog_tool_regis
     assert projection["tool_action"] == "catalog.service_query"
     assert projection["service_query"] == "маникюр"
     assert projection.get("binding_id")
-    assert result.meta["semantic_contract"]["referents"]["service"] == {
-        "value": "маникюр",
-        "entity_id": "svc:manicure",
-        "entity_type": "service",
-        "source_ref": "message",
-    }
+    assert "semantic_contract" not in result.meta
 
 
 def test_turn_executor_uses_binding_plan_for_owner_backed_fact_execution(monkeypatch) -> None:
@@ -4937,13 +5304,7 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
     assert result.tool_decision == "info_ref_unresolved"
     assert result.meta["fact_fallback"] is True
     assert result.meta["fact_fallback_reason"] == "policy_info_unresolved"
-    assert result.meta["semantic_contract"] == {
-        "contract_version": "semantic_contract.v1",
-        "subject_kind": "service",
-        "capability": "pricing",
-        "temporal_scope": "none",
-        "resolution_mode": "policy_fact",
-    }
+    assert "semantic_contract" not in result.meta
 
     now = datetime.now(timezone.utc)
     updated, dialog_state, _ = DialogStateService().write_runtime_payload(
@@ -4997,6 +5358,48 @@ def test_pack_grounding_flows_into_runtime_state_trace_and_meta(monkeypatch) -> 
         "capability": "pricing",
         "temporal_scope": "none",
         "resolution_mode": "policy_fact",
+    }
+
+
+def test_turn_executor_does_not_copy_non_owner_semantic_contract_into_execution_meta() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "reason": "question_contract_slot_constraint",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "bookability",
+            "temporal_scope": "weekday",
+            "resolution_mode": "slot_constraint",
+            "expected_reply_type": "time",
+            "pending_question_target": "time",
+            "active_question_relation": "slot_constraint",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+        },
+        interaction_owner="question_contract",
+        interaction_relation="slot_constraint",
+        source="question_contract",
+    )
+
+    meta = TurnExecutor._attach_semantic_contract_meta(
+        decision,
+        {"slot_values": {"service": "Маникюр"}},
+        semantic_contract=TurnPlanner().canonical_semantic_contract(decision),
+        pending_question_contract=TurnExecutor._build_execution_pending_question_contract(decision),
+    )
+
+    assert meta["slot_values"] == {"service": "Маникюр"}
+    assert "semantic_contract" not in meta
+    assert meta["pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "question_contract_slot_constraint",
+        "pending_question_target": "time",
+        "active_question_relation": "slot_constraint",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
     }
 
 

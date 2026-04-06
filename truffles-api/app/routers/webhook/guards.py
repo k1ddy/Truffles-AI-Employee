@@ -30,6 +30,7 @@ from app.routers.webhook.guard_runtime import (
     MSG_REENGAGE_DECLINED,
     MULTI_INTENT_LABELS,
     SESSION_TIMEOUT_HOURS,
+    _canonicalize_guard_metadata_action,
     _coerce_batch_messages,
     get_mute_settings,
 )
@@ -367,7 +368,7 @@ def _handle_clarify_limit_escalation(
     )
     _record_message_decision_meta(
         saved_message,
-        action="escalate",
+        action="handoff",
         intent=escalation_intent,
         source=source,
         fast_intent=False,
@@ -481,7 +482,7 @@ def _handle_reengage_and_mute_gate(
             if saved_message is not None:
                 _record_message_decision_meta(
                     saved_message,
-                    action="human_lock_silent",
+                    action=_canonicalize_guard_metadata_action("human_lock_silent"),
                     intent=None,
                     source="routing",
                     fast_intent=False,
@@ -806,7 +807,7 @@ def _handle_opt_out_mute_gate(
     )
     _record_message_decision_meta(
         saved_message,
-        action="rejection",
+        action=_canonicalize_guard_metadata_action("rejection"),
         intent="opt_out",
         source="opt_out",
         fast_intent=False,
@@ -870,7 +871,7 @@ def _handle_sla_collect_only_gate(
     _record_decision_trace(conversation, trace_payload)
     _record_message_decision_meta(
         saved_message,
-        action="reply",
+        action="collect",
         intent="sla_collect_only",
         source="sla_profile",
         fast_intent=False,

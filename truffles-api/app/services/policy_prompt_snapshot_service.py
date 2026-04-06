@@ -70,6 +70,10 @@ intent=check_booking, action=fact, tool_action=calendar.get_booking, reason=cale
 If customer referent is missing, set expected_reply_type=name, next_question=name, open_questions=[name].
 If customer referent is already grounded but booking reference is still missing, set
 expected_reply_type=time, next_question=datetime, open_questions=[datetime].
+If the active existing-booking follow-up was asking for customer name and the user just supplied that
+name, stay on intent=check_booking, action=fact, tool_action=calendar.get_booking and move the
+follow-up to expected_reply_type=time, next_question=datetime, open_questions=[datetime].
+Do not switch to booking collect and do not place natural-language prompt text into next_question.
 Existing-booking reference follow-up never changes semantic outcome to collect: even when you
 need name or datetime, keep action=fact and tool_action_hint=calendar.get_booking and encode
 the follow-up only through expected_reply_type / next_question / open_questions.
@@ -93,6 +97,23 @@ tool_action_hint=collect, subject_kind=booking, pending_question_act=slot_constr
 pending_question_target=time, active_question_relation=slot_constraint, and
 alternate_datetime=<grounded candidate slot>. Do not ask again for both date and time once
 temporal_scope is already not none.
+If active booking continuity still expects datetime/time but the user now asks about changing,
+cancelling, confirming, or otherwise managing an existing booking, treat it as an
+existing-booking manage interrupt instead of generic info or bookability collect. Switch to
+subject_kind=booking, capability=booking_manage. For cancel/reschedule/confirm without
+referents.booking_ref use action=handoff, tool_action_hint=handoff, needs_manager=true.
+For check/verify existing booking use action=fact with tool_action_hint=calendar.get_booking.
+Do NOT emit intent=other, tool_action_hint=info, capability=bookability, or the generic
+reply "Я уточню это для вас." for that interrupt family.
+If active booking continuity still expects datetime, memory already carries a day/date context,
+and the current message is still only a generic availability question (for example
+"Когда можно записаться?", "Какое время доступно?", "На какое время свободно?"),
+keep the turn on the canonical requested-slot owner:
+intent=booking, action=collect, tool_action_hint=collect, subject_kind=booking,
+pending_question_act=ask_about_requested_slot, pending_question_target=time,
+active_question_relation=ask_about_requested_slot.
+Do NOT switch to hours/location fact and do NOT tighten to slot_constraint unless the current
+message itself adds a new grounded candidate slot.
 For catalog.location, exact location-family scope must stay in pack_refs:
 parking-only -> pack_refs=[parking], hours-only -> pack_refs=[hours],
 address/location-only -> pack_refs=[location]. Combine refs only when the user
@@ -133,6 +154,15 @@ pending_question_act=slot_constraint, pending_question_target=time,
 active_question_relation=slot_constraint, alternate_datetime=<grounded candidate slot>,
 expected_reply_type=time, next_question=datetime, open_questions=[datetime].
 Do NOT fall back to the generic "На какую дату и время вам удобно?" prompt once temporal_scope is already not none.
+If active booking continuity still expects datetime, memory already carries a day/date context,
+and the current message is still only a generic availability question such as
+"Когда можно записаться?", "Какое время доступно?", or "На какое время свободно?",
+keep the canonical requested-slot owner instead of over-tightening to slot_constraint:
+intent=booking, action=collect, tool_action_hint=collect, subject_kind=booking,
+pending_question_act=ask_about_requested_slot, pending_question_target=time,
+active_question_relation=ask_about_requested_slot, expected_reply_type=time,
+next_question=datetime, open_questions=[datetime].
+Do NOT switch to hours/location fact and do NOT infer alternate_datetime from carried context alone.
 If active booking continuity still expects datetime and the user fixes a named specialist preference
 (for example "Мне нужен мастер Айгерим.", "Хочу к Айгерим.", "Можно к Айгерим?"),
 keep the turn under booking ownership and preserve time continuity:
@@ -161,6 +191,15 @@ active_question_relation=generic_info_interrupt.
 Preserve expected_reply_type=time, next_question=datetime, open_questions=[datetime],
 and keep the carried pending_question_act/pending_question_target. Do NOT ask the generic
 booking time prompt on this turn.
+If active booking continuity still expects datetime and the user asks about promotions/discounts
+(for example "Есть ли акции?", "Какие скидки на маникюр?", "У вас есть промо на маникюр?"),
+this is a promotions info interrupt, not pricing and not booking collect:
+intent=promotions, action=fact, tool_action_hint=catalog.service_query, pack_refs=[promotions],
+subject_kind=service, capability=promotions, resolution_mode=policy_fact,
+active_question_relation=generic_info_interrupt.
+Preserve expected_reply_type=time, next_question=datetime, open_questions=[datetime],
+and keep the carried pending_question_act/pending_question_target. Do NOT ask the generic
+booking time prompt on this turn and do NOT downgrade pack_refs to pricing.
 If active booking continuity still expects datetime and the user offers photo/reference/example media,
 switch to consult-media follow-up under the same booking continuity:
 intent=consult, action=collect, tool_action_hint=consult, pack_refs=[style_reference],

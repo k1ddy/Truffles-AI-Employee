@@ -33,7 +33,9 @@ from app.routers.webhook.runtime_primitives import (
     MSG_EXPECTED_SERVICE_OFF_TOPIC,
     QUESTION_WORD_PREFIXES,
     SESSION_MEMORY_SHORT_TOKENS,
+    _canonicalize_gate_metadata_action,
     _combine_sidecar,
+    _freeze_legacy_semantic_payload,
 )
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
@@ -952,10 +954,12 @@ def _handle_truth_gate_fallback(
                         else {}
                     )
                     override_meta.update(
-                        {
-                            "expected_reply_type": expected_reply_type,
-                            "expected_reply_guard": "truth_gate_off_topic_override",
-                        }
+                        _freeze_legacy_semantic_payload(
+                            {
+                                "expected_reply_type": expected_reply_type,
+                                "expected_reply_guard": "truth_gate_off_topic_override",
+                            }
+                        )
                     )
                     if pending_question_contract:
                         override_meta["pending_question_contract"] = pending_question_contract
@@ -968,12 +972,14 @@ def _handle_truth_gate_fallback(
                         meta=override_meta,
                     )
                     bot_response = decision.response
-                    trace_payload = {
+                    trace_payload = _freeze_legacy_semantic_payload(
+                        {
                         "stage": "truth_gate",
                         "decision": "expected_reply_override",
                         "expected_reply_type": expected_reply_type,
                         "expected_reply_matched": expected_reply_matched,
-                    }
+                        }
+                    )
                     if pending_question_contract:
                         trace_payload["pending_question_contract"] = pending_question_contract
                     _record_decision_trace(conversation, trace_payload)
@@ -993,17 +999,13 @@ def _handle_truth_gate_fallback(
                 conversation=conversation,
                 class_router_result=class_router_result,
             )
-        resolver_action = decision.action
-        if decision.action != "escalate" and decision.intent in {
-            "service_not_found",
-            "service_clarify",
-            "duration_or_price_clarify",
-            "info_clarify",
-        }:
-            resolver_action = "collect"
+        canonical_gate_action = _canonicalize_gate_metadata_action(
+            decision.action,
+            intent=decision.intent,
+        )
         resolver_meta = ensure_resolver_meta(
             decision.meta if isinstance(decision.meta, dict) else {},
-            action=resolver_action,
+            action=canonical_gate_action,
             intent=decision.intent,
             resolver_id="webhook.truth_gate",
             client_slug=client_slug,
@@ -1017,7 +1019,7 @@ def _handle_truth_gate_fallback(
         )
         trace_payload = {
             "stage": "truth_gate",
-            "decision": decision.action,
+            "decision": canonical_gate_action,
             "intent": decision.intent,
             "state": conversation.state,
             "booking_wants_flow": booking_wants_flow,
@@ -1027,17 +1029,20 @@ def _handle_truth_gate_fallback(
         if decision.intent == "multi_truth":
             trace_payload["multi_truth"] = True
         if isinstance(getattr(decision, "meta", None), dict):
-            trace_payload.update(decision.meta)
+            trace_payload.update(_freeze_legacy_semantic_payload(decision.meta))
         _record_decision_trace(conversation, trace_payload)
         _record_message_decision_meta(
             saved_message,
-            action=decision.action,
+            action=canonical_gate_action,
             intent=decision.intent,
             source="truth_gate",
             fast_intent=False,
         )
         if saved_message and isinstance(getattr(decision, "meta", None), dict):
-            _update_message_decision_metadata(saved_message, decision.meta)
+            _update_message_decision_metadata(
+                saved_message,
+                _freeze_legacy_semantic_payload(decision.meta),
+            )
         if saved_message and decision.intent == "service_clarify":
             clarify_reason = None
             service_meta = getattr(decision, "meta", None)

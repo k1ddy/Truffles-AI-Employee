@@ -90,6 +90,7 @@ def _handle_ai_response_action(
     llm_primary_reason = None
     bot_response = None
     result_message = None
+    response_decision = None
     gen_result = llm_primary_result
     if gen_result is None:
         _ensure_rag_rewrite(
@@ -240,7 +241,7 @@ def _handle_ai_response_action(
                     )
                     _record_message_decision_meta(
                         saved_message,
-                        action="reply",
+                        action="fact",
                         intent=direct_info_intent,
                         source="low_confidence_guard",
                         fast_intent=False,
@@ -346,7 +347,7 @@ def _handle_ai_response_action(
                         _update_message_decision_metadata(
                             saved_message,
                             {
-                                "action": "reply",
+                                "action": "fact",
                                 "intent": "service_not_found",
                                 "source": "truth_gate",
                                 "fact_source": "truth",
@@ -381,6 +382,7 @@ def _handle_ai_response_action(
                     )
             if conversation.state == ConversationState.PENDING.value:
                 bot_response = MSG_PENDING_LOW_CONFIDENCE
+                response_decision = "low_confidence_pending"
                 _record_decision_trace(
                     conversation,
                     {
@@ -456,6 +458,7 @@ def _handle_ai_response_action(
                         reason="low_confidence_retry",
                     )
                     bot_response = MSG_LOW_CONFIDENCE_RETRY
+                    response_decision = "low_confidence_retry"
                     conversation.retry_offered_at = now
                     context = _set_low_confidence_retry_count(context, retry_count + 1)
                     _set_conversation_context(conversation, context)
@@ -482,6 +485,7 @@ def _handle_ai_response_action(
                     _set_conversation_context(conversation, context)
 
                     bot_response = MSG_HANDOVER_CONFIRM
+                    response_decision = "low_confidence_handover_confirm"
                     _record_decision_trace(
                         conversation,
                         {
@@ -499,6 +503,7 @@ def _handle_ai_response_action(
                     )
 
     elif confidence == "bot_inactive":
+        response_decision = "bot_inactive"
         _record_decision_trace(
             conversation,
             {
@@ -511,6 +516,7 @@ def _handle_ai_response_action(
 
     elif response_text:
         bot_response = response_text
+        response_decision = "bot_reply"
         logger.debug(
             f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}..."
         )
@@ -571,6 +577,7 @@ def _handle_ai_response_action(
 
         if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
             bot_response = MSG_LOW_CONFIDENCE_RETRY
+            response_decision = "no_response_retry"
             conversation.retry_offered_at = now
             context = _set_low_confidence_retry_count(context, retry_count + 1)
             _set_conversation_context(conversation, context)
@@ -597,6 +604,7 @@ def _handle_ai_response_action(
             _set_conversation_context(conversation, context)
 
             bot_response = MSG_HANDOVER_CONFIRM
+            response_decision = "no_response_handover_confirm"
             _record_decision_trace(
                 conversation,
                 {
@@ -623,7 +631,10 @@ def _handle_ai_response_action(
         _update_message_decision_metadata(
             saved_message,
             {
-                "action": "ai_response",
+                "action": _canonicalize_response_metadata_action(
+                    action="ai_response",
+                    decision=response_decision,
+                ),
                 "intent": intent.value if intent else None,
                 "source": "llm" if llm_used else "rule",
                 "fast_intent": False,

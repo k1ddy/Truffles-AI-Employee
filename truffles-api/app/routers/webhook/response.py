@@ -69,6 +69,8 @@ from app.routers.webhook.runtime_primitives import (
     QUIET_HOURS_NOTICE_TTL_MINUTES,
     _append_followup,
     _combine_sidecar,
+    _freeze_legacy_semantic_payload,
+    _observed_legacy_semantic_value,
     should_offer_low_confidence_retry,
 )
 from app.routers.webhook.session_memory import (
@@ -775,16 +777,16 @@ def _apply_locked_consult_topic_shift(
         reason="consult_topic_shift",
         now=now,
     )
-    consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
-    consult_meta["expected_reply_reason"] = "consult_topic_shift"
+    consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    consult_meta["observer_expected_reply_reason"] = "consult_topic_shift"
     consult_meta["consult_topic_shift_expected_reply"] = True
     _record_decision_trace(
         conversation,
         {
             "stage": "consult_flow",
             "decision": "consult_topic_shift_expected_reply",
-            "expected_reply_type": EXPECTED_REPLY_SERVICE,
-            "expected_reply_reason": "consult_topic_shift",
+            "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+            "observer_expected_reply_reason": "consult_topic_shift",
             "previous_expected_reply_type": EXPECTED_REPLY_TIME,
         },
     )
@@ -793,8 +795,8 @@ def _apply_locked_consult_topic_shift(
             saved_message,
             {
                 "consult_topic_shift_expected_reply": True,
-                "expected_reply_type": EXPECTED_REPLY_SERVICE,
-                "expected_reply_reason": "consult_topic_shift",
+                "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+                "observer_expected_reply_reason": "consult_topic_shift",
             },
         )
 
@@ -823,6 +825,58 @@ class ConsultFlowResult:
     consult_topic: str | None
     consult_question: str | None
     intent_decomp_payload: dict[str, Any] | None
+
+
+def _canonicalize_consult_decision_action(
+    *,
+    action: str | None,
+    consult_flow_decision: str | None,
+    consult_meta: dict[str, Any] | None,
+) -> str | None:
+    normalized_action = action.strip().casefold() if isinstance(action, str) and action.strip() else None
+    if normalized_action in {"escalate", "handoff", "pending_wait", "pending_escalation"}:
+        return "handoff"
+    if normalized_action != "reply":
+        return normalized_action or action
+
+    consult_meta = consult_meta if isinstance(consult_meta, dict) else {}
+    if consult_flow_decision == "consult_clarify":
+        return "collect"
+    if _observed_legacy_semantic_value(consult_meta, "expected_reply_type") == EXPECTED_REPLY_SERVICE:
+        return "collect"
+    if consult_meta.get("clarify_reason") or consult_meta.get("clarify_attempt"):
+        return "collect"
+    consult_questions = consult_meta.get("consult_questions")
+    if isinstance(consult_questions, list) and consult_questions:
+        return "collect"
+    return "fact"
+
+
+def _canonicalize_response_metadata_action(
+    *,
+    action: str | None,
+    decision: str | None = None,
+) -> str | None:
+    normalized_action = action.strip().casefold() if isinstance(action, str) and action.strip() else None
+    if normalized_action in {"escalate", "handoff", "pending_wait", "pending_escalation"}:
+        return "handoff"
+    if normalized_action != "ai_response":
+        return normalized_action or action
+
+    normalized_decision = (
+        decision.strip().casefold() if isinstance(decision, str) and decision.strip() else None
+    )
+    if normalized_decision in {"low_confidence_retry", "no_response_retry"}:
+        return "collect"
+    if normalized_decision in {
+        "blocked_topics",
+        "bot_inactive",
+        "low_confidence_pending",
+        "low_confidence_handover_confirm",
+        "no_response_handover_confirm",
+    }:
+        return "handoff"
+    return "fact"
 
 
 def _record_class_router_trace_from_result(
@@ -1168,7 +1222,7 @@ def _handle_consult_flow(
                                 reason="snapshot_missing",
                                 now=now,
                             )
-                            consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                            consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
                         consult_decision = PackDecision(
                             action="reply",
                             response=clarify_prompt,
@@ -1467,7 +1521,7 @@ def _handle_consult_flow(
                             reason="consult_clarify",
                             now=now,
                         )
-                        consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                        consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
                     consult_decision = PackDecision(
                         action="reply",
                         response=clarify_prompt,
@@ -1688,7 +1742,7 @@ def _handle_consult_flow(
                     reason="consult_clarify",
                     now=now,
                 )
-                consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
             consult_decision = PackDecision(
                 action="reply",
                 response=MSG_EXPECTED_SERVICE_OFF_TOPIC,
@@ -1708,6 +1762,11 @@ def _handle_consult_flow(
         consult_flow_decision = None
 
     if consult_decision:
+        canonical_consult_action = _canonicalize_consult_decision_action(
+            action=consult_decision.action,
+            consult_flow_decision=consult_flow_decision,
+            consult_meta=consult_meta,
+        )
         class_router_result = _build_consult_class_router_result()
         _record_class_router_trace_from_result(
             conversation=conversation,
@@ -1720,7 +1779,7 @@ def _handle_consult_flow(
                 "state": conversation.state,
             }
             if consult_flow_decision == "consult_clarify":
-                consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                consult_flow_trace["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
                 consult_flow_trace["reason"] = "consult_clarify"
             elif consult_flow_decision == "consult_escalate":
                 guard_reason = None
@@ -1782,21 +1841,24 @@ def _handle_consult_flow(
                     _update_message_decision_metadata(saved_message, {"current_goal": "consult"})
         consult_trace = {
             "stage": "consult",
-            "decision": consult_decision.action,
+            "decision": canonical_consult_action,
             "intent": consult_decision.intent,
             "state": conversation.state,
         }
-        consult_trace.update(consult_meta)
+        consult_trace.update(_freeze_legacy_semantic_payload(consult_meta))
         _record_decision_trace(conversation, consult_trace)
         _record_message_decision_meta(
             saved_message,
-            action=consult_decision.action,
+            action=canonical_consult_action,
             intent=consult_decision.intent,
             source="consult",
             fast_intent=False,
         )
         if saved_message and consult_meta:
-            _update_message_decision_metadata(saved_message, consult_meta)
+            _update_message_decision_metadata(
+                saved_message,
+                _freeze_legacy_semantic_payload(consult_meta),
+            )
 
         if consult_decision.action == "escalate":
             bot_response = consult_decision.response or MSG_ESCALATED
@@ -1958,16 +2020,16 @@ def _handle_consult_flow(
                     reason="consult_booking_cta",
                     now=now,
                 )
-                consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
-                consult_meta["expected_reply_reason"] = "consult_booking_cta"
+                consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                consult_meta["observer_expected_reply_reason"] = "consult_booking_cta"
                 consult_meta["consult_booking_cta_expected_reply"] = True
                 _record_decision_trace(
                     conversation,
                     {
                         "stage": "consult_flow",
                         "decision": "booking_cta_expected_reply",
-                        "expected_reply_type": EXPECTED_REPLY_SERVICE,
-                        "expected_reply_reason": "consult_booking_cta",
+                        "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+                        "observer_expected_reply_reason": "consult_booking_cta",
                         "service_hint": service_hint.strip(),
                     },
                 )
@@ -1976,8 +2038,8 @@ def _handle_consult_flow(
                         saved_message,
                         {
                             "consult_booking_cta_expected_reply": True,
-                            "expected_reply_type": EXPECTED_REPLY_SERVICE,
-                            "expected_reply_reason": "consult_booking_cta",
+                            "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+                            "observer_expected_reply_reason": "consult_booking_cta",
                         },
                     )
         bot_response = _maybe_append_booking_cta(
@@ -2169,7 +2231,10 @@ def _handle_llm_primary(
                 _update_message_decision_metadata(
                     saved_message,
                     {
-                        "action": "escalate",
+                        "action": _canonicalize_response_metadata_action(
+                            action="escalate",
+                            decision="blocked_topics",
+                        ),
                         "intent": "llm_guard",
                         "source": "llm_guard",
                         "fast_intent": False,
@@ -2226,7 +2291,10 @@ def _handle_llm_primary(
             _update_message_decision_metadata(
                 saved_message,
                 {
-                    "action": "ai_response",
+                    "action": _canonicalize_response_metadata_action(
+                        action="ai_response",
+                        decision="bot_reply",
+                    ),
                     "intent": intent.value if intent else None,
                     "source": "llm" if llm_used else "rule",
                     "fast_intent": False,

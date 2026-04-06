@@ -2262,7 +2262,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
             text,
             intents,
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2304,7 +2304,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
             text,
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2346,7 +2346,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
             text,
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -2390,7 +2390,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
                 f"{correction_prefix}, {correction_time}",
                 ["time"],
                 {
-                    "action_any": ["booking_prompt"],
+                    "action_any": ["collect"],
                     "expected_reply_type": expected_reply_type,
                     "state": "bot_active",
                 },
@@ -2534,7 +2534,7 @@ def _chaos_build_policy_case(rng, case_id, min_turns, max_turns, noise):
                 text,
                 ["booking"],
                 {
-                    "action_any": ["booking_prompt"],
+                    "action_any": ["collect"],
                     "expected_reply_type": "service_choice",
                     "state": "bot_active",
                 },
@@ -2607,7 +2607,7 @@ def _chaos_build_consult_case(rng, case_id, min_turns, max_turns, noise):
             booking_text,
             ["booking"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2618,7 +2618,7 @@ def _chaos_build_consult_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["service"], lang_mode=lang_mode, service=service, noise=noise),
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2629,7 +2629,7 @@ def _chaos_build_consult_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["time"], lang_mode=lang_mode, time_value=time_value, noise=noise),
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -2733,7 +2733,7 @@ def _chaos_build_info_case(rng, case_id, min_turns, max_turns, noise):
             booking_text,
             ["booking"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2744,7 +2744,7 @@ def _chaos_build_info_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["service"], lang_mode=lang_mode, service=service, noise=noise),
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2755,7 +2755,7 @@ def _chaos_build_info_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["time"], lang_mode=lang_mode, time_value=time_value, noise=noise),
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -2840,7 +2840,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
             booking_text,
             ["booking"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2851,7 +2851,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["service"], lang_mode=lang_mode, service=service, noise=noise),
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2862,7 +2862,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["time"], lang_mode=lang_mode, time_value=time_value, noise=noise),
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -5204,6 +5204,7 @@ def _llm_quality_collect_human_semantic_strict_reasons(
     judge_result,
     meta,
     turn_tags,
+    turn_kind=None,
     expected_info_sections,
     actual_info_sections,
     actual_info_intents,
@@ -5233,6 +5234,7 @@ def _llm_quality_collect_human_semantic_strict_reasons(
         for tag in (turn_tags or [])
         if isinstance(tag, str) and tag.strip()
     }
+    normalized_turn_kind = _llm_quality_normalize_tool_token(turn_kind)
     expected_sections = {
         _llm_quality_normalize_tool_token(section)
         for section in (expected_info_sections or [])
@@ -5261,7 +5263,12 @@ def _llm_quality_collect_human_semantic_strict_reasons(
         and not expected_sections.intersection(actual_intent_tokens)
     ):
         reasons.append("human_semantic_required_info_miss")
-    if "media" in normalized_tags and effective_intent == "consult" and meta_action in {"collect", "booking_prompt", "reply"}:
+    if (
+        "media" in normalized_tags
+        and normalized_turn_kind in {"media", "image", "audio", "file"}
+        and effective_intent == "consult"
+        and meta_action in {"collect", "booking_prompt", "reply"}
+    ):
         reasons.append("human_semantic_media_cue_miss")
     if (
         normalized_tags.intersection({"confirm", "check_booking"})
@@ -5601,6 +5608,133 @@ def _llm_quality_materialize_file_dialog_contracts(dialogs):
     return repaired_dialogs, warnings
 
 
+def _llm_quality_expectation_tokens(value):
+    if isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+    normalized = set()
+    for item in items:
+        token = _llm_quality_normalize_tool_token(item)
+        if token:
+            normalized.add(token)
+    return normalized
+
+
+def _llm_quality_expect_targets_specialist_followup(expectations):
+    if not isinstance(expectations, dict):
+        return False
+    meta = expectations.get("meta") or {}
+    meta_any = expectations.get("meta_any") or {}
+    pending_targets = _llm_quality_expectation_tokens(meta.get("pending_question_target"))
+    pending_targets |= _llm_quality_expectation_tokens(meta_any.get("pending_question_target"))
+    active_relations = _llm_quality_expectation_tokens(meta.get("active_question_relation"))
+    active_relations |= _llm_quality_expectation_tokens(meta_any.get("active_question_relation"))
+    return "specialist" in pending_targets or "referent_followup" in active_relations
+
+
+def _llm_quality_apply_booking_collect_expectations(expectations, tag_set):
+    if not isinstance(expectations, dict):
+        return expectations
+    booking_reply_types = {"service_choice", "time"}
+    booking_collect_tags = {
+        "booking",
+        "service",
+        "time",
+        "time_alt",
+        "date",
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    excluded_tags = {"handoff", "human", "pending", "cancel", "reschedule", "check_booking", "confirm"}
+    reply_type = _llm_quality_normalize_tool_token(expectations.get("reply_type"))
+    state = _llm_quality_normalize_tool_token(expectations.get("state"))
+    if not (tag_set & booking_collect_tags):
+        return expectations
+    if tag_set & excluded_tags:
+        return expectations
+    if reply_type not in booking_reply_types:
+        return expectations
+    if state in {"pending", "manager_active"}:
+        return expectations
+    if _llm_quality_expect_targets_specialist_followup(expectations):
+        return expectations
+
+    expectations["action"] = "collect"
+    expectations["expected_reply"] = True
+
+    meta = dict(expectations.get("meta") or {})
+    meta["action"] = "collect"
+    meta["source"] = "llm_policy_core"
+    meta["tool_action"] = "collect"
+    meta["expected_reply_type"] = reply_type
+    if reply_type == "service_choice":
+        meta["expected_reply_reason"] = "collect:service"
+    else:
+        meta.pop("expected_reply_reason", None)
+    expectations["meta"] = meta
+
+    meta_any = dict(expectations.get("meta_any") or {})
+    meta_any["action"] = ["collect"]
+    meta_any["source"] = ["llm_policy_core"]
+    meta_any["tool_action"] = ["collect"]
+    meta_any["expected_reply_type"] = [reply_type]
+    if reply_type == "service_choice":
+        meta_any["expected_reply_reason"] = ["collect:service"]
+    else:
+        meta_any.pop("expected_reply_reason", None)
+    expectations["meta_any"] = meta_any
+
+    trace_contains = []
+    for entry in list(expectations.get("trace_contains") or []):
+        normalized_entry = dict(entry)
+        if normalized_entry.get("stage") == "question_contract":
+            normalized_entry["expected_reply_type"] = reply_type
+            if reply_type == "service_choice":
+                normalized_entry["reason"] = "collect:service"
+            else:
+                normalized_entry.pop("reason", None)
+        trace_contains.append(normalized_entry)
+    question_contract_trace = {
+        "stage": "question_contract",
+        "expected_reply_type": reply_type,
+    }
+    if reply_type == "service_choice":
+        question_contract_trace["reason"] = "collect:service"
+    if question_contract_trace not in trace_contains:
+        trace_contains.append(question_contract_trace)
+    expectations["trace_contains"] = trace_contains
+    return expectations
+
+
+def _llm_quality_strip_pending_question_meta_expectations(expectations, tag_set):
+    if not isinstance(expectations, dict):
+        return expectations
+    pending_question_tags = {
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    if not (tag_set & pending_question_tags):
+        return expectations
+    for key in ("meta", "meta_any", "meta_contains"):
+        mapping = expectations.get(key)
+        if not isinstance(mapping, dict):
+            continue
+        cleaned = dict(mapping)
+        cleaned.pop("pending_question_act", None)
+        cleaned.pop("pending_question_interaction", None)
+        cleaned.pop("pending_question_owner", None)
+        if cleaned:
+            expectations[key] = cleaned
+        else:
+            expectations.pop(key, None)
+    return expectations
+
+
 def _llm_quality_extract_expectations(turn):
     def _normalize_mapping(value):
         helper = globals().get("_llm_quality_normalize_expect_mapping")
@@ -5760,51 +5894,8 @@ def _llm_quality_extract_expectations(turn):
         compiled = compiler(normalized)
         if isinstance(compiled, dict):
             normalized = compiled
-    booking_reply_types = globals().get(
-        "CHAOS_BOOKING_REPLY_TYPES",
-        {"service_choice", "time", "name"},
-    )
-    if (
-        "booking" in tag_set
-        and not tag_set & {"handoff", "human", "pending", "cancel", "reschedule", "check_booking", "confirm"}
-        and normalized.get("reply_type") == "service_choice"
-        and normalized.get("reply_type") in booking_reply_types
-        and normalized.get("state") not in {"pending", "manager_active"}
-    ):
-        normalized["action"] = "booking_prompt"
-        normalized["expected_reply"] = True
-
-        meta = dict(normalized.get("meta") or {})
-        meta["action"] = "booking_prompt"
-        meta["source"] = "llm_policy_core"
-        meta["tool_action"] = "collect"
-        meta["expected_reply_type"] = "service_choice"
-        meta["expected_reply_reason"] = "booking_prompt"
-        normalized["meta"] = meta
-
-        meta_any = dict(normalized.get("meta_any") or {})
-        meta_any["action"] = ["booking_prompt"]
-        meta_any["source"] = ["llm_policy_core"]
-        meta_any["tool_action"] = ["collect"]
-        meta_any["expected_reply_type"] = ["service_choice"]
-        meta_any["expected_reply_reason"] = ["booking_prompt"]
-        normalized["meta_any"] = meta_any
-
-        trace_contains = []
-        for entry in list(normalized.get("trace_contains") or []):
-            normalized_entry = dict(entry)
-            if normalized_entry.get("stage") == "question_contract":
-                normalized_entry["expected_reply_type"] = "service_choice"
-                normalized_entry["reason"] = "booking_prompt"
-            trace_contains.append(normalized_entry)
-        question_contract_trace = {
-            "stage": "question_contract",
-            "expected_reply_type": "service_choice",
-            "reason": "booking_prompt",
-        }
-        if question_contract_trace not in trace_contains:
-            trace_contains.append(question_contract_trace)
-        normalized["trace_contains"] = trace_contains
+    normalized = _llm_quality_apply_booking_collect_expectations(normalized, tag_set)
+    normalized = _llm_quality_strip_pending_question_meta_expectations(normalized, tag_set)
     return normalized
 
 
@@ -12867,6 +12958,7 @@ def _llm_quality_build_tool_evidence_status(
     calendar_hook_events = _as_int(hook_by_action.get("calendar"))
     confirm_hook_events = _as_int(hook_by_action.get("confirm"))
     calendar_hook_candidates = _as_int(required_hook_by_action.get("calendar"))
+    confirm_hook_candidates = _as_int(required_hook_by_action.get("confirm"))
     booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
     booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
     booking_confirm_actions = _as_int(actions.get("booking_confirm"))
@@ -12925,6 +13017,12 @@ def _llm_quality_build_tool_evidence_status(
         and require_calendar
         and calendar_hook_candidates > 0
     )
+    require_confirm_hook = (
+        require_hooks
+        and hooks_mode == "auto"
+        and require_confirm
+        and confirm_hook_candidates > 0
+    )
 
     reasons = []
     if policy == "strict" and hooks_mode != "auto":
@@ -12939,7 +13037,7 @@ def _llm_quality_build_tool_evidence_status(
         reasons.append("confirm_evidence_missing")
     if require_calendar_hook and calendar_hook_events <= 0:
         reasons.append("calendar_hook_missing")
-    if require_hooks and hooks_mode == "auto" and require_confirm and confirm_hook_events <= 0:
+    if require_confirm_hook and confirm_hook_events <= 0:
         reasons.append("confirm_hook_missing")
 
     return {
@@ -12952,6 +13050,7 @@ def _llm_quality_build_tool_evidence_status(
             "confirm": require_confirm,
             "hooks": require_hooks,
             "calendar_hook": require_calendar_hook,
+            "confirm_hook": require_confirm_hook,
             "hooks_mode": hooks_mode,
         },
         "counts": {
@@ -12964,6 +13063,7 @@ def _llm_quality_build_tool_evidence_status(
             "calendar_hook_events": calendar_hook_events,
             "confirm_hook_events": confirm_hook_events,
             "calendar_hook_candidates": calendar_hook_candidates,
+            "confirm_hook_candidates": confirm_hook_candidates,
             "check_booking_prompt_actions": check_booking_prompt_actions,
             "check_booking_reference_collect_turns": check_booking_reference_collect_turns,
             "booking_commit_trace_events": booking_commit_trace_events,
@@ -21160,6 +21260,7 @@ def _run_llm_quality(args):
                     judge_result=judge_result,
                     meta=meta,
                     turn_tags=turn_tags,
+                    turn_kind=turn_kind,
                     expected_info_sections=expected_info_sections,
                     actual_info_sections=info_sections,
                     actual_info_intents=info_intents,
@@ -21311,6 +21412,10 @@ def _run_llm_quality(args):
                     if send_calendar_hook:
                         required_by_action["calendar"] = (
                             required_by_action.get("calendar", 0) + 1
+                        )
+                    if tool_signals.get("confirm") and "confirm" not in turn_tags:
+                        required_by_action["confirm"] = (
+                            required_by_action.get("confirm", 0) + 1
                         )
                     for hook in tool_hook_results:
                         if not isinstance(hook, dict):

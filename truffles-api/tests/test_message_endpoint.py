@@ -31,6 +31,7 @@ from app.routers.webhook import info as webhook_info
 from app.routers.webhook import policy as webhook_policy
 from app.routers.webhook import response as webhook_response
 from app.routers.webhook import response_compat as webhook_response_compat
+from app.routers.webhook import runtime_primitives as webhook_runtime
 from app.routers.webhook.context_manager import (
     _get_expected_reply_reason,
     _get_expected_reply_type,
@@ -176,10 +177,18 @@ def _disable_debounce_redis():
 def _disable_quiet_hours_notices():
     with ExitStack() as stack:
         stack.enter_context(
-            patch("app.routers.webhook.decision.build_quiet_hours_notice", return_value=None)
+            patch(
+                "app.routers.webhook.decision.build_quiet_hours_notice",
+                return_value=None,
+                create=True,
+            )
         )
         stack.enter_context(
-            patch("app.routers.webhook.decision.build_evening_greeting", return_value=None)
+            patch(
+                "app.routers.webhook.decision.build_evening_greeting",
+                return_value=None,
+                create=True,
+            )
         )
         yield
 
@@ -318,6 +327,7 @@ def _stub_generic_truth_pack():
             patch(
                 "app.routers.webhook.decision.load_yaml_truth",
                 side_effect=_stub,
+                create=True,
             )
         )
         yield
@@ -1892,6 +1902,7 @@ def test_truth_gate_off_topic_handles_simplenamespace_message_metadata():
     assert webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC in (response.bot_response or "")
     decision_meta = saved_message.message_metadata.get("decision_meta", {})
     assert decision_meta.get("expected_reply_guard") == "truth_gate_off_topic_override"
+    assert decision_meta.get("observer_expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     assert decision_meta.get("pending_question_contract") == {
         "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
         "reason": "truth_gate_off_topic_override",
@@ -1902,6 +1913,7 @@ def test_truth_gate_off_topic_handles_simplenamespace_message_metadata():
     assert any(
         entry.get("stage") == "truth_gate"
         and entry.get("decision") == "expected_reply_override"
+        and entry.get("observer_expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
         and entry.get("pending_question_contract") == {
             "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
             "reason": "truth_gate_off_topic_override",
@@ -3192,7 +3204,7 @@ def test_expected_reply_contract_prefers_canonical_context_question_contract_ove
     assert any(
         trace.get("stage") == "question_contract"
         and trace.get("decision") == "bypass"
-        and trace.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+        and trace.get("observer_expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
         and trace.get("pending_question_contract") == {
             "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
             "reason": "booking_interrupt",
@@ -4108,6 +4120,165 @@ def test_truth_gate_fallback_escalation_passes_active_handover_hooks():
     assert response.bot_response == legacy_router.MSG_ESCALATED
 
 
+def test_canonicalize_gate_metadata_action_maps_gateway_labels() -> None:
+    assert webhook_runtime._canonicalize_gate_metadata_action("reply", intent="hours") == "fact"
+    assert (
+        webhook_runtime._canonicalize_gate_metadata_action(
+            "reply",
+            intent="service_clarify",
+        )
+        == "collect"
+    )
+    assert (
+        webhook_runtime._canonicalize_gate_metadata_action(
+            "escalate",
+            intent="payment",
+        )
+        == "handoff"
+    )
+
+
+def test_truth_gate_fallback_records_canonical_fact_action() -> None:
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-fact", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+    truth_gate_decision = SimpleNamespace(
+        action="reply",
+        response="Мы работаем до 20:00.",
+        intent="hours",
+        collect=None,
+        meta={},
+    )
+
+    with patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ), patch(
+        "app.routers.webhook.info._record_decision_trace"
+    ) as record_trace, patch(
+        "app.routers.webhook.context_manager._maybe_store_class_carryover"
+    ), patch(
+        "app.routers.webhook.context_manager._maybe_store_service_carryover"
+    ):
+        response = webhook_info._handle_truth_gate_fallback(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Когда вы работаете?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={
+                "allow_booking_flow": False,
+                "allow_handover_create": True,
+                "allow_truth_gate_reply": True,
+            },
+            booking_wants_flow=False,
+            policy_handler={"truth_gate": lambda *_args, **_kwargs: truth_gate_decision},
+            policy_type=None,
+            current_goal=None,
+            intent_decomp_used=False,
+            intent_decomp_intents=[],
+            intent_decomp_payload=None,
+            llm_primary_reason=None,
+            message_count=1,
+            now=datetime.now(timezone.utc),
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response: (bot_response, True),
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert response is not None
+    assert response.bot_response == "Мы работаем до 20:00."
+    decision_meta = saved_message.message_metadata.get("decision_meta") or {}
+    assert decision_meta.get("action") == "fact"
+    assert decision_meta.get("intent") == "hours"
+    trace_payload = record_trace.call_args.args[1]
+    assert trace_payload["decision"] == "fact"
+
+
+def test_truth_gate_fallback_records_canonical_collect_action_for_service_clarify() -> None:
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-collect", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+    truth_gate_decision = SimpleNamespace(
+        action="reply",
+        response="Какая именно услуга вас интересует?",
+        intent="service_clarify",
+        collect=None,
+        meta={},
+    )
+
+    with patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ), patch(
+        "app.routers.webhook.info._record_decision_trace"
+    ) as record_trace, patch(
+        "app.routers.webhook.context_manager._maybe_store_class_carryover"
+    ), patch(
+        "app.routers.webhook.context_manager._maybe_store_service_carryover"
+    ), patch(
+        "app.routers.webhook.context_manager._set_expected_reply_context",
+        side_effect=lambda **kwargs: kwargs["context"],
+    ):
+        response = webhook_info._handle_truth_gate_fallback(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Сколько стоит?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={
+                "allow_booking_flow": False,
+                "allow_handover_create": True,
+                "allow_truth_gate_reply": True,
+            },
+            booking_wants_flow=False,
+            policy_handler={"truth_gate": lambda *_args, **_kwargs: truth_gate_decision},
+            policy_type=None,
+            current_goal=None,
+            intent_decomp_used=False,
+            intent_decomp_intents=[],
+            intent_decomp_payload=None,
+            llm_primary_reason=None,
+            message_count=1,
+            now=datetime.now(timezone.utc),
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            maybe_apply_fact_guard=lambda **_kwargs: None,
+            send_and_save=lambda bot_response: (bot_response, True),
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert response is not None
+    assert response.bot_response == "Какая именно услуга вас интересует?"
+    decision_meta = saved_message.message_metadata.get("decision_meta") or {}
+    assert decision_meta.get("action") == "collect"
+    assert decision_meta.get("intent") == "service_clarify"
+    trace_payload = record_trace.call_args.args[1]
+    assert trace_payload["decision"] == "collect"
+
+
 def test_policy_escalation_passes_active_handover_hooks():
     conversation = SimpleNamespace(
         id=uuid4(),
@@ -4173,6 +4344,68 @@ def test_policy_escalation_passes_active_handover_hooks():
 
     assert response.success is True
     assert response.bot_response == legacy_router.MSG_ESCALATED
+
+
+def test_policy_escalation_records_canonical_handoff_action() -> None:
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-policy", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+    decision = SimpleNamespace(
+        action="escalate",
+        response=legacy_router.MSG_ESCALATED,
+        intent="payment",
+    )
+
+    with patch(
+        "app.routers.webhook.policy._reuse_active_handover",
+        return_value=(None, True, True),
+    ), patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ), patch(
+        "app.routers.webhook.policy._set_router_observability",
+        return_value={},
+    ), patch(
+        "app.routers.webhook.policy._record_decision_trace"
+    ) as record_trace:
+        response = webhook_policy._apply_policy_decision(
+            decision,
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Как вернуть деньги?",
+            saved_message=saved_message,
+            policy_gate="payment_info",
+            policy_section="payment_info",
+            risk_level=None,
+            sidecar=None,
+            policy_t0=None,
+            gate_label="payment_info",
+            booking_wants_flow=False,
+            policy_type=None,
+            policy_source="policy_gate",
+            policy_pack_missing=False,
+            routing={"allow_handover_create": False},
+            client_slug="demo_salon",
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            record_policy_count=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+            log_timing=lambda *_args, **_kwargs: None,
+        )
+
+    assert response is not None
+    assert response.success is True
+    decision_meta = saved_message.message_metadata.get("decision_meta") or {}
+    assert decision_meta.get("action") == "handoff"
+    assert decision_meta.get("intent") == "payment"
+    trace_payload = record_trace.call_args.args[1]
+    assert trace_payload["decision"] == "handoff"
 
 
 def test_clarify_limit_escalation_passes_active_handover_hooks():
@@ -4692,6 +4925,80 @@ def test_booking_same_day_escalation_passes_active_handover_hooks():
     assert outcome.response is not None
     assert outcome.response.success is True
     assert outcome.response.bot_response == legacy_router.MSG_ESCALATED
+
+
+def test_booking_same_day_escalation_records_canonical_handoff_action() -> None:
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id="client-123",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    saved_message = SimpleNamespace(id="msg-same-day", message_metadata={})
+    user = SimpleNamespace(id="user-123")
+    db = Mock()
+    db.commit = Mock()
+    decision = SimpleNamespace(
+        action="escalate",
+        response=legacy_router.MSG_ESCALATED,
+        intent="same_day_booking",
+        meta={},
+    )
+
+    with patch(
+        "app.routers.webhook.booking._reuse_active_handover",
+        return_value=(None, True, True),
+    ), patch(
+        "app.routers.webhook.context_manager._reset_low_confidence_retry"
+    ), patch(
+        "app.routers.webhook.booking._record_decision_trace"
+    ) as record_trace, patch(
+        "app.routers.webhook.booking._update_message_decision_metadata"
+    ):
+        outcome = webhook_booking._handle_booking_flow(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text="Можно сегодня вечером?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            routing={"allow_truth_gate_reply": True, "allow_handover_create": True},
+            bypass_domain_flows=False,
+            booking_wants_flow=True,
+            booking_active=True,
+            booking_signal=False,
+            booking_messages=[],
+            booking_context={},
+            booking={"active": True, "service": "Маникюр"},
+            expected_reply_type="time",
+            expected_reply_matched=False,
+            expected_reply_blocked_by_info=False,
+            basic_info_message=False,
+            session_memory_reset_reason=None,
+            memory_expected_reply_type=None,
+            policy_handler={"truth_gate": lambda *_args, **_kwargs: decision},
+            policy_pack={},
+            now=datetime.now(timezone.utc),
+            message_count=1,
+            multi_intent_booking_followup=None,
+            consult_return_pending=False,
+            consult_return_prompt=None,
+            consult_context=None,
+            consult_return_reason=None,
+            send_and_save=lambda bot_response, allow_quiet_hours=False: (bot_response, True),
+            send_response=lambda *_args, **_kwargs: None,
+            finalize_response=lambda response: response,
+            log_timing=lambda *_args, **_kwargs: None,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    assert outcome.response is not None
+    assert outcome.response.success is True
+    decision_meta = saved_message.message_metadata.get("decision_meta") or {}
+    assert decision_meta.get("action") == "handoff"
+    assert decision_meta.get("intent") == "same_day_booking"
+    trace_payload = record_trace.call_args.args[1]
+    assert trace_payload["decision"] == "handoff"
 
 
 def test_booking_human_request_escalation_passes_active_handover_hooks():

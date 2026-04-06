@@ -241,7 +241,11 @@ class TurnExecutor:
                 meta={"reason_code": binding_plan.deny_reason_code or "binding_deny"},
             )
         if binding_outcome_type in {"workflow_start", "workflow_advance"}:
-            return self._execute_collect(decision, booking_state=merged_booking)
+            return self._execute_collect(
+                decision,
+                booking_state=merged_booking,
+                prior_booking_state=booking_state,
+            )
         if binding_outcome_type != "tool_call":
             return self._execute_binding_gap(
                 f"executor:unsupported_binding_outcome:{binding_outcome_type}"
@@ -293,6 +297,7 @@ class TurnExecutor:
         decision: PolicyDecision,
         *,
         booking_state: dict[str, Any] | None,
+        prior_booking_state: dict[str, Any] | None = None,
     ) -> RuntimeExecutionResult:
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
         canonical_pending_question = TurnPlanner().canonical_pending_question_contract(decision)
@@ -345,12 +350,29 @@ class TurnExecutor:
                     (semantic_contract or {}).get("alternate_datetime")
                 )
             if candidate_datetime:
-                prompt = (
-                    "Проверить наличие именно на "
-                    f"{candidate_datetime} "
-                    "автоматически не подтверждаю. Если хотите продолжить запись на это время, "
-                    "подтвердите его или назовите другой удобный слот."
-                )
+                if self._booking_service_slot_refined(
+                    booking_state=prior_booking_state or booking_state,
+                    merged_slots=merged_slots,
+                ):
+                    prompt = self._build_service_refinement_slot_constraint_prompt(
+                        service_name=merged_slots.get("service"),
+                        candidate_datetime=candidate_datetime,
+                    )
+                elif not self._candidate_datetime_has_exact_clock_time(candidate_datetime):
+                    prompt = self._build_partial_datetime_slot_constraint_prompt(
+                        service_name=merged_slots.get("service"),
+                        candidate_datetime=candidate_datetime,
+                    )
+                else:
+                    candidate_phrase = self._format_booking_candidate_datetime_phrase(
+                        candidate_datetime
+                    )
+                    prompt = (
+                        "Проверить наличие именно "
+                        f"{candidate_phrase} "
+                        "автоматически не подтверждаю. Если хотите продолжить запись на это время, "
+                        "подтвердите его или назовите другой удобный слот."
+                    )
                 return RuntimeExecutionResult(
                     text=prompt,
                     tool_action=decision.tool_action,
@@ -402,6 +424,12 @@ class TurnExecutor:
             next_slot or "",
             "Подскажите, пожалуйста, следующий удобный слот.",
         )
+        if self._should_use_time_only_collect_prompt(
+            next_slot=next_slot,
+            semantic_contract=semantic_contract,
+            pending_question_contract=pending_question_contract,
+        ):
+            prompt = "На какое время вам удобно?"
         pending_target = self._normalize_fact_hint(
             (pending_question_contract or {}).get("pending_question_target")
             or (semantic_contract or {}).get("pending_question_target")
@@ -419,6 +447,97 @@ class TurnExecutor:
         if not specialist_name:
             return prompt
         return f"Хорошо, ориентир по мастеру — {specialist_name}. {prompt}"
+
+    def _should_use_time_only_collect_prompt(
+        self,
+        *,
+        next_slot: str | None,
+        semantic_contract: dict[str, Any] | None,
+        pending_question_contract: dict[str, Any] | None,
+    ) -> bool:
+        if next_slot != "datetime":
+            return False
+        pending_target = self._normalize_fact_hint(
+            (pending_question_contract or {}).get("pending_question_target")
+            or (semantic_contract or {}).get("pending_question_target")
+        )
+        if pending_target != "time":
+            return False
+        relation = self._normalize_fact_hint(
+            (pending_question_contract or {}).get("active_question_relation")
+            or (semantic_contract or {}).get("active_question_relation")
+        )
+        if relation != "ask_about_requested_slot":
+            return False
+        temporal_scope = self._normalize_fact_hint(
+            (semantic_contract or {}).get("temporal_scope")
+        )
+        return temporal_scope not in {None, "none"}
+
+    @classmethod
+    def _booking_service_slot_refined(
+        cls,
+        *,
+        booking_state: dict[str, Any] | None,
+        merged_slots: dict[str, str],
+    ) -> bool:
+        current_service = cls._normalize_execution_text(merged_slots.get("service"))
+        if not current_service:
+            return False
+        previous_service = cls._normalize_execution_text((booking_state or {}).get("service"))
+        if not previous_service:
+            return False
+        return previous_service.casefold() != current_service.casefold()
+
+    @classmethod
+    def _build_service_refinement_slot_constraint_prompt(
+        cls,
+        *,
+        service_name: str | None,
+        candidate_datetime: str,
+    ) -> str:
+        candidate_phrase = cls._format_booking_candidate_datetime_phrase(candidate_datetime)
+        normalized_service = cls._normalize_execution_text(service_name)
+        if normalized_service:
+            return (
+                f"Хорошо, {normalized_service}. "
+                f"Если ориентир по дате остаётся {candidate_phrase}, назовите точное время."
+            )
+        return (
+            f"Если ориентир по дате остаётся {candidate_phrase}, "
+            "назовите точное время."
+        )
+
+    @classmethod
+    def _build_partial_datetime_slot_constraint_prompt(
+        cls,
+        *,
+        service_name: str | None,
+        candidate_datetime: str,
+    ) -> str:
+        normalized_datetime = cls._normalize_booking_slot(candidate_datetime) or candidate_datetime.strip()
+        normalized_service = cls._normalize_execution_text(service_name)
+        if normalized_service:
+            return (
+                f"Понял, {normalized_datetime} по услуге «{normalized_service}». "
+                "Подскажите, пожалуйста, точное время."
+            )
+        return f"Понял, {normalized_datetime}. Подскажите, пожалуйста, точное время."
+
+    @classmethod
+    def _candidate_datetime_has_exact_clock_time(cls, candidate_datetime: str) -> bool:
+        normalized = cls._normalize_booking_slot(candidate_datetime) or candidate_datetime.strip()
+        return ":" in normalized
+
+    @classmethod
+    def _format_booking_candidate_datetime_phrase(cls, candidate_datetime: str) -> str:
+        normalized = cls._normalize_booking_slot(candidate_datetime) or candidate_datetime.strip()
+        lowered = normalized.casefold()
+        if lowered.startswith(("в ", "во ", "на ", "к ", "ко ", "после ", "до ", "между ", "с ", "со ")):
+            return normalized
+        if ":" in normalized or normalized[:1].isdigit():
+            return f"в {normalized}"
+        return f"на {normalized}"
 
     @staticmethod
     def _lowercase_sentence_start(value: str) -> str:
@@ -601,8 +720,12 @@ class TurnExecutor:
                 service_query=service_query,
                 info_sections_hint=list(fact_plan.allowed_info_sections),
                 allowed_fact_refs=list(fact_plan.allowed_emitted_fact_refs),
-                message_text=None,
-                expected_reply_type=None,
+                message_text=message_text,
+                expected_reply_type=(
+                    pending_question_contract.get("expected_reply_type")
+                    if isinstance(pending_question_contract, dict)
+                    else None
+                ),
                 now=now,
                 semantic_contract=semantic_contract,
             )
@@ -1013,8 +1136,6 @@ class TurnExecutor:
             if isinstance(semantic_enrichment, dict) and semantic_enrichment:
                 payload["semantic_enrichment"] = semantic_enrichment
             return payload
-        if isinstance(semantic_contract, dict) and semantic_contract:
-            payload["semantic_contract"] = semantic_contract
         if isinstance(pending_question_contract, dict) and pending_question_contract:
             payload["pending_question_contract"] = pending_question_contract
         return payload

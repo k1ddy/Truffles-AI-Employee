@@ -2091,6 +2091,7 @@ def test_human_semantic_strict_reasons_promote_media_consult_miss():
         judge_result={"verdict": "fail", "reasons": ["missed_question"]},
         meta={"action": "collect", "intent": "consult", "tool_action": "collect"},
         turn_tags=["media"],
+        turn_kind="media",
         expected_info_sections=[],
         actual_info_sections=[],
         actual_info_intents=[],
@@ -2099,6 +2100,25 @@ def test_human_semantic_strict_reasons_promote_media_consult_miss():
     )
 
     assert reasons == ["human_semantic_media_cue_miss"]
+
+
+def test_human_semantic_strict_reasons_ignore_text_only_media_offer():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_human_semantic_strict_reasons"]
+
+    reasons = collect(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        meta={"action": "collect", "intent": "consult", "tool_action": "collect"},
+        turn_tags=["media"],
+        turn_kind="text",
+        expected_info_sections=[],
+        actual_info_sections=[],
+        actual_info_intents=[],
+        expected_reply_type=None,
+        actual_expected_reply_type=None,
+    )
+
+    assert reasons == []
 
 
 def test_human_semantic_strict_reasons_promote_check_booking_recovery_miss():

@@ -29,7 +29,12 @@ from app.services.policy_snapshot_service import (
 from app.services.state_machine import ConversationState
 from app.services.state_service import transition_state
 
-from .runtime_primitives import MSG_ESCALATED, _combine_sidecar, _contains_any
+from .runtime_primitives import (
+    MSG_ESCALATED,
+    _canonicalize_gate_metadata_action,
+    _combine_sidecar,
+    _contains_any,
+)
 from .trace import (
     _record_decision_trace,
     _record_message_decision_meta,
@@ -765,9 +770,13 @@ def _apply_policy_decision(
         eligible=False,
         reason=router_skip_reason,
     )
+    canonical_gate_action = _canonicalize_gate_metadata_action(
+        decision.action,
+        intent=decision.intent,
+    )
     trace_payload = {
         "stage": "policy_gate",
-        "decision": decision.action,
+        "decision": canonical_gate_action,
         "intent": decision.intent,
         "state": conversation.state,
         "policy_type": policy_type,
@@ -784,7 +793,7 @@ def _apply_policy_decision(
     _record_decision_trace(conversation, trace_payload)
     _record_message_decision_meta(
         saved_message,
-        action=decision.action,
+        action=canonical_gate_action,
         intent=decision.intent,
         source=policy_source,
         fast_intent=False,
