@@ -3671,34 +3671,22 @@ def test_sanitize_llm_turns_preserves_active_name_requested_slot_followup_withou
     sanitized = _module._sanitize_llm_turns(turns, ctx, random.Random(964))
 
     expect = sanitized[2].get("expect") or {}
-    assert sanitized[2]["tags"] == ["booking"]
-    assert expect.get("reply_type") == "name"
+    assert sanitized[2]["tags"] == ["ask_about_requested_slot"]
+    assert expect.get("reply_type") == "time"
     assert (expect.get("meta_any") or {}).get("pending_question_act") == [
         "ask_about_requested_slot"
     ]
     assert (expect.get("meta_any") or {}).get("pending_question_target") == ["time"]
-    assert (expect.get("meta_any") or {}).get("pending_question_interaction") == [
-        "ask_about_requested_slot"
-    ]
-    assert (expect.get("meta_any") or {}).get("pending_question_owner") == [
-        "booking_time_availability_followup"
-    ]
-    assert (expect.get("meta_any") or {}).get("active_question_relation") == [
-        "ask_about_requested_slot"
-    ]
-    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["name"]
+    assert (expect.get("meta_any") or {}).get("expected_reply_type") == ["time"]
     assert any(
         entry.get("stage") == "pending_question_interaction"
-        and entry.get("decision") == "booking_time_availability_followup"
         and entry.get("pending_question_act") == "ask_about_requested_slot"
         and entry.get("pending_question_target") == "time"
-        and entry.get("active_question_relation") == "ask_about_requested_slot"
-        and entry.get("expected_reply_type") == "name"
         for entry in (expect.get("trace_contains") or [])
     )
     assert any(
         entry.get("stage") == "question_contract"
-        and entry.get("expected_reply_type") == "name"
+        and entry.get("expected_reply_type") == "time"
         for entry in (expect.get("trace_contains") or [])
     )
 

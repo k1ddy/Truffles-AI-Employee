@@ -4229,7 +4229,7 @@ def test_turn_executor_routes_owner_backed_collect_by_binding_outcome(monkeypatc
     monkeypatch.setattr(
         TurnExecutor,
         "_execute_collect",
-        lambda self, decision, *, booking_state: SimpleNamespace(
+        lambda self, decision, *, booking_state, prior_booking_state=None: SimpleNamespace(
             text="На какую дату и время вам удобно?",
             tool_action="collect",
             tool_decision="datetime",

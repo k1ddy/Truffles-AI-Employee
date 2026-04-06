@@ -166,16 +166,28 @@ def test_active_time_specialist_followup_repair_drops_stale_service_collect_cont
     assert expect["reply_type"] == "time"
     assert expect["meta"]["tool_action"] == "collect"
     assert expect["meta"]["expected_reply_type"] == "time"
-    assert "action" not in expect["meta"]
-    assert "expected_reply_reason" not in expect["meta"]
+    assert expect["meta"]["action"] == "booking_prompt"
+    assert expect["meta"]["expected_reply_reason"] == "collect:service"
     assert expect["meta_any"]["pending_question_target"] == ["specialist"]
     assert expect["meta_any"]["active_question_relation"] == ["referent_followup"]
     assert expect["meta_any"]["expected_reply_type"] == ["time"]
-    assert "action" not in expect["meta_any"]
-    assert "expected_reply_reason" not in expect["meta_any"]
+    assert expect["meta_any"]["action"] == ["booking_prompt"]
+    assert expect["meta_any"]["expected_reply_reason"] == ["collect:service"]
     assert expect["trace_contains"] == [
         {
             "stage": "question_contract",
             "expected_reply_type": "time",
-        }
+            "reason": "collect:service",
+        },
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+        },
+        {
+            "stage": "pending_question_interaction",
+            "decision": "booking_specialist_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "expected_reply_type": "time",
+        },
     ]

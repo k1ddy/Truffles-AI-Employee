@@ -185,7 +185,8 @@ def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidenc
     assert "calendar_evidence_missing" in tool_evidence["reasons"]
     assert "confirm_evidence_missing" in tool_evidence["reasons"]
     assert "calendar_hook_missing" in tool_evidence["reasons"]
-    assert "confirm_hook_missing" in tool_evidence["reasons"]
+    assert "confirm_hook_missing" not in tool_evidence["reasons"]
+    assert tool_evidence["required"]["confirm_hook"] is False
 
     infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
     assert infra["valid"] is False

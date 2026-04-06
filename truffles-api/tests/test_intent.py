@@ -771,6 +771,102 @@ class TestPolicyCoreTimeoutRetry:
         assert result["payload"]["missing_information"].get("pending_question_target") is None
         assert result["payload"]["missing_information"].get("active_question_relation") is None
 
+    def test_policy_core_repairs_booking_manage_name_required_followup_after_time_answer(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        invalid_payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action_hint": "collect",
+            "pack_refs": [],
+            "slots": {
+                "service": "маникюр",
+                "datetime": "завтра 19:00",
+            },
+            "expected_reply_type": "name",
+            "next_question": "name",
+            "open_questions": ["name"],
+            "needs_manager": False,
+            "reason": (
+                "Пользователь согласовал время 19:00 для услуги «маникюр» на завтра; "
+                "теперь нужно уточнить имя клиента для поиска/подтверждения записи."
+            ),
+            "subject_kind": "booking",
+            "capability": "bookability",
+            "temporal_scope": "day",
+            "resolution_mode": "clarify_missing_time",
+            "pending_question_act": "fill_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "fill_requested_slot",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        }
+        repaired_payload = {
+            **invalid_payload,
+            "intent": "check_booking",
+            "action": "fact",
+            "tool_action_hint": "calendar.get_booking",
+            "reason": "calendar_get_booking_collect_reference",
+            "capability": "booking_manage",
+            "resolution_mode": "direct",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": None,
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                DummyResponse(json.dumps(invalid_payload)),
+                DummyResponse(json.dumps(repaired_payload)),
+            ]
+            result = route_llm_policy_core(
+                "Можно на 19:00?",
+                current_goal="booking",
+                slot_state={"service": "маникюр", "datetime": "завтра"},
+                memory_profile={
+                    "pending_question_contract": {
+                        "expected_reply_type": "name",
+                        "next_question": "name",
+                        "open_questions": ["name"],
+                        "reason": "calendar_get_booking_collect_reference",
+                    },
+                    "semantic_contract": {
+                        "subject_kind": "booking",
+                        "capability": "booking_manage",
+                        "resolution_mode": "direct",
+                        "referents": {
+                            "service": {
+                                "value": "маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            }
+                        },
+                    },
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["contract_repair_retry_used"] is True
+        assert result["contract_repair_reason"] == "llm_policy_core_error:booking_manage_reference_action_invalid"
+        assert result["binding"]["tool_action"] == "calendar.get_booking"
+        assert result["binding_plan"]["selected_tool_or_workflow_ref"] == "calendar.get_booking"
+        assert result["payload"]["requested_outcome"] == "fact"
+        assert result["payload"]["tool_action_hint"] == "calendar.get_booking"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "name"
+        assert result["payload"]["missing_information"]["next_question"] == "name"
+        assert result["payload"]["missing_information"]["open_questions"] == ["name"]
+        assert result["payload"]["missing_information"].get("pending_question_act") is None
+        assert result["payload"]["missing_information"].get("pending_question_target") is None
+        assert result["payload"]["missing_information"].get("active_question_relation") is None
+
     def test_policy_core_repairs_active_booking_manage_interrupt_out_of_generic_info(
         self, monkeypatch
     ):
@@ -1641,17 +1737,17 @@ class TestPolicyCoreTimeoutRetry:
             "subject_kind": "service",
             "capability": "live_availability",
             "temporal_scope": "specific_time",
-            "resolution_mode": "clarify_missing_time",
+            "resolution_mode": "ask_about_requested_slot",
             "pending_question_act": "ask_about_requested_slot",
             "pending_question_target": "time",
-            "active_question_relation": "generic_info_interrupt",
+            "active_question_relation": "ask_about_requested_slot",
         }
         repaired_payload = {
             "intent": "booking",
             "action": "collect",
             "tool_action_hint": "collect",
             "pack_refs": [],
-            "slots": {"service": "маникюр", "datetime": "11:30"},
+            "slots": {"service": "маникюр"},
             "expected_reply_type": "time",
             "next_question": "datetime",
             "open_questions": ["datetime"],
@@ -1670,11 +1766,10 @@ class TestPolicyCoreTimeoutRetry:
             "capability": "live_availability",
             "temporal_scope": "specific_time",
             "resolution_mode": "clarify_missing_time",
-            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_act": "slot_constraint",
             "pending_question_target": "time",
-            "active_question_relation": "generic_info_interrupt",
-            "resolver_id": "booking_availability_followup",
-            "resolver_version": "2026-04-03",
+            "active_question_relation": "slot_constraint",
+            "alternate_datetime": "11:30",
         }
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
@@ -1720,10 +1815,13 @@ class TestPolicyCoreTimeoutRetry:
         assert result["payload"]["requested_outcome"] == "collect"
         assert result["payload"]["grounding_requirements"]["subject_kind"] == "booking"
         assert result["payload"]["capability_id"] == "live_availability"
+        assert result["payload"]["grounding_requirements"]["alternate_datetime"] == "11:30"
         assert result["payload"]["missing_information"]["expected_reply_type"] == "time"
         assert result["payload"]["missing_information"]["next_question"] == "datetime"
         assert result["payload"]["missing_information"]["open_questions"] == ["datetime"]
+        assert result["payload"]["missing_information"]["pending_question_act"] == "slot_constraint"
         assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "slot_constraint"
 
     def test_policy_core_repairs_active_booking_temporal_clue_followup_into_slot_constraint(
         self,
@@ -2408,7 +2506,7 @@ class TestPolicyCoreTimeoutRetry:
             "action": "collect",
             "tool_action_hint": "collect",
             "pack_refs": [],
-            "slots": {"service": "маникюр", "datetime": "11:30"},
+            "slots": {"service": "маникюр"},
             "expected_reply_type": "time",
             "next_question": "datetime",
             "open_questions": ["datetime"],
@@ -2427,9 +2525,10 @@ class TestPolicyCoreTimeoutRetry:
             "capability": "live_availability",
             "temporal_scope": "specific_time",
             "resolution_mode": "clarify_missing_time",
-            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_act": "slot_constraint",
             "pending_question_target": "time",
-            "active_question_relation": "generic_info_interrupt",
+            "active_question_relation": "slot_constraint",
+            "alternate_datetime": "11:30",
         }
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
@@ -2463,6 +2562,10 @@ class TestPolicyCoreTimeoutRetry:
         )
         assert result["binding"]["tool_action"] == "collect"
         assert result["payload"]["requested_outcome"] == "collect"
+        assert result["payload"]["grounding_requirements"]["alternate_datetime"] == "11:30"
+        assert result["payload"]["missing_information"]["pending_question_act"] == "slot_constraint"
+        assert result["payload"]["missing_information"]["pending_question_target"] == "time"
+        assert result["payload"]["missing_information"]["active_question_relation"] == "slot_constraint"
 
     def test_policy_core_repairs_active_booking_generic_availability_hours_misroute(
         self, monkeypatch

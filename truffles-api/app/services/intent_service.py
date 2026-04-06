@@ -955,7 +955,13 @@ def _policy_core_is_booking_manage_reference_followup_shape(
     contract: LlmPolicyCoreOutput,
     normalized_memory_profile: Mapping[str, Any] | None,
 ) -> bool:
-    if contract.capability != "booking_manage" or contract.subject_kind != "booking":
+    if contract.subject_kind != "booking":
+        return False
+    contract_booking_manage_context = contract.capability == "booking_manage"
+    memory_booking_manage_context = _policy_core_memory_booking_manage_reference_context(
+        normalized_memory_profile
+    )
+    if not (contract_booking_manage_context or memory_booking_manage_context):
         return False
     referents = contract.referents if isinstance(contract.referents, dict) else {}
     if _policy_core_has_grounded_referent(referents, "booking_ref"):
@@ -964,7 +970,7 @@ def _policy_core_is_booking_manage_reference_followup_shape(
         normalized_memory_profile
     ) or _policy_core_active_pending_contract(normalized_memory_profile)
     if not (
-        _policy_core_memory_booking_manage_reference_context(normalized_memory_profile)
+        memory_booking_manage_context
         or _policy_core_is_booking_time_followup_contract(carry_contract)
     ):
         return False
@@ -1680,16 +1686,19 @@ def _validate_policy_core_runtime_contract(
     ):
         return "llm_policy_core_error:booking_manage_name_fill_followup_invalid"
 
+    booking_manage_reference_followup_shape = _policy_core_is_booking_manage_reference_followup_shape(
+        contract,
+        normalized_memory_profile,
+    )
     if (
-        contract.capability == "booking_manage"
-        and contract.subject_kind == "booking"
-        and not has_booking_ref
+        not has_booking_ref
         and (
-            contract.intent in _BOOKING_MANAGE_REFERENCE_INTENTS
-            or _policy_core_is_booking_manage_reference_followup_shape(
-                contract,
-                normalized_memory_profile,
+            (
+                contract.capability == "booking_manage"
+                and contract.subject_kind == "booking"
+                and contract.intent in _BOOKING_MANAGE_REFERENCE_INTENTS
             )
+            or booking_manage_reference_followup_shape
         )
     ):
         direct_lookup_context = _policy_core_existing_booking_lookup_context(
