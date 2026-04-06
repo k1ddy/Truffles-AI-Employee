@@ -4,16 +4,16 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from app.routers import webhook
-from app.routers.webhook import response as webhook_response
 from app.routers.webhook import _legacy as legacy
+from app.routers.webhook import response as webhook_response
 from app.routers.webhook.class_router_runtime import (
     DomainIntent,
     _resolve_class_router_result,
     build_observer_class_router_result,
 )
 from app.routers.webhook.response import (
-    MSG_LOW_CONFIDENCE_RETRY,
     MSG_EXPECTED_SERVICE_OFF_TOPIC,
+    MSG_LOW_CONFIDENCE_RETRY,
     _apply_locked_consult_topic_shift,
     _canonicalize_consult_decision_action,
     _canonicalize_response_metadata_action,

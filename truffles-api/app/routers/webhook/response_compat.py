@@ -33,6 +33,7 @@ Session = _response.Session
 User = _response.User
 WebhookResponse = _response.WebhookResponse
 _attach_llm_cache_flag = _response._attach_llm_cache_flag
+_canonicalize_response_metadata_action = _response._canonicalize_response_metadata_action
 _ensure_rag_rewrite = _response._ensure_rag_rewrite
 _get_clarify_attempt_state = _response._get_clarify_attempt_state
 _get_context_manager = _response._get_context_manager
