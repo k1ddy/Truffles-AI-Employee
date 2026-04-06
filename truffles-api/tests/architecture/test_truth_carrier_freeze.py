@@ -23,7 +23,7 @@ def test_truth_carrier_freeze_inventory_materializes_guard_contract() -> None:
 
     assert inventory["schema_version"] == "v3"
     assert inventory["status"] == "machine_readable_system_reproof_base"
-    assert inventory["active_block"] == "Consultant Core Block G — Operational Final Dedupe"
+    assert inventory["active_block"] == "Consultant Core Block H.1B — File Replay Scenario Contract Materialization"
     assert inventory["freeze_guard"]["allowed_new_writer_paths"] == [
         "truffles-api/app/core/dialog_state_service.py"
     ]

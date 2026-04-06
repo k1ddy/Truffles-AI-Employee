@@ -39,7 +39,7 @@ def test_dead_surface_registry_marks_touched_envelope_adapter_and_unreachable_su
     entries = {item["surface_path"]: item for item in registry["entries"]}
 
     assert registry["status"] == "machine_readable_system_reproof_base"
-    assert registry["active_block"] == "Consultant Core Block G — Operational Final Dedupe"
+    assert registry["active_block"] == "Consultant Core Block H.1B — File Replay Scenario Contract Materialization"
     assert registry["caller_proof_law"]["adapter_only_for_touched_envelope"] == [
         "truffles-api/app/routers/webhook/http.py",
         "truffles-api/app/routers/webhook/session_memory.py",

@@ -1,4 +1,4 @@
-active_block: Consultant Core Block G — Operational Final Dedupe
+active_block: Consultant Core Block H.1B — File Replay Scenario Contract Materialization
 registry_path: docs/system_forensics/dead_surface_registry.json
 family_id: legacy_mesh_final_fates
 package_root: truffles-api/app/routers/webhook/__init__.py

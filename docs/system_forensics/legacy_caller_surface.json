@@ -1,7 +1,7 @@
 {
   "schema_version": "v1",
   "status": "machine_readable_system_reproof_base",
-  "active_block": "Consultant Core Block G — Operational Final Dedupe",
+  "active_block": "Consultant Core Block H.1B — File Replay Scenario Contract Materialization",
   "current_practical_truth": "r35f",
   "scope_note": "Active docs now track post-booking-manage follow-up runtime closeout; legacy webhook surfaces keep exact final fates on live import/caller proof, the operational outbox seam is now deduped on one shared runtime boundary, and acceptance stays blocked pending Block H fresh replay plus full human semantic audit after the focused booking-manage blocker family proof.",
   "freeze_policy": {

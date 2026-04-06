@@ -61,7 +61,7 @@ def test_legacy_mesh_registry_captures_shadow_and_behavior_surfaces() -> None:
     entries = {item["surface_path"]: item for item in registry["entries"]}
 
     assert registry["status"] == "machine_readable_system_reproof_base"
-    assert registry["active_block"] == "Consultant Core Block G — Operational Final Dedupe"
+    assert registry["active_block"] == "Consultant Core Block H.1B — File Replay Scenario Contract Materialization"
     assert registry["caller_proof_law"]["mounted_ingress_surfaces"] == [
         "truffles-api/app/main.py",
         "truffles-api/app/routers/webhook/__init__.py",
@@ -160,7 +160,7 @@ def test_legacy_caller_surface_registry_materializes_exact_final_fates() -> None
     registry = _load_legacy_surface_registry()
     entries = {item["module_path"]: item for item in registry["entries"]}
 
-    assert registry["active_block"] == "Consultant Core Block G — Operational Final Dedupe"
+    assert registry["active_block"] == "Consultant Core Block H.1B — File Replay Scenario Contract Materialization"
     assert registry["freeze_policy"]["final_fate_set"] == [
         "adapter_only",
         "observer_only",
