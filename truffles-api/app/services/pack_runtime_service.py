@@ -9,7 +9,8 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any
+from functools import lru_cache
+from typing import Any, Protocol
 
 from app.services.knowledge_runtime import get_runtime_truth
 from app.services.pack_query_backend_service import (
@@ -18,7 +19,7 @@ from app.services.pack_query_backend_service import (
     get_pack_query_retrieval_mode,
     resolve_backend_candidates,
 )
-from app.services.pack_runtime_neutral_adapter import (
+from app.services.pack_runtime_default import (
     _build_fact_meta,
     _detect_promotion_intent,
     _has_contact_signal,
@@ -29,6 +30,7 @@ from app.services.pack_runtime_neutral_adapter import (
     _match_service,
     _matches_service_request_lexicon,
     _normalize_text,
+    _resolve_adapter,
     build_evening_greeting,
     build_info_combined_reply,
     build_quiet_hours_notice,
@@ -40,23 +42,9 @@ from app.services.pack_runtime_neutral_adapter import (
     load_policy_pack,
     load_system_lexicons,
     load_yaml_truth,
-    phrase_match_intent,
-    semantic_question_type,
 )
-from app.services.pack_runtime_neutral_adapter import (
-    _format_service_not_found_reply as _neutral_format_service_not_found_reply,
-)
-from app.services.pack_runtime_neutral_adapter import (
-    get_pack_decision as _runtime_get_pack_decision,
-)
-from app.services.pack_runtime_neutral_adapter import (
-    get_pack_service_decision as _runtime_get_pack_service_decision,
-)
-from app.services.pack_runtime_neutral_adapter import (
-    get_pack_service_hint as _runtime_get_pack_service_hint,
-)
-from app.services.pack_runtime_neutral_adapter import (
-    semantic_service_match as _runtime_semantic_service_match,
+from app.services.pack_runtime_default import (
+    _format_service_not_found_reply as _default_format_service_not_found_reply,
 )
 from app.services.pack_runtime_types import PackDecision
 
@@ -82,6 +70,62 @@ _ACTION_CLASS_BY_ACTION = {
     "pending_wait": "HANDOFF",
     "manager_active": "HANDOFF",
 }
+
+
+def _adapter_question_classifier(
+    text: str,
+    *,
+    include_kinds: set[str] | None = None,
+    return_multi: bool = False,
+    client_slug: str | None = "generic",
+):
+    return _resolve_adapter(client_slug)._pack_query_question_classifier(
+        text,
+        include_kinds=include_kinds,
+        return_multi=return_multi,
+        client_slug=client_slug,
+    )
+
+
+def _adapter_phrase_intents(text: str, *, client_slug: str | None = "generic") -> set[str]:
+    return _resolve_adapter(client_slug)._pack_query_phrase_intents(
+        text,
+        client_slug=client_slug,
+    )
+
+
+def _adapter_truth_decision(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    intent_decomp: dict | None = None,
+):
+    return _resolve_adapter(client_slug)._build_pack_query_truth_decision(
+        message,
+        client_slug=client_slug,
+        intent_decomp=intent_decomp,
+    )
+
+
+def _adapter_service_decision(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    intent_decomp: dict | None = None,
+):
+    return _resolve_adapter(client_slug)._build_pack_query_service_decision(
+        message,
+        client_slug=client_slug,
+        intent_decomp=intent_decomp,
+    )
+
+
+def _adapter_service_hint(message: str, *, client_slug: str | None = None) -> str | None:
+    return _resolve_adapter(client_slug)._resolve_pack_query_service_hint(message, client_slug=client_slug)
+
+
+def _adapter_semantic_match(text: str, client_slug: str):
+    return _resolve_adapter(client_slug)._resolve_pack_query_semantic_match(text, client_slug)
 _WALKIN_WITHOUT_BOOKING_FALLBACK_TERMS = (
     "без записи",
     "без предварительной записи",
@@ -106,6 +150,7 @@ _MASTER_QUERY_UNKNOWN_SERVICE_REPLY = (
     "Po usluge \"{service}\" utochnu dostupnyh masterov u administratora."
 )
 _MASTER_QUERY_REPLY_TEMPLATE = "Po usluge \"{service}\" rabotayut: {specialists}."
+_MASTER_QUERY_TEAM_REPLY_TEMPLATE = "По услуге «{service}» подойдут наши мастера: {summary}"
 _MASTER_QUERY_COLLECTION_ACTION = "collect"
 _MASTER_QUERY_FACT_ACTION = "reply"
 _MASTER_QUERY_FACT_INTENT = "master"
@@ -120,6 +165,12 @@ _PACK_QUERY_MAX_SUGGESTIONS = 5
 _PACK_QUERY_FALLBACK_PRESENCE_REPLY = "Da, usluga {service} dostupna."
 _PACK_QUERY_FALLBACK_NOT_FOUND_REPLY = (
     "V spiske uslug net takoi pozicii. Mogu predlozhit: {suggestions}."
+)
+_TEAM_CATEGORY_HINTS = (
+    ("hair", ("парикмах", "волос", "стриж", "окраш", "уклад", "кератин", "ботокс")),
+    ("nails", ("маник", "педик", "ногт", "гель", "нейл", "покрыт", "кутикул")),
+    ("brows_lashes", ("бров", "ресниц", "ламин", "лаш")),
+    ("facial", ("лиц", "чистк", "пилинг", "космет", "массаж")),
 )
 _SEMANTIC_SUBJECT_REFERENT_KEY = {
     "service": "service",
@@ -141,10 +192,7 @@ def _format_service_not_found_reply(
     *,
     client_slug: str | None = None,
 ) -> str | None:
-    # The public facade keeps a stable keyword-compatible helper surface even
-    # though the neutral adapter currently ignores client-specific dispatch.
-    _ = client_slug
-    return _neutral_format_service_not_found_reply(truth)
+    return _default_format_service_not_found_reply(truth, client_slug=client_slug)
 
 
 @dataclass(frozen=True)
@@ -169,6 +217,17 @@ class PackQueryCandidate:
 
 
 @dataclass(frozen=True)
+class PackServiceReferent:
+    service_label: str | None
+    service_item: dict[str, Any] | None
+    price_item: dict[str, Any] | None
+    price_category: str | None
+    team_key: str | None
+    team_summary: str | None
+    exact: bool
+
+
+@dataclass(frozen=True)
 class MasterIntentResolution:
     explicit: bool
     service_query: str | None
@@ -186,6 +245,313 @@ class MasterReplyDecision:
     action: str
     intent: str
     meta: dict[str, Any]
+
+
+class PackRuntimeBoundary(Protocol):
+    client_slug: str | None
+
+    def normalize_text(self, text: str) -> str: ...
+
+    def get_system_lexicon_list(self, key: str) -> list[str]: ...
+
+    def load_yaml_truth(self) -> dict: ...
+
+    def format_reply_from_truth(
+        self,
+        intent: str,
+        slots: dict | None = None,
+        *,
+        truth: dict | None = None,
+    ) -> str | None: ...
+
+    def build_info_combined_reply(
+        self,
+        *,
+        include_parking: bool = False,
+        include_guest: bool = False,
+    ) -> tuple[str | None, dict[str, Any]]: ...
+
+    def detect_promotion_intent(self, normalized: str) -> str | None: ...
+
+    def has_duration_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool: ...
+
+    def has_parking_signal(self, normalized: str) -> bool: ...
+
+    def has_price_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool: ...
+
+    def has_contact_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool: ...
+
+    def has_master_signal(
+        self,
+        message_text: str | None,
+        *,
+        service_query: str | None = None,
+    ) -> bool: ...
+
+    def match_service(self, normalized: str) -> dict | None: ...
+
+    def build_runtime_service_duration_reply(
+        self,
+        *,
+        message: str | None = None,
+        service_label: str | None = None,
+        branch_id: str | None = None,
+    ) -> str | None: ...
+
+    def build_runtime_service_truth_reply(
+        self,
+        service: dict[str, Any] | str | None,
+        *,
+        truth: dict | None = None,
+    ) -> str | None: ...
+
+    def resolve_runtime_service_price_item(
+        self,
+        service_name: str | None,
+        *,
+        truth: dict | None = None,
+        branch_id: str | None = None,
+    ) -> dict[str, Any] | None: ...
+
+    def format_runtime_price_item_reply(self, price_item: dict[str, Any] | None) -> str | None: ...
+
+    def build_runtime_service_presence_reply_for_name(
+        self,
+        service_name: str,
+        *,
+        truth: dict | None = None,
+    ) -> str | None: ...
+
+    def build_runtime_service_not_found_reply(
+        self,
+        *,
+        truth: dict | None = None,
+    ) -> str | None: ...
+
+    def resolve_explicit_master_intent(
+        self,
+        *,
+        service_query: str | None = None,
+        force_master_intent: bool = False,
+    ) -> MasterIntentResolution: ...
+
+    def build_master_reply_from_pack(
+        self,
+        *,
+        message_text: str | None,
+        resolution: MasterIntentResolution,
+    ) -> MasterReplyDecision | None: ...
+
+
+@dataclass(frozen=True)
+class _BoundPackRuntime:
+    client_slug: str | None
+
+    def normalize_text(self, text: str) -> str:
+        return _normalize_text(text)
+
+    def get_system_lexicon_list(self, key: str) -> list[str]:
+        return get_system_lexicon_list(key)
+
+    def load_yaml_truth(self) -> dict:
+        return load_yaml_truth(self.client_slug)
+
+    def format_reply_from_truth(
+        self,
+        intent: str,
+        slots: dict | None = None,
+        *,
+        truth: dict | None = None,
+    ) -> str | None:
+        return format_reply_from_truth(
+            intent,
+            slots=slots,
+            client_slug=self.client_slug,
+            truth=truth,
+        )
+
+    def build_info_combined_reply(
+        self,
+        *,
+        include_parking: bool = False,
+        include_guest: bool = False,
+    ) -> tuple[str | None, dict[str, Any]]:
+        return build_info_combined_reply(
+            include_parking=include_parking,
+            include_guest=include_guest,
+            client_slug=self.client_slug,
+        )
+
+    def detect_promotion_intent(self, normalized: str) -> str | None:
+        return _detect_promotion_intent(normalized, client_slug=self.client_slug)
+
+    def has_duration_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool:
+        return _has_duration_signal(
+            normalized,
+            message,
+            client_slug=self.client_slug,
+        )
+
+    def has_parking_signal(self, normalized: str) -> bool:
+        return _has_parking_signal(normalized, client_slug=self.client_slug)
+
+    def has_price_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool:
+        return _has_price_signal(
+            normalized,
+            message,
+            client_slug=self.client_slug,
+        )
+
+    def has_contact_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool:
+        return _has_contact_signal(
+            normalized,
+            message,
+            client_slug=self.client_slug,
+        )
+
+    def has_master_signal(
+        self,
+        message_text: str | None,
+        *,
+        service_query: str | None = None,
+    ) -> bool:
+        return _resolve_pack_query_master_intent(
+            message_text=message_text,
+            client_slug=self.client_slug,
+            service_query=service_query,
+        ).explicit
+
+    def match_service(self, normalized: str) -> dict | None:
+        effective_slug = self.client_slug or "generic"
+        return _match_service(normalized, effective_slug)
+
+    def build_runtime_service_duration_reply(
+        self,
+        *,
+        message: str | None = None,
+        service_label: str | None = None,
+        branch_id: str | None = None,
+    ) -> str | None:
+        return build_runtime_service_duration_reply(
+            message=message,
+            service_label=service_label,
+            client_slug=self.client_slug,
+            branch_id=branch_id,
+        )
+
+    def build_runtime_service_truth_reply(
+        self,
+        service: dict[str, Any] | str | None,
+        *,
+        truth: dict | None = None,
+    ) -> str | None:
+        return build_runtime_service_truth_reply(
+            service,
+            client_slug=self.client_slug,
+            truth=truth,
+        )
+
+    def resolve_runtime_service_price_item(
+        self,
+        service_name: str | None,
+        *,
+        truth: dict | None = None,
+        branch_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        return resolve_runtime_service_price_item(
+            service_name,
+            client_slug=self.client_slug,
+            truth=truth,
+            branch_id=branch_id,
+        )
+
+    def format_runtime_price_item_reply(self, price_item: dict[str, Any] | None) -> str | None:
+        return format_runtime_price_item_reply(price_item)
+
+    def build_runtime_service_presence_reply_for_name(
+        self,
+        service_name: str,
+        *,
+        truth: dict | None = None,
+    ) -> str | None:
+        return build_runtime_service_presence_reply_for_name(
+            service_name,
+            client_slug=self.client_slug,
+            truth=truth,
+        )
+
+    def build_runtime_service_not_found_reply(
+        self,
+        *,
+        truth: dict | None = None,
+    ) -> str | None:
+        return build_runtime_service_not_found_reply(
+            client_slug=self.client_slug,
+            truth=truth,
+        )
+
+    def resolve_explicit_master_intent(
+        self,
+        *,
+        service_query: str | None = None,
+        force_master_intent: bool = False,
+    ) -> MasterIntentResolution:
+        return resolve_explicit_master_intent(
+            client_slug=self.client_slug,
+            service_query=service_query,
+            force_master_intent=force_master_intent,
+        )
+
+    def build_master_reply_from_pack(
+        self,
+        *,
+        message_text: str | None,
+        resolution: MasterIntentResolution,
+    ) -> MasterReplyDecision | None:
+        return build_master_reply_from_pack(
+            client_slug=self.client_slug,
+            message_text=message_text,
+            resolution=resolution,
+        )
+
+
+@lru_cache(maxsize=None)
+def _cached_pack_runtime(client_slug: str | None) -> _BoundPackRuntime:
+    return _BoundPackRuntime(client_slug=client_slug)
+
+
+def get_pack_runtime(client_slug: str | None = None) -> PackRuntimeBoundary:
+    return _cached_pack_runtime(_normalize_scope_token(client_slug))
 
 
 def _coerce_text_token(value: Any) -> str | None:
@@ -358,7 +724,7 @@ def _pack_query_service_context(
             "service_query_score": round(float(best.final_score), 4),
             "retrieval_meta": _build_pack_query_retrieval_meta(candidates, engine_meta=engine_meta),
         }
-    fallback_hint = _runtime_get_pack_service_hint(query, client_slug=client_slug or "generic")
+    fallback_hint = _adapter_service_hint(query, client_slug=client_slug or "generic")
     if not fallback_hint:
         price_item = _best_price_item_match(query, truth=truth)
         item_name = _coerce_text_token(price_item.get("name")) if isinstance(price_item, dict) else None
@@ -375,10 +741,16 @@ def _pack_query_service_context(
         }
     service_item = _match_truth_service_entry(fallback_hint, client_slug=client_slug)
     if service_item is None:
-        return None, None
+        fallback_price_item = _find_price_item_by_exact_name(truth, item_name=fallback_hint)
+        if not isinstance(fallback_price_item, dict):
+            return None, None
+        service_item = {
+            "name": fallback_hint,
+            "price_items": [fallback_hint],
+        }
     return service_item, {
         "service_query": fallback_hint,
-        "service_query_source": "neutral_runtime_hint",
+        "service_query_source": "pack_runtime_hint",
         "service_query_score": 0.56,
     }
 
@@ -413,6 +785,27 @@ def _find_price_item_by_exact_name(
         if name and _normalize_text(name) == normalized_name:
             return item
     return None
+
+
+def _find_price_item_with_category(
+    truth: dict[str, Any],
+    *,
+    item_name: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    normalized_name = _normalize_text(item_name or "")
+    if not normalized_name:
+        return None, None
+    for category in truth.get("price_list") or []:
+        if not isinstance(category, dict):
+            continue
+        category_name = _coerce_text_token(category.get("category"))
+        for item in category.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            name = _coerce_text_token(item.get("name"))
+            if name and _normalize_text(name) == normalized_name:
+                return item, category_name
+    return None, None
 
 
 def _score_price_item(query_text: str, item_name: str) -> tuple[int, int, int]:
@@ -517,6 +910,7 @@ def _duration_estimate_reply(
     *,
     service_label: str | None,
     truth: dict[str, Any],
+    exact_service_referent: bool = False,
 ) -> str | None:
     label = _coerce_text_token(service_label)
     if not label and isinstance(service_item, dict):
@@ -542,6 +936,8 @@ def _duration_estimate_reply(
     if isinstance(services_catalog, dict):
         clarify = _coerce_text_token(services_catalog.get("duration_clarify"))
         if clarify:
+            if exact_service_referent and label:
+                return f"{label} — точная длительность зависит от объема и сложности."
             if label:
                 return f"{label} — точная длительность зависит от объема и сложности. {clarify}"
             return clarify
@@ -562,6 +958,110 @@ def _service_aliases(service_item: dict[str, Any]) -> list[str]:
         seen.add(normalized)
         unique.append(alias.strip())
     return unique
+
+
+def _service_price_item_candidates(
+    service_item: dict[str, Any] | None,
+    *,
+    service_label: str | None,
+) -> list[str]:
+    candidates: list[str] = []
+
+    def _append(value: Any) -> None:
+        token = _coerce_text_token(value)
+        if not token:
+            return
+        normalized = _normalize_text(token)
+        if any(_normalize_text(existing) == normalized for existing in candidates):
+            return
+        candidates.append(token)
+
+    _append(service_label)
+    if isinstance(service_item, dict):
+        _append(service_item.get("name"))
+        price_items = service_item.get("price_items")
+        if isinstance(price_items, list):
+            for item_name in price_items:
+                _append(item_name)
+    return candidates
+
+
+def _team_key_from_texts(
+    *,
+    texts: list[str],
+    truth: dict[str, Any],
+) -> str | None:
+    team = truth.get("team")
+    if not isinstance(team, dict) or not team:
+        return None
+    available = {str(key).strip() for key in team.keys() if isinstance(key, str) and str(key).strip()}
+    if not available:
+        return None
+    for text in texts:
+        normalized = _normalize_text(text)
+        if not normalized:
+            continue
+        for team_key, hints in _TEAM_CATEGORY_HINTS:
+            if team_key not in available:
+                continue
+            if any(hint in normalized for hint in hints):
+                return team_key
+    return None
+
+
+def _resolve_pack_service_referent(
+    *,
+    truth: dict[str, Any],
+    client_slug: str | None,
+    service_label: str | None = None,
+    branch_id: str | None = None,
+) -> PackServiceReferent:
+    service_item = None
+    resolved_service_label = _coerce_text_token(service_label)
+    if service_item is None and service_label:
+        service_item = _match_truth_service_entry(service_label, client_slug=client_slug)
+
+    canonical_hint = None
+    if resolved_service_label:
+        canonical_hint = _resolve_pack_query_service_hint(
+            resolved_service_label,
+            client_slug=client_slug,
+            branch_id=branch_id,
+        )
+        canonical_hint = _coerce_text_token(canonical_hint)
+
+    price_item = None
+    price_category = None
+    candidate_names = _service_price_item_candidates(service_item, service_label=resolved_service_label)
+    if canonical_hint:
+        candidate_names = [canonical_hint, *candidate_names]
+    for candidate_name in candidate_names:
+        price_item, price_category = _find_price_item_with_category(truth, item_name=candidate_name)
+        if isinstance(price_item, dict):
+            resolved_service_label = _coerce_text_token(price_item.get("name")) or resolved_service_label
+            if service_item is None:
+                service_item = {
+                    "name": resolved_service_label,
+                    "price_items": [resolved_service_label],
+                }
+            break
+
+    team_key = _team_key_from_texts(
+        texts=[text for text in (price_category, resolved_service_label) if isinstance(text, str)],
+        truth=truth,
+    )
+    team = truth.get("team")
+    team_summary = _coerce_text_token(team.get(team_key)) if isinstance(team, dict) and team_key else None
+    exact = bool(resolved_service_label and (service_item is not None or price_item is not None))
+    return PackServiceReferent(
+        service_label=resolved_service_label,
+        service_item=service_item,
+        price_item=price_item,
+        price_category=price_category,
+        team_key=team_key,
+        team_summary=team_summary,
+        exact=exact,
+    )
 
 
 def _tenant_scope_for_service(service_item: dict[str, Any]) -> set[str]:
@@ -673,7 +1173,7 @@ def _runtime_dense_signal(
     *,
     client_slug: str | None,
 ) -> tuple[str | None, float, str | None]:
-    runtime_semantic = _runtime_semantic_service_match(text, client_slug or "generic")
+    runtime_semantic = _adapter_semantic_match(text, client_slug or "generic")
     if not runtime_semantic:
         return None, 0.0, None
     dense_action = _coerce_text_token(getattr(runtime_semantic, "action", None))
@@ -1115,14 +1615,33 @@ def _resolve_master_service_query(
             if _master_long_haircut_signal(decomp_query, client_slug=client_slug):
                 return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "intent_decomp"
             return decomp_query, "intent_decomp"
-    if message_text:
-        semantic_query = get_pack_service_hint(message_text, client_slug=client_slug)
-        semantic_query = _normalize_optional_text(semantic_query)
-        if semantic_query:
-            return semantic_query, "semantic_match"
-        long_hair_signal = _master_long_haircut_signal(message_text, client_slug=client_slug)
-        if long_hair_signal:
-            return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, f"master_long_haircut_{long_hair_signal}"
+    return None, "none"
+
+
+def _resolve_pack_query_master_service_query(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    service_query: str | None,
+    intent_decomp: dict[str, Any] | None,
+) -> tuple[str | None, str]:
+    resolved_service_query, source = _resolve_master_service_query(
+        message_text=message_text,
+        client_slug=client_slug,
+        service_query=service_query,
+        intent_decomp=intent_decomp,
+    )
+    if resolved_service_query:
+        return resolved_service_query, source
+    hint = _normalize_optional_text(
+        _resolve_pack_query_service_hint(message_text or "", client_slug=client_slug)
+    )
+    if hint:
+        if _master_long_haircut_signal(hint, client_slug=client_slug):
+            return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "pack_query_hint"
+        return hint, "pack_query_hint"
+    if _master_long_haircut_signal(message_text, client_slug=client_slug):
+        return _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, "pack_query_hint"
     return None, "none"
 
 
@@ -1202,7 +1721,7 @@ def _is_question_like_master_query(
         return False
     if "?" in message_text:
         return True
-    return bool(semantic_question_type(message_text, client_slug=client_slug))
+    return bool(_adapter_question_classifier(message_text, client_slug=client_slug))
 
 
 def _has_master_person_question_shape(normalized_message: str) -> bool:
@@ -1211,7 +1730,7 @@ def _has_master_person_question_shape(normalized_message: str) -> bool:
     return any(pattern.search(normalized_message) for pattern in _MASTER_QUERY_PERSON_QUESTION_PATTERNS)
 
 
-def resolve_master_intent(
+def _resolve_pack_query_master_intent(
     *,
     message_text: str | None,
     client_slug: str | None,
@@ -1230,7 +1749,7 @@ def resolve_master_intent(
     action_hit = _first_signal_hit(normalized_message, action_terms)
     experience_hit = _first_signal_hit(normalized_message, experience_terms)
 
-    resolved_service_query, service_query_source = _resolve_master_service_query(
+    resolved_service_query, service_query_source = _resolve_pack_query_master_service_query(
         message_text=message_text,
         client_slug=client_slug,
         service_query=service_query,
@@ -1268,6 +1787,9 @@ def resolve_master_intent(
         elif person_hit and (action_hit or experience_hit):
             explicit = True
             reason = "person_action_signal"
+        elif person_hit and question_like and not resolved_service_query:
+            explicit = True
+            reason = "person_question_signal"
         elif person_hit and master_name_hit and question_like and resolved_service_query:
             explicit = True
             reason = "person_named_question_signal"
@@ -1296,6 +1818,33 @@ def resolve_master_intent(
         needs_service_clarify=bool(explicit and not resolved_service_query),
         reason=reason,
         matched_signals=matched_signals,
+    )
+
+
+def resolve_explicit_master_intent(
+    *,
+    client_slug: str | None,
+    service_query: str | None = None,
+    force_master_intent: bool = False,
+) -> MasterIntentResolution:
+    resolved_service_query, service_query_source = _resolve_master_service_query(
+        message_text=None,
+        client_slug=client_slug,
+        service_query=service_query,
+        intent_decomp=None,
+    )
+    explicit = bool(force_master_intent)
+    reason: str | None = "forced_master_intent" if explicit else None
+    if not explicit and resolved_service_query:
+        explicit = True
+        reason = "explicit_service_query"
+    return MasterIntentResolution(
+        explicit=explicit,
+        service_query=resolved_service_query,
+        service_query_source=service_query_source,
+        needs_service_clarify=bool(explicit and not resolved_service_query),
+        reason=reason,
+        matched_signals=[],
     )
 
 
@@ -1405,10 +1954,7 @@ def build_master_reply_from_pack(
     if not isinstance(max_specialists, int) or max_specialists <= 0:
         max_specialists = 3
 
-    resolved_service = resolution.service_query
-    if not resolved_service and message_text:
-        resolved_service = get_pack_service_hint(message_text, client_slug=client_slug)
-    resolved_service = _normalize_optional_text(resolved_service)
+    resolved_service = _normalize_optional_text(resolution.service_query)
     if not resolved_service:
         meta = _build_fact_meta(
             fact_source="truth",
@@ -1437,19 +1983,52 @@ def build_master_reply_from_pack(
     long_hair_signal = _master_long_haircut_signal(display_service, client_slug=client_slug)
     if long_hair_signal:
         display_service = _MASTER_QUERY_LONG_HAIR_SERVICE_LABEL
-    canonical_service = get_pack_service_hint(resolved_service, client_slug=client_slug)
-    canonical_service = _normalize_optional_text(canonical_service)
+    referent = _resolve_pack_service_referent(
+        truth=truth if isinstance(truth, dict) else {},
+        client_slug=client_slug,
+        service_label=display_service,
+    )
+    canonical_service = _normalize_optional_text(referent.service_label)
     if not canonical_service and long_hair_signal:
         canonical_service = _normalize_optional_text(
-            get_pack_service_hint(_MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, client_slug=client_slug)
+            _resolve_pack_query_service_hint(_MASTER_QUERY_LONG_HAIR_SERVICE_LABEL, client_slug=client_slug)
         )
-    canonical_service = canonical_service or resolved_service
+    canonical_service = canonical_service or display_service or resolved_service
+    display_service = canonical_service
     profiles = _extract_master_profiles(catalog)
     matched_profiles = [
         profile
         for profile in profiles
         if any(_service_match(canonical_service, service_name) for service_name in profile["services"])
     ]
+    if not matched_profiles and referent.team_summary:
+        team_reply = _MASTER_QUERY_TEAM_REPLY_TEMPLATE.format(
+            service=display_service,
+            summary=referent.team_summary,
+        )
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=[_MASTER_QUERY_FACT_INTENT],
+            info_sections=[_MASTER_QUERY_FACT_INTENT],
+            meta={
+                "master_query_contract": "team.v1",
+                "master_reply_mode": "team_match",
+                "service_query": display_service,
+                "service_query_source": resolution.service_query_source,
+                "master_profiles_count": 0,
+                "master_team_key": referent.team_key,
+                "master_resolution_reason": resolution.reason,
+                "master_resolution_signals": list(resolution.matched_signals),
+                "master_resolver_id": resolution.resolver_id,
+                "master_resolver_version": resolution.resolver_version,
+            },
+        )
+        return MasterReplyDecision(
+            response=team_reply,
+            action=_MASTER_QUERY_FACT_ACTION,
+            intent=_MASTER_QUERY_FACT_INTENT,
+            meta=meta,
+        )
     if not matched_profiles:
         fallback_reply = service_not_found_reply.format(service=canonical_service)
         meta = _build_fact_meta(
@@ -2075,7 +2654,7 @@ def _is_strict_scope_block(meta: dict[str, Any]) -> bool:
     return filtered_out_by_tenant
 
 
-def semantic_service_match(
+def _resolve_pack_query_semantic_match(
     text: str,
     client_slug: str | None,
     *,
@@ -2124,7 +2703,7 @@ def semantic_service_match(
         return None
 
     fallback_match = _to_runtime_semantic_match(
-        _runtime_semantic_service_match(query, normalized_slug),
+        _adapter_semantic_match(query, normalized_slug),
         meta=retrieval_meta,
     )
     if not fallback_match:
@@ -2137,7 +2716,7 @@ def semantic_service_match(
     return fallback_match
 
 
-def get_pack_service_hint(
+def _resolve_pack_query_service_hint(
     message: str,
     *,
     client_slug: str | None = None,
@@ -2156,7 +2735,7 @@ def get_pack_service_hint(
         return candidates[0].canonical_name
     if _is_strict_scope_block(engine_meta):
         return None
-    fallback_hint = _runtime_get_pack_service_hint(query, client_slug=normalized_slug)
+    fallback_hint = _adapter_service_hint(query, client_slug=normalized_slug)
     if fallback_hint:
         return fallback_hint
     truth = load_yaml_truth(client_slug)
@@ -2178,22 +2757,17 @@ def build_runtime_service_duration_reply(
     truth = load_yaml_truth(client_slug)
     if not isinstance(truth, dict):
         return None
-    service_item = None
-    resolved_service_label = _coerce_text_token(service_label)
-    if message:
-        service_item, _ = _pack_query_service_context(
-            message,
-            client_slug=client_slug,
-            branch_id=branch_id,
-        )
-        if service_item is not None:
-            resolved_service_label = _coerce_text_token(service_item.get("name")) or resolved_service_label
-    if service_item is None and service_label:
-        service_item = _match_truth_service_entry(service_label, client_slug=client_slug)
-    return _duration_estimate_reply(
-        service_item,
-        service_label=resolved_service_label,
+    referent = _resolve_pack_service_referent(
         truth=truth,
+        client_slug=client_slug,
+        service_label=service_label,
+        branch_id=branch_id,
+    )
+    return _duration_estimate_reply(
+        referent.service_item,
+        service_label=referent.service_label,
+        truth=truth,
+        exact_service_referent=referent.exact,
     )
 
 
@@ -2207,11 +2781,65 @@ def build_runtime_service_truth_reply(
     if not isinstance(source_truth, dict):
         return None
     service_item = service if isinstance(service, dict) else _match_truth_service_entry(service, client_slug=client_slug)
-    return _service_price_reply(
+    reply = _service_price_reply(
         service_item,
         client_slug=client_slug,
         truth=source_truth,
     )
+    if reply:
+        return reply
+    if isinstance(service, str):
+        return format_runtime_price_item_reply(
+            resolve_runtime_service_price_item(
+                service,
+                client_slug=client_slug,
+                truth=source_truth,
+            )
+        )
+    return None
+
+
+def resolve_runtime_service_price_item(
+    service_name: str | None,
+    *,
+    client_slug: str | None = None,
+    truth: dict[str, Any] | None = None,
+    branch_id: str | None = None,
+) -> dict[str, Any] | None:
+    cleaned = _coerce_text_token(service_name)
+    if not cleaned:
+        return None
+    source_truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
+    if not isinstance(source_truth, dict):
+        return None
+    referent = _resolve_pack_service_referent(
+        truth=source_truth,
+        client_slug=client_slug,
+        service_label=cleaned,
+        branch_id=branch_id,
+    )
+    if isinstance(referent.price_item, dict):
+        return referent.price_item
+    for candidate_name in _service_price_item_candidates(
+        referent.service_item,
+        service_label=referent.service_label or cleaned,
+    ):
+        item = _find_price_item_by_exact_name(source_truth, item_name=candidate_name)
+        if isinstance(item, dict):
+            return item
+    direct_item = _find_price_item_by_exact_name(source_truth, item_name=cleaned)
+    if isinstance(direct_item, dict):
+        return direct_item
+    best_item = _best_price_item_match(cleaned, truth=source_truth)
+    if isinstance(best_item, dict):
+        return best_item
+    return None
+
+
+def format_runtime_price_item_reply(price_item: dict[str, Any] | None) -> str | None:
+    if not isinstance(price_item, dict):
+        return None
+    return _format_pack_price_reply(price_item)
 
 
 def build_runtime_service_presence_reply_for_name(
@@ -2262,7 +2890,7 @@ def build_runtime_service_not_found_reply(
     return f"{template} {suggestions_text}."
 
 
-def get_pack_price_item(
+def _resolve_pack_query_price_item(
     message: str,
     *,
     client_slug: str | None = None,
@@ -2292,7 +2920,7 @@ def get_pack_price_item(
     return _best_price_item_match(query, truth=truth)
 
 
-def get_pack_price_reply(message: str, *, client_slug: str | None = None) -> str | None:
+def _build_pack_query_price_reply(message: str, *, client_slug: str | None = None) -> str | None:
     query = _coerce_text_token(message)
     if not query:
         return None
@@ -2303,10 +2931,10 @@ def get_pack_price_reply(message: str, *, client_slug: str | None = None) -> str
     reply = _service_price_reply(service_item, client_slug=client_slug, truth=truth)
     if reply:
         return reply
-    return _format_pack_price_reply(get_pack_price_item(query, client_slug=client_slug))
+    return _format_pack_price_reply(_resolve_pack_query_price_item(query, client_slug=client_slug))
 
 
-def get_pack_decision(
+def _build_pack_query_truth_decision(
     message: str,
     *,
     client_slug: str | None = None,
@@ -2328,7 +2956,7 @@ def get_pack_decision(
         )
     normalized = _normalize_text(query)
     service_item, service_meta = _pack_query_service_context(query, client_slug=client_slug)
-    info_intents = set(phrase_match_intent(query, client_slug=client_slug))
+    info_intents = set(_adapter_phrase_intents(query, client_slug=client_slug))
     if _has_parking_signal(normalized, client_slug=client_slug):
         info_intents.add("parking")
     promo_intent = _detect_promotion_intent(normalized, client_slug=client_slug)
@@ -2354,7 +2982,7 @@ def get_pack_decision(
                 resolver_id="pack_runtime.truth_gate",
                 client_slug=client_slug,
             )
-    duration_signal = _has_duration_signal(normalized, message=query, client_slug=client_slug)
+    duration_signal = _has_duration_signal(normalized, query, client_slug=client_slug)
     price_signal = _has_price_signal(normalized, query, client_slug=client_slug)
     if duration_signal:
         service_query = service_meta.get("service_query") if isinstance(service_meta, dict) else None
@@ -2385,9 +3013,9 @@ def get_pack_decision(
                 client_slug=client_slug,
             )
     if price_signal:
-        price_reply = get_pack_price_reply(query, client_slug=client_slug)
+        price_reply = _build_pack_query_price_reply(query, client_slug=client_slug)
         if price_reply:
-            price_item = get_pack_price_item(query, client_slug=client_slug)
+            price_item = _resolve_pack_query_price_item(query, client_slug=client_slug)
             price_meta = dict(service_meta or {})
             price_meta.update(
                 _build_fact_meta(
@@ -2427,7 +3055,7 @@ def get_pack_decision(
                 resolver_id="pack_runtime.truth_gate",
                 client_slug=client_slug,
             )
-    decision = _runtime_get_pack_decision(
+    decision = _adapter_truth_decision(
         query,
         client_slug=client_slug,
         intent_decomp=intent_decomp,
@@ -2439,7 +3067,7 @@ def get_pack_decision(
     )
 
 
-def get_pack_service_decision(
+def _build_pack_query_service_decision(
     message: str,
     *,
     client_slug: str | None = None,
@@ -2477,7 +3105,7 @@ def get_pack_service_decision(
                     client_slug=client_slug,
                 )
 
-        semantic_match = semantic_service_match(query, client_slug=client_slug or "generic")
+        semantic_match = _resolve_pack_query_semantic_match(query, client_slug=client_slug or "generic")
         if isinstance(semantic_match, PackQuerySemanticMatch):
             match_meta = dict(semantic_match.meta or {})
             canonical_name = _coerce_text_token(semantic_match.canonical_name)
@@ -2512,7 +3140,7 @@ def get_pack_service_decision(
                     client_slug=client_slug,
                 )
 
-    decision = _runtime_get_pack_service_decision(
+    decision = _adapter_service_decision(
         message,
         client_slug=client_slug,
         intent_decomp=intent_decomp,
@@ -2655,16 +3283,13 @@ __all__ = [
     "build_runtime_service_duration_reply",
     "build_runtime_service_not_found_reply",
     "build_runtime_service_presence_reply_for_name",
+    "format_runtime_price_item_reply",
+    "resolve_runtime_service_price_item",
     "build_runtime_service_truth_reply",
     "compose_multi_truth_reply",
     "enrich_pack_decision",
     "ensure_resolver_meta",
     "format_reply_from_truth",
-    "get_pack_decision",
-    "get_pack_price_item",
-    "get_pack_price_reply",
-    "get_pack_service_decision",
-    "get_pack_service_hint",
     "has_consult_recommendation_signal",
     "get_signal_lexicon_list",
     "get_system_anchor_groups",
@@ -2674,10 +3299,7 @@ __all__ = [
     "load_policy_pack",
     "load_system_lexicons",
     "load_yaml_truth",
-    "phrase_match_intent",
-    "resolve_master_intent",
-    "semantic_question_type",
-    "semantic_service_match",
+    "resolve_explicit_master_intent",
     "MasterIntentResolution",
     "MasterReplyDecision",
 ]

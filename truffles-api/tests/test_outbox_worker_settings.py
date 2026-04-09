@@ -18,6 +18,90 @@ def test_outbox_worker_settings_clamps_negative_max_wait(monkeypatch):
     assert settings.max_wait_seconds == 0
 
 
+def test_scoped_outbox_process_request_defaults_from_runtime_settings(monkeypatch):
+    settings = outbox_runtime.OutboxProcessSettings(
+        limit=9,
+        idle_seconds=7,
+        max_wait_seconds=11,
+        max_attempts=5,
+        retry_backoff_seconds=2.0,
+        stale_seconds=120,
+    )
+    monkeypatch.setattr(outbox_runtime, "load_outbox_process_settings", lambda: settings)
+
+    request = outbox_runtime.ScopedOutboxProcessRequest.from_optional(
+        client_id="client-1",
+        allowed_branch_ids=["branch-a", "branch-b"],
+        archive_pending_older_than_hours=24,
+    )
+
+    assert request.limit == 9
+    assert request.idle_seconds == 7
+    assert request.max_wait_seconds == 11
+    assert request.include_without_conversation is True
+    assert request.archive_pending_limit == 9
+    assert request.allowed_branch_ids == ("branch-a", "branch-b")
+
+
+@pytest.mark.asyncio
+async def test_preview_scoped_outbox_process_summarizes_shared_runtime_scope(monkeypatch):
+    now = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+    pending_rows = [
+        type("Row", (), {"conversation_id": "conv-1", "created_at": now - timedelta(days=8)})(),
+        type("Row", (), {"conversation_id": None, "created_at": now - timedelta(days=1)})(),
+    ]
+    processing_rows = [type("Row", (), {"conversation_id": "conv-2", "created_at": now})()]
+    failed_rows = [type("Row", (), {"conversation_id": None, "created_at": now})()]
+
+    def _query_rows(_db, *, request, status):
+        assert request.client_id == "client-1"
+        if status == "PENDING":
+            return pending_rows
+        if status == "PROCESSING":
+            return processing_rows
+        if status == "FAILED":
+            return failed_rows
+        return []
+
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(outbox_runtime, "_query_scoped_outbox_message_rows", _query_rows)
+    monkeypatch.setattr(outbox_runtime, "datetime", _FrozenDateTime)
+
+    result = await outbox_runtime.preview_scoped_outbox_process(
+        object(),
+        request=outbox_runtime.ScopedOutboxProcessRequest.from_optional(
+            client_id="client-1",
+            allowed_branch_ids=["branch-a"],
+            limit=5,
+            idle_seconds=12,
+            max_wait_seconds=34,
+            include_without_conversation=False,
+        ),
+    )
+
+    assert result["mode"] == "dry_run"
+    assert result["scope"] == {"client_id": "client-1", "branch_ids": ["branch-a"]}
+    assert result["config"] == {
+        "limit": 5,
+        "idle_seconds": 12,
+        "max_wait_seconds": 34,
+        "include_without_conversation": False,
+    }
+    assert result["counts"] == {
+        "pending": 2,
+        "processing": 1,
+        "failed": 1,
+        "pending_with_conversation": 1,
+        "pending_without_conversation": 1,
+        "pending_older_than_7d": 1,
+    }
+    assert result["archive_preview"] == {"enabled": False}
+
+
 @pytest.mark.asyncio
 async def test_run_outbox_worker_cycle_uses_shared_runtime_helpers(monkeypatch):
     settings = outbox_runtime.OutboxProcessSettings(
@@ -186,15 +270,18 @@ async def test_run_scoped_outbox_process_uses_shared_runtime_helpers(monkeypatch
 
     result = await outbox_runtime.run_scoped_outbox_process(
         object(),
-        client_id=client_id,
-        allowed_branch_ids=allowed_branch_ids,
-        limit=5,
-        idle_seconds=12,
-        max_wait_seconds=34,
-        include_without_conversation=False,
-        archive_pending_older_than_hours=24,
-        archive_pending_limit=7,
-        archive_pending_without_conversation_only=True,
+        request=outbox_runtime.ScopedOutboxProcessRequest.from_optional(
+            client_id=client_id,
+            allowed_branch_ids=allowed_branch_ids,
+            limit=5,
+            idle_seconds=12,
+            max_wait_seconds=34,
+            include_without_conversation=False,
+            archive_pending_older_than_hours=24,
+            archive_pending_limit=7,
+            archive_pending_without_conversation_only=True,
+            settings=settings,
+        ),
     )
 
     assert result["processed"] == 1

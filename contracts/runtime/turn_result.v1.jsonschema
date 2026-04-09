@@ -38,7 +38,14 @@
       ]
     },
     "policy_decision": {
-      "$ref": "policy_decision.v1.jsonschema"
+      "anyOf": [
+        {
+          "$ref": "policy_decision.v1.jsonschema"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "boundary_override": {
       "anyOf": [

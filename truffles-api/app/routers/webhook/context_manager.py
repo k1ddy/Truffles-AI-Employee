@@ -1,4 +1,4 @@
-"""Conversation context manager helpers (carryover, confirmations, summaries)."""
+"""Legacy context helper surface kept unreachable from the live runtime boundary."""
 
 from __future__ import annotations
 
@@ -236,11 +236,10 @@ def _get_expected_reply_type(context: dict) -> str | None:
         expected_reply_type = pending_question_contract.get("expected_reply_type")
         if isinstance(expected_reply_type, str) and expected_reply_type.strip():
             return expected_reply_type.strip()
-
-    projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
-        expected_reply_type=context.get(EXPECTED_REPLY_TYPE_KEY),
-    )
-    return projections.expected_reply_type
+    expected_reply_type = context.get(EXPECTED_REPLY_TYPE_KEY)
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        return expected_reply_type.strip()
+    return None
 
 
 def _get_expected_reply_reason(context: dict) -> str | None:
@@ -251,11 +250,10 @@ def _get_expected_reply_reason(context: dict) -> str | None:
         reason = pending_question_contract.get("reason")
         if isinstance(reason, str) and reason.strip():
             return reason.strip()
-
-    projections = _DIALOG_STATE_SERVICE.project_expected_reply_projections(
-        expected_reply_reason=context.get(EXPECTED_REPLY_REASON_KEY),
-    )
-    return projections.expected_reply_reason
+    reason = context.get(EXPECTED_REPLY_REASON_KEY)
+    if isinstance(reason, str) and reason.strip():
+        return reason.strip()
+    return None
 
 
 def _get_pending_question_contract(context: dict) -> dict[str, Any] | None:

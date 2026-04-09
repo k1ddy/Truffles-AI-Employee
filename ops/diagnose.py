@@ -2262,7 +2262,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
             text,
             intents,
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2304,7 +2304,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
             text,
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2346,7 +2346,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
             text,
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -2390,7 +2390,7 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
                 f"{correction_prefix}, {correction_time}",
                 ["time"],
                 {
-                    "action_any": ["booking_prompt"],
+                    "action_any": ["collect"],
                     "expected_reply_type": expected_reply_type,
                     "state": "bot_active",
                 },
@@ -2534,7 +2534,7 @@ def _chaos_build_policy_case(rng, case_id, min_turns, max_turns, noise):
                 text,
                 ["booking"],
                 {
-                    "action_any": ["booking_prompt"],
+                    "action_any": ["collect"],
                     "expected_reply_type": "service_choice",
                     "state": "bot_active",
                 },
@@ -2607,7 +2607,7 @@ def _chaos_build_consult_case(rng, case_id, min_turns, max_turns, noise):
             booking_text,
             ["booking"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2618,7 +2618,7 @@ def _chaos_build_consult_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["service"], lang_mode=lang_mode, service=service, noise=noise),
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2629,7 +2629,7 @@ def _chaos_build_consult_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["time"], lang_mode=lang_mode, time_value=time_value, noise=noise),
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -2733,7 +2733,7 @@ def _chaos_build_info_case(rng, case_id, min_turns, max_turns, noise):
             booking_text,
             ["booking"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2744,7 +2744,7 @@ def _chaos_build_info_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["service"], lang_mode=lang_mode, service=service, noise=noise),
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2755,7 +2755,7 @@ def _chaos_build_info_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["time"], lang_mode=lang_mode, time_value=time_value, noise=noise),
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -2840,7 +2840,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
             booking_text,
             ["booking"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "service_choice",
                 "state": "bot_active",
             },
@@ -2851,7 +2851,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["service"], lang_mode=lang_mode, service=service, noise=noise),
             ["service"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "time",
                 "state": "bot_active",
             },
@@ -2862,7 +2862,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
             _chaos_build_message(rng, ["time"], lang_mode=lang_mode, time_value=time_value, noise=noise),
             ["time"],
             {
-                "action_any": ["booking_prompt"],
+                "action_any": ["collect"],
                 "expected_reply_type": "name",
                 "state": "bot_active",
             },
@@ -5204,6 +5204,7 @@ def _llm_quality_collect_human_semantic_strict_reasons(
     judge_result,
     meta,
     turn_tags,
+    turn_kind=None,
     expected_info_sections,
     actual_info_sections,
     actual_info_intents,
@@ -5233,6 +5234,7 @@ def _llm_quality_collect_human_semantic_strict_reasons(
         for tag in (turn_tags or [])
         if isinstance(tag, str) and tag.strip()
     }
+    normalized_turn_kind = _llm_quality_normalize_tool_token(turn_kind)
     expected_sections = {
         _llm_quality_normalize_tool_token(section)
         for section in (expected_info_sections or [])
@@ -5261,7 +5263,12 @@ def _llm_quality_collect_human_semantic_strict_reasons(
         and not expected_sections.intersection(actual_intent_tokens)
     ):
         reasons.append("human_semantic_required_info_miss")
-    if "media" in normalized_tags and effective_intent == "consult" and meta_action in {"collect", "booking_prompt", "reply"}:
+    if (
+        "media" in normalized_tags
+        and normalized_turn_kind in {"media", "image", "audio", "file"}
+        and effective_intent == "consult"
+        and meta_action in {"collect", "booking_prompt", "reply"}
+    ):
         reasons.append("human_semantic_media_cue_miss")
     if (
         normalized_tags.intersection({"confirm", "check_booking"})
@@ -5492,6 +5499,242 @@ def _llm_quality_compile_active_time_specialist_followup_expectations(expectatio
     return expectations
 
 
+def _llm_quality_load_booking_scenario_contract_helpers():
+    loader = globals().get("_llm_quality_repo_root")
+    if not callable(loader):
+        return False
+    cached = globals().get("_LLM_QUALITY_BOOKING_SCENARIO_CONTRACT_HELPERS")
+    if cached is None:
+        repo_root = loader()
+        api_root = os.path.join(repo_root, "truffles-api")
+        if api_root not in sys.path:
+            sys.path.insert(0, api_root)
+        try:
+            from app.services.llm_quality_contracts import (
+                BookingScenarioPostCoverageRepairCallbacks,
+                merge_booking_scenario_expectations,
+                repair_booking_scenario_post_coverage_dialogs,
+                sanitize_booking_scenario_llm_turns,
+            )
+        except Exception:
+            globals()["_LLM_QUALITY_BOOKING_SCENARIO_CONTRACT_HELPERS"] = False
+            return False
+        cached = (
+            BookingScenarioPostCoverageRepairCallbacks,
+            merge_booking_scenario_expectations,
+            repair_booking_scenario_post_coverage_dialogs,
+            sanitize_booking_scenario_llm_turns,
+        )
+        globals()["_LLM_QUALITY_BOOKING_SCENARIO_CONTRACT_HELPERS"] = cached
+    return cached
+
+
+def _llm_quality_materialize_file_dialog_contracts(dialogs):
+    helpers = _llm_quality_load_booking_scenario_contract_helpers()
+    if helpers is False:
+        return dialogs, {}
+
+    (
+        repair_callbacks_cls,
+        merge_expectations,
+        repair_dialogs,
+        sanitize_turns,
+    ) = helpers
+
+    materialized_dialogs = []
+    changed_dialogs = 0
+    changed_turns = 0
+    rng = random.Random(0)
+    for dialog in dialogs:
+        if not isinstance(dialog, dict):
+            continue
+        normalized_dialog = dict(dialog)
+        raw_turns = normalized_dialog.get("turns") or []
+        prepared_turns = []
+        original_turn_fingerprints = []
+        for turn in raw_turns:
+            if not isinstance(turn, dict):
+                continue
+            normalized_turn = dict(turn)
+            original_turn_fingerprints.append(
+                json.dumps(normalized_turn, ensure_ascii=False, sort_keys=True)
+            )
+            normalized_turn["expect"] = merge_expectations(
+                list(normalized_turn.get("tags") or []),
+                normalized_turn.get("expect"),
+                text=str(normalized_turn.get("text") or ""),
+            )
+            prepared_turns.append(normalized_turn)
+
+        sanitized_turns = sanitize_turns(prepared_turns, {}, rng)
+        normalized_dialog["turns"] = sanitized_turns
+        materialized_dialogs.append(normalized_dialog)
+
+        dialog_changed = False
+        for original, materialized in zip(original_turn_fingerprints, sanitized_turns):
+            if original != json.dumps(materialized, ensure_ascii=False, sort_keys=True):
+                changed_turns += 1
+                dialog_changed = True
+        if dialog_changed or len(original_turn_fingerprints) != len(sanitized_turns):
+            changed_dialogs += 1
+
+    repaired_dialogs = repair_dialogs(
+        materialized_dialogs,
+        callbacks=repair_callbacks_cls(),
+    )
+    post_repair_changed_dialogs = 0
+    post_repair_changed_turns = 0
+    for before_dialog, after_dialog in zip(materialized_dialogs, repaired_dialogs):
+        before_turns = before_dialog.get("turns") or []
+        after_turns = after_dialog.get("turns") or []
+        dialog_changed = False
+        for before_turn, after_turn in zip(before_turns, after_turns):
+            if json.dumps(before_turn, ensure_ascii=False, sort_keys=True) != json.dumps(
+                after_turn, ensure_ascii=False, sort_keys=True
+            ):
+                post_repair_changed_turns += 1
+                dialog_changed = True
+        if dialog_changed or len(before_turns) != len(after_turns):
+            post_repair_changed_dialogs += 1
+
+    warnings = {}
+    if changed_dialogs or changed_turns or post_repair_changed_dialogs or post_repair_changed_turns:
+        warnings["scenario_file_materialization"] = [
+            f"sanitized_dialogs={changed_dialogs}",
+            f"sanitized_turns={changed_turns}",
+            f"post_repair_dialogs={post_repair_changed_dialogs}",
+            f"post_repair_turns={post_repair_changed_turns}",
+        ]
+    return repaired_dialogs, warnings
+
+
+def _llm_quality_expectation_tokens(value):
+    if isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+    normalized = set()
+    for item in items:
+        token = _llm_quality_normalize_tool_token(item)
+        if token:
+            normalized.add(token)
+    return normalized
+
+
+def _llm_quality_expect_targets_specialist_followup(expectations):
+    if not isinstance(expectations, dict):
+        return False
+    meta = expectations.get("meta") or {}
+    meta_any = expectations.get("meta_any") or {}
+    pending_targets = _llm_quality_expectation_tokens(meta.get("pending_question_target"))
+    pending_targets |= _llm_quality_expectation_tokens(meta_any.get("pending_question_target"))
+    active_relations = _llm_quality_expectation_tokens(meta.get("active_question_relation"))
+    active_relations |= _llm_quality_expectation_tokens(meta_any.get("active_question_relation"))
+    return "specialist" in pending_targets or "referent_followup" in active_relations
+
+
+def _llm_quality_apply_booking_collect_expectations(expectations, tag_set):
+    if not isinstance(expectations, dict):
+        return expectations
+    booking_reply_types = {"service_choice", "time"}
+    booking_collect_tags = {
+        "booking",
+        "service",
+        "time",
+        "time_alt",
+        "date",
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    excluded_tags = {"handoff", "human", "pending", "cancel", "reschedule", "check_booking", "confirm"}
+    reply_type = _llm_quality_normalize_tool_token(expectations.get("reply_type"))
+    state = _llm_quality_normalize_tool_token(expectations.get("state"))
+    if not (tag_set & booking_collect_tags):
+        return expectations
+    if tag_set & excluded_tags:
+        return expectations
+    if reply_type not in booking_reply_types:
+        return expectations
+    if state in {"pending", "manager_active"}:
+        return expectations
+    if _llm_quality_expect_targets_specialist_followup(expectations):
+        return expectations
+
+    expectations["action"] = "collect"
+    expectations["expected_reply"] = True
+
+    meta = dict(expectations.get("meta") or {})
+    meta["action"] = "collect"
+    meta["source"] = "llm_policy_core"
+    meta["tool_action"] = "collect"
+    meta["expected_reply_type"] = reply_type
+    if reply_type == "service_choice":
+        meta["expected_reply_reason"] = "collect:service"
+    else:
+        meta.pop("expected_reply_reason", None)
+    expectations["meta"] = meta
+
+    meta_any = dict(expectations.get("meta_any") or {})
+    meta_any["action"] = ["collect"]
+    meta_any["source"] = ["llm_policy_core"]
+    meta_any["tool_action"] = ["collect"]
+    meta_any["expected_reply_type"] = [reply_type]
+    if reply_type == "service_choice":
+        meta_any["expected_reply_reason"] = ["collect:service"]
+    else:
+        meta_any.pop("expected_reply_reason", None)
+    expectations["meta_any"] = meta_any
+
+    trace_contains = []
+    for entry in list(expectations.get("trace_contains") or []):
+        normalized_entry = dict(entry)
+        if normalized_entry.get("stage") == "question_contract":
+            normalized_entry["expected_reply_type"] = reply_type
+            if reply_type == "service_choice":
+                normalized_entry["reason"] = "collect:service"
+            else:
+                normalized_entry.pop("reason", None)
+        trace_contains.append(normalized_entry)
+    question_contract_trace = {
+        "stage": "question_contract",
+        "expected_reply_type": reply_type,
+    }
+    if reply_type == "service_choice":
+        question_contract_trace["reason"] = "collect:service"
+    if question_contract_trace not in trace_contains:
+        trace_contains.append(question_contract_trace)
+    expectations["trace_contains"] = trace_contains
+    return expectations
+
+
+def _llm_quality_strip_pending_question_meta_expectations(expectations, tag_set):
+    if not isinstance(expectations, dict):
+        return expectations
+    pending_question_tags = {
+        "ask_about_requested_slot",
+        "slot_constraint",
+        "slot_compare",
+        "mixed_fill_plus_question",
+    }
+    if not (tag_set & pending_question_tags):
+        return expectations
+    for key in ("meta", "meta_any", "meta_contains"):
+        mapping = expectations.get(key)
+        if not isinstance(mapping, dict):
+            continue
+        cleaned = dict(mapping)
+        cleaned.pop("pending_question_act", None)
+        cleaned.pop("pending_question_interaction", None)
+        cleaned.pop("pending_question_owner", None)
+        if cleaned:
+            expectations[key] = cleaned
+        else:
+            expectations.pop(key, None)
+    return expectations
+
+
 def _llm_quality_extract_expectations(turn):
     def _normalize_mapping(value):
         helper = globals().get("_llm_quality_normalize_expect_mapping")
@@ -5651,51 +5894,8 @@ def _llm_quality_extract_expectations(turn):
         compiled = compiler(normalized)
         if isinstance(compiled, dict):
             normalized = compiled
-    booking_reply_types = globals().get(
-        "CHAOS_BOOKING_REPLY_TYPES",
-        {"service_choice", "time", "name"},
-    )
-    if (
-        "booking" in tag_set
-        and not tag_set & {"handoff", "human", "pending", "cancel", "reschedule", "check_booking", "confirm"}
-        and normalized.get("reply_type") == "service_choice"
-        and normalized.get("reply_type") in booking_reply_types
-        and normalized.get("state") not in {"pending", "manager_active"}
-    ):
-        normalized["action"] = "booking_prompt"
-        normalized["expected_reply"] = True
-
-        meta = dict(normalized.get("meta") or {})
-        meta["action"] = "booking_prompt"
-        meta["source"] = "llm_policy_core"
-        meta["tool_action"] = "collect"
-        meta["expected_reply_type"] = "service_choice"
-        meta["expected_reply_reason"] = "booking_prompt"
-        normalized["meta"] = meta
-
-        meta_any = dict(normalized.get("meta_any") or {})
-        meta_any["action"] = ["booking_prompt"]
-        meta_any["source"] = ["llm_policy_core"]
-        meta_any["tool_action"] = ["collect"]
-        meta_any["expected_reply_type"] = ["service_choice"]
-        meta_any["expected_reply_reason"] = ["booking_prompt"]
-        normalized["meta_any"] = meta_any
-
-        trace_contains = []
-        for entry in list(normalized.get("trace_contains") or []):
-            normalized_entry = dict(entry)
-            if normalized_entry.get("stage") == "question_contract":
-                normalized_entry["expected_reply_type"] = "service_choice"
-                normalized_entry["reason"] = "booking_prompt"
-            trace_contains.append(normalized_entry)
-        question_contract_trace = {
-            "stage": "question_contract",
-            "expected_reply_type": "service_choice",
-            "reason": "booking_prompt",
-        }
-        if question_contract_trace not in trace_contains:
-            trace_contains.append(question_contract_trace)
-        normalized["trace_contains"] = trace_contains
+    normalized = _llm_quality_apply_booking_collect_expectations(normalized, tag_set)
+    normalized = _llm_quality_strip_pending_question_meta_expectations(normalized, tag_set)
     return normalized
 
 
@@ -7079,7 +7279,12 @@ def _llm_quality_load_dialogs_from_file(path):
         return None, None, "scenario file has no valid dialogs with turns"
     if dropped:
         warnings["scenario_file"] = [f"dropped_invalid_dialogs={dropped}"]
-    return normalized, warnings, None
+    materialized_dialogs, materialization_warnings = _llm_quality_materialize_file_dialog_contracts(
+        normalized
+    )
+    if isinstance(materialization_warnings, dict):
+        warnings.update(materialization_warnings)
+    return materialized_dialogs, warnings, None
 
 
 def _llm_quality_top_failure_reasons(failure_counts, limit=3):
@@ -12753,6 +12958,7 @@ def _llm_quality_build_tool_evidence_status(
     calendar_hook_events = _as_int(hook_by_action.get("calendar"))
     confirm_hook_events = _as_int(hook_by_action.get("confirm"))
     calendar_hook_candidates = _as_int(required_hook_by_action.get("calendar"))
+    confirm_hook_candidates = _as_int(required_hook_by_action.get("confirm"))
     booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
     booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
     booking_confirm_actions = _as_int(actions.get("booking_confirm"))
@@ -12811,6 +13017,12 @@ def _llm_quality_build_tool_evidence_status(
         and require_calendar
         and calendar_hook_candidates > 0
     )
+    require_confirm_hook = (
+        require_hooks
+        and hooks_mode == "auto"
+        and require_confirm
+        and confirm_hook_candidates > 0
+    )
 
     reasons = []
     if policy == "strict" and hooks_mode != "auto":
@@ -12825,7 +13037,7 @@ def _llm_quality_build_tool_evidence_status(
         reasons.append("confirm_evidence_missing")
     if require_calendar_hook and calendar_hook_events <= 0:
         reasons.append("calendar_hook_missing")
-    if require_hooks and hooks_mode == "auto" and require_confirm and confirm_hook_events <= 0:
+    if require_confirm_hook and confirm_hook_events <= 0:
         reasons.append("confirm_hook_missing")
 
     return {
@@ -12838,6 +13050,7 @@ def _llm_quality_build_tool_evidence_status(
             "confirm": require_confirm,
             "hooks": require_hooks,
             "calendar_hook": require_calendar_hook,
+            "confirm_hook": require_confirm_hook,
             "hooks_mode": hooks_mode,
         },
         "counts": {
@@ -12850,6 +13063,7 @@ def _llm_quality_build_tool_evidence_status(
             "calendar_hook_events": calendar_hook_events,
             "confirm_hook_events": confirm_hook_events,
             "calendar_hook_candidates": calendar_hook_candidates,
+            "confirm_hook_candidates": confirm_hook_candidates,
             "check_booking_prompt_actions": check_booking_prompt_actions,
             "check_booking_reference_collect_turns": check_booking_reference_collect_turns,
             "booking_commit_trace_events": booking_commit_trace_events,
@@ -18091,6 +18305,46 @@ def _send_webhook_payload_with_retry(url, payload, secret, timeout, retry_count,
     return status, body, error, attempts
 
 
+def _send_manager_telegram_action_with_retry(
+    *,
+    base_url,
+    telegram_chat_id,
+    manager_id,
+    action,
+    handover_id,
+    topic_id,
+    rng,
+    timeout,
+    retry_count,
+    retry_backoff,
+):
+    if not telegram_chat_id:
+        return None, "", "telegram_chat_id_missing", 0
+    payload = {
+        "update_id": rng.randint(100000, 999999),
+        "callback_query": {
+            "id": f"sim-{uuid.uuid4().hex[:10]}",
+            "from": {"id": manager_id, "is_bot": False, "first_name": "Sim"},
+            "data": f"{action}_{handover_id}",
+            "message": {
+                "message_id": rng.randint(1, 99999),
+                "date": int(time.time()),
+                "chat": {"id": telegram_chat_id, "type": "group"},
+            },
+        },
+    }
+    if topic_id:
+        payload["callback_query"]["message"]["message_thread_id"] = topic_id
+    return _send_webhook_payload_with_retry(
+        f"{base_url}/telegram-webhook",
+        payload,
+        None,
+        timeout,
+        retry_count,
+        retry_backoff,
+    )
+
+
 def _chaos_preflight(base_url, timeout):
     checks = {}
     endpoints = {
@@ -19681,25 +19935,19 @@ def _run_llm_quality(args):
         return True, None
 
     def _send_telegram_action(action, handover_id, conv_meta):
-        if not telegram_chat_id:
-            return None, "", "telegram_chat_id_missing"
         topic_id = (conv_meta or {}).get("telegram_topic_id")
-        payload = {
-            "update_id": rng.randint(100000, 999999),
-            "callback_query": {
-                "id": f"sim-{uuid.uuid4().hex[:10]}",
-                "from": {"id": manager_id, "is_bot": False, "first_name": "Sim"},
-                "data": f"{action}_{handover_id}",
-                "message": {
-                    "message_id": rng.randint(1, 99999),
-                    "date": int(time.time()),
-                    "chat": {"id": telegram_chat_id, "type": "group"},
-                },
-            },
-        }
-        if topic_id:
-            payload["callback_query"]["message"]["message_thread_id"] = topic_id
-        return _send_webhook_payload(f"{base_url}/telegram-webhook", payload, None, args.timeout)
+        return _send_manager_telegram_action_with_retry(
+            base_url=base_url,
+            telegram_chat_id=telegram_chat_id,
+            manager_id=manager_id,
+            action=action,
+            handover_id=handover_id,
+            topic_id=topic_id,
+            rng=rng,
+            timeout=args.timeout,
+            retry_count=args.retry_count,
+            retry_backoff=args.retry_backoff,
+        )
 
     def _send_console_action(action, handover_id):
         if args.console_mode == "skip":
@@ -19726,10 +19974,13 @@ def _run_llm_quality(args):
             expected_state, expected_status = _llm_quality_expected_manager_state(
                 action, state_before
             )
+            attempts = 1
             if args.manager_channel == "console":
                 status, body, error = _send_console_action(action, handover_id)
             else:
-                status, body, error = _send_telegram_action(action, handover_id, conv_meta)
+                status, body, error, attempts = _send_telegram_action(
+                    action, handover_id, conv_meta
+                )
             if error and error not in {"console_skipped"}:
                 manager_stats["errors"] += 1
             if args.manager_wait and args.manager_wait > 0:
@@ -19755,6 +20006,7 @@ def _run_llm_quality(args):
                 manager_stats["actions_ok"] += 1
             action_record = {
                 "action": action,
+                "attempts": attempts,
                 "status": status,
                 "error": error,
                 "response": (body or "")[:200] if body else None,
@@ -21008,6 +21260,7 @@ def _run_llm_quality(args):
                     judge_result=judge_result,
                     meta=meta,
                     turn_tags=turn_tags,
+                    turn_kind=turn_kind,
                     expected_info_sections=expected_info_sections,
                     actual_info_sections=info_sections,
                     actual_info_intents=info_intents,
@@ -21159,6 +21412,10 @@ def _run_llm_quality(args):
                     if send_calendar_hook:
                         required_by_action["calendar"] = (
                             required_by_action.get("calendar", 0) + 1
+                        )
+                    if tool_signals.get("confirm") and "confirm" not in turn_tags:
+                        required_by_action["confirm"] = (
+                            required_by_action.get("confirm", 0) + 1
                         )
                     for hook in tool_hook_results:
                         if not isinstance(hook, dict):

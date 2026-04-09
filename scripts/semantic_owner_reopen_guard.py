@@ -22,22 +22,22 @@ def _parse_module(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return node
-    raise SystemExit(f"ERROR: function not found: {name}")
+    return None
 
 
-def _return_policy_decision_call(
+def _return_named_call(
     func: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> ast.Call | None:
+) -> tuple[str | None, ast.Call | None]:
     for node in ast.walk(func):
         if isinstance(node, ast.Return) and isinstance(node.value, ast.Call):
             call = node.value
-            if isinstance(call.func, ast.Name) and call.func.id == "PolicyDecision":
-                return call
-    return None
+            if isinstance(call.func, ast.Name):
+                return call.func.id, call
+    return None, None
 
 
 def _keyword_node(call: ast.Call, key: str) -> ast.AST | None:
@@ -76,32 +76,33 @@ def collect_errors(root: Path = ROOT) -> list[str]:
 
     planner_path = root / config["planner_file"]
     planner_tree = _parse_module(planner_path)
-    for builder_name in config.get("planner_builders") or []:
+    for builder_name in config.get("removed_planner_builders") or []:
         func = _find_function(planner_tree, builder_name)
-        call = _return_policy_decision_call(func)
-        if call is None:
-            errors.append(f"{planner_path.relative_to(root)}:{builder_name} must return PolicyDecision")
+        if func is not None:
+            errors.append(f"{planner_path.relative_to(root)}:{builder_name} must stay removed")
+
+    for builder_name in config.get("planner_signal_builders") or []:
+        func = _find_function(planner_tree, builder_name)
+        if func is None:
+            errors.append(f"{planner_path.relative_to(root)}:{builder_name} must exist")
             continue
-        source_node = _keyword_node(call, "source")
-        if not (
-            isinstance(source_node, ast.Constant)
-            and source_node.value == "planner_control"
-        ):
-            errors.append(f"{planner_path.relative_to(root)}:{builder_name} must set source='planner_control'")
-        intent_node = _keyword_node(call, "intent")
-        if not (
-            isinstance(intent_node, ast.Name)
-            and intent_node.id == "_SYSTEM_CONTROL_INTENT"
-        ):
-            errors.append(f"{planner_path.relative_to(root)}:{builder_name} must set intent=_SYSTEM_CONTROL_INTENT")
-        meta_keys = _dict_literal_keys(_keyword_node(call, "meta"))
-        for required_key in ("control_label", "synthetic_policy_decision"):
-            if required_key not in meta_keys:
-                errors.append(f"{planner_path.relative_to(root)}:{builder_name} meta missing {required_key}")
+        callee_name, call = _return_named_call(func)
+        if call is None or callee_name != "PlannerBoundarySignal":
+            errors.append(
+                f"{planner_path.relative_to(root)}:{builder_name} must return PlannerBoundarySignal"
+            )
+            continue
+        for required_key in ("decision", "reason_code", "control_label"):
+            if _keyword_node(call, required_key) is None:
+                errors.append(
+                    f"{planner_path.relative_to(root)}:{builder_name} missing keyword {required_key}"
+                )
 
     runtime_path = root / config["runtime_file"]
     runtime_tree = _parse_module(runtime_path)
     runtime_func = _find_function(runtime_tree, config["runtime_control_function"])
+    if runtime_func is None:
+        return [f"{runtime_path.relative_to(root)}:{config['runtime_control_function']} missing"]
     decision_meta_keys = _assigned_dict_keys(runtime_func, "decision_meta")
     for required_key in config.get("runtime_control_decision_meta_keys_required") or []:
         if required_key not in decision_meta_keys:

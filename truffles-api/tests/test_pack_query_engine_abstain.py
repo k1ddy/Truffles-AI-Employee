@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from uuid import uuid4
 
+from app.services import pack_runtime_compat as compat_runtime
 from app.services import pack_runtime_service as runtime
 from app.services.knowledge_runtime import RuntimeTruth, set_runtime_truth
 from app.services.pack_runtime_types import PackDecision
@@ -73,8 +74,8 @@ def test_pack_query_engine_abstain_strict_branch_filter_blocks_fallback():
     }
 
     with _runtime_truth(truth, slug="demo_salon", branch_id=branch_id):
-        match = runtime.semantic_service_match("маникюр", "demo_salon")
-        hint = runtime.get_pack_service_hint("маникюр", client_slug="demo_salon")
+        match = compat_runtime.semantic_service_match("маникюр", "demo_salon")
+        hint = compat_runtime.get_pack_service_hint("маникюр", client_slug="demo_salon")
 
     assert match is None
     assert hint is None
@@ -92,8 +93,8 @@ def test_pack_query_engine_abstain_tenant_filter_blocks_cross_slug_resolution():
     }
 
     with _runtime_truth(truth, slug="clinic_pack"):
-        match = runtime.semantic_service_match("чистка зубов", "clinic_pack")
-        hint = runtime.get_pack_service_hint("чистка зубов", client_slug="clinic_pack")
+        match = compat_runtime.semantic_service_match("чистка зубов", "clinic_pack")
+        hint = compat_runtime.get_pack_service_hint("чистка зубов", client_slug="clinic_pack")
 
     assert match is None
     assert hint is None

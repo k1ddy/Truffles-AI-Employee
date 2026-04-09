@@ -1,4 +1,4 @@
-version: 2026-03-30.v1
+version: 2026-04-01.v2
 hotspots:
   - path: truffles-api/app/core/boundary_validator.py
     active_waiver: null
@@ -33,10 +33,12 @@ hotspots:
           - pending_question_contract
       - symbol: _BOUNDARY_OVERRIDE_DISALLOWED_META_FIELDS
         exact_allowlist:
+          - activate_handoff
           - semantic_contract
           - semantic_frame
           - semantic_state
           - pending_question_contract
+          - reply_kind
           - tool_args
           - tool_execution_projection
           - entity_refs
@@ -59,8 +61,7 @@ hotspots:
       exact_allowlist:
         - realize
     tracked_override_meta_get_keys:
-      exact_allowlist:
-        - reply_kind
+      exact_allowlist: []
   - path: truffles-api/app/core/turn_executor.py
     active_waiver: null
     tracked_function_names:
@@ -92,3 +93,14 @@ repo_callsite_contracts:
       - build_block_boundary_artifact_from_request
       - build_degrade_boundary_artifact_from_request
     exact_allowlist: []
+  - search_roots:
+      - truffles-api/app
+    call_names:
+      - _prepare_pending_handoff_resume_boundary_restore
+      - _prepare_resolved_handoff_resume_boundary_restore
+      - _resolve_resolved_handoff_resume_boundary_restore
+      - _resolve_pending_resume_boundary_activation
+      - _resolve_pending_resume_session_memory_policy
+      - _resolve_pending_timeout_resume_boundary_payload
+    exact_allowlist:
+      - truffles-api/app/services/state_service.py

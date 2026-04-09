@@ -338,13 +338,40 @@ async def test_run_incident_state_job_resolved_with_evidence_adds_metadata():
 
 
 @pytest.mark.asyncio
+async def test_run_outbox_process_job_dry_run_uses_shared_runtime_preview_helper(monkeypatch):
+    db = Mock()
+    context = _build_context()
+    captured: dict[str, object] = {}
+
+    async def _fake_preview(_db, *, request):
+        captured["request"] = request
+        return {"mode": "dry_run", "counts": {"pending": 2}, "archive_preview": {"enabled": False}}
+
+    monkeypatch.setattr(console_router, "preview_scoped_outbox_process", _fake_preview)
+
+    result = await console_router._run_outbox_process_job(
+        db,
+        context=context,
+        mode="dry_run",
+        params={"limit": 7, "include_without_conversation": False},
+    )
+
+    request = captured["request"]
+    assert isinstance(request, console_router.ScopedOutboxProcessRequest)
+    assert request.client_id == context.client.id
+    assert request.limit == 7
+    assert request.include_without_conversation is False
+    assert result == {"mode": "dry_run", "counts": {"pending": 2}, "archive_preview": {"enabled": False}}
+
+
+@pytest.mark.asyncio
 async def test_run_outbox_process_job_execute_supports_archive_and_single_message_flag(monkeypatch):
     db = Mock()
     context = _build_context()
     captured: dict[str, object] = {}
 
-    async def _fake_run_scoped(_db, **kwargs):
-        captured.update(kwargs)
+    async def _fake_run_scoped(_db, *, request):
+        captured["request"] = request
         return {"processed": 0, "results": {"processed": 0, "failed": 0}, "archive": {"matched": 3, "archived": 3}}
 
     monkeypatch.setattr(console_router, "run_scoped_outbox_process", _fake_run_scoped)
@@ -364,15 +391,17 @@ async def test_run_outbox_process_job_execute_supports_archive_and_single_messag
         },
     )
 
+    request = captured["request"]
+    assert isinstance(request, console_router.ScopedOutboxProcessRequest)
     assert result["processed"] == 0
     assert result["results"]["processed"] == 0
     assert result["archive"] == {"matched": 3, "archived": 3}
-    assert captured["include_without_conversation"] is False
-    assert captured["client_id"] == context.client.id
-    assert captured["allowed_branch_ids"] is None
-    assert captured["archive_pending_older_than_hours"] == 24
-    assert captured["archive_pending_limit"] == 7
-    assert captured["archive_pending_without_conversation_only"] is True
+    assert request.include_without_conversation is False
+    assert request.client_id == context.client.id
+    assert request.allowed_branch_ids is None
+    assert request.archive_pending_older_than_hours == 24
+    assert request.archive_pending_limit == 7
+    assert request.archive_pending_without_conversation_only is True
 
 
 @pytest.mark.asyncio
@@ -381,8 +410,8 @@ async def test_run_outbox_process_job_execute_uses_shared_runtime_process_helper
     context = _build_context()
     captured: dict[str, object] = {}
 
-    async def _fake_run_scoped(_db, **kwargs):
-        captured.update(kwargs)
+    async def _fake_run_scoped(_db, *, request):
+        captured["request"] = request
         return {"processed": 1, "results": {"claimed": 1, "sent": 1, "failed": 0, "retry_scheduled": 0}}
 
     monkeypatch.setattr(console_router, "run_scoped_outbox_process", _fake_run_scoped)
@@ -394,7 +423,8 @@ async def test_run_outbox_process_job_execute_uses_shared_runtime_process_helper
         params={},
     )
 
+    request = captured["request"]
     assert result["processed"] == 1
     assert result["results"]["sent"] == 1
-    assert captured["client_id"] == context.client.id
-    assert captured["allowed_branch_ids"] is None
+    assert request.client_id == context.client.id
+    assert request.allowed_branch_ids is None

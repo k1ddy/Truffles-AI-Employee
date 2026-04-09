@@ -91,6 +91,69 @@ class OutboxWorkerCycleResult:
     processed_batches: int
 
 
+@dataclass(frozen=True, kw_only=True)
+class ScopedOutboxProcessRequest:
+    client_id: UUID
+    allowed_branch_ids: tuple[UUID, ...] | None
+    limit: int
+    idle_seconds: int
+    max_wait_seconds: int
+    include_without_conversation: bool = True
+    archive_pending_older_than_hours: int = 0
+    archive_pending_limit: int | None = None
+    archive_pending_without_conversation_only: bool = True
+
+    @classmethod
+    def from_optional(
+        cls,
+        *,
+        client_id: UUID,
+        allowed_branch_ids: list[UUID] | tuple[UUID, ...] | None,
+        limit: int | None = None,
+        idle_seconds: int | None = None,
+        max_wait_seconds: int | None = None,
+        include_without_conversation: bool | None = None,
+        archive_pending_older_than_hours: int | None = None,
+        archive_pending_limit: int | None = None,
+        archive_pending_without_conversation_only: bool | None = None,
+        settings: OutboxProcessSettings | None = None,
+    ) -> "ScopedOutboxProcessRequest":
+        effective_settings = settings or load_outbox_process_settings()
+        effective_limit = effective_settings.limit if limit is None else limit
+        effective_idle_seconds = effective_settings.idle_seconds if idle_seconds is None else idle_seconds
+        effective_max_wait_seconds = (
+            effective_settings.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
+        )
+        effective_include_without_conversation = (
+            True if include_without_conversation is None else include_without_conversation
+        )
+        effective_archive_pending_older_than_hours = (
+            0 if archive_pending_older_than_hours is None else archive_pending_older_than_hours
+        )
+        effective_archive_pending_limit = (
+            effective_limit if archive_pending_limit is None else archive_pending_limit
+        )
+        effective_archive_pending_without_conversation_only = (
+            True
+            if archive_pending_without_conversation_only is None
+            else archive_pending_without_conversation_only
+        )
+        effective_branch_ids = None
+        if allowed_branch_ids is not None:
+            effective_branch_ids = tuple(allowed_branch_ids)
+        return cls(
+            client_id=client_id,
+            allowed_branch_ids=effective_branch_ids,
+            limit=effective_limit,
+            idle_seconds=effective_idle_seconds,
+            max_wait_seconds=effective_max_wait_seconds,
+            include_without_conversation=effective_include_without_conversation,
+            archive_pending_older_than_hours=effective_archive_pending_older_than_hours,
+            archive_pending_limit=effective_archive_pending_limit,
+            archive_pending_without_conversation_only=effective_archive_pending_without_conversation_only,
+        )
+
+
 def load_outbox_process_settings() -> OutboxProcessSettings:
     max_wait_seconds = max(int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10"))), 0)
     return OutboxProcessSettings(
@@ -243,36 +306,122 @@ async def run_default_outbox_process(
     return results
 
 
+def _query_scoped_outbox_message_rows(
+    db: Session,
+    *,
+    request: ScopedOutboxProcessRequest,
+    status: str,
+) -> list[OutboxMessage]:
+    query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == request.client_id,
+        OutboxMessage.status == status,
+    )
+    if request.allowed_branch_ids is not None:
+        if not request.allowed_branch_ids:
+            return []
+        query = query.filter(OutboxMessage.branch_id.in_(request.allowed_branch_ids))
+    return query.all()
+
+
+async def preview_scoped_outbox_process(
+    db: Session,
+    *,
+    request: ScopedOutboxProcessRequest,
+) -> dict[str, int | bool | str | dict[str, object] | dict[str, int] | dict[str, list[str]]]:
+    pending_rows = _query_scoped_outbox_message_rows(db, request=request, status="PENDING")
+    pending = len(pending_rows)
+    processing = len(_query_scoped_outbox_message_rows(db, request=request, status="PROCESSING"))
+    failed = len(_query_scoped_outbox_message_rows(db, request=request, status="FAILED"))
+    pending_with_conversation = sum(1 for row in pending_rows if row.conversation_id is not None)
+    pending_without_conversation = pending - pending_with_conversation
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    pending_older_than_7d = sum(
+        1 for row in pending_rows if row.created_at and row.created_at <= stale_cutoff
+    )
+    archive_preview: dict[str, object] = {"enabled": False}
+    effective_archive_limit = request.archive_pending_limit or request.limit
+    if request.archive_pending_older_than_hours > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=request.archive_pending_older_than_hours)
+        query = db.query(OutboxMessage).filter(
+            OutboxMessage.client_id == request.client_id,
+            OutboxMessage.status == "PENDING",
+            OutboxMessage.created_at <= cutoff,
+        )
+        if request.archive_pending_without_conversation_only:
+            query = query.filter(OutboxMessage.conversation_id.is_(None))
+        if request.allowed_branch_ids is not None:
+            if not request.allowed_branch_ids:
+                archive_preview = {
+                    "enabled": True,
+                    "candidates_total": 0,
+                    "candidates_capped": 0,
+                    "older_than_hours": request.archive_pending_older_than_hours,
+                    "limit": effective_archive_limit,
+                    "only_without_conversation": request.archive_pending_without_conversation_only,
+                }
+            else:
+                query = query.filter(OutboxMessage.branch_id.in_(request.allowed_branch_ids))
+        if request.allowed_branch_ids is None or request.allowed_branch_ids:
+            total = query.count()
+            oldest_row = query.order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc()).first()
+            newest_row = query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc()).first()
+            archive_preview = {
+                "enabled": True,
+                "candidates_total": total,
+                "candidates_capped": min(total, effective_archive_limit),
+                "older_than_hours": request.archive_pending_older_than_hours,
+                "limit": effective_archive_limit,
+                "only_without_conversation": request.archive_pending_without_conversation_only,
+                "oldest_created_at": (
+                    oldest_row.created_at.isoformat() if oldest_row and oldest_row.created_at else None
+                ),
+                "newest_created_at": (
+                    newest_row.created_at.isoformat() if newest_row and newest_row.created_at else None
+                ),
+            }
+
+    return {
+        "mode": "dry_run",
+        "scope": {
+            "client_id": str(request.client_id),
+            "branch_ids": [str(branch_id) for branch_id in (request.allowed_branch_ids or ())],
+        },
+        "config": {
+            "limit": request.limit,
+            "idle_seconds": request.idle_seconds,
+            "max_wait_seconds": request.max_wait_seconds,
+            "include_without_conversation": request.include_without_conversation,
+        },
+        "counts": {
+            "pending": pending,
+            "processing": processing,
+            "failed": failed,
+            "pending_with_conversation": pending_with_conversation,
+            "pending_without_conversation": pending_without_conversation,
+            "pending_older_than_7d": pending_older_than_7d,
+        },
+        "archive_preview": archive_preview,
+    }
+
+
 async def run_scoped_outbox_process(
     db: Session,
     *,
-    client_id: UUID,
-    allowed_branch_ids: list[UUID] | None,
-    limit: int | None = None,
-    idle_seconds: int | None = None,
-    max_wait_seconds: int | None = None,
-    include_without_conversation: bool = True,
-    archive_pending_older_than_hours: int = 0,
-    archive_pending_limit: int | None = None,
-    archive_pending_without_conversation_only: bool = True,
+    request: ScopedOutboxProcessRequest,
 ) -> dict[str, int | dict[str, int] | dict[str, object]]:
     settings = load_outbox_process_settings()
-    effective_limit = settings.limit if limit is None else limit
-    effective_idle_seconds = settings.idle_seconds if idle_seconds is None else idle_seconds
-    effective_max_wait_seconds = settings.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-    effective_archive_limit = archive_pending_limit if archive_pending_limit is not None else effective_limit
 
     archive_result = None
-    if archive_pending_older_than_hours > 0:
-        archive_reason = f"archived_pending:older_than_{archive_pending_older_than_hours}h"
+    if request.archive_pending_older_than_hours > 0:
+        archive_reason = f"archived_pending:older_than_{request.archive_pending_older_than_hours}h"
         archive_result = archive_pending_outbox(
             db,
-            client_id=client_id,
-            older_than_seconds=archive_pending_older_than_hours * 3600,
-            limit=effective_archive_limit,
+            client_id=request.client_id,
+            older_than_seconds=request.archive_pending_older_than_hours * 3600,
+            limit=request.archive_pending_limit or request.limit,
             reason=archive_reason,
-            branch_ids=allowed_branch_ids,
-            only_without_conversation=archive_pending_without_conversation_only,
+            branch_ids=list(request.allowed_branch_ids) if request.allowed_branch_ids is not None else None,
+            only_without_conversation=request.archive_pending_without_conversation_only,
         )
 
     claimed_rows, results = await run_canonical_outbox_process(
@@ -280,12 +429,12 @@ async def run_scoped_outbox_process(
         settings=settings,
         claim_rows=lambda: claim_scoped_outbox_rows(
             db,
-            client_id=client_id,
-            allowed_branch_ids=allowed_branch_ids,
-            limit=effective_limit,
-            idle_seconds=effective_idle_seconds,
-            max_wait_seconds=effective_max_wait_seconds,
-            include_without_conversation=include_without_conversation,
+            client_id=request.client_id,
+            allowed_branch_ids=list(request.allowed_branch_ids) if request.allowed_branch_ids is not None else None,
+            limit=request.limit,
+            idle_seconds=request.idle_seconds,
+            max_wait_seconds=request.max_wait_seconds,
+            include_without_conversation=request.include_without_conversation,
         ),
     )
     if not claimed_rows:
@@ -2093,17 +2242,11 @@ async def _process_outbox_rows(
 
 
 __all__ = [
-    "_classify_transport_degradation",
-    "_coerce_outbox_created_at",
-    "_get_outbox_window_merge_seconds",
-    "_handle_enqueue_only_accept",
-    "_prepare_skip_persist",
-    "_process_outbox_rows",
-    "_split_outbox_batches",
-    "claim_scoped_outbox_rows",
+    "OutboxProcessSettings",
+    "OutboxWorkerCycleResult",
+    "ScopedOutboxProcessRequest",
     "load_outbox_process_settings",
-    "process_claimed_outbox_rows",
-    "run_canonical_outbox_process",
+    "preview_scoped_outbox_process",
     "run_default_outbox_process",
     "run_outbox_worker_cycle",
     "run_scoped_outbox_process",

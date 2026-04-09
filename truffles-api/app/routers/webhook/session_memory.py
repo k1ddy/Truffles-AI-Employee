@@ -1,4 +1,4 @@
-"""Session memory helpers for tracking question/answer context."""
+"""Adapter-only session-memory helpers for reset/control-turn compatibility."""
 
 from __future__ import annotations
 

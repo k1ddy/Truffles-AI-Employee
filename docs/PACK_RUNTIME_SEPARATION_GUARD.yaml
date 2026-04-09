@@ -1,46 +1,61 @@
-version: 2026-03-31.v1
+version: 2026-04-01.v1
 hotspots:
-  - path: truffles-api/app/services/pack_runtime_service.py
-    active_waiver: null
-    forbidden_import_modules:
-      - app.services.pack_runtime_default
-    forbidden_function_defs:
-      - get_pack_adapter
-    tracked_function_names:
-      name_patterns:
-        - '^build_runtime_service_.*$'
-        - '^get_pack_decision$'
-        - '^get_pack_price_item$'
-        - '^get_pack_price_reply$'
-        - '^get_pack_service_decision$'
-        - '^get_pack_service_hint$'
-      exact_allowlist:
-        - build_runtime_service_duration_reply
-        - build_runtime_service_not_found_reply
-        - build_runtime_service_presence_reply_for_name
-        - build_runtime_service_truth_reply
-        - get_pack_decision
-        - get_pack_price_item
-        - get_pack_price_reply
-        - get_pack_service_decision
-        - get_pack_service_hint
-  - path: truffles-api/app/services/tool_registry_service.py
-    active_waiver: null
-    forbidden_import_names:
-      - get_pack_adapter
-    forbidden_call_names:
-      - get_pack_adapter
-      - _call_pack_adapter
-      - _find_best_price_item
-      - _format_price_reply
-      - _format_service_duration_reply
-      - _format_service_not_found_reply
-      - _format_service_presence_reply_for_name
-      - _format_service_reply
+- path: truffles-api/app/services/pack_runtime_service.py
+  active_waiver: null
+  forbidden_import_modules:
+  - app.services.pack_runtime_neutral_adapter
+  forbidden_function_defs:
+  - get_pack_adapter
+  tracked_function_names:
+    name_patterns:
+    - ^build_runtime_service_.*$
+    - ^get_pack_.*$
+    exact_allowlist:
+    - build_runtime_service_duration_reply
+    - build_runtime_service_not_found_reply
+    - build_runtime_service_presence_reply_for_name
+    - build_runtime_service_truth_reply
+    - get_pack_runtime
+- path: truffles-api/app/services/tool_registry_service.py
+  active_waiver: null
+  forbidden_import_names:
+  - _detect_promotion_intent
+  - _has_duration_signal
+  - _has_parking_signal
+  - _has_price_signal
+  - _match_service
+  - _normalize_text
+  - build_info_combined_reply
+  - build_runtime_service_duration_reply
+  - build_runtime_service_not_found_reply
+  - build_runtime_service_presence_reply_for_name
+  - build_runtime_service_truth_reply
+  - format_reply_from_truth
+  - get_pack_adapter
+  - get_pack_price_item
+  - get_pack_price_reply
+  - get_system_lexicon_list
+  - load_yaml_truth
+  forbidden_call_names:
+  - get_pack_adapter
+  - _call_pack_adapter
+  - _find_best_price_item
+  - _format_price_reply
+  - _format_service_duration_reply
+  - _format_service_not_found_reply
+  - _format_service_presence_reply_for_name
+  - _format_service_reply
+- path: truffles-api/app/core/turn_executor.py
+  active_waiver: null
+  forbidden_import_names:
+  - build_master_reply_from_pack
+  - format_reply_from_truth
+  - get_pack_decision
+  - resolve_master_intent
 repo_callsite_contracts:
-  - search_roots:
-      - truffles-api/app
-    call_names:
-      - get_pack_adapter
-      - _call_pack_adapter
-    exact_allowlist: []
+- search_roots:
+  - truffles-api/app
+  call_names:
+  - get_pack_adapter
+  - _call_pack_adapter
+  exact_allowlist: []

@@ -3,7 +3,7 @@
   "status": "machine_readable_system_reproof_base",
   "current_practical_truth": "r35f",
   "external_packet_status": "ready_for_external_handoff",
-  "active_block": "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof",
+  "active_block": "Consultant Core Block H.1B — File Replay Scenario Contract Materialization",
   "mounted_runtime_topology": {
     "mounted_ingress_paths": [
       "truffles-api/app/main.py",
@@ -67,7 +67,13 @@
         "docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md",
         "docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml",
         "scripts/semantic_owner_reopen_guard.py",
-        "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py"
+        "truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py",
+        "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e5-owner-service-referent-grounding-a922.md",
+        "truffles-api/app/services/policy_context_snapshot_service.py",
+        "truffles-api/app/services/policy_prompt_snapshot_service.py",
+        "prompts/llm_policy_core.md",
+        "truffles-api/tests/test_intent.py",
+        "truffles-api/tests/test_consultant_core_runtime_contracts.py"
       ],
       "confidence": "high"
     },
@@ -228,7 +234,7 @@
       "current_truth_carriers": [
         "BoundaryOverride.reason_code / decision / preserve_fields",
         "BoundaryOverride.public_message",
-        "BoundaryOverride.meta.reply_kind / activate_handoff / degrade_stage",
+        "BoundaryOverride.meta.degrade_stage / executor_requested_handoff",
         "TurnResult.contract_status",
         "TurnOutcome.meta.reason_code / boundary_decision"
       ],
@@ -241,11 +247,12 @@
       "next_phase_required": "replay_and_human_audit_acceptance",
       "full_closure_phase": "continuity_boundary_pack_runtime_legacy_and_operational_reproof",
       "closure_criteria": [
-        "docs/BOUNDARY_DEGRADE_GUARD.yaml freezes the live boundary/degrade hotspot files, override-meta reads, and boundary-author callsites",
-        "degrade reply-kind forcing is narrowed to boundary-safe kinds only on the live path",
-        "planner:invalid_outcome is emitted through an explicit typed boundary override path instead of an implicit later fallback"
+        "docs/BOUNDARY_DEGRADE_GUARD.yaml freezes the live boundary/degrade hotspot files, override-meta reads, and stale boundary-helper caller proofs",
+        "boundary override meta no longer carries visible handoff or reply business-control keys on the live path",
+        "executor-requested handoff is realized through an explicit controlled-degrade HANDOFF decision instead of boundary meta minting handoff semantics"
       ],
       "evidence": [
+        "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-d-boundary-purification-a922.md",
         "docs/BOUNDARY_DEGRADE_GUARD.yaml",
         "docs/REPORTS/2026-03-30-consultant-core-boundary-degrade-constriction-a922.md",
         "docs/system_forensics/BOUNDARY_DEGRADE_AUDIT.md",
@@ -431,12 +438,17 @@
         "docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md",
         "docs/SYSTEM_REPROOF_GUARD.yaml",
         "scripts/system_reproof_guard.py",
-        "truffles-api/tests/architecture/test_system_reproof_guard.py"
+        "truffles-api/tests/architecture/test_system_reproof_guard.py",
+        "docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-g-operational-final-dedupe-a922.md",
+        "truffles-api/app/services/outbox_runtime_service.py",
+        "truffles-api/app/routers/console.py",
+        "truffles-api/tests/test_console_ops_jobs.py",
+        "truffles-api/tests/test_outbox_worker_settings.py"
       ],
       "confidence": "high"
     }
   ],
-  "scope_note": "Hot-path semantic owner remains reproven, and the adjacent continuity, boundary, pack/runtime, legacy, and operational claims are now reproven against live code repo-side. Acceptance remains a separate lane.",
+  "scope_note": "Hot-path semantic owner remains reproven, and the adjacent continuity, boundary, pack/runtime, legacy, and operational claims are now closed on the live-code runtime seam one block at a time. Final acceptance remains a separate lane.",
   "freeze_scope": {
     "policy": "Freeze the active semantic, continuity, fact-scope, boundary, legacy, shadow, and operational topology on the live-code reproof base while acceptance remains blocked pending replay and full human semantic audit.",
     "primary_semantic_owner_paths": [

@@ -91,24 +91,47 @@ def evaluate(root: Path, config: dict) -> list[str]:
             now=datetime.now(timezone.utc),
         )
 
-    if captured.get("tool_action") != expected_tool_action:
+    if captured:
         violations.append(
-            f"first fact-family reroute drifted: expected tool_action={expected_tool_action!r}, got {captured.get('tool_action')!r}"
+            "service-bound first fact-family turn reopened downstream semantic reroute; "
+            f"tool registry was invoked with {captured!r}"
         )
-    if captured.get("tool_args") != {}:
-        violations.append(f"first fact-family reroute must clear stale tool_args, got {captured.get('tool_args')!r}")
-    if captured.get("allowed_fact_refs") != expected_hours_refs:
+    if reroute_result.tool_action != "catalog.service_query":
         violations.append(
-            f"first fact-family reroute allowed_fact_refs drifted: expected {expected_hours_refs!r}, got {captured.get('allowed_fact_refs')!r}"
+            "service-bound first fact-family turn drifted: expected owner-selected "
+            f"tool_action='catalog.service_query', got {reroute_result.tool_action!r}"
+        )
+    if reroute_result.tool_decision != "fact_unresolved":
+        violations.append(
+            "service-bound first fact-family unresolved path drifted: expected "
+            f"tool_decision='fact_unresolved', got {reroute_result.tool_decision!r}"
+        )
+    if reroute_result.meta.get("fact_fallback_reason") != "fact_execution_unresolved":
+        violations.append(
+            "service-bound first fact-family unresolved meta drifted: expected "
+            "fact_fallback_reason='fact_execution_unresolved'"
         )
     projection = reroute_result.meta.get("tool_execution_projection") or {}
-    if projection.get("tool_action") != expected_tool_action:
-        violations.append(f"first fact-family projection drifted: expected tool_action={expected_tool_action!r}")
-    if projection.get("fact_family_cutover") != family_id:
-        violations.append(f"first fact-family projection missing family_id={family_id!r}")
-    if projection.get("fact_family_bundle_policy") != expected_bundle_policy:
+    if projection:
         violations.append(
-            f"first fact-family projection bundle policy drifted: expected {expected_bundle_policy!r}, got {projection.get('fact_family_bundle_policy')!r}"
+            "service-bound first fact-family turn must not synthesize a cutover projection once "
+            f"the owner already selected catalog.service_query; got {projection!r}"
+        )
+    if reroute_result.meta.get("fact_family_cutover") is not None:
+        violations.append(
+            "service-bound first fact-family turn must not stamp fact_family_cutover on the "
+            "owner-selected catalog.service_query path"
+        )
+    fact_contract = reroute_result.meta.get("fact_contract") or {}
+    fact_plan = fact_contract.get("plan") or {}
+    if fact_plan.get("selected_tool_or_workflow_ref") != "catalog.service_query":
+        violations.append(
+            "service-bound first fact-family plan drifted: expected "
+            "selected_tool_or_workflow_ref='catalog.service_query'"
+        )
+    if fact_plan.get("bundle_policy") != expected_bundle_policy:
+        violations.append(
+            f"service-bound first fact-family plan bundle policy drifted: expected {expected_bundle_policy!r}, got {fact_plan.get('bundle_policy')!r}"
         )
     if reroute_result.meta.get("fact_allowed_refs") != expected_hours_refs:
         violations.append(
@@ -161,7 +184,11 @@ def evaluate(root: Path, config: dict) -> list[str]:
             ),
         ),
         patch("app.services.pack_runtime_service.format_reply_from_truth", _format_reply_from_truth),
-        patch("app.services.pack_runtime_service.get_pack_decision", _get_pack_decision),
+        patch(
+            "app.services.pack_runtime_service.get_pack_decision",
+            _get_pack_decision,
+            create=True,
+        ),
     ):
         bypass_result = TurnExecutor().execute(
             bypass_decision,
@@ -181,13 +208,13 @@ def evaluate(root: Path, config: dict) -> list[str]:
         violations.append(
             f"first fact-family unresolved path drifted: expected tool_action={expected_tool_action!r}, got {bypass_result.tool_action!r}"
         )
-    if bypass_result.tool_decision != "fact_family_unresolved":
+    if bypass_result.tool_decision != "info_ref_unresolved":
         violations.append(
-            f"first fact-family unresolved decision drifted: expected 'fact_family_unresolved', got {bypass_result.tool_decision!r}"
+            f"first fact-family unresolved decision drifted: expected 'info_ref_unresolved', got {bypass_result.tool_decision!r}"
         )
-    if bypass_result.meta.get("fact_fallback_reason") != "first_fact_family_cutover_unresolved":
+    if bypass_result.meta.get("fact_fallback_reason") != "policy_info_unresolved":
         violations.append(
-            "first fact-family unresolved meta drifted: expected fact_fallback_reason='first_fact_family_cutover_unresolved'"
+            "first fact-family unresolved meta drifted: expected fact_fallback_reason='policy_info_unresolved'"
         )
     if bypass_result.meta.get("fact_allowed_refs") != expected_parking_refs:
         violations.append(
@@ -240,7 +267,11 @@ def evaluate(root: Path, config: dict) -> list[str]:
             ),
         ),
         patch("app.services.pack_runtime_service.format_reply_from_truth", _mixed_scope_format_reply),
-        patch("app.services.pack_runtime_service.get_pack_decision", _mixed_scope_pack_decision),
+        patch(
+            "app.services.pack_runtime_service.get_pack_decision",
+            _mixed_scope_pack_decision,
+            create=True,
+        ),
     ):
         mixed_scope_result = TurnExecutor().execute(
             mixed_scope_decision,

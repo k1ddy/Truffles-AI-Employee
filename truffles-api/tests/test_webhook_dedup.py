@@ -243,7 +243,6 @@ def test_handle_post_debounce_muted_state_gate_skips_muted_without_booking_signa
 
     monkeypatch.setattr(decision_router, "_coerce_batch_messages", lambda text, batch: [text])
     monkeypatch.setattr(guards_module, "is_opt_out_message", lambda _text: False)
-    monkeypatch.setattr(decision_router, "_evaluate_booking_signal", lambda *args, **kwargs: (False, None))
     monkeypatch.setattr(guards_module, "_get_conversation_context", lambda conversation: {})
     monkeypatch.setattr(guards_module, "_get_booking_context", lambda context: {})
     monkeypatch.setattr(guards_module, "_get_reengage_confirmation", lambda context: None)
@@ -277,3 +276,33 @@ def test_handle_post_debounce_muted_state_gate_skips_muted_without_booking_signa
     assert captured_trace["decision"] == "muted_skip_after_debounce"
     assert captured_trace["booking_signal"] is False
     assert captured_trace["booking_active"] is False
+
+
+def test_handle_post_debounce_muted_state_gate_unmutes_for_active_booking(monkeypatch):
+    monkeypatch.setattr(decision_router, "_coerce_batch_messages", lambda text, batch: [text])
+    monkeypatch.setattr(guards_module, "is_opt_out_message", lambda _text: False)
+    monkeypatch.setattr(guards_module, "_get_conversation_context", lambda conversation: {"booking": {"active": True}})
+    monkeypatch.setattr(guards_module, "_get_booking_context", lambda context: {"active": True})
+    monkeypatch.setattr(guards_module, "_get_reengage_confirmation", lambda context: None)
+
+    conversation = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000032",
+        state="bot_active",
+        bot_status="muted",
+        bot_muted_until=None,
+        no_count=3,
+        telegram_topic_id=None,
+    )
+
+    response = guards_module._handle_post_debounce_muted_state_gate(
+        conversation=conversation,
+        message_text="продолжаем запись",
+        batch_messages=None,
+        client_slug="demo_salon",
+        now=datetime(2026, 3, 18, tzinfo=timezone.utc),
+    )
+
+    assert response is None
+    assert conversation.bot_status == "active"
+    assert conversation.bot_muted_until is None
+    assert conversation.no_count == 0

@@ -434,7 +434,7 @@ def _build_llm_generation_prompt(
         "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall.",
         "expect may optionally include meta/meta_any/meta_contains/trace_contains for structured runtime contracts.",
         "Use canonical tokens only in expect (no natural language):",
-        "action: null or one of [booking_prompt, booking_escalated, escalate, handoff];",
+        "action: null or one of [collect, fact, handoff];",
         "info_sections: array from [pricing, price, payment_info, payment, address, location,",
         "hours, working_hours, schedule, discounts, discount, promo, promotion, duration,",
         "service_duration, parking, master, specialist];",
@@ -443,7 +443,7 @@ def _build_llm_generation_prompt(
         "expected_reply: true/false/null.",
         "meta/meta_any/meta_contains keys must use canonical runtime fields already emitted in decision_meta for collect/question-contract turns (for example action, source, tool_action).",
         "trace_contains is a list of exact stage/decision evidence objects.",
-        "For service-missing booking collect turns (`reply_type=service_choice` on `booking` tags), require explicit booking collect evidence via `action=booking_prompt` plus structured `meta`/`trace_contains`.",
+        "For service-missing booking collect turns (`reply_type=service_choice` on `booking` tags), require explicit booking collect evidence via `action=collect` plus structured `meta`/`trace_contains`.",
         "Use ask_about_requested_slot / slot_constraint / slot_compare / mixed_fill_plus_question only",
         "for booking-active turns about the current requested slot before final slot fill.",
         "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference.",
@@ -1513,7 +1513,7 @@ def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
     if mode == "text":
         return {
             "kind": "text",
-            "text": caption,
+            "text": "Могу прислать фото.",
             "tags": ["media", kind],
             "expect": _merge_expectations(["media", kind], None),
         }

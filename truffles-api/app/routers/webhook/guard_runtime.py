@@ -22,6 +22,11 @@ MULTI_INTENT_LABELS = {
     "hours": "времени",
     "other": "другому вопросу",
 }
+_CANONICAL_GUARD_ACTIONS = {"collect", "fact", "handoff"}
+_GUARD_ACTION_TRANSLATIONS = {
+    "human_lock_silent": "handoff",
+    "rejection": "fact",
+}
 
 
 def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
@@ -53,6 +58,14 @@ def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
     return mute_first, mute_second
 
 
+def _canonicalize_guard_metadata_action(action: str | None) -> str | None:
+    if action is None:
+        return None
+    if action in _CANONICAL_GUARD_ACTIONS:
+        return action
+    return _GUARD_ACTION_TRANSLATIONS.get(action, action)
+
+
 __all__ = [
     "DEFAULT_MUTE_DURATION_FIRST_MINUTES",
     "DEFAULT_MUTE_DURATION_SECOND_HOURS",
@@ -63,6 +76,7 @@ __all__ = [
     "MSG_REENGAGE_DECLINED",
     "MULTI_INTENT_LABELS",
     "SESSION_TIMEOUT_HOURS",
+    "_canonicalize_guard_metadata_action",
     "_coerce_batch_messages",
     "get_mute_settings",
 ]

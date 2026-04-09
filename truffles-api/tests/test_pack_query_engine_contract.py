@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from uuid import uuid4
 
+from app.services import pack_runtime_compat as compat_runtime
 from app.services import pack_runtime_service as runtime
 from app.services.knowledge_runtime import RuntimeTruth, set_runtime_truth
 from app.services.pack_runtime_types import PackDecision
@@ -142,7 +143,7 @@ def test_pack_query_engine_contract_hybrid_meta_propagates_to_resolver_contract(
     }
 
     with _runtime_truth(truth, slug="clinic_pack", branch_id=branch_id):
-        decision = runtime.get_pack_service_decision(
+        decision = compat_runtime.get_pack_service_decision(
             "Сколько стоит узи брюшной полости?",
             client_slug="clinic_pack",
         )

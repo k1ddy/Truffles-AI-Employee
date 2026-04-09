@@ -751,7 +751,7 @@ def _has_term_match(normalized: str, term: str) -> bool:
     return bool(re.search(pattern, normalized))
 
 
-def phrase_match_intent(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> set[str]:
+def _pack_query_phrase_intents(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> set[str]:
     normalized = _normalize_text(text)
     if not normalized:
         return set()
@@ -1593,6 +1593,7 @@ def _has_contact_signal(
         r"\bномер(?:\s+тел(?:ефона)?)?\b",
         r"\bтел(?:ефон)?\b",
         r"\bкак\s+связ",
+        r"\bсвяз",
         r"\bкуда\s+напис",
         r"\bконтакт",
         r"\bватсап\b",
@@ -1691,7 +1692,7 @@ def _has_duration_signal(
         return True
     if re.search(r"\bкак(?:\s+\w+){0,2}\s+долг\w*\b", normalized):
         return True
-    if "время на" in normalized and get_pack_service_hint(raw_text or "", client_slug=client_slug):
+    if "время на" in normalized and _resolve_pack_query_service_hint(raw_text or "", client_slug=client_slug):
         return True
     if raw_text:
         if _extract_minutes(raw_text) is not None:
@@ -2000,7 +2001,7 @@ def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def semantic_question_type(
+def _pack_query_question_classifier(
     text: str,
     *,
     include_kinds: set[str] | None = None,
@@ -2339,7 +2340,7 @@ def _search_services_index(text: str, client_slug: str, limit: int) -> list[dict
     return results
 
 
-def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch | None:
+def _resolve_pack_query_semantic_match(text: str, client_slug: str) -> SemanticServiceMatch | None:
     if not _should_attempt_semantic_match(text):
         return None
     results = _search_services_index(text, client_slug, _SERVICE_SUGGEST_LIMIT)
@@ -2493,7 +2494,7 @@ def _resolve_service_query_meta(
                 meta["service_query_score"] = 1.0
             return meta
     if require_query and message and client_slug:
-        match = semantic_service_match(message, client_slug)
+        match = _resolve_pack_query_semantic_match(message, client_slug)
         if match and match.action == "match" and match.score >= _SERVICE_QUERY_SEMANTIC_THRESHOLD:
             candidate = match.canonical_name
             if not candidate and match.suggestions:
@@ -2603,7 +2604,7 @@ def compose_multi_truth_reply(
     service_from_query = None
     fallback_service_name_from_query = None
     if service_query:
-        service_match_from_query = semantic_service_match(service_query, slug)
+        service_match_from_query = _resolve_pack_query_semantic_match(service_query, slug)
         service_from_query = _resolve_service_from_query(service_query, slug)
         if isinstance(service_from_query, dict):
             name = service_from_query.get("name")
@@ -2613,7 +2614,7 @@ def compose_multi_truth_reply(
         normalized_segment = _normalize_text(segment)
         if not normalized_segment:
             continue
-        question_types = semantic_question_type(
+        question_types = _pack_query_question_classifier(
             segment,
             include_kinds={"hours", "pricing", "duration"},
             return_multi=True,
@@ -2642,7 +2643,7 @@ def compose_multi_truth_reply(
             kinds.add("pricing")
         if _has_duration_signal(normalized_segment, segment):
             kinds.add("duration")
-        service_match = semantic_service_match(segment, slug)
+        service_match = _resolve_pack_query_semantic_match(segment, slug)
         fallback_service = _match_service(normalized_segment, slug) if not service_match else None
         fallback_service_name = None
         if isinstance(fallback_service, dict):
@@ -2998,7 +2999,7 @@ def format_reply_from_truth(
     truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
     slots = slots or {}
 
-    if intent in {"location", "hours", "parking"}:
+    if intent in {"location", "hours", "parking", "contact"}:
         address = truth.get("salon", {}).get("address", {})
         hours = truth.get("salon", {}).get("hours", {})
         if intent == "location":
@@ -3015,6 +3016,8 @@ def format_reply_from_truth(
             parking = truth.get("salon", {}).get("parking", {})
             details = parking.get("details") or ""
             return details or "Есть парковка рядом с салоном."
+        if intent == "contact":
+            return _format_contact_reply(client_slug=client_slug, truth=truth)
     if intent == "location_directions":
         address = truth.get("salon", {}).get("address", {})
         full_address = address.get("full")
@@ -3384,7 +3387,7 @@ def _detect_policy_intent(
     return None
 
 
-def get_demo_salon_service_decision(
+def _build_demo_service_decision(
     message: str,
     client_slug: str | None = "demo_salon",
     intent_decomp: dict | None = None,
@@ -3499,7 +3502,7 @@ def get_demo_salon_service_decision(
     return None
 
 
-def get_demo_salon_decision(
+def _build_demo_truth_decision(
     message: str,
     client_slug: str | None = "demo_salon",
     intent_decomp: dict | None = None,
@@ -3510,7 +3513,7 @@ def get_demo_salon_decision(
 
     slug = _normalize_client_slug(client_slug)
     truth = load_yaml_truth(slug)
-    phrase_intents = phrase_match_intent(message, slug)
+    phrase_intents = _pack_query_phrase_intents(message, slug)
     hard_offtopic_signal = any(_contains_phrase(normalized, phrase) for phrase in _hard_offtopic_phrases(slug))
     policy_pack = load_policy_pack(slug)
     hygiene_keywords = get_signal_lexicon_list(slug, "hygiene_keywords")
@@ -3633,7 +3636,7 @@ def get_demo_salon_decision(
     )
     if consult_decision:
         if price_signal or duration_signal:
-            service_decision = get_demo_salon_service_decision(
+            service_decision = _build_demo_service_decision(
                 message,
                 client_slug=slug,
                 intent_decomp=intent_decomp,
@@ -3942,7 +3945,7 @@ def get_demo_salon_decision(
             return _build_truth_decision(response=reply, intent="guest_policy", meta=meta)
 
     hours_like = _looks_like_hours_question(normalized, client_slug=slug)
-    question_type = semantic_question_type(message, client_slug=slug)
+    question_type = _pack_query_question_classifier(message, client_slug=slug)
     if hours_like and not price_signal and not duration_signal:
         question_type = None
     question_meta: dict[str, Any] | None = None
@@ -4135,7 +4138,7 @@ def get_demo_salon_decision(
                 meta=meta,
             )
 
-    service_decision = get_demo_salon_service_decision(
+    service_decision = _build_demo_service_decision(
         message,
         client_slug=slug,
         intent_decomp=intent_decomp,
@@ -4208,7 +4211,7 @@ def get_demo_salon_decision(
     return None
 
 
-def get_demo_salon_price_reply(message: str, client_slug: str | None = "demo_salon") -> str | None:
+def _build_demo_price_reply(message: str, client_slug: str | None = "demo_salon") -> str | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
@@ -4231,7 +4234,7 @@ def get_demo_salon_price_reply(message: str, client_slug: str | None = "demo_sal
     )
 
 
-def get_demo_salon_price_item(message: str, client_slug: str | None = "demo_salon") -> str | None:
+def _resolve_demo_price_item(message: str, client_slug: str | None = "demo_salon") -> str | None:
     price_item = _find_best_price_item(message, _normalize_client_slug(client_slug))
     if not price_item:
         return None
@@ -4241,7 +4244,7 @@ def get_demo_salon_price_item(message: str, client_slug: str | None = "demo_salo
     return str(item).strip() or None
 
 
-def get_demo_salon_service_hint(message: str, client_slug: str | None = "demo_salon") -> str | None:
+def _resolve_demo_service_hint(message: str, client_slug: str | None = "demo_salon") -> str | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
@@ -4258,55 +4261,47 @@ def get_demo_salon_service_hint(message: str, client_slug: str | None = "demo_sa
             return name.strip()
     return None
 
-
-def get_truth_reply(message: str, client_slug: str | None = "demo_salon") -> str | None:
-    decision = get_pack_decision(message, client_slug=client_slug)
-    if decision and decision.action == "reply":
-        return decision.response
-    return None
-
-
-def get_pack_decision(
+def _build_pack_query_truth_decision(
     message: str,
     client_slug: str | None = _DEFAULT_CLIENT_SLUG,
     *,
     intent_decomp: dict | None = None,
 ) -> DemoSalonDecision | None:
-    return get_demo_salon_decision(message, client_slug=client_slug, intent_decomp=intent_decomp)
+    return _build_demo_truth_decision(message, client_slug=client_slug, intent_decomp=intent_decomp)
 
 
-def get_pack_service_decision(
+def _build_pack_query_service_decision(
     message: str,
     *,
     client_slug: str | None = _DEFAULT_CLIENT_SLUG,
     intent_decomp: dict | None = None,
 ) -> DemoSalonDecision | None:
-    return get_demo_salon_service_decision(
+    return _build_demo_service_decision(
         message,
         client_slug=client_slug,
         intent_decomp=intent_decomp,
     )
 
 
-def get_pack_price_reply(
+def _build_pack_query_price_reply(
     message: str,
     *,
     client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> str | None:
-    return get_demo_salon_price_reply(message, client_slug=client_slug)
+    return _build_demo_price_reply(message, client_slug=client_slug)
 
 
-def get_pack_price_item(
+def _resolve_pack_query_price_item(
     message: str,
     *,
     client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> str | None:
-    return get_demo_salon_price_item(message, client_slug=client_slug)
+    return _resolve_demo_price_item(message, client_slug=client_slug)
 
 
-def get_pack_service_hint(
+def _resolve_pack_query_service_hint(
     message: str,
     *,
     client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> str | None:
-    return get_demo_salon_service_hint(message, client_slug=client_slug)
+    return _resolve_demo_service_hint(message, client_slug=client_slug)

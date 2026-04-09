@@ -142,11 +142,18 @@ def compile_active_time_specialist_followup_expectations(
     semantic_axes = _matrix_expected_reply_axes(_ACTIVE_TIME_SPECIALIST_FOLLOWUP_ROW_ID)
     expected_reply_type = semantic_axes["expected_reply_type"]
 
+    # Once the turn is recognized as a specialist referent follow-up, the
+    # stable contract is the pending-question shape, not the legacy
+    # `booking_prompt` / `collect:service` envelope from an earlier service
+    # collect step.
+    compiled["action"] = None
     compiled["reply_type"] = expected_reply_type
     compiled["expected_reply"] = True
     compiled["info_sections"] = []
 
     meta = _normalize_expect_mapping(compiled.get("meta"))
+    meta.pop("action", None)
+    meta.pop("expected_reply_reason", None)
     if meta.get("expected_reply_type") is not None:
         meta["expected_reply_type"] = expected_reply_type
     if meta:
@@ -154,6 +161,8 @@ def compile_active_time_specialist_followup_expectations(
 
     meta_any = _normalize_expect_contains_mapping(compiled.get("meta_any"))
     for stale_key in (
+        "action",
+        "expected_reply_reason",
         "pending_question_act",
         "pending_question_interaction",
         "pending_question_owner",
@@ -174,7 +183,9 @@ def compile_active_time_specialist_followup_expectations(
         normalized_entry = dict(entry)
         if _normalize_token(normalized_entry.get("stage")) == "question_contract":
             normalized_entry["expected_reply_type"] = expected_reply_type
-        trace_contains.append(normalized_entry)
+            normalized_entry.pop("reason", None)
+        if normalized_entry not in trace_contains:
+            trace_contains.append(normalized_entry)
 
     question_contract_trace = {
         "stage": "question_contract",

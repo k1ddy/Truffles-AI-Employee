@@ -129,6 +129,7 @@ SEMANTIC_SUBJECT_KIND_VALUES = {
 SEMANTIC_CAPABILITY_VALUES = {
     "pricing",
     "duration",
+    "master",
     "location",
     "hours",
     "promotions",
@@ -606,6 +607,7 @@ class LlmPolicyCoreOutput(BaseModel):
     subject_kind: str | None = None
     capability: str | None = None
     temporal_scope: str | None = None
+    alternate_datetime: str | None = None
     resolution_mode: str | None = None
     pending_question_act: str | None = None
     pending_question_target: str | None = None
@@ -633,6 +635,7 @@ class LlmPolicyCoreOutput(BaseModel):
         "goal",
         "expected_reply_type",
         "next_question",
+        "alternate_datetime",
         "resolver_id",
         "resolver_version",
         mode="before",

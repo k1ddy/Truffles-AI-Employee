@@ -24,15 +24,37 @@ def write_config(repo: Path) -> dict:
             {
                 "path": "truffles-api/app/services/outbox_runtime_service.py",
                 "required_function_defs": [
+                    "preview_scoped_outbox_process",
                     "run_canonical_outbox_process",
                     "run_default_outbox_process",
                     "run_scoped_outbox_process",
                     "run_outbox_worker_cycle",
                 ],
+                "required_exports": [
+                    "ScopedOutboxProcessRequest",
+                    "preview_scoped_outbox_process",
+                    "run_default_outbox_process",
+                    "run_outbox_worker_cycle",
+                    "run_scoped_outbox_process",
+                ],
+                "forbidden_exports": [
+                    "claim_scoped_outbox_rows",
+                    "process_claimed_outbox_rows",
+                    "run_canonical_outbox_process",
+                ],
             },
             {
                 "path": "truffles-api/app/routers/console.py",
-                "required_import_names": ["run_scoped_outbox_process"],
+                "required_import_names": [
+                    "ScopedOutboxProcessRequest",
+                    "preview_scoped_outbox_process",
+                    "run_scoped_outbox_process",
+                ],
+                "forbidden_import_names": [
+                    "archive_pending_outbox",
+                    "claim_scoped_outbox_rows",
+                    "process_claimed_outbox_rows",
+                ],
             },
         ],
         "function_call_contracts": [
@@ -54,9 +76,9 @@ def write_config(repo: Path) -> dict:
             {
                 "path": "truffles-api/app/routers/console.py",
                 "function_name": "_run_outbox_process_job",
-                "required_calls": ["run_scoped_outbox_process"],
-                "forbidden_calls": ["claim_scoped_outbox_rows", "process_claimed_outbox_rows"],
-            }
+                "required_calls": ["from_optional", "preview_scoped_outbox_process", "run_scoped_outbox_process"],
+                "forbidden_calls": ["claim_scoped_outbox_rows", "process_claimed_outbox_rows", "archive_pending_outbox"],
+            },
         ],
         "repo_callsite_contracts": [
             {
@@ -66,9 +88,14 @@ def write_config(repo: Path) -> dict:
             },
             {
                 "search_roots": ["truffles-api/app"],
+                "call_names": ["preview_scoped_outbox_process"],
+                "exact_allowlist": ["truffles-api/app/routers/console.py"],
+            },
+            {
+                "search_roots": ["truffles-api/app"],
                 "call_names": ["run_scoped_outbox_process"],
                 "exact_allowlist": ["truffles-api/app/routers/console.py"],
-            }
+            },
         ],
     }
     path = repo / "docs" / "OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml"
@@ -81,10 +108,19 @@ def write_repo(repo: Path, *, drift: bool = False) -> None:
     service_path = repo / "truffles-api" / "app" / "services" / "outbox_runtime_service.py"
     service_path.parent.mkdir(parents=True, exist_ok=True)
     service_path.write_text(
+        "class ScopedOutboxProcessRequest:\n    pass\n\n"
+        "async def preview_scoped_outbox_process():\n    return {}\n\n"
         "async def run_canonical_outbox_process():\n    return {}\n\n"
         "async def run_default_outbox_process():\n    return await run_canonical_outbox_process()\n\n"
         "async def run_scoped_outbox_process():\n    return await run_canonical_outbox_process()\n\n"
-        "async def run_outbox_worker_cycle():\n    return await run_canonical_outbox_process()\n",
+        "async def run_outbox_worker_cycle():\n    return await run_canonical_outbox_process()\n\n"
+        "__all__ = [\n"
+        "    'ScopedOutboxProcessRequest',\n"
+        "    'preview_scoped_outbox_process',\n"
+        "    'run_default_outbox_process',\n"
+        "    'run_outbox_worker_cycle',\n"
+        "    'run_scoped_outbox_process',\n"
+        "]\n",
         encoding="utf-8",
     )
 
@@ -92,10 +128,13 @@ def write_repo(repo: Path, *, drift: bool = False) -> None:
     console_path.parent.mkdir(parents=True, exist_ok=True)
     if drift:
         console_path.write_text(
-            "from app.services.outbox_runtime_service import run_scoped_outbox_process\n\n"
+            "from app.services.outbox_runtime_service import ScopedOutboxProcessRequest, preview_scoped_outbox_process, run_scoped_outbox_process\n"
+            "from app.services.outbox_service import archive_pending_outbox\n\n"
             "async def _run_outbox_process_job():\n"
+            "    ScopedOutboxProcessRequest.from_optional()\n"
             "    claim_scoped_outbox_rows()\n"
             "    process_claimed_outbox_rows()\n"
+            "    await preview_scoped_outbox_process()\n"
             "    return await run_scoped_outbox_process()\n\n",
             encoding="utf-8",
         )
@@ -108,8 +147,10 @@ def write_repo(repo: Path, *, drift: bool = False) -> None:
         )
     else:
         console_path.write_text(
-            "from app.services.outbox_runtime_service import run_scoped_outbox_process\n\n"
+            "from app.services.outbox_runtime_service import ScopedOutboxProcessRequest, preview_scoped_outbox_process, run_scoped_outbox_process\n\n"
             "async def _run_outbox_process_job():\n"
+            "    ScopedOutboxProcessRequest.from_optional()\n"
+            "    await preview_scoped_outbox_process()\n"
             "    return await run_scoped_outbox_process()\n",
             encoding="utf-8",
         )
@@ -136,6 +177,7 @@ def test_operational_entrypoint_dedupe_guard_blocks_console_drift(tmp_path: Path
 
     violations = module.evaluate(repo, config)
     assert violations
+    assert any("forbidden import name still present -> archive_pending_outbox" in item for item in violations)
     assert any("forbidden call still present -> claim_scoped_outbox_rows" in item for item in violations)
     assert any("forbidden call still present -> process_claimed_outbox_rows" in item for item in violations)
     assert any("repo callsite set for run_scoped_outbox_process grew without waiver" in item for item in violations)

@@ -83,10 +83,10 @@ def write_config(repo: Path) -> dict:
     return config
 
 
-def commit_base(repo: Path, decision_text: str) -> str:
-    decision_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
-    decision_path.parent.mkdir(parents=True, exist_ok=True)
-    decision_path.write_text(decision_text, encoding="utf-8")
+def commit_base(repo: Path, file_text: str, relative_path: str = "truffles-api/app/routers/webhook/decision.py") -> str:
+    target_path = repo / relative_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(file_text, encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
@@ -96,22 +96,32 @@ def test_legacy_freeze_guard_blocks_executable_additions(tmp_path: Path) -> None
     module = load_module("legacy_freeze_guard", SCRIPTS / "legacy_freeze_guard.py")
     repo, _ = init_repo(tmp_path)
     config = write_config(repo)
-    base = commit_base(repo, "def keep():\n    return 1\n")
-    decision_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
-    decision_path.write_text("def keep():\n    return 1\n\nvalue = 2\n", encoding="utf-8")
+    config["sunset_files"][0]["path"] = "truffles-api/app/routers/webhook/session_memory.py"
+    base = commit_base(
+        repo,
+        "def keep():\n    return 1\n",
+        relative_path="truffles-api/app/routers/webhook/session_memory.py",
+    )
+    target_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "session_memory.py"
+    target_path.write_text("def keep():\n    return 1\n\nvalue = 2\n", encoding="utf-8")
 
     violations = module.evaluate(repo, config, base, None)
     assert violations
-    assert "decision.py" in violations[0]
+    assert "session_memory.py" in violations[0]
 
 
 def test_legacy_freeze_guard_allows_comment_only_additions(tmp_path: Path) -> None:
     module = load_module("legacy_freeze_guard", SCRIPTS / "legacy_freeze_guard.py")
     repo, _ = init_repo(tmp_path)
     config = write_config(repo)
-    base = commit_base(repo, "def keep():\n    return 1\n")
-    decision_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
-    decision_path.write_text("def keep():\n    return 1\n\n# comment only\n", encoding="utf-8")
+    config["sunset_files"][0]["path"] = "truffles-api/app/routers/webhook/session_memory.py"
+    base = commit_base(
+        repo,
+        "def keep():\n    return 1\n",
+        relative_path="truffles-api/app/routers/webhook/session_memory.py",
+    )
+    target_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "session_memory.py"
+    target_path.write_text("def keep():\n    return 1\n\n# comment only\n", encoding="utf-8")
 
     violations = module.evaluate(repo, config, base, None)
     assert violations == []
@@ -121,14 +131,19 @@ def test_legacy_freeze_guard_allows_only_scoped_waiver_lines(tmp_path: Path) -> 
     module = load_module("legacy_freeze_guard", SCRIPTS / "legacy_freeze_guard.py")
     repo, _ = init_repo(tmp_path)
     config = write_config(repo)
+    config["sunset_files"][0]["path"] = "truffles-api/app/routers/webhook/session_memory.py"
     config["sunset_files"][0]["active_waiver"] = {
         "allowed_executable_lines": [
             "value = 2",
         ]
     }
-    base = commit_base(repo, "def keep():\n    return 1\n")
-    decision_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
-    decision_path.write_text("def keep():\n    return 1\n\nvalue = 2\n", encoding="utf-8")
+    base = commit_base(
+        repo,
+        "def keep():\n    return 1\n",
+        relative_path="truffles-api/app/routers/webhook/session_memory.py",
+    )
+    target_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "session_memory.py"
+    target_path.write_text("def keep():\n    return 1\n\nvalue = 2\n", encoding="utf-8")
 
     violations = module.evaluate(repo, config, base, None)
     assert violations == []
@@ -138,14 +153,19 @@ def test_legacy_freeze_guard_blocks_non_waived_lines_even_with_scoped_waiver(tmp
     module = load_module("legacy_freeze_guard", SCRIPTS / "legacy_freeze_guard.py")
     repo, _ = init_repo(tmp_path)
     config = write_config(repo)
+    config["sunset_files"][0]["path"] = "truffles-api/app/routers/webhook/session_memory.py"
     config["sunset_files"][0]["active_waiver"] = {
         "allowed_executable_lines": [
             "value = 2",
         ]
     }
-    base = commit_base(repo, "def keep():\n    return 1\n")
-    decision_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
-    decision_path.write_text(
+    base = commit_base(
+        repo,
+        "def keep():\n    return 1\n",
+        relative_path="truffles-api/app/routers/webhook/session_memory.py",
+    )
+    target_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "session_memory.py"
+    target_path.write_text(
         "def keep():\n    return 1\n\nvalue = 2\n\nanother_value = 3\n",
         encoding="utf-8",
     )
@@ -153,6 +173,19 @@ def test_legacy_freeze_guard_blocks_non_waived_lines_even_with_scoped_waiver(tmp
     violations = module.evaluate(repo, config, base, None)
     assert violations
     assert "another_value = 3" in violations[0]
+
+
+def test_legacy_freeze_guard_skips_router_files_moved_under_single_owner_guard(tmp_path: Path) -> None:
+    module = load_module("legacy_freeze_guard", SCRIPTS / "legacy_freeze_guard.py")
+    repo, _ = init_repo(tmp_path)
+    config = write_config(repo)
+    config["sunset_files"][0]["path"] = "truffles-api/app/routers/webhook/decision.py"
+    base = commit_base(repo, "def keep():\n    return 1\n")
+    decision_path = repo / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
+    decision_path.write_text("def keep():\n    return 1\n\nvalue = 2\n", encoding="utf-8")
+
+    violations = module.evaluate(repo, config, base, None)
+    assert violations == []
 
 
 def test_webhook_legacy_adapter_uses_explicit_export_allowlist() -> None:
@@ -225,6 +258,274 @@ def test_reasoning_core_shadow_support_has_no_direct_decision_router_import() ->
     assert violations == []
 
 
+def test_app_runtime_has_no_non_service_get_pack_decision_callsites() -> None:
+    app_root = ROOT / "truffles-api" / "app"
+    allowed_paths = {
+        "truffles-api/app/services/demo_salon_knowledge.py",
+        "truffles-api/app/services/pack_runtime_default.py",
+        "truffles-api/app/services/pack_runtime_neutral_adapter.py",
+        "truffles-api/app/services/pack_runtime_service.py",
+    }
+    violations: list[str] = []
+
+    for path in app_root.rglob("*.py"):
+        relative_path = str(path.relative_to(ROOT))
+        if relative_path in allowed_paths:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "get_pack_decision":
+                violations.append(f"{relative_path}:{node.lineno}")
+            elif isinstance(func, ast.Attribute) and func.attr == "get_pack_decision":
+                violations.append(f"{relative_path}:{node.lineno}")
+
+    assert violations == []
+
+
+def test_app_runtime_has_no_non_service_get_pack_service_decision_callsites() -> None:
+    app_root = ROOT / "truffles-api" / "app"
+    allowed_paths = {
+        "truffles-api/app/services/demo_salon_knowledge.py",
+        "truffles-api/app/services/pack_runtime_default.py",
+        "truffles-api/app/services/pack_runtime_neutral_adapter.py",
+        "truffles-api/app/services/pack_runtime_service.py",
+    }
+    violations: list[str] = []
+
+    for path in app_root.rglob("*.py"):
+        relative_path = str(path.relative_to(ROOT))
+        if relative_path in allowed_paths:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "get_pack_service_decision":
+                violations.append(f"{relative_path}:{node.lineno}")
+            elif isinstance(func, ast.Attribute) and func.attr == "get_pack_service_decision":
+                violations.append(f"{relative_path}:{node.lineno}")
+
+    assert violations == []
+
+
+def test_app_runtime_has_no_synthetic_policy_decision_marker() -> None:
+    app_root = ROOT / "truffles-api" / "app"
+    violations: list[str] = []
+
+    for path in app_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if "synthetic_policy_decision" in line:
+                violations.append(f"{path.relative_to(ROOT)}:{lineno}")
+
+    assert violations == []
+
+
+def test_app_runtime_has_no_removed_non_owner_surface_snippets() -> None:
+    app_root = ROOT / "truffles-api" / "app"
+    forbidden_snippets = (
+        "build_controlled_degrade(",
+        "build_preflight_reject(",
+        "_semantic_contract_from_frame(",
+        "resolve_timeout_owner_boundary(",
+        "owner_replacement_cutover",
+    )
+    violations: list[str] = []
+
+    for path in app_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if any(snippet in line for snippet in forbidden_snippets):
+                violations.append(f"{path.relative_to(ROOT)}:{lineno}")
+
+    assert violations == []
+
+
+def test_legacy_response_policy_have_no_raw_service_resolution_paths() -> None:
+    response_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "response.py"
+    ).read_text(encoding="utf-8")
+    decision_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
+    ).read_text(encoding="utf-8")
+    guards_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "guards.py"
+    ).read_text(encoding="utf-8")
+    dedup_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "dedup.py"
+    ).read_text(encoding="utf-8")
+    booking_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "booking.py"
+    ).read_text(encoding="utf-8")
+    info_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "info.py"
+    ).read_text(encoding="utf-8")
+    policy_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "policy.py"
+    ).read_text(encoding="utf-8")
+    booking_signal_runtime_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "booking_signal_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "semantic_service_match(" not in response_text
+    assert "rewrite_for_service_match(" not in response_text
+    assert "get_pack_service_decision(" not in response_text
+    assert "_is_booking_request(" not in response_text
+    assert "_is_booking_request(" not in decision_text
+    assert "get_pack_service_hint(" not in decision_text
+    assert "_evaluate_booking_signal(" not in guards_text
+    assert "_evaluate_booking_signal(" not in dedup_text
+    assert '\"service_matcher\":' not in policy_text
+    assert ".get(\"service_matcher\")" not in booking_text
+    assert "_extract_service_hint(" not in booking_text
+    assert ".get(\"service_matcher\")" not in info_text
+    assert "get_pack_service_hint(" not in info_text
+    assert "_match_service(" not in info_text
+    assert "_validate_service_slot(" not in info_text
+    assert "def _extract_service_hint(" not in booking_signal_runtime_text
+    assert "phrase_match_intent(" not in response_text
+
+
+def test_decision_runtime_has_no_raw_info_interrupt_or_verification_fallbacks() -> None:
+    decision_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
+    ).read_text(encoding="utf-8")
+    booking_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "booking.py"
+    ).read_text(encoding="utf-8")
+    info_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "info.py"
+    ).read_text(encoding="utf-8")
+    policy_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "policy.py"
+    ).read_text(encoding="utf-8")
+    interrupt_text = (
+        ROOT
+        / "truffles-api"
+        / "app"
+        / "routers"
+        / "webhook"
+        / "expected_reply_interrupt_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_detect_info_class_intents(" not in decision_text
+    assert "fallback_info_intents" not in decision_text
+    assert "_looks_like_info_query(" not in decision_text
+    assert "_looks_like_services_overview_message(" not in decision_text
+    assert "_looks_like_time_only_request(" not in decision_text
+    assert "_looks_like_carryover_followup(" not in decision_text
+    assert "_looks_like_hours_followup(" not in decision_text
+    assert "info_followup_runtime" not in decision_text
+    assert "def _preflight_booking_block(" not in decision_text
+    assert "def _looks_like_booking_verification_request(" not in decision_text
+    assert "def _has_explicit_location_or_hours_request(" not in decision_text
+    assert "_detect_info_class_intents(" not in booking_text
+    assert "_looks_like_info_query(" not in booking_text
+    assert "def _looks_like_booking_reschedule_request(" not in booking_text
+    assert "_looks_like_promotions_request(" not in booking_text
+    assert "_detect_info_class_intents(" not in policy_text
+    assert "def _looks_like_policy_topic(" not in policy_text
+    assert "def _looks_like_promotions_request(" not in policy_text
+    assert "_detect_info_class_intents(" not in interrupt_text
+    assert "_looks_like_info_query(" not in interrupt_text
+    assert "def _looks_like_booking_verification_request(" not in interrupt_text
+    assert "def _has_explicit_location_or_hours_request(" not in interrupt_text
+    assert "_has_price_signal(" not in interrupt_text
+    assert "_has_duration_signal(" not in interrupt_text
+    assert "_validate_service_slot(" not in interrupt_text
+    assert "phrase_match_intent(" not in info_text
+    assert "semantic_question_type(" not in info_text
+    assert "from ._legacy import" not in info_text
+    assert "_looks_like_carryover_followup(" not in info_text
+    assert "_looks_like_hours_followup(" not in info_text
+    assert "info_followup_runtime" not in info_text
+    assert "_has_price_signal(normalized_message, message_text)" not in info_text
+    assert "_has_duration_signal(normalized_message, message_text)" not in info_text
+    assert "_has_parking_signal(" not in info_text
+    assert "_has_guest_waiting_signal(" not in info_text
+    assert "location_signal = _signal_any_match(" not in info_text
+    assert '"reason": "short_noisy_followup"' not in info_text
+
+
+def test_decision_runtime_has_no_dead_pre_owner_helper_defs() -> None:
+    decision_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def _detect_fast_intent(" not in decision_text
+    assert "def _detect_intent_signals(" not in decision_text
+    assert "def _resolve_action(" not in decision_text
+    assert "def _llm_first_firebreak_semantic_reasons(" not in decision_text
+    assert "def _run_class_router_stage(" not in decision_text
+    assert "def _extract_pack_index_meta(" not in decision_text
+    assert "def _extract_compiled_pack_meta(" not in decision_text
+    assert "def _should_use_expected_reply_collect_fast_path(" not in decision_text
+    assert "def _build_expected_reply_collect_fast_policy_result(" not in decision_text
+    assert "def _is_timeout_pending_time_slot_question(" not in decision_text
+    assert "def _is_timeout_master_info_interrupt_candidate(" not in decision_text
+    assert "def _is_timeout_active_time_specialist_interrupt_candidate(" not in decision_text
+    assert "resolve_master_intent(" not in decision_text
+    assert "def _looks_like_promo_code_request(" not in decision_text
+    assert "def _format_discounts_reply_for_message(" not in decision_text
+    assert "def _build_router_state(" not in decision_text
+    assert "def _controller_meta_updates_from_router_state(" not in decision_text
+    assert "route_dialogue_controller(" not in decision_text
+    assert "get_demo_salon_decision =" not in decision_text
+    assert "get_demo_salon_service_decision =" not in decision_text
+    assert "get_demo_salon_price_item =" not in decision_text
+
+    info_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "info.py"
+    ).read_text(encoding="utf-8")
+    assert "def _handle_offline_info_class(" not in info_text
+    assert "def _handle_info_flow(" not in info_text
+
+    response_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "response.py"
+    ).read_text(encoding="utf-8")
+    assert "def _handle_ai_response_action(" not in response_text
+    assert 'router_intents = class_router_result.get("intents")' not in response_text
+    assert 'if out_of_domain_signal and not expected_reply_shortcircuit:' not in response_text
+    assert 'in_signals = class_router_result.get("in_signals") or []' not in response_text
+    assert 'anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)' not in response_text
+    assert '"decision": "domain_anchor"' not in response_text
+    assert '"decision": "service_semantic_guard"' not in response_text
+    assert '"decision": "no_response_guard"' not in response_text
+    assert '"decision": "router_low_confidence"' not in response_text
+
+
+def test_live_booking_consumers_have_no_raw_booking_request_callsites() -> None:
+    booking_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "booking.py"
+    ).read_text(encoding="utf-8")
+    booking_signal_runtime_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "booking_signal_runtime.py"
+    ).read_text(encoding="utf-8")
+    interrupt_text = (
+        ROOT
+        / "truffles-api"
+        / "app"
+        / "routers"
+        / "webhook"
+        / "expected_reply_interrupt_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_is_booking_request(" not in booking_text
+    assert "_is_booking_request(" not in interrupt_text
+    assert "def _is_booking_request(" not in booking_signal_runtime_text
+    assert "def _evaluate_booking_signal(" not in booking_signal_runtime_text
+    assert "def _has_booking_signal(" not in booking_signal_runtime_text
+    assert "_detect_info_class_intents(" not in booking_signal_runtime_text
+    assert "semantic_service_match(" not in booking_signal_runtime_text
+    assert "get_pack_service_hint(" not in booking_signal_runtime_text
+    assert "classify_domain_with_scores(" not in booking_signal_runtime_text
+    assert "get_pack_service_hint(" not in booking_text
+
+
 def test_policy_router_has_no_direct_decision_router_import() -> None:
     policy_path = ROOT / "truffles-api" / "app" / "routers" / "webhook" / "policy.py"
     tree = ast.parse(policy_path.read_text(encoding="utf-8"), filename=str(policy_path))
@@ -243,6 +544,90 @@ def test_policy_router_has_no_direct_decision_router_import() -> None:
                 violations.append(module)
 
     assert violations == []
+
+
+def test_intent_service_has_no_pack_service_fallback_in_policy_core_context_hint() -> None:
+    intent_text = (
+        ROOT / "truffles-api" / "app" / "services" / "intent_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def _policy_core_context_service_hint(" in intent_text
+    assert "from app.services.pack_runtime_service import get_pack_service_hint" not in intent_text
+    assert "return get_pack_service_hint(message, client_slug=normalized_client_slug)" not in intent_text
+
+
+def test_pack_runtime_and_info_paths_require_explicit_service_grounding() -> None:
+    pack_runtime_text = (
+        ROOT / "truffles-api" / "app" / "services" / "pack_runtime_service.py"
+    ).read_text(encoding="utf-8")
+    demo_knowledge_text = (
+        ROOT / "truffles-api" / "app" / "services" / "demo_salon_knowledge.py"
+    ).read_text(encoding="utf-8")
+    demo_compat_text = (
+        ROOT / "truffles-api" / "app" / "services" / "demo_salon_knowledge_compat.py"
+    ).read_text(encoding="utf-8")
+    pack_runtime_compat_text = (
+        ROOT / "truffles-api" / "app" / "services" / "pack_runtime_compat.py"
+    ).read_text(encoding="utf-8")
+    info_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "info.py"
+    ).read_text(encoding="utf-8")
+    booking_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "booking.py"
+    ).read_text(encoding="utf-8")
+    policy_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "policy.py"
+    ).read_text(encoding="utf-8")
+    tool_registry_text = (
+        ROOT / "truffles-api" / "app" / "services" / "tool_registry_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "semantic_query = get_pack_service_hint(message_text, client_slug=client_slug)" not in pack_runtime_text
+    assert "if not resolved_service and message_text:" not in pack_runtime_text
+    assert "_pack_query_service_context(\n            message_text," not in pack_runtime_text
+    assert "def get_pack_decision(" not in pack_runtime_text
+    assert "def get_pack_service_decision(" not in pack_runtime_text
+    assert "def get_pack_service_hint(" not in pack_runtime_text
+    assert "def get_pack_price_item(" not in pack_runtime_text
+    assert "def get_pack_price_reply(" not in pack_runtime_text
+    assert "def resolve_master_intent(" not in pack_runtime_text
+    assert "def semantic_service_match(" not in pack_runtime_text
+    assert "def _compat_service_semantics(" not in pack_runtime_text
+    assert "def _compat_service_hint(" not in pack_runtime_text
+    assert "def _compat_price_item_lookup(" not in pack_runtime_text
+    assert "def _compat_price_reply_builder(" not in pack_runtime_text
+    assert "def _compat_truth_gate_builder(" not in pack_runtime_text
+    assert "def _compat_service_decision_builder(" not in pack_runtime_text
+    assert "def _compat_master_resolver(" not in pack_runtime_text
+    assert "def _resolve_compat_master_service_query(" not in pack_runtime_text
+    assert '"compat_hint"' not in pack_runtime_text
+    assert "get_pack_decision" in pack_runtime_compat_text
+    assert "resolve_master_intent" in pack_runtime_compat_text
+    assert "def _compat_demo_service_decision(" not in demo_knowledge_text
+    assert "def _compat_demo_decision(" not in demo_knowledge_text
+    assert "def _compat_demo_price_reply(" not in demo_knowledge_text
+    assert "def _compat_demo_price_item(" not in demo_knowledge_text
+    assert "def _compat_demo_service_hint(" not in demo_knowledge_text
+    assert "_build_demo_truth_decision as get_demo_salon_decision" in demo_compat_text
+    assert "_resolve_demo_price_item as get_demo_salon_price_item" in demo_compat_text
+    assert "_build_demo_price_reply as get_demo_salon_price_reply" in demo_compat_text
+    assert "_build_demo_service_decision as get_demo_salon_service_decision" in demo_compat_text
+    assert "_resolve_demo_service_hint as get_demo_salon_service_hint" in demo_compat_text
+    assert "get_pack_price_reply(" not in info_text
+    assert "get_pack_price_item(" not in info_text
+    assert "message=message_text if not resolved_service_query else None" not in info_text
+    assert 'base_info_override = bool(info_signals.get("parking") or info_signals.get("guest"))' not in info_text
+    assert 'include_base_bundle = bool({"location"} & info_class_intents_for_reply)' not in info_text
+    assert 'for key in ("parking", "guest", "location")' not in info_text
+    assert "build_master_reply_from_pack(\n            client_slug=client_slug,\n            message_text=None," in info_text
+    assert "def _detect_info_class_intents(" not in info_text
+    assert "def _looks_like_info_query(" not in info_text
+    assert "get_pack_price_item(" not in booking_text
+    assert "resolve_explicit_master_intent(\n            client_slug=client_slug," in booking_text
+    assert "price_reply = get_pack_price_reply(message, client_slug=client_slug)" not in policy_text
+    assert '"price_item": get_pack_price_item' not in policy_text
+    assert ".get_pack_price_item(" not in tool_registry_text
+    assert ".get_pack_price_reply(" not in tool_registry_text
 
 
 def test_policy_runtime_snapshot_owner() -> None:
@@ -548,6 +933,9 @@ def test_response_retry_sidecar_cluster_uses_narrow_runtime_primitives() -> None
 
 
 def test_controller_class_router_cluster_uses_narrow_runtime_owner() -> None:
+    decision_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "decision.py"
+    ).read_text(encoding="utf-8")
     response_text = (
         ROOT / "truffles-api" / "app" / "routers" / "webhook" / "response.py"
     ).read_text(encoding="utf-8")
@@ -556,6 +944,9 @@ def test_controller_class_router_cluster_uses_narrow_runtime_owner() -> None:
     ).read_text(encoding="utf-8")
     info_text = (
         ROOT / "truffles-api" / "app" / "routers" / "webhook" / "info.py"
+    ).read_text(encoding="utf-8")
+    class_router_text = (
+        ROOT / "truffles-api" / "app" / "routers" / "webhook" / "class_router_runtime.py"
     ).read_text(encoding="utf-8")
 
     for removed_symbol in (
@@ -572,6 +963,39 @@ def test_controller_class_router_cluster_uses_narrow_runtime_owner() -> None:
         assert removed_symbol not in response_text
         assert removed_symbol not in booking_text
         assert removed_symbol not in info_text
+
+    for direct_helper in (
+        "_build_controller_meta_output(",
+        "_ensure_controller_output_meta(",
+        "_resolve_class_router_result(",
+        "_resolve_controller_signal_class(",
+    ):
+        assert direct_helper not in response_text
+        assert direct_helper not in booking_text
+        assert direct_helper not in decision_text
+    for direct_helper in (
+        "_build_controller_meta_output(",
+        "_ensure_controller_output_meta(",
+        "_resolve_class_router_result(",
+        "_resolve_controller_signal_class(",
+    ):
+        assert direct_helper not in info_text
+
+    assert 'router_output_class == "out_of_domain"' not in response_text
+    assert "controller_service_query" not in response_text
+    assert 'slots.get("service_query")' not in response_text
+    assert "response_compat" not in response_text
+    assert "response_compat" not in booking_text
+    assert "response_compat" not in info_text
+    assert "response_compat" not in decision_text
+    assert "router_service_query" not in info_text
+    assert 'slots.get("service_query")' not in info_text
+    assert 'info_semantic_lock = guest_policy_lock or info_bundle_lock or controller_low_confidence' not in info_text
+    assert 'skip_reason = "controller_low_confidence"' not in info_text
+    assert 'result["classes"] = [controller_class]' not in class_router_text
+    assert 'result["intents"] = sorted(info_controller_intents)' not in class_router_text
+    assert 'controller_used_reason = "deterministic"' not in class_router_text
+    assert 'controller_output = {**controller_output, "class": controller_class, "goal": controller_goal}' not in class_router_text
 
 
 def test_response_decision_helper_residue_uses_narrow_runtime_owners() -> None:
@@ -1182,38 +1606,30 @@ def test_boundary_request_dataclasses_do_not_shape_planner_action() -> None:
     assert "action" not in _class_field_names(executor_path, "DegradeBoundaryRequest")
 
 
-def test_turn_planner_synthetic_boundary_builders_have_fixed_shape() -> None:
+def test_turn_planner_boundary_signal_builders_have_fixed_shape() -> None:
     from app.core.turn_planner import TurnPlanner
 
     planner = TurnPlanner()
-    preflight = planner.build_preflight_reject(
+    preflight = planner.build_preflight_reject_signal(
         reason_code="missing_remote_jid",
         control_label="missing_remote_jid",
         interaction_owner="reasoning_core_missing_remote_jid",
     )
-    degrade = planner.build_controlled_degrade(
+    degrade = planner.build_controlled_degrade_signal(
         reason_code="runtime_exception",
         control_label="runtime_error",
         interaction_owner="reasoning_core_exception_degrade",
     )
 
-    assert preflight.action == "preflight_reject"
-    assert preflight.intent == "system_control"
-    assert preflight.source == "planner_control"
-    assert preflight.meta["control_label"] == "missing_remote_jid"
-    assert preflight.outcome == "FACT"
-    assert preflight.tool_action == "noop"
-    assert preflight.binding_plan is not None
-    assert preflight.binding_plan.binding_outcome_type == "deny"
+    assert preflight.decision == "block"
+    assert preflight.reason_code == "missing_remote_jid"
+    assert preflight.control_label == "missing_remote_jid"
+    assert preflight.interaction_owner == "reasoning_core_missing_remote_jid"
 
-    assert degrade.action == "handoff"
-    assert degrade.intent == "system_control"
-    assert degrade.source == "planner_control"
-    assert degrade.meta["control_label"] == "runtime_error"
-    assert degrade.outcome == "HANDOFF"
-    assert degrade.tool_action == "handoff"
-    assert degrade.binding_plan is not None
-    assert degrade.binding_plan.binding_outcome_type == "degrade"
+    assert degrade.decision == "degrade"
+    assert degrade.reason_code == "runtime_exception"
+    assert degrade.control_label == "runtime_error"
+    assert degrade.interaction_owner == "reasoning_core_exception_degrade"
 
 
 def test_workstream8_observability_and_release_gate_artifacts_exist() -> None:

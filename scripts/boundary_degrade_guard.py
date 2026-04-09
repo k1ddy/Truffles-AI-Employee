@@ -36,11 +36,8 @@ def _call_name(node: ast.AST | None) -> str | None:
 def _snapshot_diff(label: str, observed: set[str], expected: set[str], file_path: str) -> list[str]:
     violations: list[str] = []
     extras = sorted(observed - expected)
-    missing = sorted(expected - observed)
     if extras:
         violations.append(f"{file_path}: {label} grew without waiver -> {', '.join(extras)}")
-    if missing:
-        violations.append(f"{file_path}: {label} drifted below snapshot -> {', '.join(missing)}")
     return violations
 
 

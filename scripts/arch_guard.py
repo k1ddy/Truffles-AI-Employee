@@ -242,6 +242,48 @@ def guard_scripts_for_active_block(truth: dict) -> list[str]:
             'touched_slice_continuity_guard.py',
             'legacy_drain_closure_guard.py',
         ]
+    if active_block_tp == 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-g-operational-final-dedupe-a922.md':
+        return [
+            'recovery_execution_guard.py',
+            'fact_plane_guard.py',
+            'fact_family_cutover_guard.py',
+            'touched_slice_continuity_guard.py',
+            'legacy_freeze_guard.py',
+            'boundary_degrade_guard.py',
+            'continuity_writer_guard.py',
+            'legacy_mesh_caller_guard.py',
+            'operational_entrypoint_dedupe_guard.py',
+            'proof_path_guard.py',
+            'semantic_bridge_growth_guard.py',
+        ]
+    if active_block_tp == 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-booking-manage-temporal-clue-grounding-followup-continuity-a922.md':
+        return [
+            'recovery_execution_guard.py',
+            'fact_plane_guard.py',
+            'fact_family_cutover_guard.py',
+            'touched_slice_continuity_guard.py',
+            'legacy_freeze_guard.py',
+            'boundary_degrade_guard.py',
+            'continuity_writer_guard.py',
+            'legacy_mesh_caller_guard.py',
+            'operational_entrypoint_dedupe_guard.py',
+            'proof_path_guard.py',
+            'semantic_bridge_growth_guard.py',
+        ]
+    if active_block_tp == 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md':
+        return [
+            'recovery_execution_guard.py',
+            'fact_plane_guard.py',
+            'fact_family_cutover_guard.py',
+            'touched_slice_continuity_guard.py',
+            'legacy_freeze_guard.py',
+            'boundary_degrade_guard.py',
+            'continuity_writer_guard.py',
+            'legacy_mesh_caller_guard.py',
+            'operational_entrypoint_dedupe_guard.py',
+            'proof_path_guard.py',
+            'semantic_bridge_growth_guard.py',
+        ]
     return [
         'recovery_execution_guard.py',
         'fact_plane_guard.py',
@@ -284,6 +326,10 @@ def main() -> int:
         if args.head_ref:
             cmd.extend(['--head-ref', args.head_ref])
         subprocess.run(cmd, cwd=root, check=True)
+
+    single_owner_guard = root / 'scripts' / 'single_semantic_owner_guard.py'
+    if single_owner_guard.exists():
+        subprocess.run([sys.executable, str(single_owner_guard)], cwd=root, check=True)
 
     print('arch_guard: OK')
     return 0

@@ -20,9 +20,38 @@ def _load_registry() -> dict:
     return json.loads((ROOT / "docs/system_forensics/dead_surface_registry.json").read_text(encoding="utf-8"))
 
 
+def _load_legacy_surface_registry() -> dict:
+    return json.loads((ROOT / "docs/system_forensics/legacy_caller_surface.json").read_text(encoding="utf-8"))
+
+
 def test_legacy_mesh_caller_guard_matches_live_registry() -> None:
     module = load_module("legacy_mesh_caller_guard", SCRIPTS / "legacy_mesh_caller_guard.py")
     registry = _load_registry()
+
+    assert module.evaluate(ROOT, registry) == []
+
+
+def test_legacy_mesh_caller_guard_skips_governed_router_importer_drift() -> None:
+    module = load_module("legacy_mesh_caller_guard", SCRIPTS / "legacy_mesh_caller_guard.py")
+    registry = {
+        "entries": [
+            {
+                "surface_path": "truffles-api/app/routers/webhook/info.py",
+                "classification": "unmounted_legacy_helper_surface",
+                "authority_mode": "adapter_only_observer",
+                "static_app_importers": ["declared-only.py"],
+                "test_only_importers": ["declared-test-only.py"],
+            }
+        ],
+        "caller_proof_law": {
+            "mounted_ingress_surfaces": [],
+            "behavior_owning_surfaces": [],
+            "observer_only_surfaces": ["truffles-api/app/routers/webhook/info.py"],
+            "shadow_only_surfaces": [],
+            "unmounted_surfaces": ["truffles-api/app/routers/webhook/info.py"],
+            "removed_surfaces": [],
+        },
+    }
 
     assert module.evaluate(ROOT, registry) == []
 
@@ -32,7 +61,7 @@ def test_legacy_mesh_registry_captures_shadow_and_behavior_surfaces() -> None:
     entries = {item["surface_path"]: item for item in registry["entries"]}
 
     assert registry["status"] == "machine_readable_system_reproof_base"
-    assert registry["active_block"] == "Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof"
+    assert registry["active_block"] == "Consultant Core Block H.1B — File Replay Scenario Contract Materialization"
     assert registry["caller_proof_law"]["mounted_ingress_surfaces"] == [
         "truffles-api/app/main.py",
         "truffles-api/app/routers/webhook/__init__.py",
@@ -125,3 +154,19 @@ def test_legacy_mesh_registry_captures_frozen_surface_static_importers() -> None
         "truffles-api/tests/test_booking_chaos_dialogs.py",
         "truffles-api/tests/test_message_endpoint.py",
     ]
+
+
+def test_legacy_caller_surface_registry_materializes_exact_final_fates() -> None:
+    registry = _load_legacy_surface_registry()
+    entries = {item["module_path"]: item for item in registry["entries"]}
+
+    assert registry["active_block"] == "Consultant Core Block H.1B — File Replay Scenario Contract Materialization"
+    assert registry["freeze_policy"]["final_fate_set"] == [
+        "adapter_only",
+        "observer_only",
+        "unreachable",
+        "removed",
+    ]
+    assert entries["truffles-api/app/routers/webhook/decision.py"]["final_fate"] == "unreachable"
+    assert entries["truffles-api/app/routers/webhook/info.py"]["final_fate"] == "unreachable"
+    assert entries["truffles-api/app/routers/webhook/context_manager.py"]["final_fate"] == "unreachable"

@@ -374,30 +374,6 @@
           }
         }
       }
-    },
-    {
-      "if": {
-        "properties": {
-          "meta": {
-            "type": "object",
-            "required": [
-              "synthetic_policy_decision"
-            ],
-            "properties": {
-              "synthetic_policy_decision": {
-                "const": true
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "binding_plan": {
-            "$ref": "https://truffles.ai/contracts/runtime/binding_plan.v1.jsonschema"
-          }
-        }
-      }
     }
   ]
 }

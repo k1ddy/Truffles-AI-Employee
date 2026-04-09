@@ -112,11 +112,8 @@ HANDOVER_CONFIRMATION_KEY = "handover_confirmation"
 RE_ENTRY_REQUIRED_KEY = "re_entry_required"
 PENDING_RESUME_SNAPSHOT_KEYS = {
     "context_manager",
-    "expected_reply_type",
-    "expected_reply_reason",
     "intent_queue",
     "booking",
-    "session_memory",
     "last_service_hint",
     "last_service_hint_at",
 }
@@ -188,17 +185,6 @@ def _build_session_memory_observability_snapshot(
     }
     if explicit_pending_question_contract is not None:
         snapshot["pending_question_contract"] = explicit_pending_question_contract
-    else:
-        last_question_type = _dialog_state_service().project_expected_reply_projections(
-            expected_reply_type=(
-                memory.get("last_question_type")
-                if isinstance(memory, dict)
-                else None
-            ),
-            expected_reply_reason=None,
-        ).expected_reply_type
-        if last_question_type is not None:
-            snapshot["last_question_type"] = last_question_type
     return snapshot
 
 

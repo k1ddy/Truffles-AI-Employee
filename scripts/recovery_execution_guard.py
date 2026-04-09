@@ -35,6 +35,15 @@ BLOCK7_TP = 'docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-fact-plane-materia
 BLOCK8_TP = 'docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-fact-contract-location-hours-parking-first-slice-a922.md'
 BLOCK9_TP = 'docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-touched-slice-continuity-normalization-a922.md'
 BLOCK10_TP = 'docs/TASK_PACKAGES/TP-2026-03-30-consultant-core-legacy-drain-and-proof-closure-a922.md'
+BLOCK_C5_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-c5-policy-info-interrupt-fact-delivery-a922.md'
+BLOCK_D_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-d-boundary-purification-a922.md'
+BLOCK_E_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e-real-pack-runtime-separation-a922.md'
+BLOCK_E5_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e5-owner-service-referent-grounding-a922.md'
+BLOCK_E6_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-e6-post-grounding-service-reply-exactness-a922.md'
+BLOCK_F_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-f-legacy-mesh-final-drain-a922.md'
+BLOCK_G_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-g-operational-final-dedupe-a922.md'
+BOOKING_MANAGE_TEMPORAL_CLUE_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-booking-manage-temporal-clue-grounding-followup-continuity-a922.md'
+BLOCK_H1_TP = 'docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md'
 
 BLOCK_EXPECTATIONS: dict[str, dict[str, Any]] = {
     WHOLE_SYSTEM_RESET_TP: {
@@ -750,6 +759,259 @@ BLOCK_EXPECTATIONS: dict[str, dict[str, Any]] = {
         },
         'requires_phase_advance_waiver': True,
     },
+    BLOCK_C5_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is not refreshed after focused `Block C.5` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, and `Block C.5` are `closed_proven` in the active worktree; `Block D` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block C.5 — Policy-Info Interrupt Fact Delivery` (`closed_proven`; next admissible runtime work is `Block D`)',
+            '- the touched policy-info interrupt fact-delivery family is now closed_proven, so `Block D` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is not refreshed after focused `Block C.5` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, and `Block C.5` are `closed_proven` in the active worktree; `Block D`..`Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block C.5 — Policy-Info Interrupt Fact Delivery (`closed_proven`)',
+            '- next admissible runtime block is therefore `Block D — Boundary Purification`',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_is_closed_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'boundary_envelope_is_narrower_but_boundary_purification_still_remains_partial_pending_block_d',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-c5 policy-info interrupt fact-delivery closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-c continuity-carrier collapse closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'boundary_purification_pack_runtime_separation_legacy_mesh_operational_dedupe_and_whole_system_acceptance_remain_open_after_block_c5',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_D_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is not refreshed after focused `Block D` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, and `Block D` are `closed_proven` in the active worktree; `Block E` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block D — Boundary Purification` (`closed_proven`; next admissible runtime work is `Block E`)',
+            '- boundary override meta no longer owns visible handoff or reply semantics on the live path, so `Block E` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is not refreshed after focused `Block D` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, and `Block D` are `closed_proven` in the active worktree; `Block E`..`Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block D — Boundary Purification (`closed_proven`)',
+            '- next admissible runtime block is therefore `Block E — Real Pack/Runtime Separation`',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_is_closed_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-d boundary purification closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-c5 policy-info interrupt fact-delivery closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'pack_runtime_separation_legacy_mesh_operational_dedupe_and_whole_system_acceptance_remain_open_after_block_d',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_F_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is not refreshed after focused `Block F` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, and `Block F` are `closed_proven` in the active worktree; `Block G` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block F — Legacy Mesh Final Drain` (`closed_proven`; next admissible runtime work is `Block G`)',
+            '- the remaining legacy webhook mesh now has one exact final-fate contract on the live import/caller topology, so `Block G — Operational Final Dedupe` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is not refreshed after focused `Block F` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, and `Block F` are `closed_proven` in the active worktree; `Block G`..`Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block F — Legacy Mesh Final Drain (`closed_proven`)',
+            '- start `Block G — Operational Final Dedupe` from live caller/process proof after `Block F` import/caller closure',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-f legacy mesh final drain closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-e6 post-grounding service reply exactness closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'operational_dedupe_and_whole_system_acceptance_remain_open_after_block_f',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_G_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is still `r35f`; focused `Block G` proof closed the operational seam only, so whole-system acceptance remains a separate lane',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, `Block F`, and `Block G` are `closed_proven` in the active worktree; `Block H` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block G — Operational Final Dedupe` (`closed_proven`; next admissible runtime work is `Block H`)',
+            '- the live outbox admin/service/console/worker surfaces now share one canonical runtime boundary for scoped preview and execute semantics, so `Block H — Final Acceptance` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is still `r35f`; focused `Block G` proof closed the operational seam only, so whole-system acceptance remains separate',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, `Block F`, and `Block G` are `closed_proven` in the active worktree; `Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block G — Operational Final Dedupe (`closed_proven`)',
+            '- start `Block H — Final Acceptance` from one fresh locked replay plus full human semantic audit after proven `Block G` closeout',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-g operational final dedupe closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-e6 post-grounding service reply exactness closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'final_acceptance_replay_and_human_semantic_audit_remain_open_after_block_g',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BOOKING_MANAGE_TEMPORAL_CLUE_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is still `r35f`; the focused booking-manage family proof removed the first surfaced `Block H` blocker, but whole-system acceptance remains a separate lane until a fresh full replay reruns `Block H`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, `Block F`, `Block G`, and the focused `booking-manage temporal clue grounding / follow-up continuity` block are `closed_proven` in the active worktree; `Block H` remains open',
+            '- Active block: `Consultant Core Booking-Manage Temporal Clue Grounding / Follow-up Continuity` (`closed_proven`; next admissible runtime work is `Block H`)',
+            '- the focused booking-manage follow-up block is now proven green, so the next admissible runtime block is again `Block H — Final Acceptance`;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is still `r35f`; the focused booking-manage family proof removed the first surfaced `Block H` blocker, but whole-system acceptance remains separate until a fresh full replay reruns `Block H`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, `Block F`, `Block G`, and the focused `booking-manage temporal clue grounding / follow-up continuity` block are `closed_proven` in the active worktree; `Block H` and whole-system acceptance remain open',
+            '- Consultant Core Booking-Manage Temporal Clue Grounding / Follow-up Continuity (`closed_proven`)',
+            '- rerun `Block H — Final Acceptance` now that the surfaced booking-manage blocker family is proven removed on a focused replay; no product closure claim is admissible until that full replay and audit pass',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core booking-manage temporal clue follow-up continuity closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-g operational final dedupe closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_block_h_final_acceptance_refreshes_it',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'block_h_final_acceptance_replay_and_full_human_semantic_audit_remain_open_after_booking_manage_temporal_clue_closeout',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_H1_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is still `r35f`; the focused `Block H.1` oracle proof plus reopened `Block H.1B` file-replay proof removed the stale booking-completion and booking-manage scenario blocker families on both compiler and file-replay seams, but whole-system acceptance remains a separate lane until a fresh full replay reruns `Block H`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, `Block F`, `Block G`, the focused `booking-manage temporal clue grounding / follow-up continuity` block, `Block H.1 — Oracle Scenario Contract Alignment`, and `Block H.1B — File Replay Scenario Contract Materialization` are `closed_proven` in the active worktree; `Block H` remains open',
+            '- Active block: `Consultant Core Block H.1B — File Replay Scenario Contract Materialization` (`closed_proven`; next admissible runtime work is `Block H`)',
+            '- the focused booking-manage follow-up block, `Block H.1`, and `Block H.1B` are now proven green, so the next admissible runtime block is again `Block H — Final Acceptance`;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is still `r35f`; the focused `Block H.1` oracle proof plus reopened `Block H.1B` file-replay proof removed the stale booking-completion and booking-manage scenario blocker families on both compiler and file-replay seams, but whole-system acceptance remains separate until a fresh full replay reruns `Block H`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, `Block E.6`, `Block F`, `Block G`, the focused `booking-manage temporal clue grounding / follow-up continuity` block, `Block H.1 — Oracle Scenario Contract Alignment`, and `Block H.1B — File Replay Scenario Contract Materialization` are `closed_proven` in the active worktree; `Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block H.1B — File Replay Scenario Contract Materialization (`closed_proven`)',
+            '- rerun `Block H — Final Acceptance` now that the surfaced booking-manage plus both oracle scenario blocker families are proven removed on focused evidence; no product closure claim is admissible until that full replay and audit pass',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-h1b file-replay scenario contract materialization closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core booking-manage temporal clue follow-up continuity closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_block_h_final_acceptance_refreshes_it',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'block_h_final_acceptance_replay_and_full_human_semantic_audit_remain_open_after_block_h1b_file_replay_scenario_contract_materialization_closeout',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_E6_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is not refreshed after focused `Block E.6` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, and `Block E.6` are `closed_proven` in the active worktree; `Block F` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block E.6 — Post-Grounding Service Reply Exactness` (`closed_proven`; next admissible runtime work is `Block F`)',
+            '- the touched hot fact path now has exact post-grounding pack/runtime reply behavior on published `effective_pack` surfaces, so `Block F — Legacy Mesh Final Drain` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is not refreshed after focused `Block E.6` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, `Block E.5`, and `Block E.6` are `closed_proven` in the active worktree; `Block F`..`Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block E.6 — Post-Grounding Service Reply Exactness (`closed_proven`)',
+            '- start `Block F — Legacy Mesh Final Drain` from live-code caller proof after replay evidence `a922-block-e6-replay-20260401r`',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-e6 post-grounding service reply exactness closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-e5 owner service referent grounding closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'legacy_mesh_operational_dedupe_and_whole_system_acceptance_remain_open_after_block_e6',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_E5_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is not refreshed after focused `Block E.5` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, and `Block E.5` are `closed_proven` in the active worktree; `Block E.6` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block E.5 — Owner Service Referent Grounding` (`closed_proven`; next admissible runtime work is `Block E.6`)',
+            '- the live hot fact path now consumes one narrow selected-adapter pack/runtime boundary, owner-side service grounding is now closed on the touched envelope, and the first remaining replay fail is post-grounding pack-side service reply exactness, so `Block E.6` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is not refreshed after focused `Block E.5` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, `Block E`, and `Block E.5` are `closed_proven` in the active worktree; `Block E.6`..`Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block E.5 — Owner Service Referent Grounding (`closed_proven`)',
+            '- start `Block E.6 — Post-Grounding Service Reply Exactness` from replay evidence `a922-block-e5-replay-20260401f`',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-e5 owner service referent grounding closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-e pack-runtime separation closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'post_grounding_service_reply_exactness_legacy_mesh_operational_dedupe_and_whole_system_acceptance_remain_open_after_block_e5',
+        },
+        'requires_phase_advance_waiver': True,
+    },
+    BLOCK_E_TP: {
+        'canon_snippets': [
+            '- Current whole-system practical truth is not refreshed after focused `Block E` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- Runtime implementation status: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, and `Block E` are `closed_proven` in the active worktree; `Block E.5` is the next runtime block and whole-system acceptance remains open',
+            '- Active block: `Consultant Core Block E — Real Pack/Runtime Separation` (`closed_proven`; next admissible runtime work is `Block E.5`)',
+            '- the live hot fact path now consumes one narrow selected-adapter pack/runtime boundary, and the first remaining replay fail is an owner-side service-referent grounding miss, so `Block E.5` is the next admissible runtime block;',
+        ],
+        'program_snippets': [
+            '- whole-system practical truth is not refreshed after focused `Block E` proof; the latest accepted full-run evidence still remains `r35f`',
+            '- implementation state: `Block A`, `Block B`, `Block C`, `Block C.5`, `Block D`, and `Block E` are `closed_proven` in the active worktree; `Block E.5`..`Block H` and whole-system acceptance remain open',
+            '- Consultant Core Block E — Real Pack/Runtime Separation (`closed_proven`)',
+            '- first remaining replay fail is now an unrelated owner-side family',
+            '- start `Block E.5 — Owner Service Referent Grounding` from replay evidence `a922-block-e-replay-20260401h`',
+        ],
+        'owner_status': {
+            'semantic_owner.cutover_status': 'owner_path_is_real_and_block_a_interrupt_arbitration_is_closed_but_full_single_semantic_owner_closure_still_remains_partial',
+            'continuity_owner.cutover_status': 'block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only',
+            'boundary_owner.cutover_status': 'block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue',
+        },
+        'state_now_prefix': '- NOW (consultant-core block-e pack-runtime separation closeout, consultant-core):',
+        'state_note_prefix': '- NOW (consultant-core block-d boundary purification closeout, consultant-core):',
+        'required_open_blockers': {
+            'fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim',
+            'current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement',
+            'whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes',
+            'owner_service_referent_grounding_legacy_mesh_operational_dedupe_and_whole_system_acceptance_remain_open_after_block_e',
+        },
+        'requires_phase_advance_waiver': True,
+    },
 }
 
 FORBIDDEN_BLOCK2_EVIDENCE = {
@@ -775,7 +1037,6 @@ FORBIDDEN_BLOCK2_EVIDENCE = {
 
 DISALLOWED_ACTIVE_TOKENS = [
     'r36g',
-    'booking-manage temporal clue grounding',
     'consult/media cue continuity',
     'run fresh practical replay and full human semantic audit for the recovered canary mechanism envelope',
 ]
@@ -783,7 +1044,6 @@ DISALLOWED_ACTIVE_TOKENS = [
 STATE_HISTORICAL_TOKENS = [
     'r36g',
     'consult/media cue continuity',
-    'booking-manage temporal clue grounding',
 ]
 
 

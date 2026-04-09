@@ -5,7 +5,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.binding_plan import BindingPlanV1
+from app.core.boundary_validator import BoundaryOverride
 from app.core.conversation_projection import ConversationProjectionV1
+from app.core.dialog_state_service import DialogState
 from app.core.semantic_decision import SemanticDecisionV1
 from app.core.turn_journal import TurnJournalV1, resolve_turn_id
 from app.core.turn_planner import PolicyDecision
@@ -100,7 +102,9 @@ def build_runtime_trace_contract(
     trace_id: str | None,
     runtime_entrypoint: str,
     semantic_runtime_path: str,
-    decision: PolicyDecision,
+    decision: PolicyDecision | None,
+    boundary_override: BoundaryOverride | None,
+    dialog_state: DialogState | None,
     contract_source: str,
     contract_action: str,
     reply_kind: str | None,
@@ -119,11 +123,16 @@ def build_runtime_trace_contract(
 ) -> RuntimeTraceContractV1:
     semantic_decision = (
         decision.semantic_decision
-        if isinstance(decision.semantic_decision, SemanticDecisionV1)
+        if isinstance(decision, PolicyDecision)
+        and isinstance(decision.semantic_decision, SemanticDecisionV1)
         else None
     )
-    binding_plan = decision.binding_plan if isinstance(decision.binding_plan, BindingPlanV1) else None
-    turn_id = resolve_turn_id(decision)
+    binding_plan = (
+        decision.binding_plan
+        if isinstance(decision, PolicyDecision) and isinstance(decision.binding_plan, BindingPlanV1)
+        else None
+    )
+    turn_id = resolve_turn_id(decision) if isinstance(decision, PolicyDecision) else None
     journal_event_types: list[str] = []
     if isinstance(turn_journal, TurnJournalV1):
         journal_event_types = [
@@ -131,23 +140,83 @@ def build_runtime_trace_contract(
             for event in turn_journal.events
             if getattr(event, "turn_id", None) == turn_id and isinstance(event.event_type, str)
         ]
+    fallback_turn_id = turn_id or (
+        boundary_override.reason_code
+        if isinstance(boundary_override, BoundaryOverride)
+        else "boundary_override"
+    )
 
     return RuntimeTraceContractV1(
         trace_id=trace_id,
         owner_transition=RuntimeTraceOwnerTransitionV1(
-            decision_id=(semantic_decision.decision_id if semantic_decision else turn_id),
-            requested_outcome=(semantic_decision.requested_outcome if semantic_decision else decision.outcome.lower()),
-            intent=(semantic_decision.intent if semantic_decision else decision.intent),
+            decision_id=(
+                semantic_decision.decision_id
+                if semantic_decision
+                else (
+                    turn_id
+                    or (
+                        boundary_override.reason_code
+                        if isinstance(boundary_override, BoundaryOverride)
+                        else "boundary_override"
+                    )
+                )
+            ),
+            requested_outcome=(
+                semantic_decision.requested_outcome
+                if semantic_decision
+                else (
+                    decision.outcome.lower()
+                    if isinstance(decision, PolicyDecision)
+                    else ("handoff" if getattr(boundary_override, "decision", None) == "degrade" else "fact")
+                )
+            ),
+            intent=(
+                semantic_decision.intent
+                if semantic_decision
+                else (
+                    decision.intent
+                    if isinstance(decision, PolicyDecision)
+                    else (
+                        (
+                            boundary_override.meta.get("control_label")
+                            if isinstance(boundary_override, BoundaryOverride)
+                            and isinstance(boundary_override.meta, dict)
+                            else None
+                        )
+                        or (
+                            boundary_override.reason_code
+                            if isinstance(boundary_override, BoundaryOverride)
+                            else "boundary_override"
+                        )
+                    )
+                )
+            ),
             capability_id=(semantic_decision.capability_id if semantic_decision else None),
-            interaction_owner=decision.interaction.owner,
+            interaction_owner=(
+                decision.interaction.owner
+                if isinstance(decision, PolicyDecision)
+                else getattr(getattr(dialog_state, "interaction_state", None), "interaction_owner", None)
+            ),
             source=contract_source,
-            tool_action_hint=(semantic_decision.tool_action_hint if semantic_decision else decision.tool_action),
-            needs_human=(semantic_decision.needs_human if semantic_decision else decision.outcome == "HANDOFF"),
+            tool_action_hint=(
+                semantic_decision.tool_action_hint
+                if semantic_decision
+                else (decision.tool_action if isinstance(decision, PolicyDecision) else None)
+            ),
+            needs_human=(
+                semantic_decision.needs_human
+                if semantic_decision
+                else (
+                    decision.outcome == "HANDOFF"
+                    if isinstance(decision, PolicyDecision)
+                    else getattr(boundary_override, "decision", None) == "degrade"
+                )
+            ),
             goal=(semantic_decision.goal if semantic_decision else None),
         ),
         binding_transition=RuntimeTraceBindingTransitionV1(
             binding_id=(binding_plan.binding_id if binding_plan else None),
-            decision_id=(binding_plan.decision_id if binding_plan else turn_id),
+            decision_id=(binding_plan.decision_id if binding_plan else fallback_turn_id),
             binding_outcome_type=(binding_plan.binding_outcome_type if binding_plan else None),
             capability_id=(binding_plan.capability_id if binding_plan else None),
             selected_tool_or_workflow_ref=(
@@ -173,7 +242,7 @@ def build_runtime_trace_contract(
             root_reason_code=root_reason_code,
         ),
         state_transition=RuntimeTraceStateTransitionV1(
-            turn_id=turn_id,
+            turn_id=fallback_turn_id,
             conversation_id=(
                 projection.conversation_id
                 if isinstance(projection, ConversationProjectionV1)

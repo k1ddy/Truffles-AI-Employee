@@ -1,4 +1,5 @@
 import json
+import random
 import shlex
 import subprocess
 from importlib.util import module_from_spec, spec_from_file_location
@@ -28,6 +29,358 @@ def _load_module():
 
 
 _module = _load_module()
+
+
+def _write_scenarios_file(tmp_path: Path, payload: dict) -> Path:
+    path = tmp_path / "scenarios.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_send_manager_telegram_action_with_retry_uses_shared_retry_wrapper(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeRng:
+        def randint(self, a, b):
+            return 123456 if a == 100000 else 4242
+
+    def _fake_retry(url, payload, secret, timeout, retry_count, retry_backoff):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["secret"] = secret
+        captured["timeout"] = timeout
+        captured["retry_count"] = retry_count
+        captured["retry_backoff"] = retry_backoff
+        return 200, "{\"success\":true}", None, 2
+
+    monkeypatch.setattr(_module, "_send_webhook_payload_with_retry", _fake_retry)
+
+    status, body, error, attempts = _module._send_manager_telegram_action_with_retry(
+        base_url="http://127.0.0.1:18189",
+        telegram_chat_id="-100123",
+        manager_id=777,
+        action="take",
+        handover_id="handover-1",
+        topic_id=99,
+        rng=_FakeRng(),
+        timeout=30.0,
+        retry_count=2,
+        retry_backoff=0.6,
+    )
+
+    assert status == 200
+    assert body == "{\"success\":true}"
+    assert error is None
+    assert attempts == 2
+    assert captured["url"] == "http://127.0.0.1:18189/telegram-webhook"
+    assert captured["secret"] is None
+    assert captured["timeout"] == 30.0
+    assert captured["retry_count"] == 2
+    assert captured["retry_backoff"] == 0.6
+    payload = captured["payload"]
+    assert payload["callback_query"]["data"] == "take_handover-1"
+    assert payload["callback_query"]["message"]["chat"]["id"] == "-100123"
+    assert payload["callback_query"]["message"]["message_thread_id"] == 99
+    assert payload["callback_query"]["id"].startswith("sim-")
+
+
+def test_send_manager_telegram_action_with_retry_requires_chat_id(monkeypatch):
+    called = False
+
+    def _fake_retry(*args, **kwargs):
+        nonlocal called
+        called = True
+        return None, "", "should_not_run", 1
+
+    monkeypatch.setattr(_module, "_send_webhook_payload_with_retry", _fake_retry)
+
+    status, body, error, attempts = _module._send_manager_telegram_action_with_retry(
+        base_url="http://127.0.0.1:18189",
+        telegram_chat_id="",
+        manager_id=777,
+        action="take",
+        handover_id="handover-1",
+        topic_id=None,
+        rng=SimpleNamespace(randint=lambda *_: 1),
+        timeout=30.0,
+        retry_count=2,
+        retry_backoff=0.6,
+    )
+
+    assert status is None
+    assert body == ""
+    assert error == "telegram_chat_id_missing"
+    assert attempts == 0
+    assert called is False
+
+
+def test_load_dialogs_from_file_materializes_booking_contracts(tmp_path):
+    scenario_file = _write_scenarios_file(
+        tmp_path,
+        {
+            "dialogs": [
+                {
+                    "dialog_id": 2,
+                    "goal": "Booking with info interrupts and completion",
+                    "turns": [
+                        {
+                            "kind": "text",
+                            "text": "Хочу записаться на маникюр",
+                            "tags": ["booking"],
+                            "expect": {
+                                "action": "booking_prompt",
+                                "info_sections": [],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Есть ли акции?",
+                            "tags": ["promo"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": ["promotions", "promotions_rules"],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Какая цена?",
+                            "tags": ["price"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": ["pricing", "price"],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Завтра в 15:00",
+                            "tags": ["time"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": [],
+                                "reply_type": "name",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["name"]},
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Алина",
+                            "tags": ["name"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": [],
+                                "reply_type": None,
+                                "state": "bot_active",
+                                "expected_reply": False,
+                                "allow_booking_stall": False,
+                            },
+                        },
+                    ],
+                },
+                {
+                    "dialog_id": 9,
+                    "goal": "Check and confirm sequence",
+                    "turns": [
+                        {
+                            "kind": "text",
+                            "text": "Проверьте мою запись на четверг.",
+                            "tags": ["check_booking"],
+                            "expect": {
+                                "action": None,
+                                "info_sections": [],
+                                "reply_type": None,
+                                "state": "bot_active",
+                                "expected_reply": False,
+                                "allow_booking_stall": False,
+                            },
+                        },
+                        {
+                            "kind": "text",
+                            "text": "Подтвердите, пожалуйста, мою запись на четверг.",
+                            "tags": ["confirm"],
+                            "expect": {
+                                "action": "booking_prompt",
+                                "info_sections": [],
+                                "reply_type": "time",
+                                "state": "bot_active",
+                                "expected_reply": True,
+                                "allow_booking_stall": False,
+                                "meta_any": {"expected_reply_type": ["time"]},
+                            },
+                        },
+                    ],
+                },
+            ]
+        },
+    )
+
+    dialogs, warnings, error = _module._llm_quality_load_dialogs_from_file(str(scenario_file))
+
+    assert error is None
+    assert "scenario_file_materialization" in warnings
+    assert "sanitized_dialogs=2" in warnings["scenario_file_materialization"]
+    assert dialogs[0]["turns"][4]["expect"]["expected_reply"] is True
+    assert dialogs[1]["turns"][0]["expect"]["expected_reply"] is True
+    assert dialogs[1]["turns"][1]["expect"]["action"] is None
+    assert dialogs[1]["turns"][1]["expect"]["reply_type"] is None
+    assert dialogs[1]["turns"][1]["expect"]["meta_any"]["expected_reply_type"] == [
+        "name",
+        "time",
+    ]
+
+
+@pytest.mark.parametrize(
+    "builder_name",
+    [
+        "_chaos_build_booking_case",
+        "_chaos_build_consult_case",
+        "_chaos_build_info_case",
+        "_chaos_build_ood_case",
+    ],
+)
+def test_chaos_booking_progression_builders_emit_canonical_collect_actions(builder_name):
+    builder = getattr(_module, builder_name)
+
+    case = builder(random.Random(7), case_id="case-1", min_turns=6, max_turns=6, noise=0.0)
+
+    collect_turns = [
+        turn
+        for turn in case["turns"]
+        if (turn.get("expected") or {}).get("expected_reply_type") in {"service_choice", "time", "name"}
+        and (turn.get("expected") or {}).get("state") == "bot_active"
+    ]
+
+    assert collect_turns
+    assert all((turn.get("expected") or {}).get("action_any") == ["collect"] for turn in collect_turns)
+
+
+def test_llm_quality_extract_expectations_canonicalizes_booking_time_collect_contract():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["booking"],
+            "expect": {
+                "action": "booking_prompt",
+                "reply_type": "time",
+                "state": "bot_active",
+                "expected_reply": True,
+                "meta": {
+                    "action": "booking_prompt",
+                    "expected_reply_type": "time",
+                },
+                "meta_any": {
+                    "action": ["booking_prompt"],
+                    "expected_reply_type": ["time"],
+                },
+                "trace_contains": [
+                    {
+                        "stage": "question_contract",
+                        "expected_reply_type": "time",
+                        "reason": "booking_prompt",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert expectations["action"] == "collect"
+    assert expectations["meta"]["action"] == "collect"
+    assert expectations["meta"]["source"] == "llm_policy_core"
+    assert expectations["meta"]["tool_action"] == "collect"
+    assert expectations["meta"]["expected_reply_type"] == "time"
+    assert "expected_reply_reason" not in expectations["meta"]
+    assert expectations["meta_any"]["action"] == ["collect"]
+    assert expectations["meta_any"]["source"] == ["llm_policy_core"]
+    assert expectations["meta_any"]["tool_action"] == ["collect"]
+    assert expectations["meta_any"]["expected_reply_type"] == ["time"]
+    assert "expected_reply_reason" not in expectations["meta_any"]
+    assert expectations["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+        }
+    ]
+
+
+def test_llm_quality_extract_expectations_moves_pending_question_act_to_trace_only():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["ask_about_requested_slot"],
+            "expect": {
+                "reply_type": "time",
+                "state": "bot_active",
+                "expected_reply": True,
+                "meta_any": {
+                    "pending_question_act": ["ask_about_requested_slot"],
+                    "pending_question_target": ["time"],
+                    "expected_reply_type": ["time"],
+                },
+                "trace_contains": [
+                    {
+                        "stage": "pending_question_interaction",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                    },
+                    {
+                        "stage": "question_contract",
+                        "expected_reply_type": "time",
+                    },
+                ],
+            },
+        }
+    )
+
+    assert expectations["action"] == "collect"
+    assert expectations["meta"]["action"] == "collect"
+    assert expectations["meta_any"]["action"] == ["collect"]
+    assert expectations["meta_any"]["pending_question_target"] == ["time"]
+    assert expectations["meta_any"].get("pending_question_act") is None
+    assert expectations["trace_contains"] == [
+        {
+            "stage": "pending_question_interaction",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+        },
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "time",
+        },
+    ]
+
+
+def test_llm_quality_extract_expectations_keeps_name_reply_type_out_of_collect_materialization():
+    expectations = _module._llm_quality_extract_expectations(
+        {
+            "tags": ["time"],
+            "expect": {
+                "reply_type": "name",
+                "state": "bot_active",
+                "expected_reply": None,
+            },
+        }
+    )
+
+    assert expectations["action"] is None
+    assert expectations["reply_type"] == "name"
+    assert expectations["meta"] == {}
+    assert expectations["meta_any"] == {}
+    assert expectations["trace_contains"] == []
 
 
 def test_run_command_passes_timeout(monkeypatch):
@@ -346,7 +699,7 @@ def test_llm_quality_structured_meta_expectation_is_strong_oracle():
                 "expected_reply": None,
                 "allow_booking_stall": False,
                 "meta": {
-                    "action": "booking_prompt",
+                    "action": "collect",
                     "expected_reply_type": "time",
                 },
                 "trace_contains": [
@@ -365,7 +718,7 @@ def test_llm_quality_structured_meta_expectation_is_strong_oracle():
     assert _module._llm_quality_is_weak_oracle_expectation(expectations) is False
 
 
-def test_llm_quality_service_choice_booking_prompt_contract_catches_wrong_handoff_path():
+def test_llm_quality_service_choice_booking_collect_contract_catches_wrong_handoff_path():
     expectations = _module._llm_quality_extract_expectations(
         {
             "tags": ["booking"],
@@ -382,18 +735,18 @@ def test_llm_quality_service_choice_booking_prompt_contract_catches_wrong_handof
 
     good_reasons = _module._llm_quality_evaluate_turn(
         meta={
-            "action": "booking_prompt",
+            "action": "collect",
             "source": "llm_policy_core",
             "tool_action": "collect",
             "expected_reply_type": "service_choice",
-            "expected_reply_reason": "booking_prompt",
+            "expected_reply_reason": "collect:service",
         },
         trace_entries=[
             {
                 "stage": "question_contract",
                 "decision": "set",
                 "expected_reply_type": "service_choice",
-                "reason": "booking_prompt",
+                "reason": "collect:service",
             }
         ],
         trace_error=None,

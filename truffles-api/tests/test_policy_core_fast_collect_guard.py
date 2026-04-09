@@ -4,11 +4,10 @@ from pathlib import Path
 
 def _load_fast_collect_guard(
     *,
-    verification_signal: bool = False,
     info_signal: bool = False,
     fast_path_enabled: bool = False,
 ):
-    source_path = Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
+    source_path = Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "_legacy.py"
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(source_path))
     target = None
@@ -30,12 +29,7 @@ def _load_fast_collect_guard(
         "EXPECTED_REPLY_TIME": "time",
         "EXPECTED_REPLY_NAME": "name",
         "_looks_like_info_query": lambda *_args, **_kwargs: info_signal,
-        "_looks_like_booking_verification_request": (
-            lambda *_args, **_kwargs: verification_signal
-        ),
         "_normalize_service_text": lambda text: (text or "").strip(),
-        "_match_service": lambda *_args, **_kwargs: False,
-        "_matches_service_request_lexicon": lambda *_args, **_kwargs: False,
         "is_human_request_message": lambda *_args, **_kwargs: False,
         "is_frustration_message": lambda *_args, **_kwargs: False,
     }
@@ -100,12 +94,20 @@ def test_fast_collect_enabled_allows_booking_intent_even_with_slot_signal():
     assert fn(**kwargs) is True
 
 
-def test_fast_collect_enabled_allows_verification_text_signal_when_intent_other_and_slot_signal():
-    fn = _load_fast_collect_guard(verification_signal=True, fast_path_enabled=True)
+def test_fast_collect_enabled_blocks_slot_signal_when_intent_other_without_owner_intent():
+    fn = _load_fast_collect_guard(fast_path_enabled=True)
     kwargs = _base_kwargs()
     kwargs["intent_decomp_set"] = {"other"}
     kwargs["booking_slot_signal"] = True
-    assert fn(**kwargs) is True
+    assert fn(**kwargs) is False
+
+
+def test_fast_collect_enabled_blocks_intent_other_without_slot_signal():
+    fn = _load_fast_collect_guard(fast_path_enabled=True)
+    kwargs = _base_kwargs()
+    kwargs["intent_decomp_set"] = {"other"}
+    kwargs["booking_slot_signal"] = False
+    assert fn(**kwargs) is False
 
 
 def test_fast_collect_enabled_blocks_info_signal():

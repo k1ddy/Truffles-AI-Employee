@@ -185,7 +185,8 @@ def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidenc
     assert "calendar_evidence_missing" in tool_evidence["reasons"]
     assert "confirm_evidence_missing" in tool_evidence["reasons"]
     assert "calendar_hook_missing" in tool_evidence["reasons"]
-    assert "confirm_hook_missing" in tool_evidence["reasons"]
+    assert "confirm_hook_missing" not in tool_evidence["reasons"]
+    assert tool_evidence["required"]["confirm_hook"] is False
 
     infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
     assert infra["valid"] is False
@@ -265,7 +266,7 @@ def test_tool_evidence_strict_policy_keeps_confirm_requirements_once_alias_oppor
             "actions": {},
             "trace_stages": {},
             "tools": {"events": {}},
-            "tool_hooks": {"by_action": {}, "required_by_action": {"calendar": 1}},
+            "tool_hooks": {"by_action": {}, "required_by_action": {"calendar": 1, "confirm": 1}},
         },
     )
 
@@ -280,6 +281,39 @@ def test_tool_evidence_strict_policy_keeps_confirm_requirements_once_alias_oppor
     assert tool_evidence["counts"]["calendar_intent_candidates"] == 1
     assert tool_evidence["counts"]["calendar_opportunity_total"] == 1
     assert tool_evidence["counts"]["confirm_opportunity_total"] == 1
+
+
+def test_tool_evidence_strict_policy_does_not_require_confirm_hook_without_confirm_hook_candidate():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+    build_infra_status = ns["_llm_quality_build_infra_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"check_booking": 1},
+            "actions": {},
+            "trace_stages": {},
+            "tools": {"events": {"calendar": 1, "confirm": 1}},
+            "tool_hooks": {
+                "by_action": {"calendar": 1},
+                "required_by_action": {"calendar": 1},
+            },
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert tool_evidence["reasons"] == []
+    assert tool_evidence["required"]["confirm"] is True
+    assert tool_evidence["required"]["confirm_hook"] is False
+    assert tool_evidence["counts"]["confirm_hook_candidates"] == 0
+    assert tool_evidence["counts"]["confirm_hook_events"] == 0
+
+    infra = build_infra_status({}, {"valid": True, "reasons": []}, tool_evidence_status=tool_evidence)
+    assert infra["valid"] is True
+    assert infra["reasons"] == []
 
 
 def test_tool_evidence_strict_policy_accepts_runs_with_calendar_and_confirm_proof():

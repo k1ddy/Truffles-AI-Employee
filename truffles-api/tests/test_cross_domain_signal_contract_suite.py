@@ -1,7 +1,7 @@
 import pytest
 
-from app.routers.webhook import info as info_router
-from app.services import booking_signal_service, pack_runtime_service, tool_registry_service
+from app.routers.webhook import info_compat as info_router
+from app.services import booking_signal_service, pack_runtime_compat, pack_runtime_service, tool_registry_service
 
 PACK_CASES = (
     {
@@ -33,7 +33,7 @@ def test_cross_domain_contract_suite_info_booking_tool_registry(case):
     )
 
     assert (
-        pack_runtime_service.get_pack_service_hint(
+        pack_runtime_compat.get_pack_service_hint(
             case["service_query"],
             client_slug=case["slug"],
         )

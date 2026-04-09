@@ -167,7 +167,7 @@ def handle_policy_timeout_recovery_boundary(
         )
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action="reply",
+            action="fact",
             intent=runtime_input.fallback_intent or "policy_core_guard",
             source="llm_policy_core",
             fast_intent=False,
@@ -242,7 +242,7 @@ def handle_policy_timeout_recovery_boundary(
     )
     hooks.record_message_decision_meta(
         runtime_input.saved_message,
-        action="reply",
+        action="fact",
         intent="catalog.service_query",
         source="llm_policy_core",
         fast_intent=False,

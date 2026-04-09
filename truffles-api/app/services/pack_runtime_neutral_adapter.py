@@ -305,7 +305,7 @@ def _has_duration_signal(
         return True
     if any(pattern.search(text) for pattern in _DURATION_QUESTION_PATTERNS):
         return True
-    if "время на" in text and get_pack_service_hint(message or "", client_slug=client_slug):
+    if "время на" in text and _resolve_pack_query_service_hint(message or "", client_slug=client_slug):
         return True
     return False
 
@@ -325,7 +325,10 @@ def _has_contact_signal(
     client_slug: str | None = None,
 ) -> bool:
     text = normalized or _normalize_text(raw_text or "")
-    return _contains_any(text, ["тел", "номер", "whatsapp", "wa", "instagram", "инст"])
+    return _contains_any(
+        text,
+        ["тел", "номер", "whatsapp", "wa", "instagram", "инст", "контакт", "связ"],
+    )
 
 
 def _matches_service_request_lexicon(normalized: str, client_slug: str) -> bool:
@@ -480,6 +483,24 @@ def _format_parking_line(salon: dict[str, Any]) -> str | None:
     return None
 
 
+def _format_contact_line(salon: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    for key, label in (
+        ("phone", "Телефон"),
+        ("whatsapp", "WhatsApp"),
+        ("telegram", "Telegram"),
+        ("instagram", "Instagram"),
+    ):
+        value = salon.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(f"{label}: {value.strip()}.")
+    if not parts:
+        return None
+    if not any(part.startswith("Телефон:") for part in parts):
+        parts.insert(0, "Телефон в карточке салона не указан.")
+    return " ".join(parts)
+
+
 def _format_promotions_line(source_truth: dict[str, Any]) -> str | None:
     promotions = source_truth.get("promotions")
     if isinstance(promotions, str) and promotions.strip():
@@ -541,6 +562,8 @@ def format_reply_from_truth(
         return _format_hours_line(salon)
     if normalized_intent == "parking":
         return _format_parking_line(salon)
+    if normalized_intent == "contact":
+        return _format_contact_line(salon)
     if normalized_intent == "services_overview":
         summary = salon.get("services_summary")
         if isinstance(summary, str) and summary.strip():
@@ -641,7 +664,7 @@ def build_evening_greeting(
     return None
 
 
-def semantic_question_type(
+def _pack_query_question_classifier(
     text: str,
     *,
     include_kinds: set[str] | None = None,
@@ -660,7 +683,7 @@ def semantic_question_type(
     return matched[0] if matched else None
 
 
-def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch | None:
+def _resolve_pack_query_semantic_match(text: str, client_slug: str) -> SemanticServiceMatch | None:
     normalized = _normalize_text(text)
     match = _match_service(normalized, client_slug)
     if not isinstance(match, dict):
@@ -717,7 +740,7 @@ def compose_multi_truth_reply(
     return result
 
 
-def get_pack_decision(
+def _build_pack_query_truth_decision(
     message: str,
     *,
     client_slug: str | None = None,
@@ -738,7 +761,7 @@ def get_pack_decision(
     return PackDecision(action="reply", response=response, intent="other", meta={"fact_source": "neutral_pack"})
 
 
-def get_pack_service_decision(
+def _build_pack_query_service_decision(
     message: str,
     *,
     client_slug: str | None = None,
@@ -764,17 +787,17 @@ def get_pack_service_decision(
     )
 
 
-def get_pack_price_reply(message: str, *, client_slug: str | None = None) -> str | None:
+def _build_pack_query_price_reply(message: str, *, client_slug: str | None = None) -> str | None:
     del message
     return format_reply_from_truth("pricing", client_slug=client_slug)
 
 
-def get_pack_price_item(message: str, *, client_slug: str | None = None) -> str | None:
+def _resolve_pack_query_price_item(message: str, *, client_slug: str | None = None) -> str | None:
     del message, client_slug
     return None
 
 
-def get_pack_service_hint(message: str, *, client_slug: str | None = None) -> str | None:
+def _resolve_pack_query_service_hint(message: str, *, client_slug: str | None = None) -> str | None:
     normalized = _normalize_text(message)
     match = _match_service(normalized, _normalize_client_slug(client_slug))
     if isinstance(match, dict):
@@ -784,7 +807,7 @@ def get_pack_service_hint(message: str, *, client_slug: str | None = None) -> st
     return None
 
 
-def phrase_match_intent(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> set[str]:
+def _pack_query_phrase_intents(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> set[str]:
     normalized = _normalize_text(text)
     intents: set[str] = set()
     if _has_price_signal(normalized, text, client_slug=client_slug):
@@ -818,18 +841,10 @@ __all__ = [
     "build_quiet_hours_notice",
     "compose_multi_truth_reply",
     "format_reply_from_truth",
-    "get_pack_decision",
-    "get_pack_price_item",
-    "get_pack_price_reply",
-    "get_pack_service_decision",
-    "get_pack_service_hint",
     "get_signal_lexicon_list",
     "get_system_anchor_groups",
     "get_system_lexicon_list",
     "load_policy_pack",
     "load_system_lexicons",
     "load_yaml_truth",
-    "phrase_match_intent",
-    "semantic_question_type",
-    "semantic_service_match",
 ]

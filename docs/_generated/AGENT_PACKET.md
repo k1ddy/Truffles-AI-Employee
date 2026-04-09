@@ -4,36 +4,49 @@ Read only these first:
 - `docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md`
 - `docs/ACTIVE_CANON.md`
 - `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md`
+- `docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md`
 - `docs/SOURCE_OF_TRUTH.yaml`
 - `docs/LEGACY_SUNSET.yaml`
 
 ## Recovery Execution Lock
 - Lock file: `docs/RECOVERY_EXECUTION_LOCK.yaml`
 - Active practical truth: `r35f`
-- Active block: `Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof`
-- Runtime status: `broader_live_code_reproof_block_closed_repo_side_acceptance_is_next`
-- Next move: `run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim`
-- Historical residue rule: `later_r36_star_and_invalidated_whole_system_closure_claims_remain_non_governing_history_while_the_live_code_reproof_block_is_active`
+- Active block: `Consultant Core Block H.1B — File Replay Scenario Contract Materialization`
+- Runtime status: `block_a_block_b_block_c_block_c5_block_d_block_e_block_e5_block_e6_block_f_block_g_booking_manage_temporal_clue_followup_continuity_block_h1_oracle_scenario_contract_alignment_and_block_h1b_file_replay_scenario_contract_materialization_closed_proven_block_h_final_acceptance_is_next`
+- Next move: `rerun_block_h_final_acceptance_after_closing_block_h1b_file_replay_scenario_contract_materialization_20260401`
+- Historical residue rule: `older_whole_system_reproof_and_invalidated_closure_claims_remain_non_governing_history_while_the_block_plan_is_active`
 
 ## Active Block
-- Consultant Core Continuity / Boundary / Pack-Runtime / Legacy / Operational Reproof
+- Consultant Core Block H.1B — File Replay Scenario Contract Materialization
 
 ## Current Runtime Cutover
-- `semantic_owner`: `hot_path_single_semantic_owner_remains_reproven_after_live_code_reproof`
-- `continuity`: `canonical_runtime_reprojection_and_pending_resume_restore_now_require_canonical_pending_contract_only`
-- `boundary`: `reply_envelope_narrowing_and_boundary_restore_constraints_are_reproven_against_live_code`
-- `fact_plane`: `typed_fact_contract_and_first_family_cutover_remain_reproven_on_active_runtime_paths`
-- `pack_runtime_split`: `public_pack_runtime_seam_remains_reproven_and_active_behavior_stays_on_public_runtime_helpers`
-- `legacy_mesh`: `runtime_shadow_wrappers_remain_removed_and_legacy_router_surfaces_stay_non_authoritative_on_live_paths`
-- `authority_topology`: `continuity_boundary_pack_runtime_legacy_and_operational_reproof_is_complete_repo_side_pending_acceptance`
-- `quality_governance`: `replay_and_human_audit_are_now_the_only_admissible_acceptance_lane`
+- `semantic_owner`: `owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial`
+- `continuity`: `block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only`
+- `boundary`: `block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue`
+- `fact_plane`: `block_b_exact_fact_scope_and_block_c5_policy_info_interrupt_delivery_are_closed_proven`
+- `pack_runtime_split`: `block_e_pack_runtime_separation_and_block_e6_post_grounding_service_reply_exactness_are_closed_on_touched_hot_fact_path_selected_adapter_boundary_is_now_canonical`
+- `legacy_mesh`: `block_f_legacy_mesh_final_fate_contract_is_closed_proven_on_live_import_caller_topology_and_block_g_operational_boundary_is_now_closed_on_shared_runtime_seam`
+- `authority_topology`: `block_plan_execution_has_block_a_block_b_block_c_block_c5_block_d_block_e_block_e5_block_e6_block_f_block_g_booking_manage_temporal_clue_followup_continuity_block_h1_oracle_scenario_contract_alignment_and_block_h1b_file_replay_scenario_contract_materialization_closed_proven_block_h_is_next`
+- `quality_governance`: `block_h_final_acceptance_remains_the_only_lane_for_fresh_locked_replay_plus_full_human_semantic_audit_before_product_closure_now_that_block_h1b_file_replay_scenario_contract_materialization_is_closed`
 
 ## Execution Strategy Lock
 - Mode: `wave_based_whole_system_architecture_closure`
 - Progress credit rule: `no_progress_credit_without_named_authority_delta_full_block_closure_and_machine_readable_evidence`
-- Current non-negotiable next move: `run_replay_and_full_human_semantic_audit_before_any_product_or_practical_closure_claim`
+- Current non-negotiable next move: `rerun_block_h_final_acceptance_after_closing_block_h1b_file_replay_scenario_contract_materialization_20260401`
 - Mandatory sequence:
+- `block_a_interrupt_arbitration_and_continuation_law`
+- `block_b_fact_scope_exactness`
+- `block_c_continuity_carrier_collapse`
+- `block_c5_policy_info_interrupt_fact_delivery`
+- `block_d_boundary_purification`
+- `block_e_real_pack_runtime_separation`
+- `block_e5_owner_service_referent_grounding`
+- `block_e6_post_grounding_service_reply_exactness`
+- `block_f_legacy_mesh_final_drain`
+- `block_g_operational_final_dedupe`
+- `block_h1_oracle_scenario_contract_alignment`
+- `block_h1b_file_replay_scenario_contract_materialization`
+- `block_h_final_acceptance`
 - `governing_decision_freeze`
 - `authority_freeze`
 - `fact_contract_schema`
@@ -81,6 +94,19 @@ Read only these first:
 - `deterministic_proof_replay_or_human_audit_missing_for_behavioral_closure`
 
 ## Root-First Recovery Program
+- `block_a_interrupt_arbitration_and_continuation_law`
+- `block_b_fact_scope_exactness`
+- `block_c_continuity_carrier_collapse`
+- `block_c5_policy_info_interrupt_fact_delivery`
+- `block_d_boundary_purification`
+- `block_e_real_pack_runtime_separation`
+- `block_e5_owner_service_referent_grounding`
+- `block_e6_post_grounding_service_reply_exactness`
+- `block_f_legacy_mesh_final_drain`
+- `block_g_operational_final_dedupe`
+- `block_h1_oracle_scenario_contract_alignment`
+- `block_h1b_file_replay_scenario_contract_materialization`
+- `block_h_final_acceptance`
 - `governing_decision_freeze`
 - `authority_freeze`
 - `fact_contract_schema`
@@ -205,7 +231,7 @@ Read only these first:
 - `truffles-api/app/routers/webhook/response.py` -> `adapter_only_after_shadow_lane_elimination` / pressure `boundary_and_continuity_shadow_pressure` / live callers `0` / app importers `3`
 
 ## Governance Delta Snapshot
-- Summary: Reproved continuity, boundary restore, pack/runtime, legacy, and operational closure claims against live code and converged live outbox execution surfaces on one canonical runtime helper.
+- Summary: Closed the reopened Block H.1B file-replay scenario contract materialization block on the shared evaluation seam: ops/diagnose.py now materializes --scenarios-file dialogs through the shared booking scenario contract pipeline before evaluation, and the next admissible lane is Block H final acceptance.
 - Locked mechanisms:
 - `semantic_turn_meaning`
 - `post_owner_semantic_reconstruction`
@@ -214,11 +240,11 @@ Read only these first:
 - `fact_scope`
 - `legacy_behavior_authority`
 - Deferred next blocks:
-- `replay_and_human_audit_acceptance`
+- `block_h_final_acceptance`
 
 ## Semantic Owner
 - Contract: `SemanticDecisionV1`
-- Current: `hot_path_single_semantic_owner_remains_reproven_and_adjacent_runtime_reproof_is_complete_repo_side_pending_acceptance`
+- Current: `owner_path_is_real_and_block_a_interrupt_arbitration_plus_block_e5_owner_service_referent_grounding_are_closed_on_touched_envelopes_but_full_single_semantic_owner_closure_still_remains_partial`
 - Current authority file: `truffles-api/app/services/intent_service.py`
 - Current authority file: `truffles-api/app/core/turn_planner.py`
 - Target file: `contracts/runtime/semantic_decision.v1.jsonschema`
@@ -226,7 +252,7 @@ Read only these first:
 
 ## Continuity Owner
 - Contract: `DialogState`
-- Current: `canonical_runtime_continuity_and_boundary_resume_restore_are_reproven_against_live_code_pending_acceptance`
+- Current: `block_c_closed_proven_on_touched_followup_resume_paths_compatibility_carriers_are_now_derived_only`
 - Current writer file: `truffles-api/app/core/dialog_state_service.py`
 - Current writer file: `truffles-api/app/routers/webhook/context_manager.py`
 - Target file: `contracts/runtime/dialog_state.v1.jsonschema`
@@ -236,7 +262,7 @@ Read only these first:
 
 ## Boundary Owner
 - Contract: `BoundaryOverride`
-- Current: `boundary_reply_envelope_and_restore_constraints_are_reproven_against_live_code_pending_acceptance`
+- Current: `block_d_boundary_purification_is_closed_on_live_runtime_path_and_stale_boundary_restore_helpers_are_guarded_as_non_runtime_residue`
 - Current file: `truffles-api/app/core/boundary_validator.py`
 - Current file: `truffles-api/app/core/consultant_runtime.py`
 - Current file: `truffles-api/app/core/response_realizer.py`
@@ -244,70 +270,33 @@ Read only these first:
 - Target file: `truffles-api/app/core/boundary_validator.py`
 
 ## Allowed Touch
-- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md`
-- `docs/REPORTS/2026-03-31-consultant-core-continuity-boundary-pack-runtime-legacy-and-operational-reproof-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-replay-and-full-human-semantic-audit-acceptance-a922.md`
-- `docs/SYSTEM_REPROOF_GUARD.yaml`
-- `docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml`
-- `docs/OPERATIONAL_ENTRYPOINT_DEDUPE_GUARD.yaml`
-- `docs/RECOVERY_EXECUTION_LOCK.yaml`
-- `docs/RECOVERY_PHASE_WAIVER.yaml`
-- `docs/SOURCE_OF_TRUTH.yaml`
-- `docs/ACTIVE_CANON.md`
-- `docs/ACTIVE_PROGRAM.md`
-- `docs/_generated/AGENT_PACKET.md`
-- `docs/_generated/AGENT_PACKET.json`
-- `docs/system_forensics/authority_registry.json`
-- `docs/system_forensics/compatibility_carrier_inventory.json`
-- `docs/system_forensics/dead_surface_registry.json`
-- `docs/system_forensics/legacy_caller_surface.json`
-- `docs/system_forensics/governance_delta.json`
-- `STATE.md`
-- `STRUCTURE.md`
-- `scripts/recovery_execution_guard.py`
-- `scripts/arch_guard.py`
-- `scripts/system_reproof_guard.py`
-- `scripts/continuity_state_normalization_guard.py`
-- `truffles-api/app/core/dialog_state_service.py`
-- `truffles-api/app/services/state_service.py`
-- `truffles-api/app/services/outbox_runtime_service.py`
-- `truffles-api/tests/test_state_service.py`
-- `truffles-api/tests/test_dialog_state_service.py`
-- `truffles-api/tests/test_message_endpoint.py`
-- `truffles-api/tests/test_outbox_worker_settings.py`
-- `truffles-api/tests/test_outbox_service_app.py`
-- `truffles-api/tests/test_admin_legacy_auth.py`
-- `truffles-api/tests/test_console_ops_jobs.py`
-- `truffles-api/tests/architecture/test_arch_guard_packet.py`
-- `truffles-api/tests/architecture/test_authority_registry.py`
-- `truffles-api/tests/architecture/test_recovery_execution_guard.py`
-- `truffles-api/tests/architecture/test_continuity_state_normalization_guard.py`
-- `truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py`
-- `truffles-api/tests/architecture/test_system_reproof_guard.py`
-- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md`
-- `docs/REPORTS/2026-03-31-consultant-core-semantic-owner-and-post-owner-reconstruction-reopen-a922.md`
-- `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md`
+- `docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-h1b-file-replay-scenario-contract-materialization-a922.md`
+- `ops/diagnose.py`
+- `truffles-api/tests/test_diagnose_run_command.py`
 
 ## Forbidden Touch
-- `truffles-api/app/routers/webhook/dedup.py`
-- `truffles-api/app/routers/webhook/_legacy.py`
-- `truffles-api/app/routers/admin.py`
-- `truffles-api/app/routers/webhook/policy.py`
+- `STATE.md`
+- `docs/ACTIVE_CANON.md`
+- `docs/ACTIVE_PROGRAM.md`
+- `docs/RECOVERY_EXECUTION_LOCK.yaml`
+- `docs/SOURCE_OF_TRUTH.yaml`
+- `docs/_generated/AGENT_PACKET.json`
+- `docs/_generated/AGENT_PACKET.md`
+- `prompts/llm_policy_core.md`
+- `truffles-api/app/core/consultant_runtime.py`
+- `truffles-api/app/core/dialog_state_service.py`
+- `truffles-api/app/services/state_service.py`
 - `truffles-api/app/services/tool_registry_service.py`
-- `truffles-api/app/routers/webhook/response.py`
-- `truffles-api/app/services/intent_service.py`
-- `truffles-api/app/routers/webhook/info.py`
-- `truffles-api/app/routers/console.py`
-- `truffles-api/app/services/pack_runtime_service.py`
-- `truffles-api/app/routers/webhook/context_manager.py`
-- `truffles-api/app/routers/webhook/guards.py`
-- `truffles-api/app/routers/webhook/booking.py`
-- `truffles-api/app/core/response_realizer.py`
-- `truffles-api/app/routers/webhook/pending.py`
-- `truffles-api/app/outbox_service_app.py`
 - `truffles-api/app/routers/webhook/decision.py`
-- `truffles-api/app/workers/outbox.py`
-- `truffles-api/app/routers/outbox_service.py`
+- `truffles-api/app/routers/webhook/_legacy.py`
+- `truffles-api/app/routers/webhook/context_manager.py`
+- `truffles-api/app/routers/webhook/response.py`
+- `truffles-api/app/routers/webhook/booking.py`
+- `truffles-api/app/routers/webhook/info.py`
+- `truffles-api/app/routers/webhook/pending.py`
+- `truffles-api/app/routers/webhook/policy.py`
+- `truffles-api/app/routers/webhook/guards.py`
+- `truffles-api/app/routers/webhook/dedup.py`
 
 ## Proof-Only Files
 - `ops/diagnose.py`
@@ -329,28 +318,13 @@ Read only these first:
 - `python3 scripts/build_agent_packet.py`
 - `python3 scripts/build_agent_packet.py --check`
 - `python3 scripts/recovery_execution_guard.py`
-- `python3 scripts/continuity_state_normalization_guard.py`
-- `python3 scripts/boundary_degrade_guard.py`
-- `python3 scripts/pack_runtime_separation_guard.py`
-- `python3 scripts/legacy_mesh_drain_guard.py`
-- `python3 scripts/operational_entrypoint_dedupe_guard.py`
-- `python3 scripts/system_reproof_guard.py`
-- `python3 scripts/arch_guard.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_state_service.py -k "restore_pending_resume_payload or prepare_pending_handoff_resume_boundary_restore or prepare_resolved_handoff_resume_boundary_restore or resolve_resolved_handoff_resume_boundary_restore or resolve_pending_resume_boundary_activation"`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_dialog_state_service.py -k "pending_resume_payload"`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_message_endpoint.py -k "provider_unavailable_human_request_pending_resume"`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_worker_settings.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_service_app.py truffles-api/tests/test_admin_legacy_auth.py -k "outbox_service or admin_outbox_process"`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_console_ops_jobs.py -k "run_outbox_process_job_execute"`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_arch_guard_packet.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_authority_registry.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_recovery_execution_guard.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_continuity_state_normalization_guard.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py`
-- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_system_reproof_guard.py`
+- `python3 -m py_compile ops/diagnose.py`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_diagnose_run_command.py -k "scenarios_file or materialize"`
+- `PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_recovery_execution_guard.py truffles-api/tests/architecture/test_arch_guard_packet.py truffles-api/tests/architecture/test_authority_registry.py`
 - `git diff --check`
 
 ## Open Blockers
 - fresh_replay_and_full_human_semantic_audit_are_required_before_product_or_practical_closure_claim
-- current_practical_truth_remains_r35f_until_acceptance_lane_proves_improvement
+- current_practical_truth_remains_r35f_until_block_h_final_acceptance_refreshes_it
 - whole_system_done_or_green_claims_remain_forbidden_until_acceptance_lane_passes
+- block_h_final_acceptance_replay_and_full_human_semantic_audit_remain_open_after_block_h1b_file_replay_scenario_contract_materialization_closeout

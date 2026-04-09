@@ -352,17 +352,30 @@ INDEX_ROOT="${LLM_QUALITY_INDEX_ROOT:-/tmp/booking_quality/_index}"
 if [[ "$ALLOW_PENDING_PREVIOUS" -ne 1 && "$HAS_RESUME" -ne 1 ]]; then
   latest_mode_file="$INDEX_ROOT/latest_by_mode/${MODE}.json"
   if [[ -f "$latest_mode_file" ]]; then
-    read -r last_run_id last_status last_audit last_artifacts <<EOF
+    ALLOW_AUDITED_INVALID_PREFLIGHT_FULL=0
+    IFS=$'\t' read -r last_run_id last_status last_audit last_artifacts last_stop_reason <<EOF
 $(python3 - "$latest_mode_file" <<'PY'
 import json, sys
 path = sys.argv[1]
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
+artifact_integrity = data.get("artifact_integrity_valid")
+if artifact_integrity is True:
+    artifact_token = "true"
+elif artifact_integrity is False:
+    artifact_token = "false"
+else:
+    artifact_token = ""
 print(
-    (data.get("run_id") or ""),
-    (data.get("status") or ""),
-    (data.get("manual_audit_status") or ""),
-    str(data.get("artifact_integrity_valid") or ""),
+    "\t".join(
+        [
+            str(data.get("run_id") or ""),
+            str(data.get("status") or ""),
+            str(data.get("manual_audit_status") or ""),
+            artifact_token,
+            str(data.get("stop_reason") or ""),
+        ]
+    )
 )
 PY
 )
@@ -371,6 +384,9 @@ EOF
       if [[ "$last_status" == "incomplete" || "$last_status" == "invalid" || "$last_status" == "failed" ]]; then
         if [[ "$MODE" == "lock" && "$last_audit" == "done" && "$last_artifacts" != "False" && "$last_artifacts" != "false" ]]; then
           echo "[guard] latest prior lock is non-canonical but audited/artifact-complete; deferring lock admission to diagnose.py run-economy gate" >&2
+        elif [[ "$MODE" == "full" && "$last_audit" == "done" && "$last_stop_reason" == "invalid_preflight" ]]; then
+          ALLOW_AUDITED_INVALID_PREFLIGHT_FULL=1
+          echo "[guard] latest prior full is preflight-invalid but audited; allowing new full admission" >&2
         else
           die "previous run not canonical (mode=$MODE run_id=$last_run_id status=$last_status). Resolve artifacts/manual audit before new run or pass --allow-pending-previous."
         fi
@@ -379,7 +395,11 @@ EOF
         die "previous run manual audit pending (mode=$MODE run_id=$last_run_id audit=$last_audit). Resolve before new run or pass --allow-pending-previous."
       fi
       if [[ "$last_artifacts" == "False" || "$last_artifacts" == "false" ]]; then
-        die "previous run artifacts incomplete (mode=$MODE run_id=$last_run_id). Resolve before new run or pass --allow-pending-previous."
+        if [[ "$ALLOW_AUDITED_INVALID_PREFLIGHT_FULL" -eq 1 ]]; then
+          echo "[guard] latest prior full artifacts are incomplete because the run stopped at invalid preflight; allowing fresh guarded admission" >&2
+        else
+          die "previous run artifacts incomplete (mode=$MODE run_id=$last_run_id). Resolve before new run or pass --allow-pending-previous."
+        fi
       fi
     fi
   fi

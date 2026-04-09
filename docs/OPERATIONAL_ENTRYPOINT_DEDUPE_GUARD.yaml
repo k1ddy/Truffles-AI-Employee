@@ -1,14 +1,25 @@
-version: 2026-03-31.v1
-active_block: Consultant Core Operational Entrypoint Dedupe
-active_block_tp: docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-operational-entrypoint-dedupe-a922.md
-next_move: complete_whole_system_governance_closure_before_replay_or_human_audit
+version: 2026-04-01.v2
+active_block: "Consultant Core Block G \u2014 Operational Final Dedupe"
+active_block_tp: docs/TASK_PACKAGES/TP-2026-04-01-consultant-core-block-g-operational-final-dedupe-a922.md
+next_move: start_block_h_final_acceptance_from_fresh_locked_replay_after_block_g_operational_closeout_20260401
 hotspots:
 - path: truffles-api/app/services/outbox_runtime_service.py
   required_function_defs:
+  - preview_scoped_outbox_process
   - run_canonical_outbox_process
   - run_default_outbox_process
   - run_scoped_outbox_process
   - run_outbox_worker_cycle
+  required_exports:
+  - ScopedOutboxProcessRequest
+  - preview_scoped_outbox_process
+  - run_default_outbox_process
+  - run_outbox_worker_cycle
+  - run_scoped_outbox_process
+  forbidden_exports:
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
+  - run_canonical_outbox_process
 - path: truffles-api/app/routers/outbox_service.py
   required_import_names:
   - run_default_outbox_process
@@ -25,8 +36,14 @@ hotspots:
   - archive_pending_outbox
 - path: truffles-api/app/routers/console.py
   required_import_names:
+  - ScopedOutboxProcessRequest
   - load_outbox_process_settings
+  - preview_scoped_outbox_process
   - run_scoped_outbox_process
+  forbidden_import_names:
+  - archive_pending_outbox
+  - claim_scoped_outbox_rows
+  - process_claimed_outbox_rows
 - path: truffles-api/app/outbox_service_app.py
   forbidden_import_modules:
   - app.services.outbox_runtime_service
@@ -69,7 +86,8 @@ function_call_contracts:
 - path: truffles-api/app/routers/console.py
   function_name: _run_outbox_process_job
   required_calls:
-  - load_outbox_process_settings
+  - from_optional
+  - preview_scoped_outbox_process
   - run_scoped_outbox_process
   forbidden_calls:
   - claim_scoped_outbox_rows
@@ -100,6 +118,12 @@ repo_callsite_contracts:
 - search_roots:
   - truffles-api/app
   call_names:
+  - preview_scoped_outbox_process
+  exact_allowlist:
+  - truffles-api/app/routers/console.py
+- search_roots:
+  - truffles-api/app
+  call_names:
   - run_scoped_outbox_process
   exact_allowlist:
   - truffles-api/app/routers/console.py
@@ -123,9 +147,10 @@ required_checks:
 - python3 scripts/arch_guard.py
 - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_service_app.py
 - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_outbox_worker_settings.py
-  -k "run_scoped_outbox_process_uses_shared_runtime_helpers"
+  -k "scoped_outbox_process or preview_scoped_outbox_process or run_default_outbox_process
+  or run_outbox_worker_cycle"
 - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_admin_legacy_auth.py -k
   "admin_outbox_process"
 - PYTHONPATH=truffles-api pytest -q truffles-api/tests/test_console_ops_jobs.py -k
-  "run_outbox_process_job_execute"
+  "run_outbox_process_job"
 - PYTHONPATH=truffles-api pytest -q truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py

@@ -3,13 +3,13 @@ expected_current_goal: booking
 expected_pending_resume_current_goal: handoff
 expected_pending_question_contract:
   expected_reply_type: time
-  reason: collect_datetime
+  reason: collect:datetime
   pending_question_act: ask_about_requested_slot
   pending_question_target: time
   active_question_relation: ask_about_requested_slot
   next_question: datetime
   open_questions:
-    - datetime
+  - datetime
 stale_expected_reply_type: name
 stale_expected_reply_reason: stale_projection
 stale_current_goal: handoff

@@ -70,6 +70,23 @@ def defined_functions(path: Path) -> set[str]:
     }
 
 
+def module_exports(path: Path) -> set[str]:
+    tree = load_tree(path)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == "__all__":
+                if not isinstance(node.value, (ast.List, ast.Tuple)):
+                    return set()
+                exports: set[str] = set()
+                for item in node.value.elts:
+                    if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                        exports.add(item.value)
+                return exports
+    return set()
+
+
 def called_names(node: ast.AST) -> set[str]:
     names: set[str] = set()
     for item in ast.walk(node):
@@ -127,6 +144,7 @@ def evaluate(root: Path, config: dict) -> list[str]:
         modules = imported_modules(path)
         names = imported_names(path)
         defs = defined_functions(path)
+        exports = module_exports(path)
         file_calls = called_names(load_tree(path))
 
         for module in hotspot.get('forbidden_import_modules') or []:
@@ -135,9 +153,18 @@ def evaluate(root: Path, config: dict) -> list[str]:
         for name in hotspot.get('required_import_names') or []:
             if name not in names:
                 errors.append(f"{hotspot['path']}: missing required import name -> {name}")
+        for name in hotspot.get('forbidden_import_names') or []:
+            if name in names:
+                errors.append(f"{hotspot['path']}: forbidden import name still present -> {name}")
         for name in hotspot.get('required_function_defs') or []:
             if name not in defs:
                 errors.append(f"{hotspot['path']}: missing required function definition -> {name}")
+        for name in hotspot.get('required_exports') or []:
+            if name not in exports:
+                errors.append(f"{hotspot['path']}: missing required export -> {name}")
+        for name in hotspot.get('forbidden_exports') or []:
+            if name in exports:
+                errors.append(f"{hotspot['path']}: forbidden export still present -> {name}")
         for name in hotspot.get('forbidden_call_names') or []:
             if name in file_calls:
                 errors.append(f"{hotspot['path']}: forbidden file-level call still present -> {name}")

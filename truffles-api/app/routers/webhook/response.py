@@ -14,20 +14,10 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.models import Conversation, Message, User
 from app.routers.webhook.booking import _get_booking_context, _next_booking_prompt
-from app.routers.webhook.booking_signal_runtime import (
-    _extract_service_hint,
-    _is_booking_request,
-    _looks_like_time_only_request,
-)
 from app.routers.webhook.class_router_runtime import (
     CONSULT_INTERRUPT_INTENTS,
-    CONTROLLER_CONFIDENCE_THRESHOLD,
-    DomainIntent,
-    _build_controller_meta_output,
-    _ensure_controller_output_meta,
-    _resolve_class_router_result,
-    _resolve_controller_signal_class,
     _router_observability_updates_from_class_router,
+    build_observer_class_router_result,
 )
 from app.routers.webhook.context_manager import (
     _get_context_manager,
@@ -79,6 +69,8 @@ from app.routers.webhook.runtime_primitives import (
     QUIET_HOURS_NOTICE_TTL_MINUTES,
     _append_followup,
     _combine_sidecar,
+    _freeze_legacy_semantic_payload,
+    _observed_legacy_semantic_value,
     should_offer_low_confidence_retry,
 )
 from app.routers.webhook.session_memory import (
@@ -93,12 +85,7 @@ from app.routers.webhook.trace import (
     _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookResponse
-from app.services.ai_service import (
-    OUT_OF_DOMAIN_RESPONSE,
-    is_low_signal_message,
-    normalize_for_matching,
-    rewrite_for_service_match,
-)
+from app.services.ai_service import normalize_for_matching
 from app.services.handover_owner_service import (
     ActiveHandoverReuseRuntimeHooks,
     _reuse_active_handover,
@@ -107,7 +94,7 @@ from app.services.handover_owner_service import (
     send_telegram_notification,
 )
 from app.services.message_service import generate_bot_response
-from app.services.pack_runtime_service import _normalize_text, semantic_service_match
+from app.services.pack_runtime_service import _normalize_text
 from app.services.state_machine import ConversationState
 from app.services.state_service import transition_state
 
@@ -679,11 +666,13 @@ def _maybe_apply_consult_return(
 def _should_append_booking_followup_for_consult(
     *,
     booking_goal_locked: bool,
+    booking_signal_active: bool,
     consult_action: str | None,
     message_text: str | None,
     expected_reply_type: str | None,
     client_slug: str | None,
 ) -> bool:
+    del client_slug
     if not booking_goal_locked:
         return False
     action_token = str(consult_action or "").strip().casefold()
@@ -691,17 +680,18 @@ def _should_append_booking_followup_for_consult(
 
         if expected_reply_type not in {EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
             return True
-        if not isinstance(message_text, str) or not message_text.strip():
-            return False
-
-        if not _is_booking_request(message_text, client_slug=client_slug):
-            return False
+        return bool(
+            booking_signal_active
+            and isinstance(message_text, str)
+            and message_text.strip()
+        )
     return True
 
 
 def _should_shift_locked_consult_topic_to_service_choice(
     *,
     booking_goal_locked: bool,
+    booking_signal_active: bool,
     booking_followup_appended: bool,
     consult_action: str | None,
     consult_meta: dict[str, Any] | None,
@@ -709,6 +699,7 @@ def _should_shift_locked_consult_topic_to_service_choice(
     expected_reply_type: str | None,
     client_slug: str | None,
 ) -> bool:
+    del client_slug
 
     if not booking_goal_locked or booking_followup_appended:
         return False
@@ -719,7 +710,7 @@ def _should_shift_locked_consult_topic_to_service_choice(
         return False
     if not isinstance(message_text, str) or not message_text.strip():
         return False
-    if _is_booking_request(message_text, client_slug=client_slug):
+    if booking_signal_active:
         return False
     if not isinstance(consult_meta, dict):
         return False
@@ -786,16 +777,16 @@ def _apply_locked_consult_topic_shift(
         reason="consult_topic_shift",
         now=now,
     )
-    consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
-    consult_meta["expected_reply_reason"] = "consult_topic_shift"
+    consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
+    consult_meta["observer_expected_reply_reason"] = "consult_topic_shift"
     consult_meta["consult_topic_shift_expected_reply"] = True
     _record_decision_trace(
         conversation,
         {
             "stage": "consult_flow",
             "decision": "consult_topic_shift_expected_reply",
-            "expected_reply_type": EXPECTED_REPLY_SERVICE,
-            "expected_reply_reason": "consult_topic_shift",
+            "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+            "observer_expected_reply_reason": "consult_topic_shift",
             "previous_expected_reply_type": EXPECTED_REPLY_TIME,
         },
     )
@@ -804,8 +795,8 @@ def _apply_locked_consult_topic_shift(
             saved_message,
             {
                 "consult_topic_shift_expected_reply": True,
-                "expected_reply_type": EXPECTED_REPLY_SERVICE,
-                "expected_reply_reason": "consult_topic_shift",
+                "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+                "observer_expected_reply_reason": "consult_topic_shift",
             },
         )
 
@@ -834,6 +825,58 @@ class ConsultFlowResult:
     consult_topic: str | None
     consult_question: str | None
     intent_decomp_payload: dict[str, Any] | None
+
+
+def _canonicalize_consult_decision_action(
+    *,
+    action: str | None,
+    consult_flow_decision: str | None,
+    consult_meta: dict[str, Any] | None,
+) -> str | None:
+    normalized_action = action.strip().casefold() if isinstance(action, str) and action.strip() else None
+    if normalized_action in {"escalate", "handoff", "pending_wait", "pending_escalation"}:
+        return "handoff"
+    if normalized_action != "reply":
+        return normalized_action or action
+
+    consult_meta = consult_meta if isinstance(consult_meta, dict) else {}
+    if consult_flow_decision == "consult_clarify":
+        return "collect"
+    if _observed_legacy_semantic_value(consult_meta, "expected_reply_type") == EXPECTED_REPLY_SERVICE:
+        return "collect"
+    if consult_meta.get("clarify_reason") or consult_meta.get("clarify_attempt"):
+        return "collect"
+    consult_questions = consult_meta.get("consult_questions")
+    if isinstance(consult_questions, list) and consult_questions:
+        return "collect"
+    return "fact"
+
+
+def _canonicalize_response_metadata_action(
+    *,
+    action: str | None,
+    decision: str | None = None,
+) -> str | None:
+    normalized_action = action.strip().casefold() if isinstance(action, str) and action.strip() else None
+    if normalized_action in {"escalate", "handoff", "pending_wait", "pending_escalation"}:
+        return "handoff"
+    if normalized_action != "ai_response":
+        return normalized_action or action
+
+    normalized_decision = (
+        decision.strip().casefold() if isinstance(decision, str) and decision.strip() else None
+    )
+    if normalized_decision in {"low_confidence_retry", "no_response_retry"}:
+        return "collect"
+    if normalized_decision in {
+        "blocked_topics",
+        "bot_inactive",
+        "low_confidence_pending",
+        "low_confidence_handover_confirm",
+        "no_response_handover_confirm",
+    }:
+        return "handoff"
+    return "fact"
 
 
 def _record_class_router_trace_from_result(
@@ -939,43 +982,17 @@ def _handle_consult_flow(
     )
     from app.services.pack_runtime_service import (
         PackDecision,
-        get_pack_decision,
-        get_pack_service_decision,
         has_consult_recommendation_signal,
     )
 
 
     def _build_consult_class_router_result() -> dict[str, Any]:
-        controller_output = _build_controller_meta_output(error="skipped")
-        controller_output["class"] = "consult"
-        controller_output["goal"] = "consult"
-        controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
-        controller_output = _ensure_controller_output_meta(controller_output, error="skipped")
-        router_state = {
-            "used": True,
-            "attempted": False,
-            "fallback": False,
-            "confidence": controller_output["confidence"],
-            "error": "skipped",
-            "fallback_reason": None,
-            "signal_class": _resolve_controller_signal_class(
-                intent_decomp_set=intent_decomp_set,
-                booking_signal=booking_signal,
-            ),
-            "signal_match": False,
-            "used_reason": "deterministic",
-            "output": controller_output,
-            "sla": None,
-        }
-        return _resolve_class_router_result(
+        return build_observer_class_router_result(
+            class_name="consult",
+            goal="consult",
             info_intents=info_class_intents,
-            info_meta=None,
             booking_signal=booking_signal,
-            class_carryover=None,
-            domain_intent=DomainIntent.UNKNOWN,
-            domain_meta=None,
-            router_state=router_state,
-            explicit_service_signal=False,
+            in_signals=["consult_signal"],
         )
 
     if not (routing.get("allow_bot_reply") and not bypass_domain_flows and message_text):
@@ -1047,38 +1064,6 @@ def _handle_consult_flow(
                 intent_decomp_payload["consult_topic"] = consult_topic
                 if consult_question:
                     intent_decomp_payload["consult_question"] = consult_question
-    if not consult_intent and isinstance(message_text, str) and message_text.strip():
-        consult_probe_decision = get_pack_service_decision(
-            message_text,
-            client_slug=client_slug,
-            intent_decomp=intent_decomp_payload,
-        )
-        consult_probe_payload = (
-            dict(intent_decomp_payload)
-            if isinstance(intent_decomp_payload, dict)
-            else {}
-        )
-        if not has_consult_recommendation_signal(consult_probe_decision):
-            consult_probe_payload["consult_intent"] = True
-            if not consult_probe_payload.get("consult_question"):
-                consult_probe_payload["consult_question"] = message_text.strip()
-            fallback_probe_decision = get_pack_service_decision(
-                message_text,
-                client_slug=client_slug,
-                intent_decomp=consult_probe_payload,
-            )
-            if has_consult_recommendation_signal(fallback_probe_decision):
-                consult_probe_decision = fallback_probe_decision
-                intent_decomp_payload = consult_probe_payload
-        if has_consult_recommendation_signal(consult_probe_decision):
-            consult_intent = True
-            if service_availability_decision is None:
-                service_availability_decision = consult_probe_decision
-            if isinstance(intent_decomp_payload, dict):
-                intent_decomp_payload = dict(intent_decomp_payload)
-                intent_decomp_payload["consult_intent"] = True
-                if not intent_decomp_payload.get("consult_question"):
-                    intent_decomp_payload["consult_question"] = message_text.strip()
     consult_intent_signal = bool(consult_intent or consult_context_active)
     booking_goal_locked = bool(
         booking_wants_flow
@@ -1237,7 +1222,7 @@ def _handle_consult_flow(
                                 reason="snapshot_missing",
                                 now=now,
                             )
-                            consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                            consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
                         consult_decision = PackDecision(
                             action="reply",
                             response=clarify_prompt,
@@ -1292,36 +1277,8 @@ def _handle_consult_flow(
                 if isinstance(intent_decomp_service_query, str)
                 else ""
             )
-            price_or_duration_signal = False
-            if message_text:
-                from app.services.pack_runtime_service import (
-                    _has_duration_signal,
-                    _has_price_signal,
-                    _normalize_text,
-                )
-
-                normalized_message = _normalize_text(message_text)
-                price_or_duration_signal = _has_price_signal(
-                    normalized_message,
-                    message_text,
-                ) or _has_duration_signal(normalized_message, message_text)
             truth_priority_intent = None
-            truth_priority_decision: PackDecision | None = None
-            if message_text:
-                truth_priority_decision = get_pack_decision(
-                    message_text,
-                    client_slug=client_slug,
-                    intent_decomp=intent_decomp_payload,
-                )
-                if isinstance(truth_priority_decision, PackDecision):
-                    candidate_intent = (
-                        truth_priority_decision.intent.strip()
-                        if isinstance(truth_priority_decision.intent, str)
-                        else ""
-                    )
-                    if candidate_intent in {"aftercare_gel_lac", "prep_brows_lashes", "procedure_combo"}:
-                        truth_priority_intent = candidate_intent
-            explicit_info_signal = bool(price_or_duration_signal or truth_priority_intent)
+            explicit_info_signal = False
             explicit_info_intent = bool(
                 explicit_info_signal
                 or info_class_intents
@@ -1330,77 +1287,11 @@ def _handle_consult_flow(
             consult_recommendation_signal = bool(
                 has_consult_recommendation_signal(service_availability_decision)
             )
-            if not consult_recommendation_signal and isinstance(truth_priority_decision, PackDecision):
-                consult_recommendation_signal = has_consult_recommendation_signal(
-                    truth_priority_decision
-                )
             if consult_recommendation_signal and not consult_intent:
                 consult_intent = True
                 if isinstance(intent_decomp_payload, dict):
                     intent_decomp_payload = dict(intent_decomp_payload)
                     intent_decomp_payload["consult_intent"] = True
-            service_matcher = None
-            handler_override = _get_policy_handler(None, client_slug=client_slug)
-            if isinstance(handler_override, dict):
-                service_matcher = handler_override.get("service_matcher")
-            if service_matcher is None and isinstance(policy_handler, dict):
-                service_matcher = policy_handler.get("service_matcher")
-            if (
-                service_availability_decision is None
-                and not truth_priority_intent
-                and (
-                    explicit_info_intent
-                    or consult_recommendation_signal
-                    or (short_circuit_service and price_or_duration_signal)
-                )
-            ):
-                if consult_recommendation_signal:
-                    consult_intent_decomp = (
-                        dict(intent_decomp_payload)
-                        if isinstance(intent_decomp_payload, dict)
-                        else {}
-                    )
-                    # Recommendation questions can be tagged as `other` by intent-decomp.
-                    # Force consult intent for service decision so runtime follows
-                    # consult recommendation contract instead of generic clarify fallback.
-                    consult_intent_decomp["consult_intent"] = True
-                    if isinstance(message_text, str) and message_text.strip():
-                        consult_intent_decomp.setdefault("consult_question", message_text.strip())
-                    service_availability_decision = get_pack_service_decision(
-                        message_text,
-                        client_slug=client_slug,
-                        intent_decomp=consult_intent_decomp,
-                    )
-                    if service_availability_decision is None and service_matcher:
-                        service_availability_decision = service_matcher(
-                            message_text,
-                            client_slug=client_slug,
-                            intent_decomp=intent_decomp_payload,
-                        )
-                elif service_matcher:
-                    service_availability_decision = service_matcher(
-                        message_text,
-                        client_slug=client_slug,
-                        intent_decomp=intent_decomp_payload,
-                    )
-                else:
-                    service_availability_decision = get_pack_service_decision(
-                        message_text,
-                        client_slug=client_slug,
-                        intent_decomp=intent_decomp_payload,
-                    )
-            if (
-                consult_intent
-                and short_circuit_service
-                and not truth_priority_intent
-                and service_availability_decision is None
-                and service_matcher
-            ):
-                service_availability_decision = service_matcher(
-                    message_text,
-                    client_slug=client_slug,
-                    intent_decomp=intent_decomp_payload,
-                )
             topic_map = {topic.id: topic for topic in playbook.topics}
             topic_candidates = resolve_consult_topic_candidates(
                 message_text,
@@ -1630,7 +1521,7 @@ def _handle_consult_flow(
                             reason="consult_clarify",
                             now=now,
                         )
-                        consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                        consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
                     consult_decision = PackDecision(
                         action="reply",
                         response=clarify_prompt,
@@ -1851,7 +1742,7 @@ def _handle_consult_flow(
                     reason="consult_clarify",
                     now=now,
                 )
-                consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
             consult_decision = PackDecision(
                 action="reply",
                 response=MSG_EXPECTED_SERVICE_OFF_TOPIC,
@@ -1871,6 +1762,11 @@ def _handle_consult_flow(
         consult_flow_decision = None
 
     if consult_decision:
+        canonical_consult_action = _canonicalize_consult_decision_action(
+            action=consult_decision.action,
+            consult_flow_decision=consult_flow_decision,
+            consult_meta=consult_meta,
+        )
         class_router_result = _build_consult_class_router_result()
         _record_class_router_trace_from_result(
             conversation=conversation,
@@ -1883,7 +1779,7 @@ def _handle_consult_flow(
                 "state": conversation.state,
             }
             if consult_flow_decision == "consult_clarify":
-                consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                consult_flow_trace["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
                 consult_flow_trace["reason"] = "consult_clarify"
             elif consult_flow_decision == "consult_escalate":
                 guard_reason = None
@@ -1945,21 +1841,24 @@ def _handle_consult_flow(
                     _update_message_decision_metadata(saved_message, {"current_goal": "consult"})
         consult_trace = {
             "stage": "consult",
-            "decision": consult_decision.action,
+            "decision": canonical_consult_action,
             "intent": consult_decision.intent,
             "state": conversation.state,
         }
-        consult_trace.update(consult_meta)
+        consult_trace.update(_freeze_legacy_semantic_payload(consult_meta))
         _record_decision_trace(conversation, consult_trace)
         _record_message_decision_meta(
             saved_message,
-            action=consult_decision.action,
+            action=canonical_consult_action,
             intent=consult_decision.intent,
             source="consult",
             fast_intent=False,
         )
         if saved_message and consult_meta:
-            _update_message_decision_metadata(saved_message, consult_meta)
+            _update_message_decision_metadata(
+                saved_message,
+                _freeze_legacy_semantic_payload(consult_meta),
+            )
 
         if consult_decision.action == "escalate":
             bot_response = consult_decision.response or MSG_ESCALATED
@@ -2047,6 +1946,7 @@ def _handle_consult_flow(
         booking_followup = None
         append_booking_followup = _should_append_booking_followup_for_consult(
             booking_goal_locked=booking_goal_locked,
+            booking_signal_active=booking_signal,
             consult_action=consult_decision.intent,
             message_text=message_text,
             expected_reply_type=expected_reply_type,
@@ -2074,6 +1974,7 @@ def _handle_consult_flow(
             consult_meta["booking_followup_suppressed"] = True
             if _should_shift_locked_consult_topic_to_service_choice(
                 booking_goal_locked=booking_goal_locked,
+                booking_signal_active=booking_signal,
                 booking_followup_appended=append_booking_followup,
                 consult_action=consult_decision.intent,
                 consult_meta=consult_meta,
@@ -2108,11 +2009,7 @@ def _handle_consult_flow(
                 EXPECTED_REPLY_NAME,
             }
         ):
-            service_hint = (
-                _extract_service_hint(message_text, client_slug)
-                if isinstance(message_text, str) and message_text.strip()
-                else None
-            )
+            service_hint = consult_meta.get("service_query")
             if isinstance(service_hint, str) and service_hint.strip():
                 context = _get_conversation_context(conversation)
                 context = _set_expected_reply_context(
@@ -2123,16 +2020,16 @@ def _handle_consult_flow(
                     reason="consult_booking_cta",
                     now=now,
                 )
-                consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
-                consult_meta["expected_reply_reason"] = "consult_booking_cta"
+                consult_meta["observer_expected_reply_type"] = EXPECTED_REPLY_SERVICE
+                consult_meta["observer_expected_reply_reason"] = "consult_booking_cta"
                 consult_meta["consult_booking_cta_expected_reply"] = True
                 _record_decision_trace(
                     conversation,
                     {
                         "stage": "consult_flow",
                         "decision": "booking_cta_expected_reply",
-                        "expected_reply_type": EXPECTED_REPLY_SERVICE,
-                        "expected_reply_reason": "consult_booking_cta",
+                        "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+                        "observer_expected_reply_reason": "consult_booking_cta",
                         "service_hint": service_hint.strip(),
                     },
                 )
@@ -2141,8 +2038,8 @@ def _handle_consult_flow(
                         saved_message,
                         {
                             "consult_booking_cta_expected_reply": True,
-                            "expected_reply_type": EXPECTED_REPLY_SERVICE,
-                            "expected_reply_reason": "consult_booking_cta",
+                            "observer_expected_reply_type": EXPECTED_REPLY_SERVICE,
+                            "observer_expected_reply_reason": "consult_booking_cta",
                         },
                     )
         bot_response = _maybe_append_booking_cta(
@@ -2334,7 +2231,10 @@ def _handle_llm_primary(
                 _update_message_decision_metadata(
                     saved_message,
                     {
-                        "action": "escalate",
+                        "action": _canonicalize_response_metadata_action(
+                            action="escalate",
+                            decision="blocked_topics",
+                        ),
                         "intent": "llm_guard",
                         "source": "llm_guard",
                         "fast_intent": False,
@@ -2391,7 +2291,10 @@ def _handle_llm_primary(
             _update_message_decision_metadata(
                 saved_message,
                 {
-                    "action": "ai_response",
+                    "action": _canonicalize_response_metadata_action(
+                        action="ai_response",
+                        decision="bot_reply",
+                    ),
                     "intent": intent.value if intent else None,
                     "source": "llm" if llm_used else "rule",
                     "fast_intent": False,
@@ -2438,982 +2341,6 @@ def _handle_llm_primary(
     )
 
 
-def _handle_ai_response_action(
-    *,
-    db: Session,
-    conversation: Conversation,
-    user: User,
-    message_text: str | None,
-    saved_message: Message | None,
-    client_slug: str | None,
-    client_id: Any,
-    client_config: dict | None,
-    routing: dict,
-    intent: Any,
-    llm_primary_result: Any | None,
-    append_user_message: bool,
-    timing_context: dict,
-    intent_decomp_payload: dict | None,
-    class_router_result: dict | None,
-    expected_reply_shortcircuit: bool,
-    out_of_domain_signal: bool,
-    booking_signal: bool,
-    info_class_intents: set[str],
-    current_goal: str | None,
-    now: datetime,
-    send_and_save: Callable[..., tuple[str | None, bool]],
-    send_response: Callable[[str], bool],
-    finalize_response: Callable[..., str | None],
-) -> AiResponseOutcome:
-
-    llm_primary_used = False
-    llm_primary_failed = False
-    llm_primary_reason = None
-    bot_response = None
-    result_message = None
-    if message_text and is_low_signal_message(message_text) and not expected_reply_shortcircuit:
-        bot_response = OUT_OF_DOMAIN_RESPONSE
-        _reset_low_confidence_retry(conversation)
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "out_of_domain",
-                "decision": "router_low_confidence",
-                "state": conversation.state,
-            },
-        )
-        _record_message_decision_meta(
-            saved_message,
-            action="out_of_domain",
-            intent="out_of_domain",
-            source="router_low_confidence",
-            fast_intent=False,
-        )
-        bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
-        result_message = (
-            "Low-signal OOD reply sent" if sent else "Low-signal OOD reply send failed"
-        )
-        db.commit()
-        return AiResponseOutcome(
-            response=WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            ),
-            bot_response=bot_response,
-            result_message=result_message,
-            llm_primary_failed=llm_primary_failed,
-            llm_primary_reason=llm_primary_reason,
-        )
-    gen_result = llm_primary_result
-    if gen_result is None:
-        _ensure_rag_rewrite(
-            conversation=conversation,
-            saved_message=saved_message,
-            message_text=message_text,
-            client_slug=client_slug,
-            client_config=client_config,
-            timing_context=timing_context,
-        )
-        gen_result = generate_bot_response(
-            db,
-            conversation,
-            message_text,
-            client_slug,
-            append_user_message=append_user_message,
-            pending_hint=conversation.state == ConversationState.PENDING.value,
-            timing_context=timing_context,
-        )
-        _record_rag_meta(
-            conversation=conversation,
-            saved_message=saved_message,
-            timing_context=timing_context,
-        )
-
-    if not gen_result.ok:
-        bot_response = MSG_AI_ERROR
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "ai_response",
-                "decision": "ai_error",
-                "state": conversation.state,
-                "error": gen_result.error,
-            },
-        )
-        bot_response, sent = send_and_save(bot_response)
-        result_message = f"AI error: {gen_result.error}"
-        return AiResponseOutcome(
-            response=None,
-            bot_response=bot_response,
-            result_message=result_message,
-            llm_primary_failed=llm_primary_failed,
-            llm_primary_reason=llm_primary_reason,
-        )
-
-    response_text, confidence = gen_result.value
-
-    if confidence == "low_confidence":
-        miss_type = (
-            "llm_timeout"
-            if timing_context and timing_context.get("llm_timeout")
-            else "low_confidence"
-        )
-        _record_knowledge_backlog(
-            db,
-            client_id=client_id,
-            conversation_id=conversation.id,
-            message=saved_message,
-            user_text=message_text,
-            miss_type=miss_type,
-        )
-        semantic_result = None
-        rewrite_query = None
-        semantic_attempted = False
-        info_intent_hint = False
-        info_signal_intents = {
-            "hours",
-            "pricing",
-            "duration",
-            "location",
-            "parking",
-            "contact",
-            "master",
-            "promotions",
-            "promo",
-        }
-        if isinstance(intent_decomp_payload, dict):
-            raw_intents = intent_decomp_payload.get("intents")
-            if isinstance(raw_intents, list):
-                normalized_intents = {
-                    item.strip().casefold()
-                    for item in raw_intents
-                    if isinstance(item, str) and item.strip()
-                }
-                info_intent_hint = bool(
-                    normalized_intents & info_signal_intents
-                )
-        if not info_intent_hint and info_class_intents:
-            normalized_info_intents = {
-                item.strip().casefold()
-                for item in info_class_intents
-                if isinstance(item, str) and item.strip()
-            }
-            info_intent_hint = bool(normalized_info_intents & info_signal_intents)
-        if not info_intent_hint and isinstance(class_router_result, dict):
-            router_intents = class_router_result.get("intents")
-            if isinstance(router_intents, list):
-                normalized_router_intents = {
-                    item.strip().casefold()
-                    for item in router_intents
-                    if isinstance(item, str) and item.strip()
-                }
-                info_intent_hint = bool(normalized_router_intents & info_signal_intents)
-        if info_intent_hint:
-            direct_info_intent = None
-            preferred_info_order = (
-                "hours",
-                "parking",
-                "location",
-                "contact",
-                "master",
-                "promotions",
-                "promo",
-            )
-            normalized_info_class = [
-                item.strip().casefold()
-                for item in (info_class_intents or [])
-                if isinstance(item, str) and item.strip()
-            ]
-            for candidate in preferred_info_order:
-                if candidate in normalized_info_class:
-                    direct_info_intent = candidate
-                    break
-            if not direct_info_intent and isinstance(intent_decomp_payload, dict):
-                raw_intents = intent_decomp_payload.get("intents")
-                normalized_intents = (
-                    {
-                        item.strip().casefold()
-                        for item in raw_intents
-                        if isinstance(item, str) and item.strip()
-                    }
-                    if isinstance(raw_intents, list)
-                    else set()
-                )
-                for candidate in preferred_info_order:
-                    if candidate in normalized_intents:
-                        direct_info_intent = candidate
-                        break
-            if direct_info_intent == "promo":
-                direct_info_intent = "promotions"
-            if direct_info_intent:
-                from app.services.pack_runtime_service import format_reply_from_truth
-
-                info_reply = format_reply_from_truth(
-                    direct_info_intent,
-                    client_slug=client_slug,
-                )
-                if isinstance(info_reply, str) and info_reply.strip():
-                    bot_response = info_reply.strip()
-                    _reset_low_confidence_retry(conversation)
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "info_class",
-                            "decision": "low_confidence_info_fallback",
-                            "state": conversation.state,
-                            "intent": direct_info_intent,
-                        },
-                    )
-                    _record_message_decision_meta(
-                        saved_message,
-                        action="reply",
-                        intent=direct_info_intent,
-                        source="low_confidence_guard",
-                        fast_intent=False,
-                    )
-                    if saved_message:
-                        _update_message_decision_metadata(
-                            saved_message,
-                            {
-                                "info_sections": [direct_info_intent],
-                                "fact_intents": [direct_info_intent],
-                                "low_confidence_guard": "info_fallback",
-                            },
-                        )
-                    bot_response, sent = send_and_save(bot_response)
-                    result_message = (
-                        "Low-confidence info fallback sent"
-                        if sent
-                        else "Low-confidence info fallback send failed"
-                    )
-                    db.commit()
-                    return AiResponseOutcome(
-                        response=WebhookResponse(
-                            success=True,
-                            message=result_message,
-                            conversation_id=conversation.id,
-                            bot_response=bot_response,
-                        ),
-                        bot_response=bot_response,
-                        result_message=result_message,
-                        llm_primary_failed=llm_primary_failed,
-                        llm_primary_reason=llm_primary_reason,
-                    )
-            llm_primary_failed = True
-            llm_primary_reason = "low_confidence"
-        else:
-            router_meta = None
-            router_output = None
-            router_output_class = None
-            if isinstance(class_router_result, dict):
-                router_meta = class_router_result.get("router")
-                if isinstance(router_meta, dict):
-                    router_output = router_meta.get("output")
-                    if isinstance(router_output, dict):
-                        router_output_class = router_output.get("class")
-            if (
-                router_output_class == "out_of_domain"
-                and not (class_router_result.get("in_signals") or [])
-                and not expected_reply_shortcircuit
-            ):
-                bot_response = OUT_OF_DOMAIN_RESPONSE
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "out_of_domain",
-                        "decision": "router_low_confidence",
-                        "state": conversation.state,
-                    },
-                )
-                _record_message_decision_meta(
-                    saved_message,
-                    action="out_of_domain",
-                    intent="out_of_domain",
-                    source="router_low_confidence",
-                    fast_intent=False,
-                )
-                bot_response, sent = send_and_save(bot_response)
-                result_message = (
-                    "Router OOD reply sent" if sent else "Router OOD reply send failed"
-                )
-                db.commit()
-                return AiResponseOutcome(
-                    response=WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    ),
-                    bot_response=bot_response,
-                    result_message=result_message,
-                    llm_primary_failed=llm_primary_failed,
-                    llm_primary_reason=llm_primary_reason,
-                )
-            if out_of_domain_signal and not expected_reply_shortcircuit:
-                bot_response = OUT_OF_DOMAIN_RESPONSE
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "out_of_domain",
-                        "decision": "domain_anchor",
-                        "state": conversation.state,
-                    },
-                )
-                _record_message_decision_meta(
-                    saved_message,
-                    action="out_of_domain",
-                    intent="out_of_domain",
-                    source="domain_anchor",
-                    fast_intent=False,
-                )
-                bot_response, sent = send_and_save(bot_response)
-                result_message = (
-                    "Domain anchor OOD reply sent"
-                    if sent
-                    else "Domain anchor OOD reply send failed"
-                )
-                db.commit()
-                return AiResponseOutcome(
-                    response=WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    ),
-                    bot_response=bot_response,
-                    result_message=result_message,
-                    llm_primary_failed=llm_primary_failed,
-                    llm_primary_reason=llm_primary_reason,
-                )
-            if _looks_like_time_only_request(message_text):
-                bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "time_only_guard",
-                        "decision": "service_clarify",
-                        "state": conversation.state,
-                    },
-                )
-                _record_message_decision_meta(
-                    saved_message,
-                    action="reply",
-                    intent="service_clarify",
-                    source="time_only_guard",
-                    fast_intent=False,
-                )
-                if saved_message:
-                    _update_message_decision_metadata(
-                        saved_message, {"time_only_guard": True}
-                    )
-                bot_response, sent = send_and_save(bot_response)
-                result_message = (
-                    "Time-only guard reply sent" if sent else "Time-only guard send failed"
-                )
-                db.commit()
-                return AiResponseOutcome(
-                    response=WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    ),
-                    bot_response=bot_response,
-                    result_message=result_message,
-                    llm_primary_failed=llm_primary_failed,
-                    llm_primary_reason=llm_primary_reason,
-                )
-            explicit_service_hint = None
-            intent_decomp_explicit_query = None
-            controller_service_query = None
-            raw_source = None
-            if not out_of_domain_signal:
-                if message_text and client_slug:
-                    explicit_service_hint = _extract_service_hint(
-                        message_text, client_slug
-                    )
-                if isinstance(intent_decomp_payload, dict):
-                    raw_source = intent_decomp_payload.get("service_query_source")
-                    raw_query = intent_decomp_payload.get("service_query")
-                    if (
-                        isinstance(raw_query, str)
-                        and raw_query.strip()
-                        and raw_source != "context"
-                    ):
-                        intent_decomp_explicit_query = raw_query.strip()
-                controller_service_query = None
-                for state_key in ("router", "controller"):
-                    state = (
-                        class_router_result.get(state_key)
-                        if isinstance(class_router_result, dict)
-                        else None
-                    )
-                    if not isinstance(state, dict):
-                        continue
-                    output = state.get("output")
-                    if not isinstance(output, dict):
-                        continue
-                    slots = output.get("slots")
-                    if not isinstance(slots, dict):
-                        continue
-                    candidate = slots.get("service_query")
-                    if isinstance(candidate, str) and candidate.strip():
-                        controller_service_query = candidate.strip()
-                        break
-                in_signals = class_router_result.get("in_signals") or []
-                anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
-                info_only_semantic_skip = bool(
-                    info_intent_hint
-                    and not explicit_service_hint
-                    and not intent_decomp_explicit_query
-                    and not controller_service_query
-                )
-                if info_only_semantic_skip:
-                    # For info-only interruptions (parking/hours/location/etc.)
-                    # do not run service semantic matcher in booking context.
-                    service_semantic_allowed = False
-                else:
-                    service_semantic_allowed = bool(
-                        explicit_service_hint
-                        or intent_decomp_explicit_query
-                        or controller_service_query
-                        or booking_signal
-                        or info_intent_hint
-                        or in_signals
-                        or anchors_in_hits > 0
-                    )
-                if not service_semantic_allowed:
-                    if info_only_semantic_skip:
-                        if saved_message:
-                            _update_message_decision_metadata(
-                                saved_message,
-                                {
-                                    "service_semantic_match_skipped": True,
-                                    "service_semantic_match_skip_reason": "info_only_interrupt",
-                                },
-                            )
-                    else:
-                        bot_response = OUT_OF_DOMAIN_RESPONSE
-                        _record_decision_trace(
-                            conversation,
-                            {
-                                "stage": "out_of_domain",
-                                "decision": "service_semantic_guard",
-                                "state": conversation.state,
-                            },
-                        )
-                        _record_message_decision_meta(
-                            saved_message,
-                            action="out_of_domain",
-                            intent="out_of_domain",
-                            source="service_semantic_guard",
-                            fast_intent=False,
-                        )
-                        if saved_message:
-                            _update_message_decision_metadata(
-                                saved_message,
-                                {
-                                    "service_semantic_match_skipped": True,
-                                    "service_semantic_match_skip_reason": "low_signal",
-                                },
-                            )
-                        bot_response, sent = send_and_save(bot_response)
-                        result_message = (
-                            "Service semantic guard reply sent"
-                            if sent
-                            else "Service semantic guard reply send failed"
-                        )
-                        db.commit()
-                        return AiResponseOutcome(
-                            response=WebhookResponse(
-                                success=True,
-                                message=result_message,
-                                conversation_id=conversation.id,
-                                bot_response=bot_response,
-                            ),
-                            bot_response=bot_response,
-                            result_message=result_message,
-                            llm_primary_failed=llm_primary_failed,
-                            llm_primary_reason=llm_primary_reason,
-                        )
-                if service_semantic_allowed:
-                    semantic_attempted = True
-                    semantic_result = semantic_service_match(message_text, client_slug)
-                    if not semantic_result:
-                        rewrite_query = rewrite_for_service_match(
-                            message_text,
-                            client_slug,
-                            client_config=client_config,
-                            timing_context=timing_context,
-                        )
-                        _record_llm_budget_trace(
-                            conversation=conversation,
-                            timing_context=timing_context,
-                        )
-                        if rewrite_query:
-                            semantic_result = semantic_service_match(rewrite_query, client_slug)
-            if semantic_result:
-                rewrite_used = bool(rewrite_query)
-                bot_response = semantic_result.response
-                _reset_low_confidence_retry(conversation)
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "service_semantic_matcher",
-                        "decision": semantic_result.action,
-                        "state": conversation.state,
-                        "score": semantic_result.score,
-                        "canonical_name": semantic_result.canonical_name,
-                        "suggestions": semantic_result.suggestions or [],
-                        "rewrite_used": rewrite_used,
-                        "rewrite_query": rewrite_query,
-                    },
-                )
-                if saved_message:
-                    llm_used = bool(timing_context.get("llm_used")) if timing_context else False
-                    llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
-                    llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
-                    _update_message_decision_metadata(
-                        saved_message,
-                        {
-                            "action": semantic_result.action,
-                            "intent": "service_semantic",
-                            "source": "service_semantic_matcher",
-                            "service_semantic_score": semantic_result.score,
-                            "service_semantic_rewrite_used": rewrite_used,
-                            "service_semantic_rewrite_query": rewrite_query,
-                            "fast_intent": False,
-                            "llm_primary_used": False,
-                            "llm_used": llm_used,
-                            "llm_timeout": llm_timeout,
-                            "llm_cache_hit": llm_cache_hit,
-                        },
-                    )
-                    _update_message_signal_snapshot(
-                        saved_message,
-                        {
-                            "semantic_service": {
-                                "attempted": True,
-                                "action": semantic_result.action,
-                                "score": semantic_result.score,
-                                "rewrite_used": rewrite_used,
-                                "rewrite_query": rewrite_query,
-                                "canonical_name": semantic_result.canonical_name,
-                            }
-                        },
-                    )
-                bot_response, sent = send_and_save(bot_response)
-                result_message = (
-                    "Service semantic matcher reply sent"
-                    if sent
-                    else "Service semantic matcher send failed"
-                )
-                db.commit()
-                return AiResponseOutcome(
-                    response=WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    ),
-                    bot_response=bot_response,
-                    result_message=result_message,
-                    llm_primary_failed=llm_primary_failed,
-                    llm_primary_reason=llm_primary_reason,
-                )
-            explicit_service_query = None
-            service_query_source = None
-            if explicit_service_hint:
-                explicit_service_query = explicit_service_hint
-                service_query_source = "semantic_match"
-            elif intent_decomp_explicit_query:
-                explicit_service_query = intent_decomp_explicit_query
-                if isinstance(raw_source, str) and raw_source.strip():
-                    service_query_source = raw_source.strip()
-                else:
-                    service_query_source = "intent_decomp"
-            elif controller_service_query:
-                explicit_service_query = controller_service_query
-                service_query_source = "controller"
-            rag_scores = timing_context.get("rag_scores") if isinstance(timing_context, dict) else None
-            rag_attempted = bool(
-                timing_context.get("rag_attempted") if isinstance(timing_context, dict) else False
-            )
-            vector_count = int(rag_scores.get("vector_count") or 0) if isinstance(rag_scores, dict) else 0
-            bm25_count = int(rag_scores.get("bm25_count") or 0) if isinstance(rag_scores, dict) else 0
-            rag_empty = bool(rag_attempted and vector_count <= 0 and bm25_count <= 0)
-            if semantic_attempted and explicit_service_query and rag_empty:
-                from app.services.pack_runtime_service import (
-                    _format_service_not_found_reply,
-                    load_yaml_truth,
-                )
-
-                reply = _format_service_not_found_reply(
-                    load_yaml_truth(client_slug),
-                    client_slug=client_slug,
-                )
-                if reply:
-                    bot_response = reply
-                    _reset_low_confidence_retry(conversation)
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "service_semantic_matcher",
-                            "decision": "service_not_found",
-                            "state": conversation.state,
-                            "rewrite_used": bool(rewrite_query),
-                            "rewrite_query": rewrite_query,
-                            "service_query": explicit_service_query,
-                            "service_query_source": service_query_source,
-                        },
-                    )
-                    if saved_message:
-                        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
-                        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
-                        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
-                        _update_message_decision_metadata(
-                            saved_message,
-                            {
-                                "action": "reply",
-                                "intent": "service_not_found",
-                                "source": "service_semantic_matcher",
-                                "fact_source": "service_semantic_matcher",
-                                "fact_intents": ["service_not_found"],
-                                "service_query": explicit_service_query,
-                                "service_query_source": service_query_source,
-                                "service_semantic_rewrite_used": bool(rewrite_query),
-                                "service_semantic_rewrite_query": rewrite_query,
-                                "fast_intent": False,
-                                "llm_primary_used": False,
-                                "llm_used": llm_used,
-                                "llm_timeout": llm_timeout,
-                                "llm_cache_hit": llm_cache_hit,
-                            },
-                        )
-                    bot_response, sent = send_and_save(bot_response)
-                    result_message = (
-                        "Service semantic not found reply sent"
-                        if sent
-                        else "Service semantic not found send failed"
-                    )
-                    db.commit()
-                    return AiResponseOutcome(
-                        response=WebhookResponse(
-                            success=True,
-                            message=result_message,
-                            conversation_id=conversation.id,
-                            bot_response=bot_response,
-                        ),
-                        bot_response=bot_response,
-                        result_message=result_message,
-                        llm_primary_failed=llm_primary_failed,
-                        llm_primary_reason=llm_primary_reason,
-                    )
-            if conversation.state == ConversationState.PENDING.value:
-                bot_response = MSG_PENDING_LOW_CONFIDENCE
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "ai_response",
-                        "decision": "low_confidence_pending",
-                        "state": conversation.state,
-                    },
-                )
-                bot_response, sent = send_and_save(bot_response)
-                result_message = "Low confidence while pending, responded without re-escalation"
-            else:
-                context = _get_conversation_context(conversation)
-                retry_count = _get_low_confidence_retry_count(context)
-                if should_offer_low_confidence_retry(conversation, now):
-                    retry_count = 0
-
-                if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
-                    clarify_intent = current_goal or "info"
-                    context_manager = _get_context_manager(context)
-                    if _should_escalate_for_clarify(context_manager, clarify_intent):
-                        clarify_count, _ = _get_clarify_attempt_state(
-                            context_manager, clarify_intent
-                        )
-                        _record_context_manager_decision(
-                            conversation,
-                            saved_message,
-                            decision="clarify_limit",
-                            updates={
-                                "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
-                                "clarify_reason": "low_confidence_retry",
-                                "clarify_limit": True,
-                            },
-                        )
-                        clarify_limit_response = _handle_clarify_limit_escalation(
-                            db=db,
-                            conversation=conversation,
-                            user=user,
-                            message_text=message_text,
-                            saved_message=saved_message,
-                            source="ai_response",
-                            allow_handover=routing.get("allow_handover_create", False),
-                            send_response=send_response,
-                            finalize_response=finalize_response,
-                        )
-                        if clarify_limit_response is not None:
-                            return AiResponseOutcome(
-                                response=clarify_limit_response,
-                                bot_response=None,
-                                result_message="Clarify limit escalation handled",
-                                llm_primary_failed=llm_primary_failed,
-                                llm_primary_reason=llm_primary_reason,
-                            )
-                        # Defensive fallback: avoid propagating empty response metadata to webhook output.
-                        bot_response = MSG_ESCALATED
-                        bot_response, sent = send_and_save(bot_response)
-                        fallback_message = (
-                            "Clarify limit fallback sent"
-                            if sent
-                            else "Clarify limit fallback failed"
-                        )
-                        return AiResponseOutcome(
-                            response=None,
-                            bot_response=bot_response,
-                            result_message=fallback_message,
-                            llm_primary_failed=llm_primary_failed,
-                            llm_primary_reason=llm_primary_reason,
-                        )
-                    _register_clarify_attempt(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        intent=clarify_intent,
-                        now=now,
-                        reason="low_confidence_retry",
-                    )
-                    bot_response = MSG_LOW_CONFIDENCE_RETRY
-                    conversation.retry_offered_at = now
-                    context = _set_low_confidence_retry_count(context, retry_count + 1)
-                    _set_conversation_context(conversation, context)
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "ai_response",
-                            "decision": "low_confidence_retry",
-                            "state": conversation.state,
-                            "retry_count": retry_count + 1,
-                        },
-                    )
-                    bot_response, sent = send_and_save(bot_response)
-                    result_message = "Low confidence: asked clarification before escalation"
-                else:
-                    confirmation = {
-                        "status": "pending",
-                        "asked_at": now.isoformat(),
-                        "trigger_type": "low_confidence",
-                        "trigger_value": "low_confidence",
-                        "user_message": message_text,
-                    }
-                    context = _set_handover_confirmation(context, confirmation)
-                    _set_conversation_context(conversation, context)
-
-                    bot_response = MSG_HANDOVER_CONFIRM
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "ai_response",
-                            "decision": "low_confidence_handover_confirm",
-                            "state": conversation.state,
-                            "retry_count": retry_count,
-                        },
-                    )
-                    bot_response, sent = send_and_save(bot_response)
-                    result_message = (
-                        "Low confidence: asked for handover confirmation"
-                        if sent
-                        else "Low confidence: handover confirmation send failed"
-                    )
-
-    elif confidence == "bot_inactive":
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "ai_response",
-                "decision": "bot_inactive",
-                "state": conversation.state,
-            },
-        )
-        result_message = f"Bot not active (state: {conversation.state})"
-
-    elif response_text:
-        bot_response = response_text
-        logger.debug(
-            f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}..."
-        )
-        _reset_low_confidence_retry(conversation)
-        llm_primary_used = True
-        trace = _attach_llm_cache_flag(
-            {
-                "stage": "ai_response",
-                "decision": "bot_reply",
-                "state": conversation.state,
-                "confidence": confidence,
-            },
-            timing_context,
-        )
-        _record_decision_trace(conversation, trace)
-        bot_response, sent = send_and_save(bot_response)
-        result_message = "Message sent" if sent else "Failed to send"
-    else:
-        _record_knowledge_backlog(
-            db,
-            client_id=client_id,
-            conversation_id=conversation.id,
-            message=saved_message,
-            user_text=message_text,
-            miss_type="clarify",
-        )
-        explicit_service_hint = None
-        if message_text and client_slug:
-            explicit_service_hint = _extract_service_hint(message_text, client_slug)
-        intent_decomp_explicit_query = None
-        info_intent_hint = False
-        if isinstance(intent_decomp_payload, dict):
-            raw_source = intent_decomp_payload.get("service_query_source")
-            raw_query = intent_decomp_payload.get("service_query")
-            if (
-                isinstance(raw_query, str)
-                and raw_query.strip()
-                and raw_source != "context"
-            ):
-                intent_decomp_explicit_query = raw_query.strip()
-            raw_intents = intent_decomp_payload.get("intents")
-            if isinstance(raw_intents, list):
-                normalized_intents = {
-                    item.strip().casefold()
-                    for item in raw_intents
-                    if isinstance(item, str) and item.strip()
-                }
-                info_intent_hint = bool(
-                    normalized_intents & {"hours", "pricing", "duration", "location"}
-                )
-        has_domain_signal = bool(
-            explicit_service_hint
-            or intent_decomp_explicit_query
-            or booking_signal
-            or info_class_intents
-            or info_intent_hint
-            or int(class_router_result.get("anchors_in_hits") or 0) > 0
-        )
-        if not has_domain_signal and not expected_reply_shortcircuit:
-            bot_response = OUT_OF_DOMAIN_RESPONSE
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "out_of_domain",
-                    "decision": "no_response_guard",
-                    "state": conversation.state,
-                },
-            )
-            _record_message_decision_meta(
-                saved_message,
-                action="out_of_domain",
-                intent="out_of_domain",
-                source="no_response_guard",
-                fast_intent=False,
-            )
-            bot_response, sent = send_and_save(bot_response)
-            result_message = (
-                "No-response OOD reply sent" if sent else "No-response OOD reply send failed"
-            )
-            db.commit()
-            return AiResponseOutcome(
-                response=WebhookResponse(
-                    success=True,
-                    message=result_message,
-                    conversation_id=conversation.id,
-                    bot_response=bot_response,
-                ),
-                bot_response=bot_response,
-                result_message=result_message,
-                llm_primary_failed=llm_primary_failed,
-                llm_primary_reason=llm_primary_reason,
-            )
-        context = _get_conversation_context(conversation)
-        retry_count = _get_low_confidence_retry_count(context)
-        if should_offer_low_confidence_retry(conversation, now):
-            retry_count = 0
-
-        if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
-            bot_response = MSG_LOW_CONFIDENCE_RETRY
-            conversation.retry_offered_at = now
-            context = _set_low_confidence_retry_count(context, retry_count + 1)
-            _set_conversation_context(conversation, context)
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "ai_response",
-                    "decision": "no_response_retry",
-                    "state": conversation.state,
-                    "retry_count": retry_count + 1,
-                },
-            )
-            bot_response, sent = send_and_save(bot_response)
-            result_message = "No response: asked clarification"
-        else:
-            confirmation = {
-                "status": "pending",
-                "asked_at": now.isoformat(),
-                "trigger_type": "low_confidence",
-                "trigger_value": "low_confidence",
-                "user_message": message_text,
-            }
-            context = _set_handover_confirmation(context, confirmation)
-            _set_conversation_context(conversation, context)
-
-            bot_response = MSG_HANDOVER_CONFIRM
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "ai_response",
-                    "decision": "no_response_handover_confirm",
-                    "state": conversation.state,
-                    "retry_count": retry_count,
-                },
-            )
-            bot_response, sent = send_and_save(bot_response)
-            result_message = (
-                "No response: asked for handover confirmation"
-                if sent
-                else "No response: handover confirmation send failed"
-            )
-
-    if result_message is None:
-        result_message = "AI fallback response skipped"
-
-    if saved_message:
-        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
-        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
-        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
-        _update_message_decision_metadata(
-            saved_message,
-            {
-                "action": "ai_response",
-                "intent": intent.value if intent else None,
-                "source": "llm" if llm_used else "rule",
-                "fast_intent": False,
-                "llm_primary_used": llm_primary_used,
-                "llm_used": llm_used,
-                "llm_timeout": llm_timeout,
-                "llm_cache_hit": llm_cache_hit,
-            },
-        )
-
-    return AiResponseOutcome(
-        response=None,
-        bot_response=bot_response,
-        result_message=result_message,
-        llm_primary_failed=llm_primary_failed,
-        llm_primary_reason=llm_primary_reason,
-    )
-
-
 __all__ = [
     "AiResponseOutcome",
     "ConsultFlowResult",
@@ -3422,7 +2349,6 @@ __all__ = [
     "_compose_fact_response",
     "_ensure_rag_rewrite",
     "_finalize_bot_response",
-    "_handle_ai_response_action",
     "_handle_consult_flow",
     "_handle_llm_primary",
     "_maybe_apply_consult_return",

@@ -860,11 +860,12 @@ from app.services.onboarding_state import (
     ensure_onboarding_step,
 )
 from app.services.outbox_runtime_service import (
+    ScopedOutboxProcessRequest,
     load_outbox_process_settings,
+    preview_scoped_outbox_process,
     run_scoped_outbox_process,
 )
 from app.services.outbox_service import (
-    archive_pending_outbox,
     build_inbound_message_id,
     enqueue_outbox_message,
 )
@@ -10383,117 +10384,6 @@ def _resolve_branch_scope(context: ConsoleAuthContext) -> Optional[list[UUID]]:
     return branch_ids
 
 
-def _query_scoped_outbox_message_rows(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    status: str,
-) -> list[OutboxMessage]:
-    query = db.query(OutboxMessage).filter(
-        OutboxMessage.client_id == context.client.id,
-        OutboxMessage.status == status,
-    )
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            return []
-        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
-    return query.all()
-
-
-def _build_outbox_dry_run_summary(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    limit: int,
-    idle_seconds: int,
-    max_wait_seconds: int,
-    include_without_conversation: bool,
-    archive_preview: Optional[dict] = None,
-) -> dict:
-    pending_rows = _query_scoped_outbox_message_rows(db, context=context, status="PENDING")
-    pending = len(pending_rows)
-    processing = len(_query_scoped_outbox_message_rows(db, context=context, status="PROCESSING"))
-    failed = len(_query_scoped_outbox_message_rows(db, context=context, status="FAILED"))
-    pending_with_conversation = sum(1 for row in pending_rows if row.conversation_id is not None)
-    pending_without_conversation = pending - pending_with_conversation
-    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    pending_older_than_7d = sum(
-        1
-        for row in pending_rows
-        if row.created_at and row.created_at <= stale_cutoff
-    )
-    return {
-        "mode": "dry_run",
-        "scope": {
-            "client_id": str(context.client.id),
-            "branch_ids": [str(branch_id) for branch_id in (_resolve_branch_scope(context) or [])],
-        },
-        "config": {
-            "limit": limit,
-            "idle_seconds": idle_seconds,
-            "max_wait_seconds": max_wait_seconds,
-            "include_without_conversation": include_without_conversation,
-        },
-        "counts": {
-            "pending": pending,
-            "processing": processing,
-            "failed": failed,
-            "pending_with_conversation": pending_with_conversation,
-            "pending_without_conversation": pending_without_conversation,
-            "pending_older_than_7d": pending_older_than_7d,
-        },
-        "archive_preview": archive_preview,
-    }
-
-
-def _build_outbox_archive_preview(
-    db: Session,
-    *,
-    context: ConsoleAuthContext,
-    older_than_hours: int,
-    limit: int,
-    only_without_conversation: bool,
-) -> dict:
-    if older_than_hours <= 0:
-        return {"enabled": False}
-
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
-    query = db.query(OutboxMessage).filter(
-        OutboxMessage.client_id == context.client.id,
-        OutboxMessage.status == "PENDING",
-        OutboxMessage.created_at <= cutoff,
-    )
-    if only_without_conversation:
-        query = query.filter(OutboxMessage.conversation_id.is_(None))
-
-    allowed_branch_ids = _resolve_branch_scope(context)
-    if allowed_branch_ids is not None:
-        if not allowed_branch_ids:
-            return {
-                "enabled": True,
-                "candidates_total": 0,
-                "candidates_capped": 0,
-                "older_than_hours": older_than_hours,
-                "limit": limit,
-                "only_without_conversation": only_without_conversation,
-            }
-        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
-
-    total = query.count()
-    oldest_row = query.order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc()).first()
-    newest_row = query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc()).first()
-    return {
-        "enabled": True,
-        "candidates_total": total,
-        "candidates_capped": min(total, limit),
-        "older_than_hours": older_than_hours,
-        "limit": limit,
-        "only_without_conversation": only_without_conversation,
-        "oldest_created_at": oldest_row.created_at.isoformat() if oldest_row and oldest_row.created_at else None,
-        "newest_created_at": newest_row.created_at.isoformat() if newest_row and newest_row.created_at else None,
-    }
-
 def _build_metrics_snapshot_dry_run(
     *,
     context: ConsoleAuthContext,
@@ -10525,81 +10415,59 @@ async def _run_outbox_process_job(
         min_value=1,
         max_value=200,
     )
-    idle_seconds = _parse_ops_job_int_param(
-        params,
-        name="idle_seconds",
-        default=process_settings.idle_seconds,
-        min_value=0,
-        max_value=3600,
-    )
-    max_wait_seconds = _parse_ops_job_int_param(
-        params,
-        name="max_wait_seconds",
-        default=process_settings.max_wait_seconds,
-        min_value=0,
-        max_value=3600,
-    )
-    include_without_conversation = _parse_ops_job_bool_param(
-        params,
-        name="include_without_conversation",
-        default=True,
-    )
-    archive_pending_older_than_hours = _parse_ops_job_int_param(
-        params,
-        name="archive_pending_older_than_hours",
-        default=0,
-        min_value=0,
-        max_value=24 * 365,
-    )
-    archive_pending_limit = _parse_ops_job_int_param(
-        params,
-        name="archive_pending_limit",
-        default=limit,
-        min_value=1,
-        max_value=1000,
-    )
-    archive_pending_without_conversation_only = _parse_ops_job_bool_param(
-        params,
-        name="archive_pending_without_conversation_only",
-        default=True,
+    request = ScopedOutboxProcessRequest.from_optional(
+        client_id=context.client.id,
+        allowed_branch_ids=_resolve_branch_scope(context),
+        limit=limit,
+        idle_seconds=_parse_ops_job_int_param(
+            params,
+            name="idle_seconds",
+            default=process_settings.idle_seconds,
+            min_value=0,
+            max_value=3600,
+        ),
+        max_wait_seconds=_parse_ops_job_int_param(
+            params,
+            name="max_wait_seconds",
+            default=process_settings.max_wait_seconds,
+            min_value=0,
+            max_value=3600,
+        ),
+        include_without_conversation=_parse_ops_job_bool_param(
+            params,
+            name="include_without_conversation",
+            default=True,
+        ),
+        archive_pending_older_than_hours=_parse_ops_job_int_param(
+            params,
+            name="archive_pending_older_than_hours",
+            default=0,
+            min_value=0,
+            max_value=24 * 365,
+        ),
+        archive_pending_limit=_parse_ops_job_int_param(
+            params,
+            name="archive_pending_limit",
+            default=limit,
+            min_value=1,
+            max_value=1000,
+        ),
+        archive_pending_without_conversation_only=_parse_ops_job_bool_param(
+            params,
+            name="archive_pending_without_conversation_only",
+            default=True,
+        ),
+        settings=process_settings,
     )
 
     if mode == "dry_run":
-        archive_preview = _build_outbox_archive_preview(
-            db,
-            context=context,
-            older_than_hours=archive_pending_older_than_hours,
-            limit=archive_pending_limit,
-            only_without_conversation=archive_pending_without_conversation_only,
-        )
-        return _build_outbox_dry_run_summary(
-            db,
-            context=context,
-            limit=limit,
-            idle_seconds=idle_seconds,
-            max_wait_seconds=max_wait_seconds,
-            include_without_conversation=include_without_conversation,
-            archive_preview=archive_preview,
-        )
+        return await preview_scoped_outbox_process(db, request=request)
 
     response = {
         "mode": "execute",
         "scope": {"client_id": str(context.client.id)},
     }
-    response.update(
-        await run_scoped_outbox_process(
-            db,
-            client_id=context.client.id,
-            allowed_branch_ids=_resolve_branch_scope(context),
-            limit=limit,
-            idle_seconds=idle_seconds,
-            max_wait_seconds=max_wait_seconds,
-            include_without_conversation=include_without_conversation,
-            archive_pending_older_than_hours=archive_pending_older_than_hours,
-            archive_pending_limit=archive_pending_limit,
-            archive_pending_without_conversation_only=archive_pending_without_conversation_only,
-        )
-    )
+    response.update(await run_scoped_outbox_process(db, request=request))
     return response
 
 

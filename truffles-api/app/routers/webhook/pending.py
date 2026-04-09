@@ -17,7 +17,10 @@ from app.routers.webhook.context_manager import (
     _set_conversation_context,
     _set_handover_confirmation,
 )
-from app.routers.webhook.guard_runtime import MSG_MUTED_TEMP
+from app.routers.webhook.guard_runtime import (
+    MSG_MUTED_TEMP,
+    _canonicalize_guard_metadata_action,
+)
 from app.routers.webhook.media import (
     _build_media_caption,
     _is_voice_note,
@@ -393,7 +396,7 @@ def _handle_pending_gate(
         _record_decision_trace(conversation, trace_payload)
         _record_message_decision_meta(
             saved_message,
-            action="rejection",
+            action=_canonicalize_guard_metadata_action("rejection"),
             intent="opt_out",
             source="pending",
             fast_intent=False,

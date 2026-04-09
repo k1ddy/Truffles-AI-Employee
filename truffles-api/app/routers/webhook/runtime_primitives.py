@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -127,6 +128,23 @@ INFO_ANCHOR_GROUPS: dict[str, list[tuple[str, ...]]] = {
     "location": get_system_anchor_groups("location"),
 }
 QUESTION_WORD_PREFIXES = tuple(get_system_lexicon_list("question_word_prefixes"))
+_CANONICAL_GATE_ACTIONS = {"collect", "fact", "handoff"}
+_GATE_COLLECT_INTENTS = {
+    "service_not_found",
+    "service_clarify",
+    "duration_or_price_clarify",
+    "info_clarify",
+}
+_LEGACY_CANONICAL_SEMANTIC_FIELDS = frozenset(
+    {
+        "expected_reply_type",
+        "expected_reply_reason",
+        "pending_question_target",
+        "active_question_relation",
+        "semantic_contract",
+        "semantic_frame",
+    }
+)
 
 
 def _contains_any(normalized: str, keywords: list[str]) -> bool:
@@ -143,6 +161,51 @@ def _append_followup(primary: str, followup: str | None) -> str:
     if not followup:
         return primary
     return f"{primary}\n\n{followup}"
+
+
+def _canonicalize_gate_metadata_action(
+    action: str | None,
+    *,
+    intent: str | None = None,
+) -> str | None:
+    if action is None:
+        return None
+    if action in _CANONICAL_GATE_ACTIONS:
+        return action
+    if action == "escalate":
+        return "handoff"
+    if action == "reply":
+        if intent in _GATE_COLLECT_INTENTS:
+            return "collect"
+        return "fact"
+    return action
+
+
+def _freeze_legacy_semantic_payload(
+    payload: dict[str, Any] | None,
+    *,
+    fields: frozenset[str] = _LEGACY_CANONICAL_SEMANTIC_FIELDS,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    frozen: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in fields:
+            if value is None:
+                continue
+            frozen[f"observer_{key}"] = deepcopy(value)
+            continue
+        frozen[key] = deepcopy(value)
+    return frozen
+
+
+def _observed_legacy_semantic_value(payload: dict[str, Any] | None, key: str) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    observer_key = f"observer_{key}"
+    if observer_key in payload:
+        return payload.get(observer_key)
+    return payload.get(key)
 
 
 def should_offer_low_confidence_retry(conversation: Any, now: datetime) -> bool:
@@ -197,8 +260,11 @@ __all__ = [
     "ROUTING_MATRIX",
     "SERVICE_CARRYOVER_TTL_MESSAGES",
     "SESSION_MEMORY_SHORT_TOKENS",
+    "_canonicalize_gate_metadata_action",
     "_append_followup",
     "_combine_sidecar",
     "_contains_any",
+    "_freeze_legacy_semantic_payload",
+    "_observed_legacy_semantic_value",
     "should_offer_low_confidence_retry",
 ]

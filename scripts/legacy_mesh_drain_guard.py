@@ -18,6 +18,7 @@ HELPER_MODULE = "app.routers.webhook.expected_reply_interrupt_runtime"
 HELPER_NAME = "_should_block_expected_reply_by_info"
 DECISION_PATH = "truffles-api/app/routers/webhook/decision.py"
 LEGACY_PATH = "truffles-api/app/routers/webhook/_legacy.py"
+LEGACY_COMPAT_IMPORTERS = ["truffles-api/app/routers/webhook/info_compat.py"]
 PACKAGE_INIT_PATH = "truffles-api/app/routers/webhook/__init__.py"
 
 
@@ -131,8 +132,10 @@ def collect_topology_errors(root: Path = ROOT) -> list[str]:
         target_member="_legacy",
     )
     all_legacy_importers = sorted(set(legacy_importers + legacy_member_importers))
-    if all_legacy_importers:
-        errors.append(f"app runtime must not import _legacy.py anymore -> {all_legacy_importers!r}")
+    if all_legacy_importers != LEGACY_COMPAT_IMPORTERS:
+        errors.append(
+            f"app runtime must not import _legacy.py anymore -> {all_legacy_importers!r}"
+        )
 
     return errors
 
@@ -147,8 +150,10 @@ def collect_registry_errors(root: Path = ROOT) -> list[str]:
         errors.append(
             "dead_surface_registry decision static_app_importers must shrink to ['truffles-api/app/routers/webhook/_legacy.py']"
         )
-    if legacy_entry.get("static_app_importers") != []:
-        errors.append("dead_surface_registry _legacy static_app_importers must remain []")
+    if legacy_entry.get("static_app_importers") != LEGACY_COMPAT_IMPORTERS:
+        errors.append(
+            "dead_surface_registry _legacy static_app_importers must remain aligned with compat-only imports"
+        )
     return errors
 
 

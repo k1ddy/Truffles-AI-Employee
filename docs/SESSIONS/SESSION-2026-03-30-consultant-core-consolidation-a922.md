@@ -6,7 +6,7 @@
 - branch: feat/2026-03-30-consultant-core-consolidation-a922
 - worktree: /home/zhan/worktrees/2026-03-30-consultant-core-consolidation-a922
 - base_ref: 531001fc
-- scope: Active consolidation worktree for bounded consultant-core and CI blocks; latest closed block splits Console k6 into PR, live, and nightly lanes without pointing PR CI at prod by default.
+- scope: Active consolidation worktree for consultant-core single-owner stabilization and PR #989 remediation across lint, unit, and architecture/session gates.
 - done:
   - captured freeze manifests/diff bundles for `truffles-main`, `governance-lock`, `practical-closure`
   - generated inventory and transfer matrix under `/home/zhan/consolidation_freeze/2026-03-30-consultant-core-consolidation-a922`
@@ -15,8 +15,12 @@
   - added dedicated workflow `.github/workflows/console-k6.yml` with `console-k6-live` (`workflow_dispatch`) and `console-k6-nightly` (`schedule`)
   - extended `ops/k6/console_smoke.js` with optional `X-Company-Id`, `X-Client-Id`, and `X-Branch-Id` headers
   - updated `TECH.md`, `docs/DEV_SETUP.md`, and `docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md` for the new k6 cadence
+  - repaired PR #989 lint drift in `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/routers/webhook/response_compat.py`, and `truffles-api/app/routers/webhook/booking.py`
+  - restored canonical pending-question and semantic-contract projection paths in `truffles-api/app/core/dialog_state_service.py` and `truffles-api/app/routers/webhook/context_manager.py`
+  - fixed `catalog.service_query` duration grounding so explicit message service beats stale slot carryover in `truffles-api/app/services/tool_registry_service.py`
+  - synced architecture guard configs/registries for current pack-runtime, continuity, legacy-drain, and semantic-owner topology
 - next:
-  - provision a stable non-prod Console API target and `CONSOLE_K6_PR_*` secrets so `console-k6-pr` runs instead of skipping
+  - rerun the exact PR #989 check families locally, then commit and push the remediation set to `wip/2026-04-03-consultant-single-owner-a922`
 - evidence:
   - /home/zhan/consolidation_freeze/2026-03-30-consultant-core-consolidation-a922
   - docs/REPORTS/2026-03-30-consultant-core-consolidation-freeze-inventory-a922.md
@@ -26,8 +30,23 @@
   - TECH.md
   - docs/DEV_SETUP.md
   - docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md
+  - truffles-api/app/core/dialog_state_service.py
+  - truffles-api/app/routers/webhook/context_manager.py
+  - truffles-api/app/services/tool_registry_service.py
+  - docs/CONTINUITY_STATE_NORMALIZATION_GUARD.yaml
+  - docs/LEGACY_DRAIN_CLOSURE_GUARD.yaml
+  - docs/PACK_RUNTIME_SEPARATION_GUARD.yaml
+  - docs/SEMANTIC_BRIDGE_GUARD.yaml
+  - docs/SEMANTIC_OWNER_REOPEN_GUARD.yaml
+  - docs/system_forensics/dead_surface_registry.json
+  - docs/system_forensics/legacy_caller_surface.json
+  - docs/system_forensics/compatibility_carrier_inventory.json
   - Checks:
     - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml'); yaml.safe_load('.github/workflows/console-k6.yml') ... PY` (`pass`)
     - `node --check ops/k6/console_smoke.js` (`pass`)
     - `git diff --check -- .github/workflows/ci.yml .github/workflows/console-k6.yml ops/k6/console_smoke.js TECH.md docs/DEV_SETUP.md docs/TASK_PACKAGES/TP-2026-04-01-console-k6-cadence-split-a922.md` (`pass`)
-- last_updated: 2026-04-01T10:20:00+05:00
+    - `PYTHONPATH=. pytest -q tests/test_booking_appointments.py tests/test_reasoning_core.py tests/test_state_service.py tests/test_webhook_booking.py` (`pass`)
+    - `PYTHONPATH=. pytest -q tests/architecture/test_continuity_state_normalization_guard.py tests/architecture/test_legacy_drain_closure_guard.py tests/architecture/test_legacy_mesh_caller_proof.py tests/architecture/test_legacy_mesh_drain_guard.py tests/architecture/test_pack_runtime_separation_guard.py tests/architecture/test_semantic_bridge_growth_guard.py tests/architecture/test_semantic_owner_reopen_guard.py tests/architecture/test_shadow_lane_elimination_guard.py tests/architecture/test_truth_carrier_freeze.py` (`pass`)
+    - `ruff check app tests` (`pass`)
+    - `python3 scripts/legacy_drain_closure_guard.py && python3 scripts/legacy_mesh_drain_guard.py && python3 scripts/pack_runtime_separation_guard.py && python3 scripts/semantic_bridge_growth_guard.py && python3 scripts/semantic_owner_reopen_guard.py && python3 scripts/shadow_lane_elimination_guard.py && python3 scripts/continuity_state_normalization_guard.py` (`pass`)
+- last_updated: 2026-04-03T16:14:21+05:00

@@ -32,17 +32,11 @@ from app.routers.webhook.booking_signal_runtime import (
     TIME_HOUR_PATTERN,
     TIME_PATTERN,
     _extract_datetime,
-    _extract_service_hint,
-    _is_booking_request,
+    _matches_booking_request_lexicon,
 )
 from app.routers.webhook.class_router_runtime import (
-    CONTROLLER_CONFIDENCE_THRESHOLD,
-    DomainIntent,
-    _build_controller_meta_output,
-    _ensure_controller_output_meta,
-    _resolve_class_router_result,
-    _resolve_controller_signal_class,
     _router_observability_updates_from_class_router,
+    build_observer_class_router_result,
 )
 from app.routers.webhook.context_runtime import (
     SERVICE_HINT_AT_KEY,
@@ -51,7 +45,6 @@ from app.routers.webhook.context_runtime import (
     _is_refusal_flag_active,
 )
 from app.routers.webhook.guard_runtime import MSG_FACT_GUARD_CLARIFY
-from app.routers.webhook.info import _detect_info_class_intents, _looks_like_info_query
 from app.routers.webhook.media import _is_style_reference_request
 from app.routers.webhook.pending_runtime import MSG_PENDING_ESCALATION
 from app.routers.webhook.runtime_primitives import (
@@ -69,7 +62,9 @@ from app.routers.webhook.runtime_primitives import (
     MSG_ESCALATED,
     MSG_EXPECTED_SERVICE_OFF_TOPIC,
     MSG_STYLE_REFERENCE_NEED_MEDIA,
+    _canonicalize_gate_metadata_action,
     _combine_sidecar,
+    _freeze_legacy_semantic_payload,
 )
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import (
@@ -146,10 +141,10 @@ from app.services.intent_service import (
 )
 from app.services.pack_runtime_service import (
     _format_service_not_found_reply,
+    _match_service,
     _normalize_text,
     get_system_lexicon_list,
     load_yaml_truth,
-    phrase_match_intent,
 )
 from app.services.state_machine import ConversationState
 from app.services.state_service import transition_state
@@ -277,12 +272,8 @@ def _should_defer_booking_confirmation_for_info(
     message_text: str | None,
     client_slug: str | None,
 ) -> bool:
-    return bool(
-        confirmation
-        and basic_info_message
-        and message_text
-        and _looks_like_info_query(message_text, client_slug=client_slug)
-    )
+    del message_text, client_slug
+    return bool(confirmation and basic_info_message)
 
 def _should_defer_booking_flow_for_info_interrupt(
     *,
@@ -536,30 +527,110 @@ def _validate_service_slot(
     allow_freeform: bool,
     client_slug: str | None,
 ) -> str | None:
+    del allow_freeform
     if _is_blocked_slot_message(message_text):
         return None
-    extracted = _extract_service_hint(message_text, client_slug)
-    if extracted:
-        return extracted
-    if client_slug:
-        from app.services.pack_runtime_service import get_pack_service_hint
-
-        fallback = get_pack_service_hint(message_text, client_slug=client_slug)
-        if fallback:
-            return fallback
+    if not isinstance(client_slug, str):
+        return None
+    slug = client_slug.strip()
+    if not slug:
+        return None
+    cleaned_text = re.sub(r"\[[^\]]+\]", " ", message_text).strip()
+    if not cleaned_text:
+        return None
+    normalized_text = _normalize_text(cleaned_text)
+    if not normalized_text:
+        return None
+    match = _match_service(normalized_text, slug)
+    if not isinstance(match, dict):
+        return None
+    aliases = match.get("aliases")
+    if not isinstance(aliases, list):
+        return None
+    if normalized_text not in {
+        " ".join(str(token).strip() for token in alias_tokens if str(token).strip())
+        for alias_tokens in aliases
+        if isinstance(alias_tokens, list)
+    }:
+        return None
+    canonical_name = match.get("name")
+    if isinstance(canonical_name, str) and canonical_name.strip():
+        return canonical_name.strip()
     return None
+
+
+def _canonicalize_booking_info_action(
+    action: str | None,
+    *,
+    intent: str | None,
+    info_meta: dict[str, Any] | None,
+) -> str | None:
+    normalized_action = action.strip().casefold() if isinstance(action, str) and action.strip() else None
+    if normalized_action in {"escalate", "handoff", "pending_wait", "pending_escalation"}:
+        return "handoff"
+    if normalized_action in {"collect", "booking_prompt", "booking_confirm"}:
+        return "collect"
+    if normalized_action != "reply":
+        return normalized_action or action
+
+    info_meta = info_meta if isinstance(info_meta, dict) else {}
+    action_class = info_meta.get("action_class")
+    if isinstance(action_class, str):
+        normalized_action_class = action_class.strip().upper()
+        if normalized_action_class == "COLLECT":
+            return "collect"
+        if normalized_action_class == "HANDOFF":
+            return "handoff"
+        if normalized_action_class == "FACT":
+            return "fact"
+
+    normalized_intent = intent.strip().casefold() if isinstance(intent, str) and intent.strip() else ""
+    if normalized_intent in {"service_clarify", "duration_or_price_clarify", "info_clarify"}:
+        return "collect"
+    if str(info_meta.get("fact_source") or "").strip().casefold() == "info_clarify":
+        return "collect"
+    return "fact"
+
+
+def _canonicalize_booking_flow_action(action: str | None) -> str | None:
+    normalized_action = action.strip().casefold() if isinstance(action, str) and action.strip() else None
+    if normalized_action in {"escalate", "handoff", "pending_wait", "pending_escalation"}:
+        return "handoff"
+    if normalized_action in {
+        "booking_confirm",
+        "booking_prompt",
+        "collect",
+    }:
+        return "collect"
+    if normalized_action in {
+        "booking_cancelled",
+        "booking_paused",
+        "reply",
+        "fact",
+    }:
+        return "fact"
+    if normalized_action in {
+        "booking_reuse_handover",
+        "booking_escalated",
+        "booking_captured_pending",
+        "booking_escalation_failed",
+    }:
+        return "handoff"
+    return normalized_action or action
+
 
 def _validate_datetime_slot(
     message_text: str,
     *,
     allow_freeform: bool,
     client_slug: str | None,
+    booking_context_active: bool = False,
 ) -> str | None:
     if _is_blocked_slot_message(message_text):
         return None
     normalized = _normalize_text(message_text)
     has_duration_context = _has_duration_context_marker(normalized)
-    booking_signal = bool(_is_booking_request(message_text, client_slug=client_slug))
+    booking_signal = bool(booking_context_active)
 
     def _allow_partial_daypart_candidate(value: str) -> bool:
         if not isinstance(value, str) or not value.strip():
@@ -639,7 +710,7 @@ def _validate_name_slot(
     elif not allow_freeform:
         return None
     else:
-        if _extract_service_hint(message_text, client_slug) or _extract_datetime(
+        if _validate_service_slot(message_text, allow_freeform=False, client_slug=client_slug) or _extract_datetime(
             message_text, client_slug=client_slug
         ):
             return None
@@ -723,6 +794,8 @@ def _match_expected_reply(
         return False, None, []
     if not slot_key:
         return False, None, []
+    if slot_key == "service":
+        return False, None, []
     if _is_blocked_slot_message(message_text):
         return False, None, []
     validator = validator_by_slot.get(slot_key)
@@ -732,11 +805,13 @@ def _match_expected_reply(
     for candidate in _build_slot_candidates(
         message_text, expected_reply_type=expected_reply_type
     ):
-        value = validator(
-            candidate.text,
-            allow_freeform=True,
-            client_slug=client_slug,
-        )
+        validator_kwargs = {
+            "allow_freeform": True,
+            "client_slug": client_slug,
+        }
+        if validator is _validate_datetime_slot:
+            validator_kwargs["booking_context_active"] = True
+        value = validator(candidate.text, **validator_kwargs)
         if value:
             return True, value, list(candidate.flags)
     return False, None, []
@@ -807,14 +882,14 @@ def _is_booking_related_message(
 ) -> bool:
     if not message_text:
         return False
-    if _is_booking_request(message_text, client_slug=client_slug):
+    if _matches_booking_request_lexicon(message_text, client_slug=client_slug):
         return True
     refusal_flags = detect_refusal_flags(message_text)
     if refusal_flags.get("name") or refusal_flags.get("phone"):
         return True
-    if allow_service and _extract_service_hint(message_text, client_slug):
-        return True
     if _extract_datetime(message_text, client_slug=client_slug):
+        return True
+    if allow_service and _validate_service_slot(message_text, client_slug=client_slug):
         return True
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
@@ -825,11 +900,6 @@ def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None
         return False
     if _looks_like_phone(message_text):
         return True
-    if _looks_like_info_query(message_text, client_slug=client_slug) and not _is_booking_request(
-        message_text,
-        client_slug=client_slug,
-    ):
-        return False
     return _is_booking_related_message(
         message_text,
         client_slug,
@@ -843,8 +913,6 @@ def _select_last_non_booking_message(messages: list[str], *, client_slug: str | 
             continue
         if _is_booking_related_message(message, client_slug, allow_name=False, allow_service=False):
             continue
-        if _looks_like_info_query(message, client_slug=client_slug):
-            return message
         return message
     return None
 
@@ -889,58 +957,23 @@ def _resolve_booking_info_intents(
     elif intent_decomp_used:
         booking_info_intents = sorted(intent_decomp_set & INFO_INTENTS)
 
-    if booking_interrupt_text:
-        anchor_intents, _ = _detect_info_class_intents(
-            booking_interrupt_text,
-            intent_decomp_set=set(),
-            client_slug=client_slug,
-        )
-        if expected_reply_shortcircuit and anchor_intents:
-            booking_info_intents = sorted(anchor_intents)
-        elif not booking_info_intents and anchor_intents:
-            # Keep booking flow resilient when intent decomposition misses short
-            # info interruptions (parking, duration, etc.).
-            booking_info_intents = sorted(anchor_intents)
-
     return booking_info_intents
 
-def _looks_like_booking_reschedule_request(
-    message_text: str | None,
+def _is_owner_booking_manage_handoff_request(
     *,
-    client_slug: str | None = None,
+    intent_decomp_used: bool,
+    intent_decomp_payload: dict | None,
 ) -> bool:
-    normalized = _normalize_text(message_text or "")
-    if not normalized:
+    if not intent_decomp_used or not isinstance(intent_decomp_payload, dict):
         return False
-    try:
-        intent_signals = {
-            str(item).strip().casefold()
-            for item in phrase_match_intent(normalized, client_slug=client_slug)
-            if isinstance(item, str) and item.strip()
-        }
-    except Exception:
-        intent_signals = set()
-    if intent_signals & {"reschedule", "cancel_request"}:
-        return True
-    # Check explicit reschedule lexicon before generic info-question guards.
-    # Phrases like "что если я захочу изменить время" can look informational,
-    # but operationally they still mean reschedule flow.
-    reschedule_markers = get_system_lexicon_list("booking_reschedule_keywords")
-    if any(marker in normalized for marker in reschedule_markers):
-        return True
-    if intent_signals & INFO_INTENTS:
-        return False
-    if _looks_like_info_query(message_text, client_slug=client_slug):
-        return False
-    booking_reference_markers = get_system_lexicon_list("booking_request")
-    booking_keyword_markers = get_system_lexicon_list("booking_keywords")
-    has_booking_reference = any(marker in normalized for marker in booking_reference_markers) or any(
-        marker in normalized for marker in booking_keyword_markers
-    )
-    if not has_booking_reference:
-        return False
-    cancel_markers = get_system_lexicon_list("booking_cancel_keywords")
-    return any(marker in normalized for marker in cancel_markers)
+    action = str(intent_decomp_payload.get("action") or "").strip().casefold()
+    capability = str(intent_decomp_payload.get("capability") or "").strip().casefold()
+    tool_action = str(
+        intent_decomp_payload.get("tool_action")
+        or intent_decomp_payload.get("tool_action_hint")
+        or ""
+    ).strip().casefold()
+    return capability == "booking_manage" and action == "handoff" and tool_action == "handoff"
 
 def _select_expected_reply_message(
     messages: list[str],
@@ -984,7 +1017,15 @@ def _apply_booking_slot(
     validator = BOOKING_SLOT_VALIDATORS.get(slot_key)
     if not validator:
         return booking
-    value = validator(message_text, allow_freeform=allow_freeform, client_slug=client_slug)
+    validator_kwargs = {
+        "allow_freeform": allow_freeform,
+        "client_slug": client_slug,
+    }
+    if validator is _validate_datetime_slot:
+        validator_kwargs["booking_context_active"] = bool(
+            booking.get("active") or booking.get("service")
+        )
+    value = validator(message_text, **validator_kwargs)
     if value:
         booking[slot_key] = value
     return booking
@@ -994,8 +1035,9 @@ def _update_booking_from_message(booking: dict, message_text: str, *, client_slu
     last_question = booking.get("last_question")
     if _is_blocked_slot_message(message_text):
         return booking
+    raw_capture_slots = tuple(slot for slot in BOOKING_SLOT_ORDER if slot != "service")
 
-    if last_question in BOOKING_SLOT_ORDER:
+    if last_question in raw_capture_slots:
         booking = _apply_booking_slot(
             booking,
             last_question,
@@ -1004,7 +1046,7 @@ def _update_booking_from_message(booking: dict, message_text: str, *, client_slu
             client_slug=client_slug,
         )
 
-    for slot_key in BOOKING_SLOT_ORDER:
+    for slot_key in raw_capture_slots:
         booking = _apply_booking_slot(
             booking,
             slot_key,
@@ -1025,6 +1067,42 @@ def _update_booking_from_messages(
     for message in messages:
         updated = _update_booking_from_message(updated, message, client_slug=client_slug)
     return updated
+
+
+def _normalize_owner_service_query(payload: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, None
+    raw_query = payload.get("service_query")
+    if not isinstance(raw_query, str):
+        return None, None
+    service_query = raw_query.strip()
+    if not service_query:
+        return None, None
+    raw_source = payload.get("service_query_source")
+    source = raw_source.strip() if isinstance(raw_source, str) and raw_source.strip() else None
+    return service_query, source
+
+
+def _apply_owner_service_query(
+    booking_state: dict,
+    *payloads: dict[str, Any] | None,
+) -> dict:
+    if not isinstance(booking_state, dict):
+        return booking_state
+    current_value = booking_state.get("service")
+    current_service = current_value.strip() if isinstance(current_value, str) else None
+    for payload in payloads:
+        service_query, source = _normalize_owner_service_query(payload)
+        if not service_query:
+            continue
+        if current_service and source == "context":
+            continue
+        if current_service == service_query:
+            return booking_state
+        updated = dict(booking_state)
+        updated["service"] = service_query
+        return updated
+    return booking_state
 
 def _is_datetime_grounded_for_prompt(
     datetime_value: str | None,
@@ -1505,36 +1583,12 @@ def _build_booking_class_router_result(
     intent_decomp_set: set[str] | None,
     booking_signal: bool,
 ) -> dict[str, Any]:
-    controller_output = _build_controller_meta_output(error="skipped")
-    controller_output["class"] = "booking"
-    controller_output["goal"] = "booking"
-    controller_output["confidence"] = max(CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
-    controller_output = _ensure_controller_output_meta(controller_output, error="skipped")
-    router_state = {
-        "used": True,
-        "attempted": False,
-        "fallback": False,
-        "confidence": controller_output["confidence"],
-        "error": "skipped",
-        "fallback_reason": None,
-        "signal_class": _resolve_controller_signal_class(
-            intent_decomp_set=intent_decomp_set or set(),
-            booking_signal=booking_signal,
-        ),
-        "signal_match": False,
-        "used_reason": "deterministic",
-        "output": controller_output,
-        "sla": None,
-    }
-    return _resolve_class_router_result(
-        info_intents=set(),
-        info_meta=None,
+    return build_observer_class_router_result(
+        class_name="booking",
+        goal="booking",
+        info_intents=[],
         booking_signal=booking_signal,
-        class_carryover=None,
-        domain_intent=DomainIntent.UNKNOWN,
-        domain_meta=None,
-        router_state=router_state,
-        explicit_service_signal=False,
+        in_signals=["booking_signal"] if booking_signal else [],
     )
 
 def _record_booking_class_router_trace(
@@ -1636,11 +1690,14 @@ def _handle_booking_interrupt(
 ) -> WebhookResponse | None:
     from app.services.pack_runtime_service import (
         PackDecision,
+        _build_fact_meta,
         build_info_combined_reply,
+        build_runtime_service_truth_reply,
         compose_multi_truth_reply,
+        ensure_resolver_meta,
         format_reply_from_truth,
-        get_pack_decision,
-        resolve_master_intent,
+        resolve_explicit_master_intent,
+        resolve_runtime_service_price_item,
     )
 
     from .info import _build_info_intent_reply as _build_booking_interrupt_info_reply
@@ -1664,9 +1721,9 @@ def _handle_booking_interrupt(
         client_slug=client_slug,
     )
     if (
-        _looks_like_booking_reschedule_request(
-            booking_interrupt_text,
-            client_slug=client_slug,
+        _is_owner_booking_manage_handoff_request(
+            intent_decomp_used=intent_decomp_used,
+            intent_decomp_payload=intent_decomp_payload,
         )
         and conversation.state == ConversationState.BOT_ACTIVE.value
         and routing.get("allow_handover_create", False)
@@ -1723,7 +1780,7 @@ def _handle_booking_interrupt(
         )
         _record_message_decision_meta(
             saved_message,
-            action="escalate",
+            action="handoff",
             intent="reschedule_request",
             source="booking_interrupt",
             fast_intent=False,
@@ -1795,20 +1852,7 @@ def _handle_booking_interrupt(
             booking_interrupt_text=booking_interrupt_text,
             client_slug=client_slug,
         )
-        promotions_signal = False
-        if message_text:
-            policy_pack = (
-                policy_handler.get("policy_pack") if isinstance(policy_handler, dict) else None
-            )
-            from app.routers.webhook.policy import _looks_like_promotions_request
-
-            promotions_signal = _looks_like_promotions_request(
-                message_text,
-                policy_pack=policy_pack,
-                client_slug=client_slug,
-            )
-        if promotions_signal and "promotions" not in booking_info_intents:
-            booking_info_intents = [*booking_info_intents, "promotions"]
+        master_interrupt_requested = "master" in booking_info_intents
         master_service_query = None
         if isinstance(intent_decomp_payload, dict):
             raw_master_service_query = intent_decomp_payload.get("service_query")
@@ -1818,12 +1862,10 @@ def _handle_booking_interrupt(
             booking_service_value = booking_state.get("service")
             if isinstance(booking_service_value, str) and booking_service_value.strip():
                 master_service_query = booking_service_value.strip()
-        master_resolution = resolve_master_intent(
-            message_text=booking_interrupt_text,
+        master_resolution = resolve_explicit_master_intent(
             client_slug=client_slug,
             service_query=master_service_query,
-            intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
-            force_master_intent=False,
+            force_master_intent=master_interrupt_requested,
         )
         if (
             pending_question_target_value is None
@@ -1862,11 +1904,6 @@ def _handle_booking_interrupt(
         if allow_booking_interrupt_info and routing.get("allow_truth_gate_reply"):
             info_decision = None
             info_source = None
-            service_matcher = (
-                policy_handler.get("service_matcher")
-                if isinstance(policy_handler, dict)
-                else None
-            )
             truth_gate = (
                 policy_handler.get("truth_gate")
                 if isinstance(policy_handler, dict)
@@ -1942,10 +1979,12 @@ def _handle_booking_interrupt(
                     action=info_decision.action,
                     response=info_decision.response,
                     intent=info_decision.intent,
-                    meta={
-                        **info_meta,
-                        "pending_question_target": pending_question_target_value,
-                    },
+                    meta=_freeze_legacy_semantic_payload(
+                        {
+                            **info_meta,
+                            "pending_question_target": pending_question_target_value,
+                        }
+                    ),
                 )
             if booking_info_intents:
                 if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
@@ -1976,15 +2015,6 @@ def _handle_booking_interrupt(
                         )
                         if info_decision:
                             info_source = "truth_gate"
-                if not info_decision:
-                    if service_matcher:
-                        info_decision = service_matcher(
-                            booking_interrupt_text,
-                            client_slug=client_slug,
-                            intent_decomp=intent_decomp_payload,
-                        )
-                        if info_decision:
-                            info_source = "service_matcher"
                 if not info_decision and not prefer_truth_gate:
                     if truth_gate:
                         info_decision = truth_gate(
@@ -2013,84 +2043,58 @@ def _handle_booking_interrupt(
                 if not info_decision and "pricing" in booking_info_intents:
                     service_hint = booking_state.get("service")
                     if isinstance(service_hint, str) and service_hint.strip():
-                        service_enriched_text = f"{booking_interrupt_text or ''} {service_hint.strip()}".strip()
-                        candidate = get_pack_decision(
-                            service_enriched_text,
+                        resolved_service_hint = service_hint.strip()
+                        candidate_reply = build_runtime_service_truth_reply(
+                            resolved_service_hint,
                             client_slug=client_slug,
-                            intent_decomp=intent_decomp_payload,
                         )
-                        if candidate and candidate.action == "reply":
-                            candidate_meta = candidate.meta if isinstance(candidate.meta, dict) else {}
-                            candidate_meta = dict(candidate_meta)
-                            fact_intents = candidate_meta.get("fact_intents")
-                            if isinstance(fact_intents, list):
-                                merged_fact_intents = [
-                                    item.strip()
-                                    for item in fact_intents
-                                    if isinstance(item, str) and item.strip()
-                                ]
-                            else:
-                                merged_fact_intents = []
-                            if "pricing" not in merged_fact_intents:
-                                merged_fact_intents.append("pricing")
-                            candidate_meta["fact_intents"] = merged_fact_intents
-                            info_sections = candidate_meta.get("info_sections")
-                            if isinstance(info_sections, list):
-                                merged_info_sections = [
-                                    item.strip()
-                                    for item in info_sections
-                                    if isinstance(item, str) and item.strip()
-                                ]
-                            else:
-                                merged_info_sections = []
-                            if "pricing" not in merged_info_sections:
-                                merged_info_sections.append("pricing")
-                            candidate_meta["info_sections"] = merged_info_sections
+                        if candidate_reply:
+                            candidate_meta = ensure_resolver_meta(
+                                _build_fact_meta(
+                                    fact_source="truth",
+                                    fact_intents=["pricing"],
+                                    info_sections=["pricing"],
+                                    service_query_meta={
+                                        "service_query": resolved_service_hint,
+                                        "service_query_source": "booking_state",
+                                        "service_query_score": 1.0,
+                                    },
+                                    price_item=resolve_runtime_service_price_item(
+                                        resolved_service_hint,
+                                        client_slug=client_slug,
+                                    ),
+                                ),
+                                action="reply",
+                                intent="price_query",
+                                resolver_id="webhook.booking_interrupt",
+                                client_slug=client_slug,
+                            )
                             info_decision = PackDecision(
                                 action="reply",
-                                response=candidate.response,
+                                response=candidate_reply,
                                 intent="pricing",
                                 meta=candidate_meta,
                             )
                             info_source = "service_enriched_pricing"
             if not info_decision and batch_non_booking_message and not booking_info_intents:
-                if service_matcher:
-                    info_decision = service_matcher(
+                if truth_gate:
+                    info_decision = truth_gate(
                         booking_interrupt_text,
                         client_slug=client_slug,
                         intent_decomp=intent_decomp_payload,
                     )
                     if info_decision:
-                        info_source = "service_matcher"
-                if not info_decision:
-                    if truth_gate:
-                        info_decision = truth_gate(
-                            booking_interrupt_text,
-                            client_slug=client_slug,
-                            intent_decomp=intent_decomp_payload,
-                        )
-                        if info_decision:
-                            info_source = "truth_gate"
+                        info_source = "truth_gate"
             if not info_decision and booking_time_service_candidate:
-                if service_matcher:
-                    candidate = service_matcher(
+                if truth_gate:
+                    candidate = truth_gate(
                         booking_interrupt_text,
                         client_slug=client_slug,
                         intent_decomp=intent_decomp_payload,
                     )
                     if _is_booking_time_service_decision(candidate):
                         info_decision = candidate
-                        info_source = "service_matcher"
-                if not info_decision:
-                    if truth_gate:
-                        candidate = truth_gate(
-                            booking_interrupt_text,
-                            client_slug=client_slug,
-                            intent_decomp=intent_decomp_payload,
-                        )
-                        if _is_booking_time_service_decision(candidate):
-                            info_decision = candidate
-                            info_source = "truth_gate"
+                        info_source = "truth_gate"
 
             if (
                 not info_decision
@@ -2160,6 +2164,10 @@ def _handle_booking_interrupt(
                     booking_messages,
                     client_slug=client_slug,
                 )
+                booking_state = _apply_owner_service_query(
+                    booking_state,
+                    intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
+                )
                 if booking_active and not booking_state.get("service"):
                     service_hint = _get_recent_service_hint(context, now)
                     if service_hint:
@@ -2191,7 +2199,8 @@ def _handle_booking_interrupt(
                     )
                     _record_decision_trace(
                         conversation,
-                        {
+                        _freeze_legacy_semantic_payload(
+                            {
                             "stage": "pending_question_interaction",
                             "decision": "booking_slot_guidance",
                             "state": conversation.state,
@@ -2200,11 +2209,12 @@ def _handle_booking_interrupt(
                             "pending_question_target": pending_question_target_value or "time",
                             "requested_slot": "datetime",
                             "expected_reply_type": booking_expected,
-                        },
+                            }
+                        ),
                     )
                     _record_message_decision_meta(
                         saved_message,
-                        action="reply",
+                        action="collect",
                         intent="booking",
                         source="booking_slot_guidance",
                         fast_intent=False,
@@ -2212,12 +2222,14 @@ def _handle_booking_interrupt(
                     if saved_message:
                         _update_message_decision_metadata(
                             saved_message,
-                            {
+                            _freeze_legacy_semantic_payload(
+                                {
                                 "pending_question_act": pending_question_act,
                                 "pending_question_target": pending_question_target_value or "time",
                                 "pending_question_interaction": pending_question_act,
                                 "pending_question_owner": "booking_slot_guidance",
-                            },
+                                }
+                            ),
                         )
                     bot_response = MSG_BOOKING_PENDING_QUESTION_TIME_GUIDANCE
                     style_reference_signal = bool(
@@ -2269,6 +2281,11 @@ def _handle_booking_interrupt(
             if info_decision and info_decision.action == "escalate":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                canonical_info_action = _canonicalize_booking_info_action(
+                    info_decision.action,
+                    intent=info_decision.intent,
+                    info_meta=info_meta,
+                )
                 trace_info_intents = booking_info_intents
                 if not trace_info_intents:
                     fact_intents = info_meta.get("fact_intents")
@@ -2291,7 +2308,7 @@ def _handle_booking_interrupt(
                     info_meta["info_sections"] = info_sections
                 trace_payload = {
                     "stage": "booking_interrupt",
-                    "decision": info_decision.action,
+                    "decision": canonical_info_action,
                     "intent": info_decision.intent,
                     "state": conversation.state,
                     "booking_interrupt_info": True,
@@ -2303,7 +2320,7 @@ def _handle_booking_interrupt(
                 if info_source == "truth_gate":
                     gate_trace = {
                         "stage": "truth_gate",
-                        "decision": info_decision.action,
+                        "decision": canonical_info_action,
                         "intent": info_decision.intent,
                         "state": conversation.state,
                         "booking_wants_flow": booking_wants_flow,
@@ -2315,7 +2332,7 @@ def _handle_booking_interrupt(
                 _record_decision_trace(conversation, trace_payload)
                 _record_message_decision_meta(
                     saved_message,
-                    action=info_decision.action,
+                    action=canonical_info_action,
                     intent=info_decision.intent,
                     source=info_source or "booking_interrupt",
                     fast_intent=False,
@@ -2391,6 +2408,11 @@ def _handle_booking_interrupt(
             if info_decision and info_decision.action == "reply":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                canonical_info_action = _canonicalize_booking_info_action(
+                    info_decision.action,
+                    intent=info_decision.intent,
+                    info_meta=info_meta,
+                )
                 trace_info_intents = booking_info_intents
                 if not trace_info_intents:
                     fact_intents = info_meta.get("fact_intents")
@@ -2446,6 +2468,11 @@ def _handle_booking_interrupt(
                     booking_state,
                     booking_messages,
                     client_slug=client_slug,
+                )
+                booking_state = _apply_owner_service_query(
+                    booking_state,
+                    info_meta if isinstance(info_meta, dict) else None,
+                    intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
                 )
                 if booking_time_service_interrupt:
                     service_query = info_meta.get("service_query")
@@ -2702,21 +2729,13 @@ def _handle_booking_interrupt(
                 if info_sections:
                     trace_payload["info_sections"] = info_sections
                 if pending_question_target_value:
-                    trace_payload["pending_question_target"] = pending_question_target_value
+                    trace_payload["observer_pending_question_target"] = pending_question_target_value
                 _record_decision_trace(conversation, trace_payload)
 
-                if info_source == "service_matcher":
-                    matcher_trace = {
-                        "stage": "service_matcher",
-                        "decision": info_decision.intent,
-                        "state": conversation.state,
-                    }
-                    matcher_trace.update(info_meta)
-                    _record_decision_trace(conversation, matcher_trace)
-                elif info_source == "truth_gate":
+                if info_source == "truth_gate":
                     gate_trace = {
                         "stage": "truth_gate",
-                        "decision": info_decision.action,
+                        "decision": canonical_info_action,
                         "intent": info_decision.intent,
                         "state": conversation.state,
                         "booking_wants_flow": booking_wants_flow,
@@ -2727,7 +2746,7 @@ def _handle_booking_interrupt(
                 elif info_source == "multi_truth":
                     multi_trace = {
                         "stage": "multi_truth",
-                        "decision": "reply",
+                        "decision": canonical_info_action,
                         "intent": "multi_truth",
                         "state": conversation.state,
                         "intents": booking_info_intents,
@@ -2737,7 +2756,7 @@ def _handle_booking_interrupt(
 
                 _record_message_decision_meta(
                     saved_message,
-                    action=info_decision.action,
+                    action=canonical_info_action,
                     intent=info_decision.intent,
                     source=info_source or "booking_interrupt",
                     fast_intent=False,
@@ -2750,7 +2769,9 @@ def _handle_booking_interrupt(
                         "booking_interrupt_info": bool(booking_interrupt_info),
                     }
                     if pending_question_target_value:
-                        message_meta_updates["pending_question_target"] = pending_question_target_value
+                        message_meta_updates["observer_pending_question_target"] = (
+                            pending_question_target_value
+                        )
                     if booking_prompt_suppressed:
                         message_meta_updates["carryover_ignored"] = True
                         message_meta_updates[
@@ -2834,6 +2855,7 @@ def _handle_booking_flow(
     expected_reply_type: str | None,
     expected_reply_matched: bool | None,
     expected_reply_blocked_by_info: bool = False,
+    intent_decomp_payload: dict | None = None,
     basic_info_message: bool,
     session_memory_reset_reason: str | None,
     memory_expected_reply_type: str | None,
@@ -2936,9 +2958,13 @@ def _handle_booking_flow(
                 else:
                     result_message = "Booking same-day escalation skipped (already pending)"
 
+                canonical_gate_action = _canonicalize_gate_metadata_action(
+                    decision.action,
+                    intent=decision.intent,
+                )
                 trace_payload = {
                     "stage": "truth_gate",
-                    "decision": decision.action,
+                    "decision": canonical_gate_action,
                     "intent": decision.intent,
                     "state": conversation.state,
                     "booking_wants_flow": booking_wants_flow,
@@ -2949,7 +2975,7 @@ def _handle_booking_flow(
                 _record_decision_trace(conversation, trace_payload)
                 _record_message_decision_meta(
                     saved_message,
-                    action=decision.action,
+                    action=canonical_gate_action,
                     intent=decision.intent,
                     source="truth_gate",
                     fast_intent=False,
@@ -3053,7 +3079,7 @@ def _handle_booking_flow(
             )
             _record_message_decision_meta(
                 saved_message,
-                action="escalate",
+                action="handoff",
                 intent="human_request",
                 source="booking",
                 fast_intent=False,
@@ -3085,7 +3111,7 @@ def _handle_booking_flow(
                 )
                 _record_message_decision_meta(
                     saved_message,
-                    action="booking_prompt",
+                    action="collect",
                     intent="booking",
                     source="booking",
                     fast_intent=False,
@@ -3155,7 +3181,7 @@ def _handle_booking_flow(
             )
             _record_message_decision_meta(
                 saved_message,
-                action="booking_cancelled",
+                action=_canonicalize_booking_flow_action("booking_cancelled"),
                 intent="booking",
                 source="booking",
                 fast_intent=False,
@@ -3278,7 +3304,7 @@ def _handle_booking_flow(
                         )
                         _record_message_decision_meta(
                             saved_message,
-                            action="booking_prompt",
+                            action="collect",
                             intent="booking",
                             source="booking_confirm",
                             fast_intent=False,
@@ -3327,7 +3353,7 @@ def _handle_booking_flow(
                 )
                 _record_message_decision_meta(
                     saved_message,
-                    action="booking_confirm",
+                    action=_canonicalize_booking_flow_action("booking_confirm"),
                     intent="booking",
                     source="booking",
                     fast_intent=False,
@@ -3425,7 +3451,7 @@ def _handle_booking_flow(
             )
             _record_message_decision_meta(
                 saved_message,
-                action="booking_paused",
+                action=_canonicalize_booking_flow_action("booking_paused"),
                 intent="booking",
                 source="booking",
                 fast_intent=False,
@@ -3457,6 +3483,10 @@ def _handle_booking_flow(
                 booking_state,
                 booking_messages,
                 client_slug=client_slug,
+            )
+            booking_state = _apply_owner_service_query(
+                booking_state,
+                intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
             )
             context_manager = _context_runtime()._get_context_manager(context)
             # Only reuse service carryover while already inside an active booking flow.
@@ -3655,7 +3685,7 @@ def _handle_booking_flow(
                 )
                 _record_message_decision_meta(
                     saved_message,
-                    action="booking_prompt",
+                    action="collect",
                     intent="booking",
                     source="booking",
                     fast_intent=False,
@@ -3799,7 +3829,7 @@ def _handle_booking_flow(
             )
             _record_message_decision_meta(
                 saved_message,
-                action=f"booking_{trace_decision}",
+                action=_canonicalize_booking_flow_action(f"booking_{trace_decision}"),
                 intent="booking",
                 source="booking",
                 fast_intent=False,

@@ -163,6 +163,7 @@ class GroundingRequirementsV1(BaseModel):
     referents: dict[str, dict[str, Any]] = Field(default_factory=dict)
     subject_kind: str | None = None
     temporal_scope: str | None = None
+    alternate_datetime: str | None = None
     resolution_mode: str | None = None
     resolver_id: str | None = None
     resolver_version: str | None = None
@@ -256,6 +257,7 @@ class SemanticDecisionV1(BaseModel):
                 referents=_normalize_referents(payload.get("referents")),
                 subject_kind=_normalize_token(payload.get("subject_kind")),
                 temporal_scope=_normalize_token(payload.get("temporal_scope")),
+                alternate_datetime=_normalize_token(payload.get("alternate_datetime")),
                 resolution_mode=_normalize_token(payload.get("resolution_mode")),
                 resolver_id=_normalize_token(payload.get("resolver_id")),
                 resolver_version=_normalize_token(payload.get("resolver_version")),

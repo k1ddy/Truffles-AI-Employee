@@ -1,4 +1,4 @@
-from app.services.demo_salon_knowledge import get_demo_salon_service_decision
+from app.services.demo_salon_knowledge_compat import get_demo_salon_service_decision
 
 
 def test_consult_haircut_recommendation_returns_consult_reply():

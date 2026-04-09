@@ -74,7 +74,8 @@ BOOKING_SCENARIO_EXPECT_INFO_SECTIONS = {
     "master": ["master", "specialist"],
 }
 BOOKING_SCENARIO_EXPECT_ACTION_BY_TAG = {
-    "handoff": ["booking_escalated", "escalate", "handoff"],
+    "booking": ["collect"],
+    "handoff": ["handoff"],
 }
 BOOKING_SCENARIO_EXPECT_REPLY_TYPE_BY_TAG = {
     "booking": "time",
@@ -153,7 +154,7 @@ BOOKING_SCENARIO_CANONICAL_EXPECT_ACTIONS = sorted(
         for actions in BOOKING_SCENARIO_EXPECT_ACTION_BY_TAG.values()
         for action in actions
     }
-    | {"booking_prompt"}
+    | {"fact"}
 )
 BOOKING_SCENARIO_CANONICAL_EXPECT_STATES = sorted(
     set(BOOKING_SCENARIO_EXPECT_STATE_BY_TAG.values())
@@ -960,13 +961,13 @@ def _apply_service_choice_booking_collect_expectations(
         "multi_service_booking_clarify",
     )
 
-    expect["action"] = "booking_prompt"
+    expect["action"] = "collect"
     expect["expected_reply"] = True
 
     collect_reason = "collect:service"
 
     meta = deepcopy(dict(expect.get("meta") or {}))
-    meta["action"] = "booking_prompt"
+    meta["action"] = "collect"
     meta["source"] = "llm_policy_core"
     meta["tool_action"] = "collect"
     meta["expected_reply_type"] = "service_choice"
@@ -976,7 +977,7 @@ def _apply_service_choice_booking_collect_expectations(
         expect["meta"] = meta
 
     meta_any = deepcopy(dict(expect.get("meta_any") or {}))
-    meta_any["action"] = ["booking_prompt"]
+    meta_any["action"] = ["collect"]
     meta_any["source"] = ["llm_policy_core"]
     meta_any["tool_action"] = ["collect"]
     meta_any["expected_reply_type"] = ["service_choice"]
@@ -1481,18 +1482,27 @@ def sanitize_booking_scenario_expect_action_by_tags(tags: list[str], action: Any
     def _allow(token: str | None) -> bool:
         if token is None:
             return True
-        if token == "booking_prompt":
+        normalized = token.strip().lower()
+        if normalized == "booking_prompt":
             return True
-        if token in BOOKING_SCENARIO_CANONICAL_EXPECT_ACTIONS:
+        if normalized in {"booking_escalated", "escalate"}:
             return allow_handoff
-        return False
+        if normalized == "handoff":
+            return allow_handoff
+        return normalized in {"collect", "fact"}
 
     if isinstance(action, list):
         cleaned: list[str | None] = []
         for token in action:
             value = token if isinstance(token, str) else None
             if _allow(value):
-                cleaned.append(value)
+                normalized = value.strip().lower()
+                if normalized == "booking_prompt":
+                    cleaned.append("collect")
+                elif normalized in {"booking_escalated", "escalate"}:
+                    cleaned.append("handoff")
+                else:
+                    cleaned.append(normalized)
         cleaned = [token for token in cleaned if token is not None]
         if not cleaned:
             return None
@@ -1501,7 +1511,14 @@ def sanitize_booking_scenario_expect_action_by_tags(tags: list[str], action: Any
         return cleaned
 
     token = action if isinstance(action, str) else None
-    return token if _allow(token) else None
+    if not _allow(token):
+        return None
+    normalized = token.strip().lower() if isinstance(token, str) else None
+    if normalized == "booking_prompt":
+        return "collect"
+    if normalized in {"booking_escalated", "escalate"}:
+        return "handoff"
+    return normalized
 
 
 def sanitize_booking_scenario_expect_override_for_tags(
@@ -1840,9 +1857,12 @@ def _booking_scenario_matched_service_candidates(
     if not text:
         return []
     normalized = text.lower()
-    candidates: list[str] = []
+    active_service = ""
     if isinstance(ctx, Mapping):
-        candidates.append(str(ctx.get("service") or ""))
+        active_service = str(ctx.get("service") or "").strip().lower()
+    candidates: list[str] = []
+    if active_service:
+        candidates.append(active_service)
     candidates.extend(str(candidate or "") for candidate in service_candidates)
     matches: list[str] = []
     seen: set[str] = set()
@@ -1853,6 +1873,11 @@ def _booking_scenario_matched_service_candidates(
         seen.add(token)
         if token in normalized:
             matches.append(token)
+            continue
+        if active_service and token.startswith(active_service):
+            suffix = token[len(active_service) :].strip(" -–—,:;.")
+            if suffix and suffix in normalized:
+                matches.append(token)
     return matches
 
 
@@ -2096,6 +2121,40 @@ def booking_scenario_normalize_stateful_booking_tags(
     if replaced and "booking" in normalized:
         normalized = [tag for tag in normalized if tag != "booking"]
     return normalized
+
+
+def booking_scenario_normalize_active_time_weak_time_question_tags(
+    text: str | None,
+    tags: list[str],
+    *,
+    active_reply_type: str | None,
+) -> tuple[list[str], bool]:
+    if active_reply_type != "time":
+        return tags, False
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if "time" not in lowered_tags:
+        return tags, False
+    if booking_scenario_looks_like_explicit_time_fill(text):
+        return tags, False
+    if not booking_scenario_looks_like_mixed_slot_question(text):
+        return tags, False
+
+    normalized: list[str] = []
+    replaced = False
+    for raw_tag in tags:
+        if not isinstance(raw_tag, str):
+            continue
+        tag = raw_tag.strip().lower()
+        if not tag:
+            continue
+        if tag == "time":
+            tag = "mixed_fill_plus_question"
+            replaced = True
+        if tag not in normalized:
+            normalized.append(tag)
+    if replaced and "time" in normalized:
+        normalized = [tag for tag in normalized if tag != "time"]
+    return normalized, replaced
 
 
 def booking_scenario_normalize_malformed_check_booking_tags(
@@ -2780,6 +2839,74 @@ def has_booking_scenario_active_check_booking_confirm(
     return active_management_tag == "check_booking" and "confirm" in _booking_scenario_lowered_tags(tags)
 
 
+def apply_booking_scenario_check_booking_entry_expectations(
+    expect: dict[str, Any],
+    *,
+    tags: list[str],
+) -> dict[str, Any]:
+    if "check_booking" not in _booking_scenario_lowered_tags(tags):
+        return expect
+    expect["expected_reply"] = True
+    return expect
+
+
+def apply_booking_scenario_active_name_answer_expectations(
+    expect: dict[str, Any],
+    *,
+    tags: list[str],
+    active_reply_type: str | None,
+) -> dict[str, Any]:
+    if active_reply_type != "name":
+        return expect
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if not (lowered_tags & {"name", "phone"}):
+        return expect
+
+    expect["reply_type"] = None
+    expect["expected_reply"] = True
+
+    meta = deepcopy(dict(expect.get("meta") or {}))
+    meta.pop("expected_reply_type", None)
+    meta.pop("expected_reply_reason", None)
+    meta.pop("pending_question_act", None)
+    meta.pop("pending_question_target", None)
+    meta.pop("pending_question_interaction", None)
+    meta.pop("pending_question_owner", None)
+    meta.pop("active_question_relation", None)
+    if meta:
+        expect["meta"] = meta
+    elif "meta" in expect:
+        expect.pop("meta", None)
+
+    meta_any = deepcopy(dict(expect.get("meta_any") or {}))
+    meta_any.pop("expected_reply_type", None)
+    meta_any.pop("expected_reply_reason", None)
+    meta_any.pop("pending_question_act", None)
+    meta_any.pop("pending_question_target", None)
+    meta_any.pop("pending_question_interaction", None)
+    meta_any.pop("pending_question_owner", None)
+    meta_any.pop("active_question_relation", None)
+    if meta_any:
+        expect["meta_any"] = meta_any
+    elif "meta_any" in expect:
+        expect.pop("meta_any", None)
+
+    trace_contains = []
+    for entry in deepcopy(list(expect.get("trace_contains") or [])):
+        normalized_entry = dict(entry)
+        if normalized_entry.get("stage") in {
+            "question_contract",
+            "pending_question_interaction",
+        }:
+            continue
+        trace_contains.append(normalized_entry)
+    if trace_contains:
+        expect["trace_contains"] = trace_contains
+    elif "trace_contains" in expect:
+        expect.pop("trace_contains", None)
+    return expect
+
+
 def apply_booking_scenario_active_time_specialist_followup_expectations(
     expect: dict[str, Any],
     *,
@@ -2791,9 +2918,10 @@ def apply_booking_scenario_active_time_specialist_followup_expectations(
         return expect
 
     lowered_tags = _booking_scenario_lowered_tags(tags)
+    specialist_followup_tags = {"ask_about_requested_slot", "slot_constraint"}
     specialist_target_question = bool(
         active_reply_type == "time"
-        and "ask_about_requested_slot" in lowered_tags
+        and bool(lowered_tags & specialist_followup_tags)
         and (
             infer_booking_scenario_pending_question_target(text, tags) == "specialist"
             or booking_scenario_looks_like_named_specialist_preference_availability_question(text)
@@ -2877,6 +3005,10 @@ def apply_booking_scenario_active_time_specialist_followup_expectations(
         trace_contains.append(specialist_trace)
     if trace_contains:
         expect["trace_contains"] = trace_contains
+    if active_reply_type == "time":
+        expect["action"] = None
+        expect["expected_reply"] = True
+        return expect
     return expect
 
 
@@ -3462,25 +3594,18 @@ def apply_booking_scenario_service_grounded_booking_expectations(
         return expect
 
     expect["reply_type"] = "time"
-    collect_reason = "collect:datetime"
 
     meta = deepcopy(dict(expect.get("meta") or {}))
     if meta.get("expected_reply_type") == "service_choice":
         meta["expected_reply_type"] = "time"
-    stale_reason = _normalize_lower_token(meta.get("expected_reply_reason"))
-    if stale_reason in {"booking_prompt", "collect:service"}:
-        meta["expected_reply_reason"] = collect_reason
+    meta.pop("expected_reply_reason", None)
     if meta:
         expect["meta"] = meta
 
     meta_any = deepcopy(dict(expect.get("meta_any") or {}))
     if meta_any.get("expected_reply_type"):
         meta_any["expected_reply_type"] = ["time"]
-    expected_reply_reasons = meta_any.get("expected_reply_reason")
-    if isinstance(expected_reply_reasons, list) and expected_reply_reasons:
-        normalized_reasons = {_normalize_lower_token(item) for item in expected_reply_reasons}
-        if normalized_reasons & {"booking_prompt", "collect:service"}:
-            meta_any["expected_reply_reason"] = [collect_reason]
+    meta_any.pop("expected_reply_reason", None)
     if meta_any:
         expect["meta_any"] = meta_any
 
@@ -3493,9 +3618,7 @@ def apply_booking_scenario_service_grounded_booking_expectations(
         ):
             normalized_entry["expected_reply_type"] = "time"
         if normalized_entry.get("stage") == "question_contract":
-            reason_token = _normalize_lower_token(normalized_entry.get("reason"))
-            if reason_token in {"booking_prompt", "collect:service"}:
-                normalized_entry["reason"] = collect_reason
+            normalized_entry.pop("reason", None)
         trace_contains.append(normalized_entry)
     if trace_contains:
         expect["trace_contains"] = trace_contains
@@ -3618,6 +3741,60 @@ def apply_booking_scenario_service_grounded_booking_progress_interrupt_expectati
     }
     if question_contract_trace not in trace_contains:
         trace_contains.append(question_contract_trace)
+    if trace_contains:
+        expect["trace_contains"] = trace_contains
+    return expect
+
+
+def apply_booking_scenario_active_time_reschedule_service_grounded_expectations(
+    expect: dict[str, Any],
+    *,
+    tags: list[str],
+    active_reply_type: str | None,
+) -> dict[str, Any]:
+    if active_reply_type != "time":
+        return expect
+
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if "reschedule" not in lowered_tags:
+        return expect
+    if _normalize_lower_token(expect.get("reply_type")) != "service_choice":
+        return expect
+    if _normalize_lower_token(expect.get("state")) in {"pending", "manager_active"}:
+        return expect
+
+    expect["reply_type"] = "time"
+    expect["expected_reply"] = True
+
+    meta = deepcopy(dict(expect.get("meta") or {}))
+    if meta.get("expected_reply_type"):
+        meta["expected_reply_type"] = "time"
+    meta.pop("expected_reply_reason", None)
+    if meta:
+        expect["meta"] = meta
+    elif "meta" in expect:
+        expect.pop("meta", None)
+
+    meta_any = deepcopy(dict(expect.get("meta_any") or {}))
+    if meta_any.get("expected_reply_type"):
+        meta_any["expected_reply_type"] = ["time"]
+    meta_any.pop("expected_reply_reason", None)
+    if meta_any:
+        expect["meta_any"] = meta_any
+    elif "meta_any" in expect:
+        expect.pop("meta_any", None)
+
+    trace_contains = []
+    for entry in deepcopy(list(expect.get("trace_contains") or [])):
+        normalized_entry = dict(entry)
+        if (
+            normalized_entry.get("stage") == "question_contract"
+            and normalized_entry.get("expected_reply_type") == "service_choice"
+        ):
+            normalized_entry["expected_reply_type"] = "time"
+        if normalized_entry.get("stage") == "question_contract":
+            normalized_entry.pop("reason", None)
+        trace_contains.append(normalized_entry)
     if trace_contains:
         expect["trace_contains"] = trace_contains
     return expect
@@ -3926,6 +4103,28 @@ def advance_booking_scenario_partial_date_anchor_context(
     return partial_date_anchor_active
 
 
+def advance_booking_scenario_management_context(
+    active_management_tag: str | None,
+    *,
+    tags: list[str],
+    expect: dict[str, Any] | None,
+) -> str | None:
+    lowered_tags = _booking_scenario_coerce_turn_tags(tags)
+    if "reschedule" in lowered_tags:
+        return "reschedule"
+    if "check_booking" in lowered_tags:
+        return "check_booking"
+    if active_management_tag is None:
+        return None
+
+    normalized_state = _normalize_lower_token((expect or {}).get("state"))
+    normalized_action = _normalize_lower_token((expect or {}).get("action"))
+    keeps_management_flow = normalized_state in {"pending", "manager_active"} or normalized_action == "handoff"
+    if keeps_management_flow:
+        return active_management_tag
+    return None
+
+
 @dataclass(frozen=True)
 class BookingScenarioPostCoverageRepairState:
     active_reply_type: str | None = None
@@ -4026,6 +4225,14 @@ def _booking_scenario_select_post_coverage_repair_decision(
         active_reply_type=state.active_reply_type,
         partial_date_anchor_active=state.partial_date_anchor_active,
     )
+    (
+        rewritten_weak_time_question_tags,
+        active_time_weak_time_question_normalized,
+    ) = booking_scenario_normalize_active_time_weak_time_question_tags(
+        text,
+        effective_tags,
+        active_reply_type=state.active_reply_type,
+    )
 
     if slot_compare_exact_time_normalized:
         return BookingScenarioPostCoverageRepairDecision(tags=rewritten_slot_compare_tags)
@@ -4047,6 +4254,10 @@ def _booking_scenario_select_post_coverage_repair_decision(
         return BookingScenarioPostCoverageRepairDecision(
             tags=rewritten_grounded_partial_date_tags
         )
+    if active_time_weak_time_question_normalized:
+        return BookingScenarioPostCoverageRepairDecision(
+            tags=rewritten_weak_time_question_tags
+        )
     if malformed_check_booking_normalized:
         return BookingScenarioPostCoverageRepairDecision(tags=rewritten_check_booking_tags)
     if active_time_specialist_master_normalized:
@@ -4067,6 +4278,7 @@ def _booking_scenario_select_post_coverage_repair_decision(
         active_management_tag=state.active_management_tag,
     ):
         return BookingScenarioPostCoverageRepairDecision(
+            tags=effective_tags,
             expect_override=booking_scenario_check_booking_confirm_expect_override(),
         )
     if booking_scenario_looks_like_check_booking_followup(text, effective_tags):
@@ -4164,6 +4376,15 @@ def repair_booking_scenario_post_coverage_dialogs(
                 tags=current_tags,
                 active_reply_type=state.active_reply_type,
             )
+            expectations = apply_booking_scenario_check_booking_entry_expectations(
+                expectations,
+                tags=current_tags,
+            )
+            expectations = apply_booking_scenario_active_name_answer_expectations(
+                expectations,
+                tags=current_tags,
+                active_reply_type=state.active_reply_type,
+            )
             expectations = apply_booking_scenario_exact_time_fill_collect_expectations(
                 expectations,
                 tags=current_tags,
@@ -4218,23 +4439,21 @@ def repair_booking_scenario_post_coverage_dialogs(
                 text=text,
                 expect=expectations,
             )
-            lowered_tags = _booking_scenario_coerce_turn_tags(current_tags)
             next_multi_service_clarify_active = advance_booking_scenario_multi_service_clarify_context(
                 state.multi_service_clarify_active,
                 tags=current_tags,
                 expect=expectations,
             )
-            next_active_management_tag = state.active_management_tag
-            if "reschedule" in lowered_tags:
-                next_active_management_tag = "reschedule"
-            elif "check_booking" in lowered_tags:
-                next_active_management_tag = "check_booking"
 
             state = BookingScenarioPostCoverageRepairState(
                 active_reply_type=next_active_reply_type,
                 partial_date_anchor_active=next_partial_date_anchor_active,
                 multi_service_clarify_active=next_multi_service_clarify_active,
-                active_management_tag=next_active_management_tag,
+                active_management_tag=advance_booking_scenario_management_context(
+                    state.active_management_tag,
+                    tags=current_tags,
+                    expect=expectations,
+                ),
             )
             repaired_turns.append(normalized_turn)
         normalized_dialog["turns"] = repaired_turns
@@ -4390,6 +4609,13 @@ def sanitize_booking_scenario_llm_turns(
             tags,
             active_reply_type=state.active_reply_type,
         )
+        tags, active_time_weak_time_question_normalized = (
+            booking_scenario_normalize_active_time_weak_time_question_tags(
+                text,
+                tags,
+                active_reply_type=state.active_reply_type,
+            )
+        )
         tags, active_time_specialist_master_normalized = (
             booking_scenario_normalize_active_time_specialist_master_tags(
                 text,
@@ -4535,6 +4761,15 @@ def sanitize_booking_scenario_llm_turns(
                 else {}
             )
         elif (
+            partial_date_slot_constraint_normalized
+            or partial_date_mixed_normalized
+            or (
+                grounded_partial_date_mixed_fill_normalized
+                and active_time_weak_time_question_normalized
+            )
+        ):
+            normalized_turn["expect"] = booking_scenario_time_collect_expect_override()
+        elif (
             malformed_check_booking_normalized
             or active_name_master_info_normalized
             or active_time_master_info_normalized
@@ -4549,10 +4784,9 @@ def sanitize_booking_scenario_llm_turns(
             or grounded_partial_date_mixed_fill_normalized
             or question_like_slot_constraint_normalized
             or grounded_time_specialist_availability_normalized
+            or active_time_weak_time_question_normalized
         ):
             normalized_turn["expect"] = {}
-        elif partial_date_slot_constraint_normalized or partial_date_mixed_normalized:
-            normalized_turn["expect"] = booking_scenario_time_collect_expect_override()
 
         normalized_turn["kind"] = kind
         normalized_turn["text"] = text
@@ -4620,7 +4854,23 @@ def sanitize_booking_scenario_llm_turns(
             ctx=ctx,
             active_reply_type=state.active_reply_type,
         )
+        expectations = (
+            apply_booking_scenario_active_time_reschedule_service_grounded_expectations(
+                expectations,
+                tags=tags,
+                active_reply_type=state.active_reply_type,
+            )
+        )
         expectations = apply_booking_scenario_active_pending_question_cancel_interrupt_expectations(
+            expectations,
+            tags=tags,
+            active_reply_type=state.active_reply_type,
+        )
+        expectations = apply_booking_scenario_check_booking_entry_expectations(
+            expectations,
+            tags=tags,
+        )
+        expectations = apply_booking_scenario_active_name_answer_expectations(
             expectations,
             tags=tags,
             active_reply_type=state.active_reply_type,
@@ -4694,17 +4944,15 @@ def sanitize_booking_scenario_llm_turns(
             tags=tags,
             expect=expectations,
         )
-        lowered_tags = _booking_scenario_coerce_turn_tags(tags)
-        next_active_management_tag = state.active_management_tag
-        if "reschedule" in lowered_tags:
-            next_active_management_tag = "reschedule"
-        elif "check_booking" in lowered_tags:
-            next_active_management_tag = "check_booking"
         state = BookingScenarioPostCoverageRepairState(
             active_reply_type=next_active_reply_type,
             partial_date_anchor_active=next_partial_date_anchor_active,
             multi_service_clarify_active=next_multi_service_clarify_active,
-            active_management_tag=next_active_management_tag,
+            active_management_tag=advance_booking_scenario_management_context(
+                state.active_management_tag,
+                tags=tags,
+                expect=expectations,
+            ),
         )
         sanitized.append(normalized_turn)
     return sanitized
@@ -4729,6 +4977,7 @@ __all__ = [
     "booking_scenario_check_booking_followup_expect_override",
     "booking_scenario_check_booking_confirm_expect_override",
     "booking_scenario_normalize_active_time_booking_fill_tags",
+    "booking_scenario_normalize_active_time_weak_time_question_tags",
     "booking_scenario_normalize_booking_requested_slot_question_tags",
     "booking_scenario_normalize_grounded_partial_date_mixed_fill_tags",
     "booking_scenario_normalize_grounded_time_probe_tags",
@@ -4747,6 +4996,7 @@ __all__ = [
     "BOOKING_SCENARIO_EXPECT_INFO_SECTIONS",
     "BOOKING_SCENARIO_PENDING_QUESTION_TAGS",
     "BOOKING_SCENARIO_TARGETED_PENDING_QUESTION_TAGS",
+    "advance_booking_scenario_management_context",
     "advance_booking_scenario_multi_service_clarify_context",
     "advance_booking_scenario_partial_date_anchor_context",
     "advance_booking_scenario_pending_question_context",

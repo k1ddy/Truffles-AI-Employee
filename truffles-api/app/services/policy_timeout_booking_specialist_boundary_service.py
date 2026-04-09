@@ -160,7 +160,7 @@ def handle_policy_timeout_booking_specialist_boundary(
         hooks.record_decision_trace(runtime_input.conversation, pending_trace)
         hooks.record_message_decision_meta(
             runtime_input.saved_message,
-            action="booking_prompt",
+            action="collect",
             intent="booking",
             source="policy_core_guard",
             fast_intent=False,
