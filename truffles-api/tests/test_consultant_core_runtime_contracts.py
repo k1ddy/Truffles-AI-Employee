@@ -4089,7 +4089,7 @@ def test_turn_executor_renders_owner_greeting_smalltalk_without_info_fallback() 
     )
 
     assert result.text == "Здравствуйте! Могу помочь с услугами, ценами или записью."
-    assert result.tool_action == "catalog.location"
+    assert result.tool_action == "info"
     assert result.tool_decision == "smalltalk_direct"
     assert result.meta["smalltalk_direct"] is True
     assert result.meta["smalltalk_intent"] == "greeting"
@@ -4146,7 +4146,7 @@ def test_turn_executor_renders_owner_thanks_smalltalk_without_info_fallback() ->
     )
 
     assert result.text == "Рад помочь. Если нужно — подскажу по услугам, ценам или записи."
-    assert result.tool_action == "catalog.location"
+    assert result.tool_action == "info"
     assert result.tool_decision == "smalltalk_direct"
     assert result.meta["smalltalk_direct"] is True
     assert result.meta["smalltalk_intent"] == "thanks"
@@ -6423,6 +6423,101 @@ def test_turn_executor_appends_service_followup_for_promotions_location_booking_
         "Официальные акции: Первое посещение: 10%.\n\n"
         "Адрес: Алматы, ул. Абая 150.\n\n"
         "На какую услугу хотите записаться?"
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["promotions", "location"]
+
+
+def test_turn_executor_appends_datetime_followup_for_promotions_grounded_service_location_booking_multitruth(
+    monkeypatch,
+) -> None:
+    def _execute_tool_action(db, **kwargs):
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert kwargs["expected_reply_type"] == "time"
+            assert kwargs["allowed_fact_refs"] == ["promotions"]
+            assert kwargs["service_query"] == "маникюр"
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Официальные акции: Первое посещение: 10%.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        if kwargs["tool_action"] == "catalog.location":
+            assert kwargs["allowed_fact_refs"] == ["location"]
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Адрес: Алматы, ул. Абая 150.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "location",
+                    "info_sections": ["location"],
+                },
+                trace={"stage": "tool_registry", "decision": "location"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions", "location"],
+            "fact_refs": ["promotions", "location"],
+            "slots": {"service": "маникюр"},
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+            "reason": "standalone_promotions_head_with_grounded_service_booking_request",
+            "goal": "booking",
+            "capability": "promotions",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Есть акции на маникюр, хочу записаться и адрес, пожалуйста.",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == (
+        "Официальные акции: Первое посещение: 10%.\n\n"
+        "Адрес: Алматы, ул. Абая 150.\n\n"
+        "На какую дату и время вам удобно?"
     )
     assert result.tool_action == "catalog.service_query"
     assert result.tool_decision == "multi_truth_composed"

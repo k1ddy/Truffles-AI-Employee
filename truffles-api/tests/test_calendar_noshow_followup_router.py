@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -641,7 +641,7 @@ async def test_register_booking_no_show_followup_rejects_rebooked_booking_case_c
 async def test_update_booking_follow_up_governance_updates_owner_and_due(monkeypatch):
     booking_id = uuid4()
     owner_agent_id = uuid4()
-    due_at = datetime(2026, 3, 7, 15, 30, tzinfo=timezone.utc)
+    due_at = datetime.now(timezone.utc) - timedelta(days=29)
     context = SimpleNamespace(
         role="owner",
         client=SimpleNamespace(id=uuid4()),

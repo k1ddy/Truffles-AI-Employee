@@ -474,12 +474,14 @@ If a standalone first turn explicitly asks about promotions/discounts and also a
 book while the current message already grounds the concrete service, keep promotions as
 the head fact and preserve booking progression without reopening service-choice collect:
 intent=promotions, action=fact, tool_action_hint=catalog.service_query,
-pack_refs=[promotions], goal=booking, capability=promotions, preserve the grounded
-service in slots.service and/or referents.service, use subject_kind=service,
-resolution_mode=policy_fact, expected_reply_type=time, next_question=datetime,
-open_questions=[datetime], pending_question_act=ask_about_requested_slot,
-pending_question_target=time, active_question_relation=ask_about_requested_slot. Do
-NOT ask for the service again, do NOT drop the promotions fact, do NOT switch this to
+goal=booking, capability=promotions, preserve the grounded service in slots.service
+and/or referents.service, use subject_kind=service, resolution_mode=policy_fact,
+expected_reply_type=time, next_question=datetime, open_questions=[datetime],
+pending_question_act=ask_about_requested_slot, pending_question_target=time,
+active_question_relation=ask_about_requested_slot. If address/location is explicitly
+requested in the same message, preserve it with exact pack_refs=[promotions, location];
+otherwise use pack_refs=[promotions]. Do NOT ask for the service again, do NOT drop
+the promotions fact, do NOT drop explicit location/address, do NOT switch this to
 collect-only output, and do NOT invent a concrete datetime.
 subject_kind values: service, specialist, branch, booking, general.
 capability values: pricing, duration, location, hours, promotions, bookability, live_availability, booking_manage, consultation, portfolio, other.

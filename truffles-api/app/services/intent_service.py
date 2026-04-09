@@ -1285,16 +1285,38 @@ def _policy_core_current_message_promotions_location_pack_refs(
 
 def _policy_core_current_message_promotions_booking_collect_pack_refs(
     current_message: str | None,
+    *,
+    client_slug: str | None = None,
 ) -> list[str] | None:
     if not isinstance(current_message, str) or not current_message.strip():
         return None
     if not _policy_core_current_message_has_promotions_query(current_message):
         return None
-    if _policy_core_current_message_has_location_side_ask(current_message):
-        return None
     if not _policy_core_current_message_has_booking_side_ask(current_message):
         return None
-    return ["promotions"]
+    refs = ["promotions"]
+    normalized_message = _normalize_text(current_message)
+    if _policy_core_current_message_has_location_side_ask(current_message):
+        refs.append("location")
+    if normalized_message and isinstance(client_slug, str) and client_slug.strip():
+        from app.services.pack_runtime_service import get_pack_runtime
+
+        try:
+            pack_runtime = get_pack_runtime(client_slug)
+        except Exception:
+            pack_runtime = None
+        if pack_runtime is not None:
+            try:
+                if pack_runtime.has_contact_signal(normalized_message, message=current_message):
+                    refs.append("contact")
+            except Exception:
+                pass
+            try:
+                if pack_runtime.has_parking_signal(normalized_message):
+                    refs.append("parking")
+            except Exception:
+                pass
+    return refs
 
 
 def _policy_core_current_message_service_scoped_fact_pack_refs(
@@ -2592,6 +2614,17 @@ def _policy_core_apply_prevalidate_boundary_normalizations(
     )
     if normalized_hours_service_payload is not None:
         return normalized_hours_service_payload
+    normalized_service_fact_side_booking_payload = (
+        _policy_core_build_mixed_first_turn_service_fact_booking_side_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=current_message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+    )
+    if normalized_service_fact_side_booking_payload is not None:
+        return normalized_service_fact_side_booking_payload
     return payload
 
 
@@ -2757,6 +2790,16 @@ def _policy_core_build_start_booking_exact_datetime_boundary_payload(
     exact_datetime = _policy_core_current_message_exact_datetime_surface(current_message)
     if not exact_datetime:
         return None
+    if _policy_core_current_message_service_scoped_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    ) is not None:
+        return None
+    if _policy_core_current_message_service_multifact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    ) is not None:
+        return None
     grounded_service = _policy_core_payload_grounded_service(payload)
     grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
         current_message=current_message,
@@ -2895,7 +2938,8 @@ def _policy_core_build_promotions_booking_fact_followup_boundary_payload(
     ):
         return None
     expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
-        current_message
+        current_message,
+        client_slug=client_slug,
     )
     if expected_pack_refs is None:
         return None
@@ -3008,7 +3052,8 @@ def _policy_core_build_promotions_grounded_service_booking_followup_boundary_pay
     ):
         return None
     expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
-        current_message
+        current_message,
+        client_slug=client_slug,
     )
     if expected_pack_refs is None:
         return None
@@ -3278,7 +3323,8 @@ def _policy_core_is_canonical_promotions_booking_fact_followup_contract(
     ):
         return False
     expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
-        current_message
+        current_message,
+        client_slug=client_slug,
     )
     if expected_pack_refs is None:
         return False
@@ -3426,7 +3472,8 @@ def _policy_core_is_promotions_booking_fact_followup_contract(
     ):
         return False
     expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
-        current_message
+        current_message,
+        client_slug=client_slug,
     )
     if expected_pack_refs is None:
         return False
@@ -3460,7 +3507,8 @@ def _policy_core_is_canonical_promotions_grounded_service_booking_followup_contr
     ):
         return False
     expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
-        current_message
+        current_message,
+        client_slug=client_slug,
     )
     if expected_pack_refs is None:
         return False
@@ -3518,7 +3566,8 @@ def _policy_core_is_promotions_grounded_service_booking_followup_contract(
     ):
         return False
     expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
-        current_message
+        current_message,
+        client_slug=client_slug,
     )
     if expected_pack_refs is None:
         return False
@@ -4129,6 +4178,7 @@ def _policy_core_is_start_booking_exact_datetime_progression_contract(
     normalized_memory_profile: Mapping[str, Any] | None,
     *,
     current_message: str | None,
+    client_slug: str | None = None,
 ) -> bool:
     if contract.intent != "booking":
         return False
@@ -4138,6 +4188,16 @@ def _policy_core_is_start_booking_exact_datetime_progression_contract(
     if _policy_core_is_booking_time_followup_contract(carry_contract):
         return False
     if not _policy_core_current_message_exact_datetime_surface(current_message):
+        return False
+    if _policy_core_current_message_service_scoped_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    ) is not None:
+        return False
+    if _policy_core_current_message_service_multifact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    ) is not None:
         return False
     grounded_service = _policy_core_contract_grounded_service(
         contract
@@ -4753,6 +4813,7 @@ def _validate_policy_core_runtime_contract(
         contract,
         normalized_memory_profile,
         current_message=current_message,
+        client_slug=client_slug,
     ):
         return "llm_policy_core_error:start_booking_exact_datetime_progression_required"
 
