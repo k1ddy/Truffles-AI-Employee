@@ -482,10 +482,12 @@ expected_reply_type=time, next_question=datetime, open_questions=[datetime],
 pending_question_act=ask_about_requested_slot, pending_question_target=time,
 active_question_relation=ask_about_requested_slot. If address/location/contact/parking
 is explicitly requested in the same message, preserve those general refs in the same
-fact scope, for example pack_refs=[promotions, location] or [promotions, contact];
-otherwise use pack_refs=[promotions]. Do NOT ask for the service again, do NOT drop
-the promotions fact, do NOT drop explicit address/location/contact/parking, do NOT
-switch this to collect-only output, and do NOT invent a concrete datetime.
+fact scope, for example pack_refs=[promotions, location], [promotions, contact], or
+[promotions, location, contact]; otherwise use pack_refs=[promotions]. Do NOT let a
+broader location-head/service-fact override win over explicit promotions+booking. Do
+NOT ask for the service again, do NOT drop the promotions fact, do NOT drop explicit
+address/location/contact/parking, do NOT switch this to collect-only output, and do
+NOT invent a concrete datetime.
 subject_kind values: service, specialist, branch, booking, general.
 capability values: pricing, duration, location, hours, promotions, bookability, live_availability, booking_manage, consultation, portfolio, other.
 temporal_scope values: none, specific_time, day, weekday, weekend, date_range.

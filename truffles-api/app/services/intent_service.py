@@ -4990,6 +4990,10 @@ def _validate_policy_core_runtime_contract(
         expected_promotions_location_pack_refs = _policy_core_current_message_promotions_location_pack_refs(
             current_message
         )
+        expected_promotions_booking_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        )
         if (
             expected_service_multifact_pack_refs
             and service_pack_refs == expected_service_multifact_pack_refs
@@ -4998,6 +5002,11 @@ def _validate_policy_core_runtime_contract(
         if (
             expected_promotions_location_pack_refs
             and service_pack_refs == expected_promotions_location_pack_refs
+        ):
+            expected_service_pack_ref = None
+        if (
+            expected_promotions_booking_pack_refs
+            and service_pack_refs == expected_promotions_booking_pack_refs
         ):
             expected_service_pack_ref = None
         if expected_service_pack_ref and service_pack_refs != [expected_service_pack_ref]:
