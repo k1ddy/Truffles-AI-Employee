@@ -2539,6 +2539,17 @@ def _policy_core_apply_prevalidate_boundary_normalizations(
     context_payload: Mapping[str, Any] | None,
     client_slug: str | None,
 ) -> dict[str, Any]:
+    normalized_promotions_location_booking_payload = (
+        _policy_core_build_promotions_location_booking_followup_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=current_message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+    )
+    if normalized_promotions_location_booking_payload is not None:
+        return normalized_promotions_location_booking_payload
     normalized_promotions_grounded_booking_payload = (
         _policy_core_build_promotions_grounded_service_booking_followup_boundary_payload(
             payload=payload,
@@ -2931,6 +2942,59 @@ def _policy_core_build_promotions_booking_fact_followup_boundary_payload(
     }
 
 
+def _policy_core_build_promotions_location_booking_followup_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_promotions_location_pack_refs(current_message)
+    if expected_pack_refs is None or not _policy_core_current_message_has_booking_side_ask(current_message):
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service:
+        return None
+    return {
+        "intent": "promotions",
+        "action": "fact",
+        "tool_action_hint": "catalog.service_query",
+        "pack_refs": list(expected_pack_refs),
+        "slots": {},
+        "expected_reply_type": "service_choice",
+        "next_question": "service",
+        "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": "standalone_promotions_location_head_with_missing_service_booking_request",
+        "goal": "booking",
+        "entity_refs": [],
+        "referents": {},
+        "subject_kind": "general",
+        "capability": "promotions",
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
 def _policy_core_build_promotions_grounded_service_booking_followup_boundary_payload(
     *,
     payload: Mapping[str, Any] | None,
@@ -3258,6 +3322,95 @@ def _policy_core_is_canonical_promotions_booking_fact_followup_contract(
     if _policy_core_payload_token(contract.goal) != "booking":
         return False
     return True
+
+
+def _policy_core_is_canonical_promotions_location_booking_followup_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_location_pack_refs(current_message)
+    if expected_pack_refs is None or not _policy_core_current_message_has_booking_side_ask(current_message):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service:
+        return False
+    open_questions = {
+        item.strip().casefold()
+        for item in list(contract.open_questions or [])
+        if isinstance(item, str) and item.strip()
+    }
+    if contract.intent != "promotions":
+        return False
+    if contract.action != "fact":
+        return False
+    if contract.tool_action_hint not in {"catalog.service_query", "info"}:
+        return False
+    if _policy_core_catalog_service_pack_refs(contract) != expected_pack_refs:
+        return False
+    if contract.expected_reply_type != "service_choice":
+        return False
+    if contract.next_question != "service" or "service" not in open_questions:
+        return False
+    if contract.pending_question_act is not None:
+        return False
+    if contract.pending_question_target is not None:
+        return False
+    if contract.active_question_relation is not None:
+        return False
+    if contract.subject_kind not in {None, "general"}:
+        return False
+    if contract.capability != "promotions":
+        return False
+    if contract.resolution_mode != "policy_fact":
+        return False
+    if _policy_core_payload_token(contract.goal) != "booking":
+        return False
+    return True
+
+
+def _policy_core_is_promotions_location_booking_followup_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_location_pack_refs(current_message)
+    if expected_pack_refs is None or not _policy_core_current_message_has_booking_side_ask(current_message):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service:
+        return False
+    return not _policy_core_is_canonical_promotions_location_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    )
 
 
 def _policy_core_is_promotions_booking_fact_followup_contract(
@@ -3886,6 +4039,14 @@ def _policy_core_is_mixed_first_turn_promotions_precedence_contract(
     ):
         return False
     if _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    if _policy_core_is_canonical_promotions_location_booking_followup_contract(
         contract,
         normalized_memory_profile,
         current_message=current_message,
@@ -4699,6 +4860,15 @@ def _validate_policy_core_runtime_contract(
     ):
         return "llm_policy_core_error:promotions_grounded_service_booking_followup_reclassification_required"
 
+    if _policy_core_is_promotions_location_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:promotions_location_booking_followup_reclassification_required"
+
     if _policy_core_is_promotions_booking_fact_followup_contract(
         contract,
         normalized_memory_profile,
@@ -4788,6 +4958,13 @@ def _validate_policy_core_runtime_contract(
             has_followup_contract
             and not carried_followup_contract
             and not promotions_booking_followup_contract
+            and not _policy_core_is_canonical_promotions_location_booking_followup_contract(
+                contract,
+                normalized_memory_profile,
+                current_message=current_message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
             and not _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
                 contract,
                 normalized_memory_profile,
@@ -5515,6 +5692,19 @@ def _build_policy_core_contract_repair_instruction(
             'Keep `subject_kind="general"` and leave `slots.service` / `referents.service` empty because no concrete service is grounded yet.',
             'Clear `pending_question_act`, `pending_question_target`, and `active_question_relation` for this standalone fact follow-up.',
             "Do NOT drop the booking ask, do NOT answer with promotions only, and do NOT switch this turn to pure collect.",
+            "Return corrected JSON only.",
+        ]
+        return " ".join(parts)
+
+    if token.startswith("promotions_location_booking_followup_reclassification_required"):
+        parts: list[str] = [
+            "This standalone first turn asks about promotions or discounts, explicitly asks for address/location, and also asks to book without grounding the service.",
+            "Keep the promotions and location facts in the same turn and preserve booking progression instead of dropping the follow-up.",
+            'Return `intent="promotions"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `pack_refs=["promotions","location"]`, `capability="promotions"`, `goal="booking"`, and `resolution_mode="policy_fact"`.',
+            'Set `expected_reply_type="service_choice"`, `next_question="service"`, and `open_questions=["service"]` so runtime asks only for the missing service after the promotions + location fact response.',
+            'Keep `subject_kind="general"` and leave `slots.service` / `referents.service` empty because no concrete service is grounded yet.',
+            'Clear `pending_question_act`, `pending_question_target`, and `active_question_relation` for this standalone fact follow-up.',
+            "Do NOT answer with promotions+location only, do NOT switch this family to pure collect, and do NOT drop the booking ask.",
             "Return corrected JSON only.",
         ]
         return " ".join(parts)
@@ -8134,6 +8324,30 @@ def route_llm_policy_core(
                     client_slug=client_slug,
                 )
     if (
+        schema_error == "llm_policy_core_error:promotions_location_booking_followup_reclassification_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_promotions_location_booking_payload = (
+            _policy_core_build_promotions_location_booking_followup_boundary_payload(
+                payload=payload,
+                normalized_memory_profile=normalized_memory_profile,
+                current_message=message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
+        )
+        if normalized_promotions_location_booking_payload is not None:
+            payload = normalized_promotions_location_booking_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
         schema_error == "llm_policy_core_error:promotions_grounded_service_booking_followup_reclassification_required"
         and isinstance(payload, dict)
     ):
@@ -8430,6 +8644,31 @@ def route_llm_policy_core(
                             )
                             if normalized_start_exact_datetime_payload is not None:
                                 payload = normalized_start_exact_datetime_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:promotions_location_booking_followup_reclassification_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_promotions_location_booking_payload = (
+                                _policy_core_build_promotions_location_booking_followup_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_promotions_location_booking_payload is not None:
+                                payload = normalized_promotions_location_booking_payload
                                 contract, schema_error = validate_llm_policy_core_output(payload)
                                 if contract is not None and schema_error is None:
                                     schema_error = _validate_policy_core_runtime_contract(

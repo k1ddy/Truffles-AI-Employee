@@ -6465,6 +6465,16 @@ class TestPolicyCoreTimeoutRetry:
         assert "Forbidden: отвечать только адресом/локацией" in prompt
         assert "молча выбрасывать явно запрошенный address/location" in prompt
 
+    def test_policy_core_prompt_promotions_location_booking_preserves_service_followup(self):
+        prompt = _load_policy_core_prompt()
+
+        assert '"Есть скидки, хочу записаться и адрес, пожалуйста."' in prompt
+        assert '"Есть акции и где вы находитесь, хочу записаться."' in prompt
+        assert '`pack_refs=["promotions","location"]`' in prompt
+        assert '`goal="booking"`' in prompt
+        assert '`expected_reply_type="service_choice"`' in prompt
+        assert "promotions+location without booking follow-up" in prompt
+
     def test_policy_core_prompt_promotions_booking_preserves_service_followup(self):
         prompt = _load_policy_core_prompt()
 
@@ -6549,6 +6559,16 @@ class TestPolicyCoreTimeoutRetry:
         assert "pack_refs=[promotions, location]" in prompt
         assert "subject_kind=general" in prompt
         assert "Do NOT answer only location/address" in prompt
+
+    def test_policy_core_compact_prompt_promotions_location_booking_preserves_service_followup(self):
+        prompt = load_policy_core_compact_prompt_snapshot().prompt_text
+
+        assert "address/location" in prompt
+        assert "pack_refs=[promotions, location]" in prompt
+        assert "goal=booking" in prompt
+        assert "expected_reply_type=service_choice" in prompt
+        assert "promotions +" in prompt
+        assert "location only" in prompt
 
     def test_policy_core_compact_prompt_promotions_booking_preserves_service_followup(self):
         prompt = load_policy_core_compact_prompt_snapshot().prompt_text
@@ -9393,6 +9413,57 @@ class TestPolicyCoreTimeoutRetry:
         assert result["payload"]["intent"] == "promotions"
         assert result["payload"]["grounding_requirements"]["subject_kind"] == "general"
         assert result["payload"]["grounding_requirements"]["pack_refs"] == ["promotions", "location"]
+
+    def test_policy_core_boundary_preserves_promotions_location_booking_followup(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        owner_payload = {
+            "intent": "booking",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "pack_refs": ["promotions", "location"],
+            "slots": {"service": None},
+            "expected_reply_type": "service_choice",
+            "next_question": "service",
+            "open_questions": ["service"],
+            "needs_manager": False,
+            "risk_signals": [],
+            "language": "ru",
+            "confidence": 0.72,
+            "reason": "user_wants_promotions_and_booking_and_address_without_specifying_service",
+            "goal": "booking",
+            "entity_refs": [],
+            "referents": {"service": None},
+            "subject_kind": "general",
+            "capability": "promotions",
+            "temporal_scope": "none",
+            "alternate_datetime": None,
+            "resolution_mode": "policy_fact",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": None,
+            "resolver_id": None,
+            "resolver_version": None,
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(owner_payload))
+            result = route_llm_policy_core(
+                "Есть скидки, хочу записаться и адрес, пожалуйста.",
+                memory_profile={},
+            )
+
+        assert result["ok"] is True
+        assert result["contract_repair_retry_used"] is False
+        assert result["contract_repair_reason"] is None
+        assert result["binding"]["tool_action"] == "catalog.service_query"
+        assert result["payload"]["intent"] == "promotions"
+        assert result["payload"]["grounding_requirements"]["pack_refs"] == ["promotions", "location"]
+        assert result["payload"]["grounding_requirements"]["subject_kind"] == "general"
+        assert result["payload"]["missing_information"]["expected_reply_type"] == "service_choice"
+        assert result["payload"]["missing_information"]["next_question"] == "service"
+        assert result["payload"]["missing_information"]["open_questions"] == ["service"]
 
     def test_policy_core_boundary_normalizes_promotions_booking_followup_without_service(
         self,

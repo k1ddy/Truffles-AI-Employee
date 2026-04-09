@@ -816,7 +816,17 @@ class TurnExecutor:
                     )
                 )
                 if composed_response_parts and len(composed_emitted_refs) > 1:
-                    composed_text = "\n\n".join(composed_response_parts)
+                    composed_text = self._maybe_append_promotions_booking_followup(
+                        response_text="\n\n".join(composed_response_parts),
+                        tool_action=resolved_tool_action,
+                        tool_meta={
+                            "tool_action": resolved_tool_action,
+                            "tool_decision": "multi_truth_composed",
+                            "info_sections": composed_emitted_refs,
+                        },
+                        pending_question_contract=pending_question_contract,
+                        semantic_contract=semantic_contract,
+                    )
                     composed_fact_plan = self._project_composed_fact_plan(
                         fact_plan,
                         emitted_fact_refs=composed_emitted_refs,
@@ -915,7 +925,17 @@ class TurnExecutor:
                             for secondary_text in secondary_response_parts:
                                 if secondary_text not in composed_text_parts:
                                     composed_text_parts.append(secondary_text)
-                            composed_text = "\n\n".join(composed_text_parts)
+                            composed_text = self._maybe_append_promotions_booking_followup(
+                                response_text="\n\n".join(composed_text_parts),
+                                tool_action=resolved_tool_action,
+                                tool_meta={
+                                    "tool_action": resolved_tool_action,
+                                    "tool_decision": "multi_truth_composed",
+                                    "info_sections": composed_emitted_refs,
+                                },
+                                pending_question_contract=pending_question_contract,
+                                semantic_contract=semantic_contract,
+                            )
                             composed_fact_plan = self._project_composed_fact_plan(
                                 fact_plan,
                                 emitted_fact_refs=composed_emitted_refs,

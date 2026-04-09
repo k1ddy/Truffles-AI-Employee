@@ -441,6 +441,17 @@ tool_action_hint=catalog.service_query, exact pack_refs=[pricing] or [duration],
 subject_kind=service, matching capability, resolution_mode=policy_fact, and cleared
 standalone follow-up fields. Do NOT switch this turn to booking collect,
 calendar.book_slot, or a customer-name question.
+If a standalone first turn explicitly asks about promotions/discounts, explicitly asks
+for address/location, and also asks to book without grounding the service, keep
+promotions as the head fact, preserve location in the same fact scope, and preserve
+booking progression: intent=promotions, action=fact,
+tool_action_hint=catalog.service_query, pack_refs=[promotions, location],
+goal=booking, capability=promotions, subject_kind=general,
+resolution_mode=policy_fact, expected_reply_type=service_choice,
+next_question=service, open_questions=[service], with empty pending_question_act /
+pending_question_target / active_question_relation. Do NOT reply with promotions +
+location only, do NOT switch this family to collect-only output, and do NOT drop the
+explicit location/address request.
 If a standalone first turn explicitly asks about promotions/discounts and also adds
 side booking/location asks, keep promotions as the head intent:
 intent=promotions, action=fact, tool_action_hint=catalog.service_query,
