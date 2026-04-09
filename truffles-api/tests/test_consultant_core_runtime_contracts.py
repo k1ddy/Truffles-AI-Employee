@@ -6524,6 +6524,101 @@ def test_turn_executor_appends_datetime_followup_for_promotions_grounded_service
     assert result.meta["info_sections"] == ["promotions", "location"]
 
 
+def test_turn_executor_appends_datetime_followup_for_promotions_grounded_service_contact_booking_multitruth(
+    monkeypatch,
+) -> None:
+    def _execute_tool_action(db, **kwargs):
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert kwargs["expected_reply_type"] == "time"
+            assert kwargs["allowed_fact_refs"] == ["promotions"]
+            assert kwargs["service_query"] == "маникюр"
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Официальные акции: Первое посещение: 10%.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        if kwargs["tool_action"] == "catalog.location":
+            assert kwargs["allowed_fact_refs"] == ["contact"]
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Связаться можно по WhatsApp: +7 700 123-45-67.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "contact",
+                    "info_sections": ["contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "contact"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions", "contact"],
+            "fact_refs": ["promotions", "contact"],
+            "slots": {"service": "маникюр"},
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+            "reason": "standalone_promotions_head_with_grounded_service_booking_request",
+            "goal": "booking",
+            "capability": "promotions",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Есть акции на маникюр, хочу записаться и как с вами связаться?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == (
+        "Официальные акции: Первое посещение: 10%.\n\n"
+        "Связаться можно по WhatsApp: +7 700 123-45-67.\n\n"
+        "На какую дату и время вам удобно?"
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["promotions", "contact"]
+
+
 def test_tool_registry_catalog_location_does_not_reinfer_parking_outside_allowed_scope(monkeypatch) -> None:
     from app.services import tool_registry_service
 

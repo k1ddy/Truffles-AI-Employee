@@ -496,6 +496,7 @@ from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials
 from app.services.expected_reply_contract import (
+    expected_reply_collect_reason,
     resolve_services_overview_contract_update,
     resolve_tool_expected_reply_contract,
 )
@@ -3065,10 +3066,10 @@ def _is_booking_followup_expected_reply_reason(
         "booking_followup",
     }:
         return True
-    expected_slot = _expected_reply_slot_key(expected_reply_type)
-    if not expected_slot:
+    collect_reason = expected_reply_collect_reason(expected_reply_type)
+    if not collect_reason:
         return False
-    return normalized_reason == f"collect:{expected_slot}"
+    return normalized_reason == collect_reason
 
 
 def _booking_prompt_for_expected_reply_type(expected_reply_type: str | None) -> str | None:

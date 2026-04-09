@@ -462,12 +462,14 @@ the grounded service and use subject_kind=service. Do NOT answer only location/a
 silently drop explicit location/address, turn this into booking collect, or use
 intent=out_of_domain / intent=other.
 If a standalone first turn explicitly asks about promotions/discounts and also asks to
-book, but no concrete service is grounded and no address/location is requested, keep
-promotions as the head fact and preserve booking progression in the same turn:
-intent=promotions, action=fact, tool_action_hint=catalog.service_query,
-pack_refs=[promotions], goal=booking, capability=promotions, subject_kind=general,
-resolution_mode=policy_fact, expected_reply_type=service_choice,
-next_question=service, open_questions=[service]. Leave pending_question_act /
+book while no concrete service is grounded, keep promotions as the head fact and
+preserve booking progression in the same turn: intent=promotions, action=fact,
+tool_action_hint=catalog.service_query, goal=booking, capability=promotions,
+subject_kind=general, resolution_mode=policy_fact, expected_reply_type=service_choice,
+next_question=service, open_questions=[service]. If the same message explicitly asks
+for address/location/contact/parking, preserve those general refs in the same fact
+scope, for example pack_refs=[promotions, contact] or [promotions, location];
+otherwise use pack_refs=[promotions]. Leave pending_question_act /
 pending_question_target / active_question_relation empty, do not invent a service, do
 not reply with promotions only, and do not switch this family to collect-only output.
 If a standalone first turn explicitly asks about promotions/discounts and also asks to
@@ -478,11 +480,12 @@ goal=booking, capability=promotions, preserve the grounded service in slots.serv
 and/or referents.service, use subject_kind=service, resolution_mode=policy_fact,
 expected_reply_type=time, next_question=datetime, open_questions=[datetime],
 pending_question_act=ask_about_requested_slot, pending_question_target=time,
-active_question_relation=ask_about_requested_slot. If address/location is explicitly
-requested in the same message, preserve it with exact pack_refs=[promotions, location];
+active_question_relation=ask_about_requested_slot. If address/location/contact/parking
+is explicitly requested in the same message, preserve those general refs in the same
+fact scope, for example pack_refs=[promotions, location] or [promotions, contact];
 otherwise use pack_refs=[promotions]. Do NOT ask for the service again, do NOT drop
-the promotions fact, do NOT drop explicit location/address, do NOT switch this to
-collect-only output, and do NOT invent a concrete datetime.
+the promotions fact, do NOT drop explicit address/location/contact/parking, do NOT
+switch this to collect-only output, and do NOT invent a concrete datetime.
 subject_kind values: service, specialist, branch, booking, general.
 capability values: pricing, duration, location, hours, promotions, bookability, live_availability, booking_manage, consultation, portfolio, other.
 temporal_scope values: none, specific_time, day, weekday, weekend, date_range.

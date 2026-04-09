@@ -3831,6 +3831,14 @@ def _policy_core_is_mixed_first_turn_location_service_fact_contract(
     context_payload: Mapping[str, Any] | None,
     client_slug: str | None,
 ) -> bool:
+    if _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
     if _policy_core_is_canonical_hours_location_service_fact_contract(
         contract,
         normalized_memory_profile,
@@ -3980,6 +3988,14 @@ def _policy_core_is_service_query_multifact_contract(
         client_slug=client_slug,
     )
     if not grounded_service and not grounded_service_hint:
+        return False
+    if _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
         return False
     normalized_pack_refs = _policy_core_catalog_service_pack_refs(contract)
     if contract.action != "fact":
@@ -4885,15 +4901,6 @@ def _validate_policy_core_runtime_contract(
     ):
         return "llm_policy_core_error:mixed_first_turn_location_service_fact_reclassification_required"
 
-    if _policy_core_is_service_query_multifact_contract(
-        contract,
-        normalized_memory_profile,
-        current_message=current_message,
-        context_payload=context_payload,
-        client_slug=client_slug,
-    ):
-        return "llm_policy_core_error:service_query_multifact_reclassification_required"
-
     if _policy_core_is_mixed_first_turn_service_fact_booking_side_precedence_contract(
         contract,
         normalized_memory_profile,
@@ -4938,6 +4945,15 @@ def _validate_policy_core_runtime_contract(
         client_slug=client_slug,
     ):
         return "llm_policy_core_error:promotions_booking_followup_reclassification_required"
+
+    if _policy_core_is_service_query_multifact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:service_query_multifact_reclassification_required"
 
     if _policy_core_is_mixed_first_turn_promotions_precedence_contract(
         contract,

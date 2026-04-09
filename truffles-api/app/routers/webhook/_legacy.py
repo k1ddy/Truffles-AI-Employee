@@ -171,6 +171,7 @@ PackDecision = _DECISION_MODULE.PackDecision
 THANKS_RESPONSE = _DECISION_MODULE.THANKS_RESPONSE
 _compact_signal_snapshot = _DECISION_MODULE._compact_signal_snapshot
 _is_env_enabled = _DECISION_MODULE._is_env_enabled
+_is_question_like_message = _DECISION_MODULE._is_question_like_message
 _normalize_service_text = _DECISION_MODULE._normalize_service_text
 _record_decision_trace = _DECISION_MODULE._record_decision_trace
 _set_router_observability = _DECISION_MODULE._set_router_observability
@@ -534,9 +535,7 @@ def _detect_info_class_intents(
     tokens = _tokenize_for_matching(normalized)
     anchor_hits = _detect_info_anchor_hits(tokens)
     anchor_intents = {intent for intent, count in anchor_hits.items() if count > 0}
-    question_like = "?" in (message_text or "")
-    if not question_like and tokens:
-        question_like = _tokens_have_prefixes(tokens, QUESTION_WORD_PREFIXES)
+    question_like = _is_question_like_message(message_text)
     short_query = 0 < len(tokens) <= 4
     daypart_preference_statement = _looks_like_daypart_preference_statement(
         message_text,

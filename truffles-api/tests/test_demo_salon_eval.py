@@ -208,7 +208,7 @@ def test_llm_guard_records_trace_and_meta() -> None:
     trace = _decision_trace(conversation)
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert _trace_has_entry(trace, stage="llm_guard", decision="blocked_topics")
-    assert meta.get("action") == "escalate"
+    assert meta.get("action") == "handoff"
     assert meta.get("intent") == "llm_guard"
     assert meta.get("source") == "llm_guard"
 

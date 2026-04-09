@@ -68,6 +68,13 @@ def expected_reply_slot_key(expected_reply_type: str | None) -> str | None:
     return EXPECTED_REPLY_SLOT_KEYS.get(expected_type)
 
 
+def expected_reply_collect_reason(expected_reply_type: str | None) -> str | None:
+    slot_key = expected_reply_slot_key(expected_reply_type)
+    if not slot_key:
+        return None
+    return f"collect:{slot_key}"
+
+
 def is_expected_reply_type(expected_reply_type: str | None, target_type: str) -> bool:
     expected_type = normalize_expected_reply_type(expected_reply_type)
     target = normalize_expected_reply_type(target_type)
