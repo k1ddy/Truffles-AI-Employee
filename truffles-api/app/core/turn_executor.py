@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, Mapping, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -124,6 +124,33 @@ class TurnExecutor:
         "location",
         "hours",
         "parking",
+    }
+    _FIRST_FACT_FAMILY_COMPOSABLE_SERVICE_REFS = {
+        "pricing",
+        "promotions",
+        "duration",
+        "master",
+        "services_overview",
+    }
+    _SERVICE_QUERY_MULTI_FACT_REFS = {
+        "pricing",
+        "promotions",
+        "duration",
+        "master",
+        "services_overview",
+    }
+    _LOCATION_FACT_REFS = {
+        "location",
+        "hours",
+        "parking",
+        "contact",
+    }
+    _SERVICE_QUERY_COMPOSABLE_FACT_REFS = (
+        _SERVICE_QUERY_MULTI_FACT_REFS | _LOCATION_FACT_REFS
+    )
+    _DIRECT_SMALLTALK_RESPONSES = {
+        "greeting": "Здравствуйте! Могу помочь с услугами, ценами или записью.",
+        "thanks": "Рад помочь. Если нужно — подскажу по услугам, ценам или записи.",
     }
     _BOOKING_PROMPTS = {
         "service": "На какую услугу хотите записаться?",
@@ -350,6 +377,8 @@ class TurnExecutor:
                     (semantic_contract or {}).get("alternate_datetime")
                 )
             if candidate_datetime:
+                slot_values_with_candidate = dict(merged_slots)
+                slot_values_with_candidate["datetime"] = candidate_datetime
                 if self._booking_service_slot_refined(
                     booking_state=prior_booking_state or booking_state,
                     merged_slots=merged_slots,
@@ -380,7 +409,7 @@ class TurnExecutor:
                     meta=self._attach_semantic_contract_meta(
                         decision,
                         {
-                            "slot_values": merged_slots,
+                            "slot_values": slot_values_with_candidate,
                             "next_slot": next_slot,
                             "pending_question_act": "slot_constraint",
                             "pending_question_target": "time",
@@ -394,6 +423,7 @@ class TurnExecutor:
         prompt = self._build_collect_prompt(
             next_slot=next_slot,
             prompt_map=prompt_map,
+            merged_slots=merged_slots,
             semantic_contract=semantic_contract,
             pending_question_contract=pending_question_contract,
         )
@@ -417,6 +447,7 @@ class TurnExecutor:
         *,
         next_slot: str | None,
         prompt_map: dict[str, str],
+        merged_slots: dict[str, str],
         semantic_contract: dict[str, Any] | None,
         pending_question_contract: dict[str, Any] | None,
     ) -> str:
@@ -426,6 +457,7 @@ class TurnExecutor:
         )
         if self._should_use_time_only_collect_prompt(
             next_slot=next_slot,
+            merged_slots=merged_slots,
             semantic_contract=semantic_contract,
             pending_question_contract=pending_question_contract,
         ):
@@ -452,27 +484,30 @@ class TurnExecutor:
         self,
         *,
         next_slot: str | None,
+        merged_slots: dict[str, str],
         semantic_contract: dict[str, Any] | None,
         pending_question_contract: dict[str, Any] | None,
     ) -> bool:
         if next_slot != "datetime":
             return False
-        pending_target = self._normalize_fact_hint(
-            (pending_question_contract or {}).get("pending_question_target")
-            or (semantic_contract or {}).get("pending_question_target")
-        )
-        if pending_target != "time":
-            return False
         relation = self._normalize_fact_hint(
             (pending_question_contract or {}).get("active_question_relation")
             or (semantic_contract or {}).get("active_question_relation")
         )
-        if relation != "ask_about_requested_slot":
-            return False
-        temporal_scope = self._normalize_fact_hint(
-            (semantic_contract or {}).get("temporal_scope")
-        )
-        return temporal_scope not in {None, "none"}
+        if relation == "ask_about_requested_slot":
+            pending_target = self._normalize_fact_hint(
+                (pending_question_contract or {}).get("pending_question_target")
+                or (semantic_contract or {}).get("pending_question_target")
+            )
+            if pending_target != "time":
+                return False
+            temporal_scope = self._normalize_fact_hint(
+                (semantic_contract or {}).get("temporal_scope")
+            )
+            return temporal_scope not in {None, "none"}
+        if relation == "referent_followup":
+            return bool(self._normalize_booking_slot(merged_slots.get("datetime")))
+        return False
 
     @classmethod
     def _booking_service_slot_refined(
@@ -569,6 +604,41 @@ class TurnExecutor:
             )
         return prompt
 
+    def _maybe_append_promotions_booking_followup(
+        self,
+        *,
+        response_text: str,
+        tool_action: str,
+        tool_meta: Mapping[str, Any] | None,
+        pending_question_contract: dict[str, Any] | None,
+        semantic_contract: Mapping[str, Any] | None,
+    ) -> str:
+        if tool_action != "catalog.service_query":
+            return response_text
+        prompt_key = self._normalize_booking_slot((pending_question_contract or {}).get("next_question"))
+        expected_reply_type = self._normalize_booking_slot(
+            (pending_question_contract or {}).get("expected_reply_type")
+        )
+        if prompt_key is None:
+            if expected_reply_type == "service_choice":
+                prompt_key = "service"
+            elif expected_reply_type == "time":
+                prompt_key = "datetime"
+        if prompt_key not in {"service", "datetime"}:
+            return response_text
+        subject_kind = str((semantic_contract or {}).get("subject_kind") or "").strip().casefold() or None
+        if prompt_key == "service" and subject_kind not in {None, "general"}:
+            return response_text
+        if prompt_key == "datetime" and subject_kind != "service":
+            return response_text
+        info_sections = normalize_fact_ref_list((tool_meta or {}).get("info_sections") or [])
+        if "promotions" not in info_sections:
+            return response_text
+        followup_prompt = self._BOOKING_PROMPTS[prompt_key]
+        if followup_prompt in response_text:
+            return response_text
+        return f"{response_text}\n\n{followup_prompt}"
+
     def _execute_fact(
         self,
         decision: PolicyDecision,
@@ -611,9 +681,11 @@ class TurnExecutor:
             current_semantic_contract: dict[str, Any] | None,
             fallback_fact_refs: list[str] | None = None,
             resolution_reason: str | None = None,
+            fact_plan_override: FactPlanV1 | None = None,
         ) -> dict[str, Any] | None:
+            current_fact_plan = fact_plan_override or fact_plan
             fact_result = self._build_fact_result(
-                fact_plan,
+                current_fact_plan,
                 resolution_source=resolution_source,
                 response_text=response_text,
                 meta=base_meta,
@@ -633,7 +705,7 @@ class TurnExecutor:
                 build_fact_contract_meta(
                     base_meta,
                     fact_request=fact_request,
-                    fact_plan=fact_plan,
+                    fact_plan=current_fact_plan,
                     fact_result=fact_result,
                 ),
                 semantic_contract=current_semantic_contract,
@@ -665,7 +737,12 @@ class TurnExecutor:
             fact_refs - self._FIRST_FACT_FAMILY_REFS
         )
         unresolved_info_meta: dict[str, Any] | None = None
-        if decision.intent == "master_query" or "master" in fact_refs:
+        master_is_part_of_composable_multi_fact = "master" in fact_refs and len(
+            fact_refs & self._SERVICE_QUERY_COMPOSABLE_FACT_REFS
+        ) > 1
+        if (
+            decision.intent == "master_query" or "master" in fact_refs
+        ) and not mixed_first_fact_family_scope and not master_is_part_of_composable_multi_fact:
             master_service = self._resolve_fact_service_query(
                 decision=decision,
                 service_name=service_name,
@@ -710,6 +787,65 @@ class TurnExecutor:
                 service_name=service_name,
                 semantic_contract=semantic_contract,
             )
+            service_query_multi_fact_refs = [
+                ref
+                for ref in fact_plan.allowed_emitted_fact_refs
+                if ref in self._SERVICE_QUERY_COMPOSABLE_FACT_REFS
+            ]
+            if (
+                resolved_tool_action == "catalog.service_query"
+                and len(service_query_multi_fact_refs) > 1
+                and branch_id is not None
+            ):
+                composed_response_parts, composed_emitted_refs, composed_meta = (
+                    self._execute_service_query_multi_fact_composition(
+                        db=db,
+                        conversation_id=conversation_id,
+                        branch_id=branch_id,
+                        client_slug=client_slug,
+                        service_query=service_query,
+                        message_text=message_text,
+                        expected_reply_type=(
+                            pending_question_contract.get("expected_reply_type")
+                            if isinstance(pending_question_contract, dict)
+                            else None
+                        ),
+                        now=now,
+                        semantic_contract=semantic_contract,
+                        allowed_service_refs=list(service_query_multi_fact_refs),
+                    )
+                )
+                if composed_response_parts and len(composed_emitted_refs) > 1:
+                    composed_text = "\n\n".join(composed_response_parts)
+                    composed_fact_plan = self._project_composed_fact_plan(
+                        fact_plan,
+                        emitted_fact_refs=composed_emitted_refs,
+                    )
+                    composed_tool_meta = {
+                        "tool_action": resolved_tool_action,
+                        "tool_decision": "multi_truth_composed",
+                        "info_sections": composed_emitted_refs,
+                        "fact_composition": composed_meta or {
+                            "composition_scope": "service_query_multi_fact",
+                        },
+                    }
+                    if tool_execution_projection:
+                        composed_tool_meta["tool_execution_projection"] = tool_execution_projection
+                    finalized_composed_meta = _fact_meta(
+                        composed_tool_meta,
+                        response_text=composed_text,
+                        resolution_source="tool_registry_multi_truth",
+                        current_semantic_contract=semantic_contract,
+                        resolution_reason="service_query_multi_truth_composed",
+                        fact_plan_override=composed_fact_plan,
+                    )
+                    if finalized_composed_meta is not None:
+                        return RuntimeExecutionResult(
+                            text=composed_text,
+                            tool_action=resolved_tool_action,
+                            tool_decision="multi_truth_composed",
+                            meta=finalized_composed_meta,
+                        )
             tool_result = execute_tool_action(
                 db,
                 tool_action=resolved_tool_action,
@@ -733,9 +869,100 @@ class TurnExecutor:
                 tool_meta = dict(tool_result.decision_meta) if isinstance(tool_result.decision_meta, dict) else {}
                 if tool_execution_projection:
                     tool_meta["tool_execution_projection"] = tool_execution_projection
+                if mixed_first_fact_family_scope and resolved_tool_action == "catalog.location":
+                    first_emitted_refs = normalize_fact_ref_list(tool_meta.get("info_sections") or [])
+                    secondary_allowed_refs = [
+                        ref
+                        for ref in fact_plan.allowed_emitted_fact_refs
+                        if ref in self._FIRST_FACT_FAMILY_COMPOSABLE_SERVICE_REFS
+                    ]
+                    if first_emitted_refs and secondary_allowed_refs and branch_id is not None:
+                        secondary_response_parts, secondary_emitted_refs, secondary_composition_meta = (
+                            self._execute_secondary_service_fact_composition(
+                                db=db,
+                                conversation_id=conversation_id,
+                                branch_id=branch_id,
+                                client_slug=client_slug,
+                                service_query=service_query,
+                                message_text=message_text,
+                                expected_reply_type=(
+                                    pending_question_contract.get("expected_reply_type")
+                                    if isinstance(pending_question_contract, dict)
+                                    else None
+                                ),
+                                now=now,
+                                semantic_contract=semantic_contract,
+                                secondary_allowed_refs=list(secondary_allowed_refs),
+                            )
+                        )
+                        combined_emitted_ref_set = set(first_emitted_refs) | set(secondary_emitted_refs)
+                        composed_emitted_refs = [
+                            ref
+                            for ref in fact_plan.allowed_emitted_fact_refs
+                            if ref in combined_emitted_ref_set
+                        ]
+                        if (
+                            secondary_emitted_refs
+                            and any(
+                                ref in self._FIRST_FACT_FAMILY_REFS for ref in composed_emitted_refs
+                            )
+                            and any(
+                                ref in self._FIRST_FACT_FAMILY_COMPOSABLE_SERVICE_REFS
+                                for ref in composed_emitted_refs
+                            )
+                        ):
+                            composed_text_parts = [tool_result.response_text.strip()]
+                            for secondary_text in secondary_response_parts:
+                                if secondary_text not in composed_text_parts:
+                                    composed_text_parts.append(secondary_text)
+                            composed_text = "\n\n".join(composed_text_parts)
+                            composed_fact_plan = self._project_composed_fact_plan(
+                                fact_plan,
+                                emitted_fact_refs=composed_emitted_refs,
+                            )
+                            composed_tool_meta = {
+                                "tool_action": resolved_tool_action,
+                                "tool_decision": "multi_truth_composed",
+                                "info_sections": composed_emitted_refs,
+                                "fact_composition": {
+                                    "primary_tool_action": resolved_tool_action,
+                                    "primary_tool_decision": str(
+                                        tool_meta.get("tool_decision")
+                                        or tool_result.error_code
+                                        or "ok"
+                                    ),
+                                    "primary_info_sections": list(first_emitted_refs),
+                                },
+                            }
+                            if isinstance(secondary_composition_meta, dict):
+                                composed_tool_meta["fact_composition"].update(secondary_composition_meta)
+                            if tool_execution_projection:
+                                composed_tool_meta["tool_execution_projection"] = tool_execution_projection
+                            finalized_composed_meta = _fact_meta(
+                                composed_tool_meta,
+                                response_text=composed_text,
+                                resolution_source="tool_registry_multi_truth",
+                                current_semantic_contract=semantic_contract,
+                                resolution_reason="mixed_first_turn_multi_truth_composed",
+                                fact_plan_override=composed_fact_plan,
+                            )
+                            if finalized_composed_meta is not None:
+                                return RuntimeExecutionResult(
+                                    text=composed_text,
+                                    tool_action=resolved_tool_action,
+                                    tool_decision="multi_truth_composed",
+                                    meta=finalized_composed_meta,
+                                )
+                response_text = self._maybe_append_promotions_booking_followup(
+                    response_text=tool_result.response_text.strip(),
+                    tool_action=resolved_tool_action,
+                    tool_meta=tool_meta,
+                    pending_question_contract=pending_question_contract,
+                    semantic_contract=semantic_contract,
+                )
                 finalized_tool_meta = _fact_meta(
                     tool_meta,
-                    response_text=tool_result.response_text.strip(),
+                    response_text=response_text,
                     resolution_source="tool_registry",
                     current_semantic_contract=semantic_contract,
                     fallback_fact_refs=[
@@ -745,7 +972,7 @@ class TurnExecutor:
                 )
                 if finalized_tool_meta is not None:
                     return RuntimeExecutionResult(
-                        text=tool_result.response_text.strip(),
+                        text=response_text,
                         tool_action=resolved_tool_action,
                         tool_decision=str(tool_meta.get("tool_decision") or tool_result.error_code or "ok"),
                         meta=finalized_tool_meta,
@@ -789,6 +1016,30 @@ class TurnExecutor:
         )
         if explicit_pack_result is not None:
             return explicit_pack_result
+        direct_smalltalk_reply = self._resolve_direct_smalltalk_reply(
+            decision,
+            resolved_tool_action=resolved_tool_action,
+            fact_request=fact_request,
+            semantic_contract=semantic_contract,
+        )
+        if direct_smalltalk_reply is not None:
+            direct_smalltalk_meta = _fact_meta(
+                {
+                    "fact_fallback": False,
+                    "smalltalk_direct": True,
+                    "smalltalk_intent": self._normalize_fact_hint(decision.intent),
+                },
+                response_text=direct_smalltalk_reply,
+                resolution_source="semantic_smalltalk_direct",
+                current_semantic_contract=semantic_contract,
+                resolution_reason=self._normalize_fact_hint(decision.intent),
+            )
+            return RuntimeExecutionResult(
+                text=direct_smalltalk_reply,
+                tool_action=resolved_tool_action,
+                tool_decision="smalltalk_direct",
+                meta=direct_smalltalk_meta or {},
+            )
         should_attempt_info_resolution = decision.tool_action == "info" or (
             self._has_canonical_semantic_owner(decision) and bool(policy_info_refs)
         )
@@ -1230,6 +1481,293 @@ class TurnExecutor:
             return True
         return branch_id is not None
 
+    @staticmethod
+    def _project_composed_fact_plan(
+        fact_plan: FactPlanV1,
+        *,
+        emitted_fact_refs: list[str],
+    ) -> FactPlanV1:
+        projected_refs = normalize_fact_ref_list(emitted_fact_refs)
+        return fact_plan.model_copy(
+            update={
+                "allowed_emitted_sets": [projected_refs],
+                "allowed_emitted_fact_refs": projected_refs,
+            }
+        )
+
+    @staticmethod
+    def _execute_master_fact_for_composition(
+        *,
+        client_slug: str | None,
+        service_query: str | None,
+    ) -> tuple[str | None, dict[str, Any]]:
+        if not client_slug:
+            return None, {}
+        from app.services.pack_runtime_service import get_pack_runtime
+
+        pack_runtime = get_pack_runtime(client_slug)
+        master_resolution = pack_runtime.resolve_explicit_master_intent(
+            service_query=service_query,
+            force_master_intent=bool(service_query),
+        )
+        master_reply = pack_runtime.build_master_reply_from_pack(
+            message_text=None,
+            resolution=master_resolution,
+        )
+        if not (
+            master_reply
+            and isinstance(master_reply.response, str)
+            and master_reply.response.strip()
+        ):
+            return None, {}
+        master_meta = dict(master_reply.meta) if isinstance(master_reply.meta, dict) else {}
+        master_meta["tool_action"] = "catalog.service_query"
+        master_meta["tool_decision"] = master_reply.intent or "master"
+        master_meta["info_sections"] = normalize_fact_ref_list(
+            master_meta.get("info_sections") or ["master"]
+        )
+        return master_reply.response.strip(), master_meta
+
+    @staticmethod
+    def _execute_secondary_service_fact_composition(
+        *,
+        db: Any,
+        conversation_id: Any | None,
+        branch_id: Any,
+        client_slug: str | None,
+        service_query: str | None,
+        message_text: str | None,
+        expected_reply_type: str | None,
+        now: datetime,
+        semantic_contract: dict[str, Any] | None,
+        secondary_allowed_refs: list[str],
+    ) -> tuple[list[str], list[str], dict[str, Any] | None]:
+        if branch_id is None or not secondary_allowed_refs:
+            return [], [], None
+        from app.services.tool_registry_service import execute_tool_action
+
+        normalized_secondary_refs = list(secondary_allowed_refs)
+        response_parts: list[str] = []
+        emitted_refs: list[str] = []
+        secondary_steps: list[dict[str, Any]] = []
+        for ref in normalized_secondary_refs:
+            if ref == "master":
+                secondary_text, secondary_meta = TurnExecutor._execute_master_fact_for_composition(
+                    client_slug=client_slug,
+                    service_query=service_query,
+                )
+                if not secondary_text:
+                    continue
+            else:
+                secondary_result = execute_tool_action(
+                    db,
+                    tool_action="catalog.service_query",
+                    tool_args={},
+                    conversation_id=conversation_id,
+                    branch_id=branch_id,
+                    client_slug=client_slug,
+                    service_query=service_query if ref != "services_overview" else None,
+                    info_sections_hint=[ref],
+                    allowed_fact_refs=[ref],
+                    message_text=message_text,
+                    expected_reply_type=expected_reply_type,
+                    now=now,
+                    semantic_contract=semantic_contract,
+                )
+                if not (
+                    secondary_result.handled
+                    and isinstance(secondary_result.response_text, str)
+                    and secondary_result.response_text.strip()
+                ):
+                    continue
+                secondary_meta = (
+                    dict(secondary_result.decision_meta)
+                    if isinstance(secondary_result.decision_meta, dict)
+                    else {}
+                )
+                secondary_text = secondary_result.response_text.strip()
+            secondary_emitted_refs = normalize_fact_ref_list(secondary_meta.get("info_sections") or [])
+            if not secondary_emitted_refs:
+                continue
+            if secondary_text not in response_parts:
+                response_parts.append(secondary_text)
+            for emitted_ref in secondary_emitted_refs:
+                if emitted_ref not in emitted_refs:
+                    emitted_refs.append(emitted_ref)
+            secondary_steps.append(
+                {
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": str(
+                        secondary_meta.get("tool_decision")
+                        or secondary_result.error_code
+                        or ref
+                    ),
+                    "info_sections": list(secondary_emitted_refs),
+                }
+            )
+        if not response_parts or not emitted_refs:
+            return [], [], None
+        composition_meta: dict[str, Any] = {
+            "secondary_tool_action": "catalog.service_query",
+            "secondary_info_sections": list(emitted_refs),
+        }
+        if len(secondary_steps) == 1:
+            composition_meta["secondary_tool_decision"] = secondary_steps[0]["tool_decision"]
+        else:
+            composition_meta["secondary_tool_decision"] = "multi_step"
+            composition_meta["secondary_steps"] = secondary_steps
+        return response_parts, emitted_refs, composition_meta
+
+    @classmethod
+    def _execute_service_query_multi_fact_composition(
+        cls,
+        *,
+        db: Any,
+        conversation_id: Any | None,
+        branch_id: Any,
+        client_slug: str | None,
+        service_query: str | None,
+        message_text: str | None,
+        expected_reply_type: str | None,
+        now: datetime,
+        semantic_contract: dict[str, Any] | None,
+        allowed_service_refs: list[str],
+    ) -> tuple[list[str], list[str], dict[str, Any] | None]:
+        composable_refs = [
+            ref for ref in allowed_service_refs if ref in cls._SERVICE_QUERY_COMPOSABLE_FACT_REFS
+        ]
+        if len(composable_refs) <= 1 or not any(
+            ref in cls._SERVICE_QUERY_MULTI_FACT_REFS for ref in composable_refs
+        ):
+            return [], [], None
+        response_by_ref: dict[str, str] = {}
+        emitted_refs: list[str] = []
+        steps: list[dict[str, Any]] = []
+        from app.services.tool_registry_service import execute_tool_action
+
+        for ref in composable_refs:
+            if ref == "master":
+                response_text, service_meta = cls._execute_master_fact_for_composition(
+                    client_slug=client_slug,
+                    service_query=service_query,
+                )
+                if not response_text:
+                    continue
+                ref_tool_action = "catalog.service_query"
+            elif ref in cls._SERVICE_QUERY_MULTI_FACT_REFS:
+                ref_tool_action = "catalog.service_query"
+                ref_service_query = service_query if ref != "services_overview" else None
+                service_result = execute_tool_action(
+                    db,
+                    tool_action=ref_tool_action,
+                    tool_args={},
+                    conversation_id=conversation_id,
+                    branch_id=branch_id,
+                    client_slug=client_slug,
+                    service_query=ref_service_query,
+                    info_sections_hint=[ref],
+                    allowed_fact_refs=[ref],
+                    message_text=message_text,
+                    expected_reply_type=expected_reply_type,
+                    now=now,
+                    semantic_contract=semantic_contract,
+                )
+                if not (
+                    service_result.handled
+                    and isinstance(service_result.response_text, str)
+                    and service_result.response_text.strip()
+                ):
+                    continue
+                service_meta = (
+                    dict(service_result.decision_meta)
+                    if isinstance(service_result.decision_meta, dict)
+                    else {}
+                )
+                response_text = service_result.response_text.strip()
+            elif ref in cls._LOCATION_FACT_REFS:
+                ref_tool_action = "catalog.location"
+                ref_service_query = None
+                service_result = execute_tool_action(
+                    db,
+                    tool_action=ref_tool_action,
+                    tool_args={},
+                    conversation_id=conversation_id,
+                    branch_id=branch_id,
+                    client_slug=client_slug,
+                    service_query=ref_service_query,
+                    info_sections_hint=[ref],
+                    allowed_fact_refs=[ref],
+                    message_text=message_text,
+                    expected_reply_type=expected_reply_type,
+                    now=now,
+                    semantic_contract=semantic_contract,
+                )
+                if not (
+                    service_result.handled
+                    and isinstance(service_result.response_text, str)
+                    and service_result.response_text.strip()
+                ):
+                    continue
+                service_meta = (
+                    dict(service_result.decision_meta)
+                    if isinstance(service_result.decision_meta, dict)
+                    else {}
+                )
+                response_text = service_result.response_text.strip()
+            else:
+                continue
+            current_refs = normalize_fact_ref_list(service_meta.get("info_sections") or [])
+            if not current_refs:
+                continue
+            for emitted_ref in current_refs:
+                if emitted_ref in composable_refs and emitted_ref not in response_by_ref:
+                    response_by_ref[emitted_ref] = response_text
+                if emitted_ref in composable_refs and emitted_ref not in emitted_refs:
+                    emitted_refs.append(emitted_ref)
+            steps.append(
+                {
+                    "tool_action": ref_tool_action,
+                    "tool_decision": str(
+                        service_meta.get("tool_decision")
+                        or service_result.error_code
+                        or ref
+                    ),
+                    "info_sections": list(current_refs),
+                }
+            )
+        ordered_emitted_refs = [ref for ref in composable_refs if ref in emitted_refs]
+        if len(ordered_emitted_refs) <= 1:
+            return [], [], None
+        response_parts: list[str] = []
+        for ref in ordered_emitted_refs:
+            response_text = response_by_ref.get(ref)
+            if response_text and response_text not in response_parts:
+                response_parts.append(response_text)
+        if len(response_parts) <= 1:
+            return [], [], None
+        secondary_tool_actions = {step["tool_action"] for step in steps[1:]}
+        composition_scope = (
+            "service_query_cross_tool_fact"
+            if any(ref in cls._LOCATION_FACT_REFS for ref in ordered_emitted_refs)
+            else "service_query_multi_fact"
+        )
+        composition_meta: dict[str, Any] = {
+            "primary_tool_action": steps[0]["tool_action"],
+            "primary_tool_decision": steps[0]["tool_decision"],
+            "primary_info_sections": list(steps[0]["info_sections"]),
+            "secondary_tool_action": (
+                steps[1]["tool_action"] if len(secondary_tool_actions) == 1 else "multi_tool"
+            ),
+            "secondary_info_sections": list(ordered_emitted_refs[1:]),
+            "composition_scope": composition_scope,
+        }
+        if len(steps) == 2:
+            composition_meta["secondary_tool_decision"] = steps[1]["tool_decision"]
+        else:
+            composition_meta["secondary_tool_decision"] = "multi_step"
+            composition_meta["secondary_steps"] = steps[1:]
+        return response_parts, ordered_emitted_refs, composition_meta
+
     def _resolve_policy_info_refs(self, decision: PolicyDecision) -> list[str]:
         refs: list[str] = []
         seen: set[str] = set()
@@ -1253,6 +1791,32 @@ class TurnExecutor:
         if isinstance(semantic_contract, dict):
             _remember(semantic_contract.get("capability"))
         return refs
+
+    @classmethod
+    def _resolve_direct_smalltalk_reply(
+        cls,
+        decision: PolicyDecision,
+        *,
+        resolved_tool_action: str,
+        fact_request: FactRequestV1,
+        semantic_contract: dict[str, Any] | None,
+    ) -> str | None:
+        if not cls._has_canonical_semantic_owner(decision):
+            return None
+        if resolved_tool_action != "info":
+            return None
+        if fact_request.requested_fact_refs:
+            return None
+        intent = cls._normalize_fact_hint(decision.intent)
+        if intent is None:
+            return None
+        reply = cls._DIRECT_SMALLTALK_RESPONSES.get(intent)
+        if reply is None:
+            return None
+        subject_kind = cls._normalize_fact_hint((semantic_contract or {}).get("subject_kind"))
+        if subject_kind not in {None, "general"}:
+            return None
+        return reply
 
     def _execute_owner_bound_pack_fact(
         self,

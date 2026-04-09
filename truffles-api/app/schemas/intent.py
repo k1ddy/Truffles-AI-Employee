@@ -129,6 +129,7 @@ SEMANTIC_SUBJECT_KIND_VALUES = {
 SEMANTIC_CAPABILITY_VALUES = {
     "pricing",
     "duration",
+    "master",
     "location",
     "hours",
     "promotions",

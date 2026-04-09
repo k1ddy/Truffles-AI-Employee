@@ -1593,6 +1593,7 @@ def _has_contact_signal(
         r"\bномер(?:\s+тел(?:ефона)?)?\b",
         r"\bтел(?:ефон)?\b",
         r"\bкак\s+связ",
+        r"\bсвяз",
         r"\bкуда\s+напис",
         r"\bконтакт",
         r"\bватсап\b",
@@ -2998,7 +2999,7 @@ def format_reply_from_truth(
     truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
     slots = slots or {}
 
-    if intent in {"location", "hours", "parking"}:
+    if intent in {"location", "hours", "parking", "contact"}:
         address = truth.get("salon", {}).get("address", {})
         hours = truth.get("salon", {}).get("hours", {})
         if intent == "location":
@@ -3015,6 +3016,8 @@ def format_reply_from_truth(
             parking = truth.get("salon", {}).get("parking", {})
             details = parking.get("details") or ""
             return details or "Есть парковка рядом с салоном."
+        if intent == "contact":
+            return _format_contact_reply(client_slug=client_slug, truth=truth)
     if intent == "location_directions":
         address = truth.get("salon", {}).get("address", {})
         full_address = address.get("full")

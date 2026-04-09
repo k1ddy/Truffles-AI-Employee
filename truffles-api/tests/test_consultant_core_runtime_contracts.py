@@ -3232,6 +3232,10 @@ def test_turn_executor_realizes_slot_constraint_collect_from_canonical_owner_con
     assert result.meta.get("pending_question_act") == "slot_constraint"
     assert result.meta.get("pending_question_target") == "time"
     assert result.meta.get("alternate_datetime") == "пятница утром"
+    assert result.meta.get("slot_values") == {
+        "service": "Маникюр",
+        "datetime": "пятница утром",
+    }
     assert result.meta.get("question_contract") is True
 
 
@@ -3350,6 +3354,156 @@ def test_turn_executor_slot_constraint_with_day_only_anchor_asks_precise_time() 
     assert result.meta.get("pending_question_act") == "slot_constraint"
     assert result.meta.get("pending_question_target") == "time"
     assert result.meta.get("alternate_datetime") == "сегодня"
+
+
+def test_turn_executor_slot_constraint_preserves_candidate_datetime_in_runtime_profile() -> None:
+    planner = TurnPlanner()
+    runtime = ConsultantRuntime()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "bookability",
+            "tool_action_hint": "collect",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "temporal_scope": "day",
+            "resolution_mode": "slot_constraint",
+            "expected_reply_type": "time",
+            "reason": "active_booking_temporal_clue_followup",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "active_question_relation": "slot_constraint",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "alternate_datetime": "завтра вечером",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        binding_tool_args={},
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    execution = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Давайте на завтра вечером.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime(2026, 4, 7, 0, 0, tzinfo=timezone.utc),
+    )
+
+    updated, dialog_state, booking_payload = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution.meta,
+        now=datetime(2026, 4, 7, 0, 0, tzinfo=timezone.utc),
+    )
+    runtime_state = LoadedRuntimeState(
+        context=updated,
+        dialog_state=dialog_state,
+        booking_state=booking_payload or {},
+    )
+
+    profile = runtime._build_policy_core_memory_profile(runtime_state)
+
+    assert execution.meta.get("slot_values") == {
+        "service": "Маникюр",
+        "datetime": "завтра вечером",
+    }
+    assert (booking_payload or {}).get("datetime") == "завтра вечером"
+    assert profile["slot_state"]["datetime"] == "завтра вечером"
+    assert profile["semantic_contract"]["alternate_datetime"] == "завтра вечером"
+
+
+def test_turn_executor_slot_constraint_replaces_stale_datetime_with_new_candidate() -> None:
+    planner = TurnPlanner()
+    runtime = ConsultantRuntime()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "action": "collect",
+            "intent": "booking",
+            "goal": "booking",
+            "capability": "bookability",
+            "tool_action_hint": "collect",
+            "slots": {"service": "Маникюр"},
+            "subject_kind": "booking",
+            "temporal_scope": "day",
+            "resolution_mode": "slot_constraint",
+            "expected_reply_type": "time",
+            "reason": "active_booking_temporal_clue_followup",
+            "pending_question_act": "slot_constraint",
+            "pending_question_target": "time",
+            "active_question_relation": "slot_constraint",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "alternate_datetime": "завтра вечером",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "memory",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        binding_tool_args={},
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    execution = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Давайте на завтра вечером.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр", "datetime": "11:30"},
+        user_name=None,
+        user_phone=None,
+        now=datetime(2026, 4, 7, 0, 0, tzinfo=timezone.utc),
+    )
+
+    updated, dialog_state, booking_payload = DialogStateService().write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta=execution.meta,
+        now=datetime(2026, 4, 7, 0, 0, tzinfo=timezone.utc),
+    )
+    runtime_state = LoadedRuntimeState(
+        context=updated,
+        dialog_state=dialog_state,
+        booking_state=booking_payload or {},
+    )
+
+    profile = runtime._build_policy_core_memory_profile(runtime_state)
+
+    assert execution.meta.get("slot_values") == {
+        "service": "Маникюр",
+        "datetime": "завтра вечером",
+    }
+    assert (booking_payload or {}).get("datetime") == "завтра вечером"
+    assert profile["slot_state"]["datetime"] == "завтра вечером"
+    assert profile["semantic_contract"]["alternate_datetime"] == "завтра вечером"
 
 
 def test_turn_executor_requested_slot_availability_with_carried_day_asks_time_only() -> None:
@@ -3519,6 +3673,62 @@ def test_turn_executor_realizes_specialist_followup_collect_prompt_from_canonica
     assert result.meta["pending_question_contract"]["pending_question_target"] == "specialist"
     assert result.meta["pending_question_contract"]["active_question_relation"] == "referent_followup"
     assert "semantic_contract" not in result.meta
+
+
+def test_turn_executor_specialist_followup_with_carried_day_asks_only_for_time() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "reason": "user_requested_specific_master_keep_time_collect_with_carried_day",
+            "goal": "booking",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                },
+                "specialist": {
+                    "value": "Динара",
+                    "entity_type": "specialist",
+                    "source_ref": "user_message",
+                },
+            },
+            "subject_kind": "specialist",
+            "capability": "bookability",
+            "resolution_mode": "referent_followup",
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "temporal_scope": "weekday",
+        },
+        interaction_owner="llm_policy_core_booking",
+        interaction_relation="referent_followup",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Я хочу записаться к Динаре.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр", "datetime": "пятницу"},
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert "Динара" in result.text
+    assert "мастер" in result.text.casefold()
+    assert "время" in result.text.casefold()
+    assert "дат" not in result.text.casefold()
+    assert result.tool_decision == "datetime"
+    assert result.meta["pending_question_contract"]["pending_question_target"] == "specialist"
+    assert result.meta["pending_question_contract"]["active_question_relation"] == "referent_followup"
 
 
 def test_turn_executor_adds_pricing_info_sections_for_price_reply() -> None:
@@ -3832,6 +4042,120 @@ def test_turn_executor_rejects_out_of_plan_tool_fact_scope(monkeypatch) -> None:
     assert result.meta["fact_contract"]["result"]["scope_verdict"] == "empty"
 
 
+def test_turn_executor_renders_owner_greeting_smalltalk_without_info_fallback() -> None:
+    planner = TurnPlanner()
+    semantic_payload = build_test_semantic_decision_payload(
+        {
+            "intent": "greeting",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "reason": "user_greeting",
+            "subject_kind": "general",
+            "resolution_mode": "direct",
+            "temporal_scope": "none",
+            "goal": "greeting",
+        }
+    )
+    binding_payload = {
+        "schema_version": "binding_plan.v1",
+        "binding_id": "binding-owner-greeting",
+        "decision_id": semantic_payload["decision_id"],
+        "binding_outcome_type": "tool_call",
+        "selected_tool_or_workflow_ref": "info",
+        "authz_scope": {},
+        "resolved_args": {},
+        "timeout_policy": {},
+        "retry_policy": {},
+        "idempotency_key": semantic_payload["decision_id"],
+        "deny_reason_code": None,
+        "degrade_reason_code": None,
+        "handoff_reason_code": None,
+    }
+    decision = planner._build_policy_core_decision(
+        semantic_payload,
+        binding_plan_payload=binding_payload,
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Здравствуйте",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == "Здравствуйте! Могу помочь с услугами, ценами или записью."
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "smalltalk_direct"
+    assert result.meta["smalltalk_direct"] is True
+    assert result.meta["smalltalk_intent"] == "greeting"
+    assert result.meta["fact_fallback"] is False
+    assert result.meta.get("fact_fallback_reason") is None
+    assert result.meta["fact_contract"]["result"]["response_generated"] is True
+    assert result.meta["fact_contract"]["result"]["resolution_source"] == "semantic_smalltalk_direct"
+
+
+def test_turn_executor_renders_owner_thanks_smalltalk_without_info_fallback() -> None:
+    planner = TurnPlanner()
+    semantic_payload = build_test_semantic_decision_payload(
+        {
+            "intent": "thanks",
+            "action": "fact",
+            "tool_action_hint": "info",
+            "reason": "user_thanks",
+            "subject_kind": "general",
+            "resolution_mode": "direct",
+            "temporal_scope": "none",
+            "goal": "thanks",
+        }
+    )
+    binding_payload = {
+        "schema_version": "binding_plan.v1",
+        "binding_id": "binding-owner-thanks",
+        "decision_id": semantic_payload["decision_id"],
+        "binding_outcome_type": "tool_call",
+        "selected_tool_or_workflow_ref": "info",
+        "authz_scope": {},
+        "resolved_args": {},
+        "timeout_policy": {},
+        "retry_policy": {},
+        "idempotency_key": semantic_payload["decision_id"],
+        "deny_reason_code": None,
+        "degrade_reason_code": None,
+        "handoff_reason_code": None,
+    }
+    decision = planner._build_policy_core_decision(
+        semantic_payload,
+        binding_plan_payload=binding_payload,
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Спасибо",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == "Рад помочь. Если нужно — подскажу по услугам, ценам или записи."
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "smalltalk_direct"
+    assert result.meta["smalltalk_direct"] is True
+    assert result.meta["smalltalk_intent"] == "thanks"
+    assert result.meta["fact_fallback"] is False
+    assert result.meta.get("fact_fallback_reason") is None
+    assert result.meta["fact_contract"]["result"]["response_generated"] is True
+    assert result.meta["fact_contract"]["result"]["resolution_source"] == "semantic_smalltalk_direct"
+
+
 def test_tool_registry_catalog_service_query_blocks_out_of_plan_fact_reply(monkeypatch) -> None:
     from app.services import tool_registry_service
 
@@ -4123,6 +4447,1905 @@ def test_turn_executor_first_fact_family_blocks_mixed_scope_direct_truth_and_pac
     assert result.meta["fact_emitted_refs"] == []
 
 
+def test_turn_executor_mixed_first_turn_fact_scope_hours_and_service_presence_falls_back_to_unresolved(monkeypatch) -> None:
+    calls = {"tool_registry": 0, "direct_truth": 0, "pack_runtime": 0}
+
+    def _execute_tool_action(db, **kwargs):
+        calls["tool_registry"] += 1
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00.",
+            error_code=None,
+            decision_meta={
+                "tool_action": kwargs["tool_action"],
+                "tool_decision": "hours",
+                "info_sections": ["hours"],
+            },
+            trace={"stage": "tool_registry", "decision": "hours"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+    monkeypatch.setattr(
+        "app.services.pack_runtime_service.format_reply_from_truth",
+        lambda *args, **kwargs: calls.__setitem__("direct_truth", calls["direct_truth"] + 1) or "Маникюр есть.",
+    )
+    monkeypatch.setattr(
+        "app.services.pack_runtime_compat.get_pack_decision",
+        lambda *args, **kwargs: calls.__setitem__("pack_runtime", calls["pack_runtime"] + 1)
+        or SimpleNamespace(
+            response="Маникюр есть.",
+            intent="services_overview",
+            meta={"info_sections": ["services_overview"]},
+            action="reply",
+        ),
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "services_overview"],
+            "fact_refs": ["hours", "services_overview"],
+            "reason": "user_asks_working_hours_and_service_is_manicure",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Здравствуйте! Вы сегодня работаете? Вы маникюром занимаетесь?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == {"tool_registry": 1, "direct_truth": 0, "pack_runtime": 0}
+    assert result.text == "Я уточню это для вас."
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "fact_family_unresolved"
+    assert result.meta["fact_fallback"] is True
+    assert result.meta["fact_fallback_reason"] == "first_fact_family_mixed_scope_unresolved"
+    assert result.meta["fact_family_cutover"] == "location_hours_parking"
+    assert result.meta["family_overlap_fact_refs"] == ["hours"]
+    assert result.meta["fact_requested_refs"] == ["hours", "services_overview"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "services_overview"]
+    assert result.meta["fact_emitted_refs"] == []
+
+
+def test_turn_executor_composes_mixed_first_turn_hours_and_pricing(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "hours",
+                    "info_sections": ["hours"],
+                },
+                trace={"stage": "tool_registry", "decision": "hours"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            if kwargs["allowed_fact_refs"] == ["pricing"]:
+                assert kwargs["service_query"] == "педикюр"
+                return SimpleNamespace(
+                    handled=True,
+                    ok=True,
+                    response_text="Педикюр — 4 500 ₸.",
+                    error_code=None,
+                    decision_meta={
+                        "tool_action": "catalog.service_query",
+                        "tool_decision": "pricing",
+                        "info_sections": ["pricing"],
+                    },
+                    trace={"stage": "tool_registry", "decision": "pricing"},
+                )
+            if kwargs["allowed_fact_refs"] == ["services_overview"]:
+                return SimpleNamespace(
+                    handled=False,
+                    ok=False,
+                    response_text=None,
+                    error_code="fact_scope_not_needed",
+                    decision_meta={},
+                    trace={"stage": "tool_registry", "decision": "fact_scope_not_needed"},
+                )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "pricing", "services_overview"],
+            "fact_refs": ["hours", "pricing", "services_overview"],
+            "reason": "user_asks_working_hours_and_pricing_for_pedikur",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "педикюр",
+                    "entity_id": "svc:pedicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Здравствуйте! Вы сегодня работаете? Сколько стоит педикюр?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["hours", "pricing", "services_overview"]),
+        ("catalog.service_query", ["pricing"]),
+        ("catalog.service_query", ["services_overview"]),
+    ]
+    assert result.text == "Работаем ежедневно, без выходных, с 9:00 до 21:00.\n\nПедикюр — 4 500 ₸."
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["hours", "pricing"]
+    assert result.meta["fact_requested_refs"] == ["hours", "pricing", "services_overview"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "pricing"]
+    assert result.meta["fact_emitted_refs"] == ["hours", "pricing"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["pricing"]
+
+
+def test_turn_executor_composes_mixed_first_turn_hours_and_services_overview(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "hours",
+                    "info_sections": ["hours"],
+                },
+                trace={"stage": "tool_registry", "decision": "hours"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert kwargs["service_query"] is None
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Мы салон красоты: парикмахерские услуги, маникюр и педикюр.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "services_overview",
+                    "info_sections": ["services_overview"],
+                },
+                trace={"stage": "tool_registry", "decision": "services_overview"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "services_overview"],
+            "fact_refs": ["hours", "services_overview"],
+            "reason": "user_asks_working_hours_and_service_presence_for_manicure",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Здравствуйте! Вы сегодня работаете? Вы маникюром занимаетесь?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["hours", "services_overview"]),
+        ("catalog.service_query", ["services_overview"]),
+    ]
+    assert (
+        result.text
+        == "Работаем ежедневно, без выходных, с 9:00 до 21:00.\n\n"
+        "Мы салон красоты: парикмахерские услуги, маникюр и педикюр."
+    )
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["hours", "services_overview"]
+    assert result.meta["fact_requested_refs"] == ["hours", "services_overview"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "services_overview"]
+    assert result.meta["fact_emitted_refs"] == ["hours", "services_overview"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["services_overview"]
+
+
+def test_turn_executor_composes_mixed_first_turn_hours_promotions_and_contact(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00. Телефон в карточке салона не указан. Instagram: https://instagram.com/mira_beauty_kz.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["hours", "contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert kwargs["service_query"] == "маникюр"
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Официальные акции: Первое посещение: 10% (на услуги).",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "promotions", "contact"],
+            "fact_refs": ["hours", "promotions", "contact"],
+            "reason": "user_asks_working_hours_promotions_and_contact_for_manicure",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Вы сегодня работаете, есть акции на маникюр и как с вами связаться?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["hours", "promotions", "contact"]),
+        ("catalog.service_query", ["promotions"]),
+    ]
+    assert "Работаем ежедневно" in result.text
+    assert "Официальные акции" in result.text
+    assert "Instagram" in result.text
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["hours", "promotions", "contact"]
+    assert result.meta["fact_requested_refs"] == ["hours", "promotions", "contact"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "promotions", "contact"]
+    assert result.meta["fact_emitted_refs"] == ["hours", "promotions", "contact"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["promotions"]
+
+
+def test_turn_executor_composes_mixed_first_turn_hours_location_and_promotions(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00. Мы находимся по адресу: Абая 10.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["hours", "location"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert kwargs["service_query"] == "маникюр"
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Официальные акции: Первое посещение: 10% (на услуги).",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "location", "promotions"],
+            "fact_refs": ["hours", "location", "promotions"],
+            "reason": "user_asks_working_hours_location_and_promotions_for_manicure",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Вы сегодня работаете, есть акции на маникюр и где находитесь?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["hours", "location", "promotions"]),
+        ("catalog.service_query", ["promotions"]),
+    ]
+    assert "Работаем ежедневно" in result.text
+    assert "Абая 10" in result.text
+    assert "Официальные акции" in result.text
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_requested_refs"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_emitted_refs"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["promotions"]
+
+
+def test_turn_executor_composes_general_hours_location_and_promotions(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00. Мы находимся по адресу: Абая 10.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["hours", "location"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert not kwargs.get("service_query")
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Официальные акции: Первое посещение: 10% (на услуги).",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "hours",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "location", "promotions"],
+            "fact_refs": ["hours", "location", "promotions"],
+            "reason": "user_asks_working_hours_location_and_promotions_without_grounded_service",
+            "goal": "info",
+            "capability": "hours",
+            "subject_kind": "general",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="general_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Вы сегодня работаете, есть акции и где находитесь?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["hours", "location", "promotions"]),
+        ("catalog.service_query", ["promotions"]),
+    ]
+    assert "Работаем ежедневно" in result.text
+    assert "Абая 10" in result.text
+    assert "Официальные акции" in result.text
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_requested_refs"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_emitted_refs"] == ["hours", "location", "promotions"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["promotions"]
+
+
+def test_turn_executor_composes_general_hours_location_promotions_and_contact(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Работаем ежедневно, без выходных, с 9:00 до 21:00. Адрес: Абая 10. Instagram: https://instagram.com/mira_beauty_kz.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["hours", "location", "contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert not kwargs.get("service_query")
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Официальные акции: Первое посещение: 10% (на услуги).",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["hours", "location", "promotions", "contact"],
+            "fact_refs": ["hours", "location", "promotions", "contact"],
+            "reason": "user_requests combined hours+promotions+location+contact facts",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "general",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="general_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Вы сегодня работаете, есть акции, где находитесь и как с вами связаться?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["hours", "location", "promotions", "contact"]),
+        ("catalog.service_query", ["promotions"]),
+    ]
+    assert "Работаем ежедневно" in result.text
+    assert "Instagram" in result.text
+    assert "Официальные акции" in result.text
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["hours", "location", "promotions", "contact"]
+    assert result.meta["fact_requested_refs"] == ["hours", "location", "promotions", "contact"]
+    assert result.meta["fact_allowed_refs"] == ["hours", "location", "promotions", "contact"]
+    assert result.meta["fact_emitted_refs"] == ["hours", "location", "promotions", "contact"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["promotions"]
+
+
+def test_turn_executor_composes_mixed_first_turn_location_and_services_overview(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Мы находимся по адресу: Абая 10.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "location",
+                    "info_sections": ["location"],
+                },
+                trace={"stage": "tool_registry", "decision": "location"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            assert kwargs["service_query"] is None
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Доступны маникюр, педикюр и стрижки.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "services_overview",
+                    "info_sections": ["services_overview"],
+                },
+                trace={"stage": "tool_registry", "decision": "services_overview"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["location", "services_overview"],
+            "fact_refs": ["location", "services_overview"],
+            "reason": "user_asks_services_and_address",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "general",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Какие услуги у вас есть и адрес, пожалуйста.",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["location", "services_overview"]),
+        ("catalog.service_query", ["services_overview"]),
+    ]
+    assert result.text == "Мы находимся по адресу: Абая 10.\n\nДоступны маникюр, педикюр и стрижки."
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["location", "services_overview"]
+    assert result.meta["fact_allowed_refs"] == ["location", "services_overview"]
+    assert result.meta["fact_emitted_refs"] == ["location", "services_overview"]
+
+
+def test_turn_executor_composes_mixed_first_turn_location_pricing_and_duration(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Адрес: Абая 150.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "location",
+                    "info_sections": ["location"],
+                },
+                trace={"stage": "tool_registry", "decision": "location"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["duration"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр обычно длится 40–60 минут.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "duration",
+                    "info_sections": ["duration"],
+                },
+                trace={"stage": "tool_registry", "decision": "duration"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["location", "pricing", "duration"],
+            "fact_refs": ["location", "pricing", "duration"],
+            "reason": "user_asks_location_price_and_duration_for_manicure",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Сколько стоит маникюр, сколько длится и где находитесь?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["location", "pricing", "duration"]),
+        ("catalog.service_query", ["pricing"]),
+        ("catalog.service_query", ["duration"]),
+    ]
+    assert result.text == (
+        "Адрес: Абая 150.\n\nМаникюр классический — 2 500 ₸.\n\nМаникюр обычно длится 40–60 минут."
+    )
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["location", "pricing", "duration"]
+    assert result.meta["fact_allowed_refs"] == ["location", "pricing", "duration"]
+    assert result.meta["fact_emitted_refs"] == ["location", "pricing", "duration"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["pricing", "duration"]
+    assert result.meta["fact_composition"]["secondary_tool_decision"] == "multi_step"
+
+
+def test_turn_executor_composes_mixed_first_turn_location_pricing_and_parking(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            assert kwargs.get("allowed_fact_refs") == ["location", "pricing", "parking"]
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Адрес: Абая 150.\n\nБесплатная парковка во дворе.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["location", "parking"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "pack_refs": ["location", "pricing", "parking"],
+            "fact_refs": ["location", "pricing", "parking"],
+            "reason": "user_asked_location_price_parking_for_grounded_service",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Где вы находитесь, сколько стоит маникюр и есть парковка?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["location", "pricing", "parking"]),
+        ("catalog.service_query", ["pricing"]),
+    ]
+    assert result.text == (
+        "Адрес: Абая 150.\n\nБесплатная парковка во дворе.\n\nМаникюр классический — 2 500 ₸."
+    )
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["location", "pricing", "parking"]
+    assert result.meta["fact_requested_refs"] == ["location", "pricing", "parking"]
+    assert result.meta["fact_allowed_refs"] == ["location", "pricing", "parking"]
+    assert result.meta["fact_emitted_refs"] == ["location", "pricing", "parking"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["pricing"]
+
+
+def test_turn_executor_composes_mixed_first_turn_location_pricing_and_contact(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            assert kwargs.get("allowed_fact_refs") == ["location", "pricing", "contact"]
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Адрес: Абая 150.\n\nWhatsApp: +7 700 000 00 00.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["location", "contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "pack_refs": ["location", "pricing", "contact"],
+            "fact_refs": ["location", "pricing", "contact"],
+            "reason": "user_asked_location_price_contact_for_grounded_service",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Где вы находитесь, сколько стоит маникюр и как с вами связаться?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["location", "pricing", "contact"]),
+        ("catalog.service_query", ["pricing"]),
+    ]
+    assert result.text == (
+        "Адрес: Абая 150.\n\nWhatsApp: +7 700 000 00 00.\n\nМаникюр классический — 2 500 ₸."
+    )
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["location", "pricing", "contact"]
+    assert result.meta["fact_requested_refs"] == ["location", "pricing", "contact"]
+    assert result.meta["fact_allowed_refs"] == ["location", "pricing", "contact"]
+    assert result.meta["fact_emitted_refs"] == ["location", "pricing", "contact"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["pricing"]
+
+
+def test_turn_executor_composes_mixed_first_turn_location_pricing_master_and_contact(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+    truth = {
+        "services_catalog": {
+            "services": [
+                {
+                    "name": "Маникюр",
+                    "aliases": ["маникюр"],
+                    "price_items": ["Маникюр классический"],
+                    "duration_text": "Обычно 45–90 минут.",
+                }
+            ],
+            "duration_clarify": "По времени зависит от услуги. Какая именно?",
+        },
+        "price_list": [
+            {
+                "category": "Маникюр",
+                "items": [{"name": "Маникюр классический", "price": 2500}],
+            }
+        ],
+        "team": {
+            "nails": "Нейл-мастера 5+ лет, работают с классическим и аппаратным маникюром."
+        },
+        "masters_catalog": {
+            "specialists": [
+                {
+                    "name": "Алия",
+                    "services": ["Маникюр"],
+                    "experience": "5+ лет",
+                    "highlight": "классический маникюр",
+                }
+            ]
+        },
+    }
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.location":
+            assert kwargs.get("allowed_fact_refs") == ["location", "pricing", "master", "contact"]
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Адрес: Абая 150.\n\nWhatsApp: +7 700 000 00 00.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["location", "contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "pack_refs": ["location", "pricing", "master", "contact"],
+            "fact_refs": ["location", "pricing", "master", "contact"],
+            "reason": "user_asked_location_price_master_contact_for_grounded_service",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    with use_runtime_truth_override(_runtime_truth_payload(truth)):
+        result = TurnExecutor().execute(
+            decision,
+            db=object(),
+            message_text="Где вы находитесь, сколько стоит маникюр, кто делает маникюр и как с вами связаться?",
+            client_slug="demo_salon",
+            branch_id=uuid4(),
+            booking_state=None,
+            user_name=None,
+            user_phone=None,
+            now=datetime.now(timezone.utc),
+        )
+
+    assert calls == [
+        ("catalog.location", ["location", "pricing", "master", "contact"]),
+        ("catalog.service_query", ["pricing"]),
+    ]
+    assert "Адрес: Абая 150." in result.text
+    assert "WhatsApp: +7 700 000 00 00." in result.text
+    assert "Маникюр классический — 2 500 ₸." in result.text
+    assert "Алия" in result.text
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["location", "pricing", "master", "contact"]
+    assert result.meta["fact_requested_refs"] == ["location", "pricing", "master", "contact"]
+    assert result.meta["fact_allowed_refs"] == ["location", "pricing", "master", "contact"]
+    assert result.meta["fact_emitted_refs"] == ["location", "pricing", "master", "contact"]
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["pricing", "master"]
+
+
+def test_turn_executor_composes_promotions_master_and_contact(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+    truth = {
+        "services_catalog": {
+            "services": [
+                {
+                    "name": "Маникюр",
+                    "aliases": ["маникюр"],
+                    "price_items": ["Маникюр классический"],
+                    "duration_text": "Обычно 45–90 минут.",
+                }
+            ],
+        },
+        "promotions": {
+            "items": [
+                {
+                    "title": "Скидка 10% на маникюр по будням",
+                    "description": "Действует по будням до 16:00.",
+                }
+            ]
+        },
+        "team": {
+            "nails": "Нейл-мастера 5+ лет, работают с классическим и аппаратным маникюром."
+        },
+        "masters_catalog": {
+            "specialists": [
+                {
+                    "name": "Алия",
+                    "services": ["Маникюр"],
+                    "experience": "5+ лет",
+                    "highlight": "классический маникюр",
+                }
+            ]
+        },
+    }
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["promotions"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Скидка 10% на маникюр по будням до 16:00.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "promotions",
+                    "info_sections": ["promotions"],
+                },
+                trace={"stage": "tool_registry", "decision": "promotions"},
+            )
+        if kwargs["tool_action"] == "catalog.location" and kwargs.get("allowed_fact_refs") == ["contact"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Телефон в карточке салона не указан. Instagram: https://instagram.com/mira_beauty_kz.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        raise AssertionError(
+            f"unexpected tool action: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}"
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions", "master", "contact"],
+            "fact_refs": ["promotions", "master", "contact"],
+            "reason": "user_asked_promotions_master_contact_for_grounded_service",
+            "goal": "info",
+            "capability": "promotions",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    with use_runtime_truth_override(_runtime_truth_payload(truth)):
+        result = TurnExecutor().execute(
+            decision,
+            db=object(),
+            message_text="Есть акции на маникюр, кто делает маникюр и как с вами связаться?",
+            client_slug="demo_salon",
+            branch_id=uuid4(),
+            booking_state=None,
+            user_name=None,
+            user_phone=None,
+            now=datetime.now(timezone.utc),
+        )
+
+    assert calls == [
+        ("catalog.service_query", ["promotions"]),
+        ("catalog.location", ["contact"]),
+    ]
+    assert "Скидка 10% на маникюр по будням до 16:00." in result.text
+    assert "Алия" in result.text
+    assert "Instagram" in result.text
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["promotions", "master", "contact"]
+    assert result.meta["fact_requested_refs"] == ["promotions", "master", "contact"]
+    assert result.meta["fact_allowed_refs"] == ["promotions", "master", "contact"]
+    assert result.meta["fact_emitted_refs"] == ["promotions", "master", "contact"]
+    assert result.meta["fact_composition"]["primary_tool_action"] == "catalog.service_query"
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "multi_tool"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["master", "contact"]
+
+
+def test_turn_executor_composes_mixed_first_turn_location_pricing_and_services_overview(monkeypatch) -> None:
+    calls: list[tuple[str, list[str], str | None]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append(
+            (
+                kwargs["tool_action"],
+                list(kwargs.get("allowed_fact_refs") or []),
+                kwargs.get("service_query"),
+            )
+        )
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Адрес: Абая 150.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "location",
+                    "info_sections": ["location"],
+                },
+                trace={"stage": "tool_registry", "decision": "location"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["services_overview"]:
+            assert kwargs["service_query"] is None
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Мы салон красоты: маникюр, педикюр и стрижки.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "services_overview",
+                    "info_sections": ["services_overview"],
+                },
+                trace={"stage": "tool_registry", "decision": "services_overview"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["location", "pricing", "services_overview"],
+            "fact_refs": ["location", "pricing", "services_overview"],
+            "reason": "user_asks_services_pricing_and_location_for_manicure",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Какие услуги у вас есть и сколько стоит маникюр и где находитесь?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.location", ["location", "pricing", "services_overview"], "маникюр"),
+        ("catalog.service_query", ["pricing"], "маникюр"),
+        ("catalog.service_query", ["services_overview"], None),
+    ]
+    assert result.text == (
+        "Адрес: Абая 150.\n\nМаникюр классический — 2 500 ₸.\n\nМы салон красоты: маникюр, педикюр и стрижки."
+    )
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["location", "pricing", "services_overview"]
+    assert result.meta["fact_allowed_refs"] == ["location", "pricing", "services_overview"]
+    assert result.meta["fact_emitted_refs"] == ["location", "pricing", "services_overview"]
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["pricing", "services_overview"]
+    assert result.meta["fact_composition"]["secondary_tool_decision"] == "multi_step"
+
+
+def test_turn_executor_composes_service_query_multifact_pricing_and_duration(monkeypatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append((kwargs["tool_action"], list(kwargs.get("allowed_fact_refs") or [])))
+        if kwargs["tool_action"] != "catalog.service_query":
+            raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+        if kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        if kwargs.get("allowed_fact_refs") == ["duration"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр обычно длится 40–60 минут.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "duration",
+                    "info_sections": ["duration"],
+                },
+                trace={"stage": "tool_registry", "decision": "duration"},
+            )
+        raise AssertionError(f"unexpected allowed refs: {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["pricing", "duration"],
+            "fact_refs": ["pricing", "duration"],
+            "reason": "user asks pricing and duration for grounded service маникюр",
+            "goal": "info",
+            "capability": "pricing",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Сколько стоит маникюр и сколько длится маникюр?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.service_query", ["pricing"]),
+        ("catalog.service_query", ["duration"]),
+    ]
+    assert result.text == (
+        "Маникюр классический — 2 500 ₸.\n\nМаникюр обычно длится 40–60 минут."
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["pricing", "duration"]
+    assert result.meta["fact_allowed_refs"] == ["pricing", "duration"]
+    assert result.meta["fact_emitted_refs"] == ["pricing", "duration"]
+    assert result.meta["fact_composition"]["composition_scope"] == "service_query_multi_fact"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["duration"]
+
+
+def test_turn_executor_composes_service_query_multifact_pricing_and_services_overview(monkeypatch) -> None:
+    calls: list[tuple[str, list[str], str | None]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append(
+            (
+                kwargs["tool_action"],
+                list(kwargs.get("allowed_fact_refs") or []),
+                kwargs.get("service_query"),
+            )
+        )
+        if kwargs["tool_action"] != "catalog.service_query":
+            raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+        if kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        if kwargs.get("allowed_fact_refs") == ["services_overview"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Мы салон красоты: маникюр, педикюр, стрижки и брови.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "services_overview",
+                    "info_sections": ["services_overview"],
+                },
+                trace={"stage": "tool_registry", "decision": "services_overview"},
+            )
+        raise AssertionError(f"unexpected allowed refs: {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["pricing", "services_overview"],
+            "fact_refs": ["pricing", "services_overview"],
+            "reason": "user asks what services are available and the price of manicure",
+            "goal": "info",
+            "capability": "pricing",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Какие услуги у вас есть и сколько стоит маникюр?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.service_query", ["pricing"], "маникюр"),
+        ("catalog.service_query", ["services_overview"], None),
+    ]
+    assert result.text == (
+        "Маникюр классический — 2 500 ₸.\n\nМы салон красоты: маникюр, педикюр, стрижки и брови."
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["pricing", "services_overview"]
+    assert result.meta["fact_allowed_refs"] == ["pricing", "services_overview"]
+    assert result.meta["fact_emitted_refs"] == ["pricing", "services_overview"]
+    assert result.meta["fact_composition"]["composition_scope"] == "service_query_multi_fact"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["services_overview"]
+
+
+def test_turn_executor_composes_service_query_head_pricing_and_contact(monkeypatch) -> None:
+    calls: list[tuple[str, list[str], str | None]] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append(
+            (
+                kwargs["tool_action"],
+                list(kwargs.get("allowed_fact_refs") or []),
+                kwargs.get("service_query"),
+            )
+        )
+        if kwargs["tool_action"] == "catalog.service_query" and kwargs.get("allowed_fact_refs") == ["pricing"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Маникюр классический — 2 500 ₸.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "pricing",
+                    "info_sections": ["pricing"],
+                },
+                trace={"stage": "tool_registry", "decision": "pricing"},
+            )
+        if kwargs["tool_action"] == "catalog.location" and kwargs.get("allowed_fact_refs") == ["contact"]:
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Телефон не указан. Instagram: https://instagram.com/mira_beauty_kz.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "ok",
+                    "info_sections": ["contact"],
+                },
+                trace={"stage": "tool_registry", "decision": "ok"},
+            )
+        raise AssertionError(f"unexpected tool call: {kwargs['tool_action']} / {kwargs.get('allowed_fact_refs')}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "pricing",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["pricing", "contact"],
+            "fact_refs": ["pricing", "contact"],
+            "reason": "user asks pricing for grounded service and contact details",
+            "goal": "info",
+            "capability": "pricing",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Сколько стоит маникюр и как с вами связаться?",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == [
+        ("catalog.service_query", ["pricing"], "маникюр"),
+        ("catalog.location", ["contact"], None),
+    ]
+    assert result.text == (
+        "Маникюр классический — 2 500 ₸.\n\n"
+        "Телефон не указан. Instagram: https://instagram.com/mira_beauty_kz."
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "multi_truth_composed"
+    assert result.meta["info_sections"] == ["pricing", "contact"]
+    assert result.meta["fact_allowed_refs"] == ["pricing", "contact"]
+    assert result.meta["fact_emitted_refs"] == ["pricing", "contact"]
+    assert result.meta["fact_composition"]["composition_scope"] == "service_query_cross_tool_fact"
+    assert result.meta["fact_composition"]["secondary_tool_action"] == "catalog.location"
+    assert result.meta["fact_composition"]["secondary_info_sections"] == ["contact"]
+
+
+def test_turn_executor_mixed_first_turn_promotions_still_do_not_compose(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _execute_tool_action(db, **kwargs):
+        calls.append(kwargs["tool_action"])
+        if kwargs["tool_action"] == "catalog.location":
+            return SimpleNamespace(
+                handled=True,
+                ok=True,
+                response_text="Парковка есть.",
+                error_code=None,
+                decision_meta={
+                    "tool_action": "catalog.location",
+                    "tool_decision": "parking",
+                    "info_sections": ["parking"],
+                },
+                trace={"stage": "tool_registry", "decision": "parking"},
+            )
+        if kwargs["tool_action"] == "catalog.service_query":
+            return SimpleNamespace(
+                handled=True,
+                ok=False,
+                response_text=None,
+                error_code="not_found",
+                decision_meta={
+                    "tool_action": "catalog.service_query",
+                    "tool_decision": "not_found",
+                    "info_sections": [],
+                },
+                trace={"stage": "tool_registry", "decision": "not_found"},
+            )
+        raise AssertionError(f"unexpected tool action: {kwargs['tool_action']}")
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "other",
+            "action": "fact",
+            "tool_action": "info",
+            "pack_refs": ["parking", "promotions"],
+            "fact_refs": ["parking", "promotions"],
+            "reason": "mixed_scope_question",
+            "goal": "info",
+            "capability": "parking",
+            "subject_kind": "branch",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Подскажите парковку и акции.",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert calls == ["catalog.location", "catalog.service_query"]
+    assert result.text == "Я уточню это для вас."
+    assert result.tool_decision == "fact_family_unresolved"
+    assert result.meta["fact_fallback_reason"] == "first_fact_family_mixed_scope_unresolved"
+
+
+def test_turn_executor_appends_service_followup_for_promotions_booking_fact(monkeypatch) -> None:
+    def _execute_tool_action(db, **kwargs):
+        assert kwargs["tool_action"] == "catalog.service_query"
+        assert kwargs["expected_reply_type"] == "service_choice"
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Официальные акции: Первое посещение: 10%.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.service_query",
+                "tool_decision": "promotions",
+                "info_sections": ["promotions"],
+            },
+            trace={"stage": "tool_registry", "decision": "promotions"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions"],
+            "fact_refs": ["promotions"],
+            "reason": "standalone_promotions_head_with_missing_service_booking_request",
+            "goal": "booking",
+            "capability": "promotions",
+            "subject_kind": "general",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "service_choice",
+            "next_question": "service",
+            "open_questions": ["service"],
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Есть скидки, хочу записаться.",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == (
+        "Официальные акции: Первое посещение: 10%.\n\n"
+        "На какую услугу хотите записаться?"
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "promotions"
+    assert result.meta["info_sections"] == ["promotions"]
+
+
+def test_turn_executor_appends_datetime_followup_for_promotions_grounded_service_booking_fact(
+    monkeypatch,
+) -> None:
+    def _execute_tool_action(db, **kwargs):
+        assert kwargs["tool_action"] == "catalog.service_query"
+        assert kwargs["expected_reply_type"] == "time"
+        assert kwargs["service_query"] == "маникюр"
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Официальные акции: Первое посещение: 10%.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.service_query",
+                "tool_decision": "promotions",
+                "info_sections": ["promotions"],
+            },
+            trace={"stage": "tool_registry", "decision": "promotions"},
+        )
+
+    monkeypatch.setattr(
+        "app.services.tool_registry_service.execute_tool_action",
+        _execute_tool_action,
+    )
+
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "promotions",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "pack_refs": ["promotions"],
+            "fact_refs": ["promotions"],
+            "slots": {"service": "маникюр"},
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_type": "service",
+                    "source_ref": "user_text",
+                }
+            },
+            "reason": "standalone_promotions_head_with_grounded_service_booking_request",
+            "goal": "booking",
+            "capability": "promotions",
+            "subject_kind": "service",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "ask_about_requested_slot",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Есть акции на маникюр, хочу записаться.",
+        client_slug="demo_salon",
+        branch_id=uuid4(),
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.text == (
+        "Официальные акции: Первое посещение: 10%.\n\n"
+        "На какую дату и время вам удобно?"
+    )
+    assert result.tool_action == "catalog.service_query"
+    assert result.tool_decision == "promotions"
+    assert result.meta["info_sections"] == ["promotions"]
+
+
 def test_tool_registry_catalog_location_does_not_reinfer_parking_outside_allowed_scope(monkeypatch) -> None:
     from app.services import tool_registry_service
 
@@ -4146,6 +6369,99 @@ def test_tool_registry_catalog_location_does_not_reinfer_parking_outside_allowed
     assert result.handled is True
     assert result.ok is True
     assert "parking" not in (result.decision_meta.get("info_sections") or [])
+
+
+def test_tool_registry_catalog_location_preserves_allowed_fact_ref_order(monkeypatch) -> None:
+    from app.services import tool_registry_service
+
+    monkeypatch.setattr(tool_registry_service, "_resolve_branch", lambda db, branch_id: None)
+
+    result = tool_registry_service.execute_tool_action(
+        object(),
+        tool_action="catalog.location",
+        tool_args={},
+        conversation_id=None,
+        branch_id=None,
+        client_slug="demo_salon",
+        service_query=None,
+        info_sections_hint=["hours", "location"],
+        message_text="Вы сегодня работаете и где находитесь?",
+        expected_reply_type=None,
+        now=datetime.now(timezone.utc),
+        allowed_fact_refs=["hours", "location"],
+    )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("info_sections") == ["hours", "location"]
+    assert result.response_text.startswith("Работаем ")
+
+
+def test_tool_registry_catalog_location_renders_contact_location_exact_scope(monkeypatch) -> None:
+    from app.services import tool_registry_service
+
+    monkeypatch.setattr(tool_registry_service, "_resolve_branch", lambda db, branch_id: None)
+
+    result = tool_registry_service.execute_tool_action(
+        object(),
+        tool_action="catalog.location",
+        tool_args={},
+        conversation_id=None,
+        branch_id=None,
+        client_slug="demo_salon",
+        service_query=None,
+        info_sections_hint=["contact", "location"],
+        message_text="Какой у вас телефон и адрес?",
+        expected_reply_type=None,
+        now=datetime.now(timezone.utc),
+        allowed_fact_refs=["contact", "location"],
+    )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("info_sections") == ["contact", "location"]
+    assert "Instagram:" in result.response_text
+    assert "Адрес:" in result.response_text
+
+
+def test_turn_executor_contact_only_catalog_location_uses_exact_pack_ref() -> None:
+    decision = build_test_policy_override_decision(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action": "catalog.location",
+            "pack_refs": ["contact"],
+            "reason": "user_requests_contact_details",
+            "goal": "info",
+            "capability": "location",
+            "subject_kind": "general",
+            "resolution_mode": "policy_fact",
+        },
+        interaction_owner="llm_policy_core_fact",
+        interaction_relation="grounded_fact",
+        source="llm_policy_core",
+    )
+
+    result = TurnExecutor().execute(
+        decision,
+        db=object(),
+        message_text="Как с вами связаться?",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state=None,
+        user_name=None,
+        user_phone=None,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert result.tool_action == "catalog.location"
+    assert result.tool_decision == "ok"
+    assert result.meta["fact_requested_refs"] == ["contact"]
+    assert result.meta["fact_allowed_refs"] == ["contact"]
+    assert result.meta["fact_emitted_refs"] == ["contact"]
+    assert result.meta["info_sections"] == ["contact"]
+    assert "Instagram:" in result.text
+    assert "Адрес:" not in result.text
 
 
 def test_turn_executor_prefers_explicit_parking_ref_over_coarse_location_family_alias() -> None:
@@ -6490,6 +8806,30 @@ def test_dialog_state_service_projects_booking_resume_contract_for_active_media_
     }
 
 
+def test_dialog_state_service_projects_booking_resume_contract_for_active_media_followup_with_specialist_carry() -> None:
+    resume_contract = DialogStateService().project_interrupt_resume_pending_question_contract(
+        {
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+        },
+        current_goal="booking",
+        booking_payload={"service": "Маникюр"},
+    )
+
+    assert resume_contract == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+    }
+
+
 def test_consultant_runtime_exposes_resume_contract_for_active_media_followup() -> None:
     planner = TurnPlanner()
     runtime = ConsultantRuntime()
@@ -6556,6 +8896,90 @@ def test_consultant_runtime_exposes_resume_contract_for_active_media_followup() 
         "pending_question_act": "ask_about_requested_slot",
         "pending_question_target": "time",
         "active_question_relation": "ask_about_requested_slot",
+        "next_question": "media",
+        "open_questions": ["media"],
+    }
+    assert profile["resume_pending_question_contract"] == {
+        "expected_reply_type": "time",
+        "reason": "collect:datetime",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+    }
+
+
+def test_consultant_runtime_exposes_resume_contract_for_active_media_followup_with_specialist() -> None:
+    planner = TurnPlanner()
+    runtime = ConsultantRuntime()
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "consult",
+            "action": "collect",
+            "tool_action": "consult",
+            "goal": "booking",
+            "reason": "user_offers_photo_reference_before_time_selection",
+            "capability": "consultation",
+            "pack_refs": ["style_reference"],
+            "expected_reply_type": "media",
+            "next_question": "media",
+            "open_questions": ["media"],
+            "pending_question_target": "specialist",
+            "active_question_relation": "referent_followup",
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                },
+                "specialist": {
+                    "value": "Айгерим",
+                    "entity_id": "sp:aygerim",
+                    "entity_type": "specialist",
+                    "source_ref": "user_message",
+                },
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="collect",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+    execution = TurnExecutor().execute(
+        decision,
+        db=None,
+        message_text="Могу прислать фото ногтей для примера.",
+        client_slug="demo_salon",
+        branch_id=None,
+        booking_state={"service": "Маникюр"},
+        user_name=None,
+        user_phone=None,
+        now=datetime(2026, 4, 6, 0, 0, tzinfo=timezone.utc),
+    )
+
+    updated, dialog_state, booking_payload = DialogStateService().write_runtime_payload(
+        {"booking": {"service": "Маникюр"}},
+        decision=decision,
+        execution_meta=execution.meta,
+        now=datetime(2026, 4, 6, 0, 0, tzinfo=timezone.utc),
+    )
+    runtime_state = LoadedRuntimeState(
+        context=updated,
+        dialog_state=dialog_state,
+        booking_state=booking_payload or {},
+    )
+
+    profile = runtime._build_policy_core_memory_profile(runtime_state)
+
+    assert profile["pending_question_contract"] == {
+        "expected_reply_type": "media",
+        "reason": "collect:media",
+        "pending_question_target": "specialist",
+        "active_question_relation": "referent_followup",
         "next_question": "media",
         "open_questions": ["media"],
     }

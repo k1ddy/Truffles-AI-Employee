@@ -325,7 +325,10 @@ def _has_contact_signal(
     client_slug: str | None = None,
 ) -> bool:
     text = normalized or _normalize_text(raw_text or "")
-    return _contains_any(text, ["тел", "номер", "whatsapp", "wa", "instagram", "инст"])
+    return _contains_any(
+        text,
+        ["тел", "номер", "whatsapp", "wa", "instagram", "инст", "контакт", "связ"],
+    )
 
 
 def _matches_service_request_lexicon(normalized: str, client_slug: str) -> bool:
@@ -480,6 +483,24 @@ def _format_parking_line(salon: dict[str, Any]) -> str | None:
     return None
 
 
+def _format_contact_line(salon: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    for key, label in (
+        ("phone", "Телефон"),
+        ("whatsapp", "WhatsApp"),
+        ("telegram", "Telegram"),
+        ("instagram", "Instagram"),
+    ):
+        value = salon.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(f"{label}: {value.strip()}.")
+    if not parts:
+        return None
+    if not any(part.startswith("Телефон:") for part in parts):
+        parts.insert(0, "Телефон в карточке салона не указан.")
+    return " ".join(parts)
+
+
 def _format_promotions_line(source_truth: dict[str, Any]) -> str | None:
     promotions = source_truth.get("promotions")
     if isinstance(promotions, str) and promotions.strip():
@@ -541,6 +562,8 @@ def format_reply_from_truth(
         return _format_hours_line(salon)
     if normalized_intent == "parking":
         return _format_parking_line(salon)
+    if normalized_intent == "contact":
+        return _format_contact_line(salon)
     if normalized_intent == "services_overview":
         summary = salon.get("services_summary")
         if isinstance(summary, str) and summary.strip():

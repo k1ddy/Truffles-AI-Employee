@@ -289,6 +289,20 @@ class PackRuntimeBoundary(Protocol):
         message: str | None = None,
     ) -> bool: ...
 
+    def has_contact_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool: ...
+
+    def has_master_signal(
+        self,
+        message_text: str | None,
+        *,
+        service_query: str | None = None,
+    ) -> bool: ...
+
     def match_service(self, normalized: str) -> dict | None: ...
 
     def build_runtime_service_duration_reply(
@@ -412,6 +426,30 @@ class _BoundPackRuntime:
             message,
             client_slug=self.client_slug,
         )
+
+    def has_contact_signal(
+        self,
+        normalized: str,
+        *,
+        message: str | None = None,
+    ) -> bool:
+        return _has_contact_signal(
+            normalized,
+            message,
+            client_slug=self.client_slug,
+        )
+
+    def has_master_signal(
+        self,
+        message_text: str | None,
+        *,
+        service_query: str | None = None,
+    ) -> bool:
+        return _resolve_pack_query_master_intent(
+            message_text=message_text,
+            client_slug=self.client_slug,
+            service_query=service_query,
+        ).explicit
 
     def match_service(self, normalized: str) -> dict | None:
         effective_slug = self.client_slug or "generic"

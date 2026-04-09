@@ -36,6 +36,7 @@ _DEFAULT_INFO_REFS_V1 = (
     "location",
     "parking",
     "promotions",
+    "services_overview",
     "master",
     "contact",
 )

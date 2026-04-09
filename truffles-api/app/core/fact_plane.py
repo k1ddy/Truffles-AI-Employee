@@ -408,6 +408,29 @@ def collect_requested_fact_refs(decision: Any) -> list[str]:
         exact_service_pack_refs = _dedupe_tokens(pack_refs)
         if exact_service_pack_refs:
             return exact_service_pack_refs
+    if tool_action == "catalog.location":
+        normalized_pack_refs = _dedupe_tokens(pack_refs)
+        location_family_refs = {"location", "hours", "parking", "contact"}
+        service_family_refs = {"pricing", "promotions", "duration", "services_overview", "master"}
+        exact_location_pack_refs = [
+            ref for ref in normalized_pack_refs if ref in location_family_refs
+        ]
+        exact_service_pack_refs = [
+            ref for ref in normalized_pack_refs if ref in service_family_refs
+        ]
+        if exact_location_pack_refs and exact_service_pack_refs:
+            return [
+                ref
+                for ref in normalized_pack_refs
+                if ref in location_family_refs or ref in service_family_refs
+            ]
+        exact_location_pack_refs = [
+            ref
+            for ref in normalized_pack_refs
+            if ref in location_family_refs
+        ]
+        if exact_location_pack_refs:
+            return exact_location_pack_refs
 
     manifest = build_default_fact_manifest()
     group_priority: dict[str, int] = {}

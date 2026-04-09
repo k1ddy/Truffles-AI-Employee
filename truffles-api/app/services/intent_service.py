@@ -52,21 +52,92 @@ _POLICY_CORE_GENERIC_AVAILABILITY_QUERY_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
+        r"\b(?:есть(?:\s+ли)?|будет(?:\s+ли)?)\b.*\b(?:время|слот(?:ы|ов)?|окн(?:о|а|е)?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\b(?:свободн\w*|доступн\w*)\b.*\b(?:время|слот(?:ы|ов)?|окн(?:о|а|е)?)\b",
         re.IGNORECASE,
     ),
     re.compile(r"\bкогда\b.*\bзаписа(?:ться|т[ья])\b", re.IGNORECASE),
 )
+_POLICY_CORE_SERVICE_PRESENCE_QUERY_PATTERNS = (
+    re.compile(r"\bзанимает(?:есь|ся)\b", re.IGNORECASE),
+    re.compile(r"\bделаете\b", re.IGNORECASE),
+    re.compile(r"\bоказываете\b", re.IGNORECASE),
+    re.compile(r"\bпредлагаете\b", re.IGNORECASE),
+    re.compile(r"\bкакие\b.*\b(?:услуг\w*|процедур\w*|сервис\w*)\b", re.IGNORECASE),
+    re.compile(r"\bwhat\b.*\bservices?\b", re.IGNORECASE),
+    re.compile(r"\bservices?\b.*\b(?:available|have|offer)\b", re.IGNORECASE),
+)
+_POLICY_CORE_PROMOTIONS_QUERY_PATTERNS = (
+    re.compile(r"\bскидк\w*\b", re.IGNORECASE),
+    re.compile(r"\bакци\w*\b", re.IGNORECASE),
+    re.compile(r"\bпромо(?:код\w*)?\b", re.IGNORECASE),
+    re.compile(r"\bpromo(?:code|codes)?\b", re.IGNORECASE),
+    re.compile(r"\bpromotion(?:s)?\b", re.IGNORECASE),
+)
+_POLICY_CORE_LOCATION_SIDE_ASK_PATTERNS = (
+    re.compile(r"\bадрес\w*\b", re.IGNORECASE),
+    re.compile(r"\bгде\b.*\bнаходит\w*\b", re.IGNORECASE),
+    re.compile(r"\bкак\s+вас\s+найти\b", re.IGNORECASE),
+    re.compile(r"\bhow\s+to\s+find\b", re.IGNORECASE),
+)
+_POLICY_CORE_HOURS_ASK_PATTERNS = (
+    re.compile(r"\bработа(?:ете|ет|ют)\b", re.IGNORECASE),
+    re.compile(r"\b(?:часы|режим)\s+работы\b", re.IGNORECASE),
+    re.compile(r"\bдо\s+скольк(?:и|о)\b", re.IGNORECASE),
+    re.compile(r"\bсо\s+скольк(?:и|о)\b", re.IGNORECASE),
+    re.compile(r"\bopening\s+hours\b", re.IGNORECASE),
+)
+_POLICY_CORE_BOOKING_SIDE_ASK_PATTERNS = (
+    re.compile(r"\bзапис", re.IGNORECASE),
+    re.compile(r"\bbook\b", re.IGNORECASE),
+    re.compile(r"\bappointment\b", re.IGNORECASE),
+)
 _POLICY_CORE_MESSAGE_GROUNDED_TEMPORAL_CLUE_PATTERNS = (
     re.compile(
-        r"\b(?:сегодня|завтра|послезавтра|утром|вечером|дн[её]м|ночью|после|до)\b",
+        r"\b(?:сегодня|завтра|послезавтра|утр(?:о|ом)|вечер(?:ом)?|дн[её]м|ноч(?:ь|ью)|после|до)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:понедельник|вторник|сред(?:а|у|е)|четверг|пятниц(?:а|у|е)|суббот(?:а|у|е)|воскресень(?:е|я))\b",
+        r"\b(?:понедельник(?:а|у|е)?|вторник(?:а|у|е)?|сред(?:а|у|е|ы)|четверг(?:а|у|е)?|пятниц(?:а|у|е|ы)|суббот(?:а|у|е|ы)|воскресень(?:е|я|ю))\b",
         re.IGNORECASE,
     ),
 )
+_POLICY_CORE_MESSAGE_RELATIVE_DAY_PATTERN = re.compile(
+    r"\b(?:сегодня|завтра|послезавтра)\b",
+    re.IGNORECASE,
+)
+_POLICY_CORE_MESSAGE_WEEKDAY_PATTERN = re.compile(
+    r"\b(?:понедельник(?:а|у|е)?|вторник(?:а|у|е)?|сред(?:а|у|е|ы)|четверг(?:а|у|е)?|пятниц(?:а|у|е|ы)|суббот(?:а|у|е|ы)|воскресень(?:е|я|ю))\b",
+    re.IGNORECASE,
+)
+_POLICY_CORE_MESSAGE_NUMERIC_DATE_PATTERN = re.compile(
+    r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b",
+    re.IGNORECASE,
+)
+_POLICY_CORE_EXPLICIT_CUSTOMER_NAME_INTRO_PATTERNS = (
+    re.compile(r"\bменя\s+зовут\b", re.IGNORECASE),
+    re.compile(r"\bмо[её]\s+имя\b", re.IGNORECASE),
+    re.compile(r"\bmy\s+name\s+is\b", re.IGNORECASE),
+    re.compile(r"\bi\s+am\b", re.IGNORECASE),
+    re.compile(r"\bi['’]m\b", re.IGNORECASE),
+    re.compile(
+        r"^\s*я\s+[A-Za-zА-Яа-яЁё-]+(?:\s+[A-Za-zА-Яа-яЁё-]+){0,2}[.!?]?\s*$",
+        re.IGNORECASE,
+    ),
+)
+_POLICY_CORE_HYPOTHETICAL_CANCEL_QUERY_PATTERNS = (
+    re.compile(r"^\s*(?:а\s+)?если\b", re.IGNORECASE),
+    re.compile(r"\bзахочу\b", re.IGNORECASE),
+    re.compile(r"^\s*как\b", re.IGNORECASE),
+    re.compile(r"\bможно\s+ли\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+if\b", re.IGNORECASE),
+    re.compile(r"\bcan\s+i\b", re.IGNORECASE),
+)
+_POLICY_CORE_CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
+_POLICY_CORE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 
 
 def _log_timing(
@@ -596,20 +667,55 @@ def _sanitize_policy_core_payload(payload: dict[str, Any]) -> tuple[dict[str, An
             if sanitized_payload.pop(field_name, None) is not None:
                 sanitized = True
 
+    if intent == "master_query" and action == "fact":
+        normalized_pack_refs_for_master = {
+            _token(item)
+            for item in sanitized_payload.get("pack_refs") or []
+            if _token(item) is not None
+        }
+        if "master" in normalized_pack_refs_for_master and capability in {None, "portfolio", "master"}:
+            if sanitized_payload.get("capability") != "master":
+                sanitized_payload["capability"] = "master"
+                sanitized = True
+            capability = "master"
+
     if tool_action_hint == "catalog.service_query" and action == "fact":
         normalized_pack_refs = []
         for item in sanitized_payload.get("pack_refs") or []:
             if not isinstance(item, str) or not item.strip():
                 continue
             normalized = item.strip().casefold()
-            if normalized in {"pricing", "duration", "promotions", "master"} and normalized not in normalized_pack_refs:
+            if (
+                normalized
+                in {
+                    "pricing",
+                    "duration",
+                    "promotions",
+                    "master",
+                    "services_overview",
+                    "contact",
+                    "parking",
+                }
+                and normalized not in normalized_pack_refs
+            ):
                 normalized_pack_refs.append(normalized)
+        supported_multi_refs = [
+            ref for ref in _SERVICE_QUERY_MULTI_FACT_REFS if ref in normalized_pack_refs
+        ]
+        if (
+            len(supported_multi_refs) > 1
+            and set(supported_multi_refs) == set(normalized_pack_refs)
+        ):
+            if normalized_pack_refs != supported_multi_refs:
+                sanitized_payload["pack_refs"] = supported_multi_refs
+                sanitized = True
+            return sanitized_payload, sanitized
         expected_pack_ref = None
         if len(normalized_pack_refs) == 1:
             expected_pack_ref = normalized_pack_refs[0]
         elif capability == "live_availability" or intent == "master_query":
             expected_pack_ref = "master"
-        elif capability in {"pricing", "duration", "promotions"}:
+        elif capability in {"pricing", "duration", "promotions", "master"}:
             expected_pack_ref = capability
         elif intent in {"pricing", "duration", "promotions"}:
             expected_pack_ref = intent
@@ -755,6 +861,110 @@ def _policy_core_current_message_has_message_grounded_temporal_clue(
     )
 
 
+def _policy_core_current_message_has_explicit_customer_name_intro(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_EXPLICIT_CUSTOMER_NAME_INTRO_PATTERNS
+    )
+
+
+def _policy_core_current_message_grounded_temporal_scope_hint(
+    current_message: str | None,
+) -> str | None:
+    if not isinstance(current_message, str):
+        return None
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return None
+    if _policy_core_current_message_has_explicit_clock_time(normalized):
+        return "specific_time"
+    if _POLICY_CORE_MESSAGE_WEEKDAY_PATTERN.search(normalized):
+        return "weekday"
+    if _POLICY_CORE_MESSAGE_RELATIVE_DAY_PATTERN.search(normalized):
+        return "day"
+    return None
+
+
+def _policy_core_current_message_has_day_or_date_clue(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return bool(
+        _POLICY_CORE_MESSAGE_RELATIVE_DAY_PATTERN.search(normalized)
+        or _POLICY_CORE_MESSAGE_WEEKDAY_PATTERN.search(normalized)
+        or _POLICY_CORE_MESSAGE_NUMERIC_DATE_PATTERN.search(normalized)
+    )
+
+
+def _policy_core_current_message_exact_datetime_surface(
+    current_message: str | None,
+) -> str | None:
+    if not isinstance(current_message, str):
+        return None
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return None
+    if not _policy_core_current_message_has_explicit_clock_time(normalized):
+        return None
+    starts = [
+        match.start()
+        for pattern in (
+            _POLICY_CORE_MESSAGE_RELATIVE_DAY_PATTERN,
+            _POLICY_CORE_MESSAGE_WEEKDAY_PATTERN,
+            _POLICY_CORE_MESSAGE_NUMERIC_DATE_PATTERN,
+        )
+        for match in [pattern.search(normalized)]
+        if match is not None
+    ]
+    if not starts:
+        return None
+    surface = normalized[min(starts):]
+    clock_match = _POLICY_CORE_EXPLICIT_CLOCK_TIME_PATTERN.search(surface)
+    if clock_match is not None:
+        return surface[: clock_match.end()].strip(" ,.!?;:")
+    hour_match = _POLICY_CORE_HOUR_TIME_PATTERN.search(surface)
+    if hour_match is not None:
+        return surface[: hour_match.end()].strip(" ,.!?;:")
+    return surface.strip(" ,.!?:") or None
+
+
+def _policy_core_temporal_clue_requires_message_grounded_alternate_datetime(
+    alternate_datetime: str | None,
+    current_message: str | None,
+) -> bool:
+    if not isinstance(alternate_datetime, str):
+        return False
+    normalized_alternate_datetime = " ".join(alternate_datetime.split())
+    if not normalized_alternate_datetime:
+        return False
+    if not isinstance(current_message, str):
+        return False
+    normalized_message = " ".join(current_message.split())
+    if not normalized_message:
+        return False
+    if normalized_alternate_datetime.casefold() in normalized_message.casefold():
+        return False
+    if not _policy_core_current_message_has_message_grounded_temporal_clue(normalized_message):
+        return False
+    if not _POLICY_CORE_CYRILLIC_PATTERN.search(normalized_message):
+        return False
+    return bool(
+        _POLICY_CORE_LATIN_PATTERN.search(normalized_alternate_datetime)
+        and not _POLICY_CORE_CYRILLIC_PATTERN.search(normalized_alternate_datetime)
+    )
+
+
 def _policy_core_current_message_is_generic_booking_availability_question(
     current_message: str | None,
 ) -> bool:
@@ -771,8 +981,460 @@ def _policy_core_current_message_is_generic_booking_availability_question(
     )
 
 
+def _policy_core_current_message_is_hypothetical_cancel_query(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_HYPOTHETICAL_CANCEL_QUERY_PATTERNS
+    )
+
+
+def _policy_core_current_message_has_service_presence_query(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_SERVICE_PRESENCE_QUERY_PATTERNS
+    )
+
+
+def _policy_core_current_message_has_location_side_ask(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_LOCATION_SIDE_ASK_PATTERNS
+    )
+
+
+def _policy_core_current_message_has_hours_ask(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_HOURS_ASK_PATTERNS
+    )
+
+
+def _policy_core_current_message_has_booking_side_ask(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_BOOKING_SIDE_ASK_PATTERNS
+    )
+
+
+def _policy_core_current_message_has_temporal_booking_side_ask(
+    current_message: str | None,
+) -> bool:
+    if _policy_core_current_message_has_booking_side_ask(current_message):
+        return True
+    if not _policy_core_current_message_has_message_grounded_temporal_clue(current_message):
+        return False
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return bool(re.search(r"\bможно\b", normalized, re.IGNORECASE))
+
+
+def _policy_core_current_message_hours_service_fact_pack_refs(
+    current_message: str | None,
+    *,
+    client_slug: str | None = None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if not _policy_core_current_message_has_hours_ask(current_message):
+        return None
+    normalized_message = _normalize_text(current_message)
+    if not normalized_message:
+        return None
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        pack_runtime = get_pack_runtime(client_slug)
+    except Exception:
+        pack_runtime = None
+    refs = ["hours"]
+    if pack_runtime is not None:
+        try:
+            if _policy_core_current_message_has_promotions_query(current_message):
+                refs.append("promotions")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_price_signal(normalized_message, message=current_message):
+                refs.append("pricing")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_duration_signal(normalized_message, message=current_message):
+                refs.append("duration")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_master_signal(current_message):
+                refs.append("master")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_parking_signal(normalized_message):
+                refs.append("parking")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_contact_signal(normalized_message, message=current_message):
+                refs.append("contact")
+        except Exception:
+            pass
+    if (
+        _policy_core_current_message_has_service_presence_query(current_message)
+        and "services_overview" not in refs
+    ):
+        refs.append("services_overview")
+    if len(refs) == 1:
+        return None
+    return refs
+
+
+def _policy_core_current_message_location_service_fact_pack_refs(
+    current_message: str | None,
+    *,
+    client_slug: str | None = None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if not _policy_core_current_message_has_location_side_ask(current_message):
+        return None
+    normalized_message = _normalize_text(current_message)
+    if not normalized_message:
+        return None
+    refs = ["location"]
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        pack_runtime = get_pack_runtime(client_slug)
+    except Exception:
+        pack_runtime = None
+    if pack_runtime is not None:
+        try:
+            if pack_runtime.has_price_signal(normalized_message, message=current_message):
+                refs.append("pricing")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_duration_signal(normalized_message, message=current_message):
+                refs.append("duration")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_master_signal(current_message):
+                refs.append("master")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_parking_signal(normalized_message):
+                refs.append("parking")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_contact_signal(normalized_message, message=current_message):
+                refs.append("contact")
+        except Exception:
+            pass
+    if (
+        _policy_core_current_message_has_service_presence_query(current_message)
+        and "services_overview" not in refs
+    ):
+        refs.append("services_overview")
+    if len(refs) == 1:
+        return None
+    return refs
+
+
+def _policy_core_current_message_hours_location_service_fact_pack_refs(
+    current_message: str | None,
+    *,
+    client_slug: str | None = None,
+) -> list[str] | None:
+    hours_refs = _policy_core_current_message_hours_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if hours_refs is None:
+        return None
+    if not _policy_core_current_message_has_location_side_ask(current_message):
+        return None
+    refs_set = {
+        item.strip().casefold()
+        for item in [*hours_refs, "location"]
+        if isinstance(item, str) and item.strip()
+    }
+    refs = [
+        ref
+        for ref in (
+            "hours",
+            "location",
+            "parking",
+            "contact",
+            "pricing",
+            "promotions",
+            "duration",
+            "master",
+            "services_overview",
+        )
+        if ref in refs_set
+    ]
+    if len(refs) <= 2:
+        return None
+    return refs
+
+
+def _policy_core_current_message_hours_location_fact_pack_refs(
+    current_message: str | None,
+    *,
+    client_slug: str | None = None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if not _policy_core_current_message_has_hours_ask(
+        current_message
+    ) or not _policy_core_current_message_has_location_side_ask(current_message):
+        return None
+    if _policy_core_current_message_has_service_presence_query(current_message):
+        return None
+    normalized_message = _normalize_text(current_message)
+    if not normalized_message:
+        return None
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        pack_runtime = get_pack_runtime(client_slug)
+    except Exception:
+        pack_runtime = None
+    if pack_runtime is not None:
+        try:
+            if pack_runtime.has_price_signal(normalized_message, message=current_message):
+                return None
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_duration_signal(normalized_message, message=current_message):
+                return None
+        except Exception:
+            pass
+    refs = ["hours", "location"]
+    if _policy_core_current_message_has_promotions_query(current_message):
+        refs.append("promotions")
+    if pack_runtime is not None:
+        try:
+            if pack_runtime.has_parking_signal(normalized_message):
+                refs.append("parking")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_contact_signal(normalized_message, message=current_message):
+                refs.append("contact")
+        except Exception:
+            pass
+    return refs
+
+
+def _policy_core_current_message_promotions_location_pack_refs(
+    current_message: str | None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if not _policy_core_current_message_has_promotions_query(current_message):
+        return None
+    if _policy_core_current_message_has_hours_ask(current_message):
+        return None
+    if not _policy_core_current_message_has_location_side_ask(current_message):
+        return None
+    return ["promotions", "location"]
+
+
+def _policy_core_current_message_promotions_booking_collect_pack_refs(
+    current_message: str | None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if not _policy_core_current_message_has_promotions_query(current_message):
+        return None
+    if _policy_core_current_message_has_location_side_ask(current_message):
+        return None
+    if not _policy_core_current_message_has_booking_side_ask(current_message):
+        return None
+    return ["promotions"]
+
+
+def _policy_core_current_message_service_scoped_fact_pack_refs(
+    current_message: str | None,
+    *,
+    client_slug: str | None = None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if not _policy_core_current_message_has_temporal_booking_side_ask(current_message):
+        return None
+    normalized_message = _normalize_text(current_message)
+    if not normalized_message:
+        return None
+    refs: list[str] = []
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        pack_runtime = get_pack_runtime(client_slug)
+    except Exception:
+        pack_runtime = None
+    if pack_runtime is not None:
+        try:
+            if pack_runtime.has_price_signal(normalized_message, message=current_message):
+                refs.append("pricing")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_duration_signal(normalized_message, message=current_message):
+                refs.append("duration")
+        except Exception:
+            pass
+    if len(refs) != 1:
+        return None
+    return refs
+
+
+def _policy_core_current_message_service_multifact_pack_refs(
+    current_message: str | None,
+    *,
+    client_slug: str | None = None,
+) -> list[str] | None:
+    if not isinstance(current_message, str) or not current_message.strip():
+        return None
+    if _policy_core_current_message_has_location_side_ask(current_message):
+        return None
+    if (
+        _policy_core_current_message_hours_service_fact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        )
+        is not None
+    ):
+        return None
+    normalized_message = _normalize_text(current_message)
+    if not normalized_message:
+        return None
+    refs: list[str] = []
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        pack_runtime = get_pack_runtime(client_slug)
+    except Exception:
+        pack_runtime = None
+    if pack_runtime is not None:
+        if _policy_core_current_message_has_promotions_query(current_message):
+            refs.append("promotions")
+        try:
+            if pack_runtime.has_price_signal(normalized_message, message=current_message):
+                refs.append("pricing")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_duration_signal(normalized_message, message=current_message):
+                refs.append("duration")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_master_signal(current_message):
+                refs.append("master")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_contact_signal(normalized_message, message=current_message):
+                refs.append("contact")
+        except Exception:
+            pass
+        try:
+            if pack_runtime.has_parking_signal(normalized_message):
+                refs.append("parking")
+        except Exception:
+            pass
+    if (
+        _policy_core_current_message_has_service_presence_query(current_message)
+        and "services_overview" not in refs
+    ):
+        refs.append("services_overview")
+    if len(refs) <= 1:
+        return None
+    return [ref for ref in _SERVICE_QUERY_MULTI_FACT_REFS if ref in refs]
+
+
+def _policy_core_current_message_has_promotions_query(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    return any(
+        pattern.search(normalized)
+        for pattern in _POLICY_CORE_PROMOTIONS_QUERY_PATTERNS
+    )
+
+
+def _policy_core_current_message_has_booking_or_location_side_ask(
+    current_message: str | None,
+) -> bool:
+    if not isinstance(current_message, str):
+        return False
+    normalized = " ".join(current_message.split())
+    if not normalized:
+        return False
+    if _policy_core_current_message_has_location_side_ask(current_message):
+        return True
+    return _policy_core_current_message_has_booking_side_ask(current_message)
+
+
 _SERVICE_SCOPED_OWNER_INTENTS = {"pricing", "duration", "master_query", "promotions"}
-_SERVICE_SCOPED_OWNER_CAPABILITIES = {"pricing", "duration", "live_availability", "promotions"}
+_SERVICE_SCOPED_OWNER_CAPABILITIES = {"pricing", "duration", "master", "live_availability", "promotions"}
+_SERVICE_QUERY_MULTI_FACT_REFS = (
+    "pricing",
+    "promotions",
+    "duration",
+    "master",
+    "services_overview",
+    "contact",
+    "parking",
+)
 
 
 def _policy_core_contract_grounded_service(
@@ -862,6 +1524,43 @@ def _policy_core_memory_slot_value(
     return None
 
 
+def _policy_core_normalize_surface_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())
+    return normalized or None
+
+
+def _policy_core_memory_alternate_datetime(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> str | None:
+    if not isinstance(normalized_memory_profile, Mapping):
+        return None
+    semantic_contract = (
+        normalized_memory_profile.get("semantic_contract")
+        if isinstance(normalized_memory_profile.get("semantic_contract"), Mapping)
+        else None
+    )
+    if not isinstance(semantic_contract, Mapping):
+        return None
+    return _policy_core_normalize_surface_text(semantic_contract.get("alternate_datetime"))
+
+
+def _policy_core_memory_temporal_scope(
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> str | None:
+    if not isinstance(normalized_memory_profile, Mapping):
+        return None
+    semantic_contract = (
+        normalized_memory_profile.get("semantic_contract")
+        if isinstance(normalized_memory_profile.get("semantic_contract"), Mapping)
+        else None
+    )
+    if not isinstance(semantic_contract, Mapping):
+        return None
+    return _policy_core_payload_token(semantic_contract.get("temporal_scope"))
+
+
 def _policy_core_memory_has_datetime_context(
     normalized_memory_profile: Mapping[str, Any] | None,
 ) -> bool:
@@ -889,6 +1588,21 @@ def _policy_core_has_customer_identity(
         or contract.slots.get("name")
         or _policy_core_memory_slot_value(normalized_memory_profile, "name")
     )
+
+
+def _policy_core_contract_customer_entity_name(
+    contract: LlmPolicyCoreOutput,
+) -> str | None:
+    for raw_ref in list(contract.entity_refs or []):
+        if not isinstance(raw_ref, Mapping):
+            continue
+        entity_type = _policy_core_payload_token(raw_ref.get("entity_type"))
+        if entity_type != "customer":
+            continue
+        value = raw_ref.get("value")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _policy_core_booking_commit_ready(
@@ -932,6 +1646,33 @@ def _policy_core_existing_booking_lookup_context(
     return has_customer and has_datetime
 
 
+def _policy_core_contract_supplies_lookup_datetime(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    return any(
+        isinstance(value, str) and value.strip()
+        for value in (
+            contract.slots.get("datetime"),
+            _policy_core_payload_token(contract.alternate_datetime),
+        )
+    )
+
+
+def _policy_core_booking_manage_reference_direct_lookup_context(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    carry_contract = _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ) or _policy_core_active_pending_contract(normalized_memory_profile)
+    if (
+        _policy_core_payload_token(carry_contract.get("expected_reply_type")) == "name"
+        and not _policy_core_contract_supplies_lookup_datetime(contract)
+    ):
+        return False
+    return _policy_core_existing_booking_lookup_context(contract, normalized_memory_profile)
+
+
 def _policy_core_memory_booking_manage_reference_context(
     normalized_memory_profile: Mapping[str, Any] | None,
 ) -> bool:
@@ -951,11 +1692,26 @@ def _policy_core_memory_booking_manage_reference_context(
     )
 
 
+def _policy_core_is_explicit_manager_handoff_contract(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    return bool(
+        contract.intent == "booking"
+        and contract.action == "handoff"
+        and contract.tool_action_hint == "handoff"
+        and contract.needs_manager
+        and contract.capability == "booking_manage"
+        and contract.subject_kind == "booking"
+    )
+
+
 def _policy_core_is_booking_manage_reference_followup_shape(
     contract: LlmPolicyCoreOutput,
     normalized_memory_profile: Mapping[str, Any] | None,
 ) -> bool:
     if contract.subject_kind != "booking":
+        return False
+    if _policy_core_is_explicit_manager_handoff_contract(contract):
         return False
     contract_booking_manage_context = contract.capability == "booking_manage"
     memory_booking_manage_context = _policy_core_memory_booking_manage_reference_context(
@@ -1007,7 +1763,10 @@ def _policy_core_is_booking_manage_name_fill_followup_contract(
         return False
     if not _policy_core_has_customer_identity(contract, normalized_memory_profile):
         return False
-    if _policy_core_existing_booking_lookup_context(contract, normalized_memory_profile):
+    if _policy_core_booking_manage_reference_direct_lookup_context(
+        contract,
+        normalized_memory_profile,
+    ):
         return False
     if contract.intent != "check_booking":
         return True
@@ -1225,6 +1984,7 @@ def _policy_core_is_active_followup_info_interrupt(
         "parking",
         "duration",
         "promotions",
+        "master",
         "contact",
         "portfolio",
     }:
@@ -1254,7 +2014,11 @@ def _policy_core_catalog_service_pack_refs(contract: LlmPolicyCoreOutput) -> lis
         if not isinstance(item, str):
             continue
         normalized = item.strip().casefold()
-        if normalized in {"pricing", "duration", "promotions", "master"} and normalized not in refs:
+        if (
+            normalized
+            in {"pricing", "duration", "promotions", "master", "services_overview", "location", "contact", "parking"}
+            and normalized not in refs
+        ):
             refs.append(normalized)
     return refs
 
@@ -1267,7 +2031,7 @@ def _policy_core_expected_catalog_service_pack_ref(
         return service_pack_refs[0]
     if contract.intent == "master_query" or contract.capability == "live_availability":
         return "master"
-    if contract.capability in {"pricing", "duration", "promotions"}:
+    if contract.capability in {"pricing", "duration", "promotions", "master"}:
         return contract.capability
     if contract.intent in {"pricing", "duration", "promotions"}:
         return contract.intent
@@ -1379,6 +2143,862 @@ def _policy_core_schema_requires_booking_live_availability_reclassification(
     return True
 
 
+def _policy_core_resolve_message_grounded_service_hint(
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> str | None:
+    grounded_service_hint = _policy_core_context_service_hint(
+        current_message,
+        context_payload,
+        client_slug=client_slug,
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if not grounded_service_hint and isinstance(client_slug, str) and client_slug.strip():
+        from app.services.policy_context_snapshot_service import build_policy_core_context_snapshot
+
+        fallback_context_payload = build_policy_core_context_snapshot(
+            client_slug=client_slug,
+            info_refs=None,
+            consult_refs=None,
+        ).as_context_payload()
+        grounded_service_hint = _policy_core_context_service_hint(
+            current_message,
+            fallback_context_payload,
+            client_slug=client_slug,
+        )
+    return grounded_service_hint
+
+
+def _policy_core_build_mixed_first_turn_location_service_fact_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_location_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    effective_service = grounded_service or grounded_service_hint
+    if not effective_service:
+        return None
+    normalized_slots: dict[str, Any] = {"service": effective_service}
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    reason = "standalone_location_head_intent_with_service_fact_requests"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": "location",
+        "action": "fact",
+        "tool_action_hint": "info",
+        "pack_refs": list(expected_pack_refs),
+        "slots": normalized_slots,
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service",
+        "capability": "location",
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_mixed_first_turn_hours_location_fact_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_hours_location_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service or grounded_service_hint:
+        return None
+    intent_token = _policy_core_payload_token(payload.get("intent")) if isinstance(payload, Mapping) else None
+    capability_token = _policy_core_payload_token(payload.get("capability")) if isinstance(payload, Mapping) else None
+    head_ref = next(
+        (token for token in (intent_token, capability_token) if token in {"hours", "location"}),
+        "hours",
+    )
+    reason = "standalone_hours_location_fact_request"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": head_ref,
+        "action": "fact",
+        "tool_action_hint": "info",
+        "pack_refs": list(expected_pack_refs),
+        "slots": {},
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": {},
+        "subject_kind": "general",
+        "capability": head_ref,
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_mixed_first_turn_hours_service_fact_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_hours_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    effective_service = grounded_service or grounded_service_hint
+    if not effective_service:
+        return None
+    normalized_pack_refs = (
+        {
+            item.strip().casefold()
+            for item in list(payload.get("pack_refs") or [])
+            if isinstance(item, str) and item.strip()
+        }
+        if isinstance(payload, Mapping)
+        else set()
+    )
+    if normalized_pack_refs != {
+        item.strip().casefold()
+        for item in expected_pack_refs
+        if isinstance(item, str) and item.strip()
+    }:
+        return None
+    intent_token = _policy_core_payload_token(payload.get("intent")) if isinstance(payload, Mapping) else None
+    capability_token = _policy_core_payload_token(payload.get("capability")) if isinstance(payload, Mapping) else None
+    tool_action_hint = _policy_core_payload_token(payload.get("tool_action_hint")) if isinstance(payload, Mapping) else None
+    if intent_token != "hours" and capability_token != "hours" and "hours" not in normalized_pack_refs:
+        return None
+    if tool_action_hint not in {None, "info", "catalog.location"}:
+        return None
+    if (
+        grounded_service
+        and payload.get("subject_kind") == "service"
+        and capability_token == "hours"
+        and _policy_core_payload_token(payload.get("resolution_mode")) == "policy_fact"
+        and payload.get("expected_reply_type") is None
+        and payload.get("next_question") is None
+        and not list(payload.get("open_questions") or [])
+        and payload.get("pending_question_act") is None
+        and payload.get("pending_question_target") is None
+        and payload.get("active_question_relation") is None
+    ):
+        return None
+    normalized_slots: dict[str, Any] = {"service": effective_service}
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    if "service" not in normalized_referents:
+        normalized_referents["service"] = {
+            "value": effective_service,
+            "entity_type": "service",
+            "source_ref": "carryover",
+        }
+    reason = "standalone_hours_head_intent_with_service_fact_requests"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": "hours",
+        "action": "fact",
+        "tool_action_hint": "info",
+        "pack_refs": list(expected_pack_refs),
+        "slots": normalized_slots,
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service",
+        "capability": "hours",
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_mixed_first_turn_hours_location_service_fact_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_hours_location_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    effective_service = grounded_service or grounded_service_hint
+    if not effective_service:
+        return None
+    normalized_pack_refs = (
+        {
+            item.strip().casefold()
+            for item in list(payload.get("pack_refs") or [])
+            if isinstance(item, str) and item.strip()
+        }
+        if isinstance(payload, Mapping)
+        else set()
+    )
+    expected_pack_ref_set = {
+        item.strip().casefold()
+        for item in expected_pack_refs
+        if isinstance(item, str) and item.strip()
+    }
+    intent_token = _policy_core_payload_token(payload.get("intent")) if isinstance(payload, Mapping) else None
+    capability_token = _policy_core_payload_token(payload.get("capability")) if isinstance(payload, Mapping) else None
+    tool_action_hint = _policy_core_payload_token(payload.get("tool_action_hint")) if isinstance(payload, Mapping) else None
+    if intent_token not in {"hours", "location", None} and capability_token not in {"hours", "location", None}:
+        return None
+    if tool_action_hint not in {None, "info", "catalog.location"}:
+        return None
+    if (
+        normalized_pack_refs == expected_pack_ref_set
+        and payload.get("subject_kind") == "service"
+        and payload.get("expected_reply_type") is None
+        and payload.get("next_question") is None
+        and not list(payload.get("open_questions") or [])
+        and payload.get("pending_question_act") is None
+        and payload.get("pending_question_target") is None
+        and payload.get("active_question_relation") is None
+        and _policy_core_payload_token(payload.get("resolution_mode")) == "policy_fact"
+        and capability_token in {"hours", "location"}
+    ):
+        return None
+    head_ref = next(
+        (token for token in (intent_token, capability_token) if token in {"hours", "location"}),
+        "hours",
+    )
+    normalized_slots: dict[str, Any] = {"service": effective_service}
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    if "service" not in normalized_referents:
+        normalized_referents["service"] = {
+            "value": effective_service,
+            "entity_type": "service",
+            "source_ref": "carryover",
+        }
+    reason = "standalone_hours_location_head_intent_with_service_fact_requests"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": head_ref,
+        "action": "fact",
+        "tool_action_hint": "info",
+        "pack_refs": list(expected_pack_refs),
+        "slots": normalized_slots,
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service",
+        "capability": head_ref,
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_apply_prevalidate_boundary_normalizations(
+    *,
+    payload: dict[str, Any],
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any]:
+    normalized_promotions_grounded_booking_payload = (
+        _policy_core_build_promotions_grounded_service_booking_followup_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=current_message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+    )
+    if normalized_promotions_grounded_booking_payload is not None:
+        return normalized_promotions_grounded_booking_payload
+    normalized_promotions_booking_payload = (
+        _policy_core_build_promotions_booking_fact_followup_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=current_message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+    )
+    if normalized_promotions_booking_payload is not None:
+        return normalized_promotions_booking_payload
+    normalized_hours_location_service_payload = (
+        _policy_core_build_mixed_first_turn_hours_location_service_fact_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=current_message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+    )
+    if normalized_hours_location_service_payload is not None:
+        return normalized_hours_location_service_payload
+    normalized_hours_service_payload = _policy_core_build_mixed_first_turn_hours_service_fact_boundary_payload(
+        payload=payload,
+        normalized_memory_profile=normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    )
+    if normalized_hours_service_payload is not None:
+        return normalized_hours_service_payload
+    return payload
+
+
+def _policy_core_build_mixed_first_turn_service_fact_booking_side_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_service_scoped_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return None
+    expected_ref = expected_pack_refs[0]
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    effective_service = grounded_service or grounded_service_hint
+    if not effective_service:
+        return None
+    normalized_slots: dict[str, Any] = {"service": effective_service}
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    reason = "standalone_service_fact_head_intent_with_side_booking_request"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": expected_ref,
+        "action": "fact",
+        "tool_action_hint": "catalog.service_query",
+        "pack_refs": [expected_ref],
+        "slots": normalized_slots,
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service",
+        "capability": expected_ref,
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_service_query_multifact_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_service_multifact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    effective_service = grounded_service or grounded_service_hint
+    if not effective_service:
+        return None
+    intent_token = _policy_core_payload_token(payload.get("intent")) if isinstance(payload, Mapping) else None
+    capability_token = _policy_core_payload_token(payload.get("capability")) if isinstance(payload, Mapping) else None
+    head_ref = next(
+        (token for token in (intent_token, capability_token) if token in expected_pack_refs),
+        expected_pack_refs[0],
+    )
+    head_intent = "master_query" if head_ref == "master" else head_ref
+    normalized_slots: dict[str, Any] = {"service": effective_service}
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    reason = "standalone_same_service_multifact_fact_request"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": head_intent,
+        "action": "fact",
+        "tool_action_hint": "catalog.service_query",
+        "pack_refs": list(expected_pack_refs),
+        "slots": normalized_slots,
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service",
+        "capability": head_ref,
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_start_booking_exact_datetime_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_is_booking_time_followup_contract(
+        _policy_core_resume_pending_contract(normalized_memory_profile)
+        or _policy_core_active_pending_contract(normalized_memory_profile)
+    ):
+        return None
+    exact_datetime = _policy_core_current_message_exact_datetime_surface(current_message)
+    if not exact_datetime:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    effective_service = grounded_service or grounded_service_hint
+    if not effective_service:
+        return None
+    normalized_slots: dict[str, Any] = {"service": effective_service, "datetime": exact_datetime}
+    if isinstance(payload, Mapping):
+        slots = payload.get("slots")
+        if isinstance(slots, Mapping):
+            for key in ("name", "phone"):
+                value = slots.get(key)
+                if isinstance(value, str) and value.strip():
+                    normalized_slots[key] = " ".join(value.split())
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    if "service" not in normalized_referents:
+        normalized_referents["service"] = {
+            "value": effective_service,
+            "entity_type": "service",
+            "source_ref": "carryover",
+        }
+    reason = "start_booking_exact_datetime_progression_after_service_carryover"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": "booking",
+        "action": "collect",
+        "tool_action_hint": "collect",
+        "pack_refs": [],
+        "slots": normalized_slots,
+        "expected_reply_type": "name",
+        "next_question": "name",
+        "open_questions": ["name"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": "booking",
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "booking",
+        "capability": "bookability",
+        "temporal_scope": "specific_time",
+        "alternate_datetime": exact_datetime,
+        "resolution_mode": "direct",
+        "pending_question_act": "fill_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "fill_requested_slot",
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_mixed_first_turn_promotions_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    if not _policy_core_current_message_has_promotions_query(current_message):
+        return None
+    if not _policy_core_current_message_has_booking_or_location_side_ask(current_message):
+        return None
+    expected_pack_refs = _policy_core_current_message_promotions_location_pack_refs(
+        current_message
+    ) or ["promotions"]
+    grounded_service = _policy_core_payload_grounded_service(payload)
+    normalized_slots: dict[str, Any] = {}
+    normalized_referents: dict[str, Any] = {}
+    if grounded_service:
+        normalized_slots["service"] = grounded_service
+        if isinstance(payload, Mapping):
+            referents = payload.get("referents")
+            if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+                normalized_referents["service"] = dict(referents["service"])
+    reason = "standalone_promotions_head_intent_with_side_requests"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": "promotions",
+        "action": "fact",
+        "tool_action_hint": "catalog.service_query",
+        "pack_refs": list(expected_pack_refs),
+        "slots": normalized_slots,
+        "expected_reply_type": None,
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": None,
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service" if grounded_service else "general",
+        "capability": "promotions",
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_promotions_booking_fact_followup_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+        current_message
+    )
+    if expected_pack_refs is None:
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service:
+        return None
+    reason = "standalone_promotions_head_with_missing_service_booking_request"
+    if isinstance(payload, Mapping):
+        raw_reason = payload.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            reason = " ".join(raw_reason.split())
+    return {
+        "intent": "promotions",
+        "action": "fact",
+        "tool_action_hint": "catalog.service_query",
+        "pack_refs": list(expected_pack_refs),
+        "slots": {},
+        "expected_reply_type": "service_choice",
+        "next_question": "service",
+        "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": reason,
+        "goal": "booking",
+        "entity_refs": [],
+        "referents": {},
+        "subject_kind": "general",
+        "capability": "promotions",
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": None,
+        "pending_question_target": None,
+        "active_question_relation": None,
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
+def _policy_core_build_promotions_grounded_service_booking_followup_boundary_payload(
+    *,
+    payload: Mapping[str, Any] | None,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> dict[str, Any] | None:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return None
+    expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+        current_message
+    )
+    if expected_pack_refs is None:
+        return None
+    if _policy_core_current_message_has_message_grounded_temporal_clue(current_message):
+        return None
+    grounded_service = _policy_core_payload_grounded_service(payload) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service:
+        return None
+    normalized_referents: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        referents = payload.get("referents")
+        if isinstance(referents, Mapping) and isinstance(referents.get("service"), Mapping):
+            normalized_referents["service"] = dict(referents["service"])
+    if "service" not in normalized_referents:
+        normalized_referents["service"] = {
+            "value": grounded_service,
+            "entity_type": "service",
+            "source_ref": "user_text",
+        }
+    return {
+        "intent": "promotions",
+        "action": "fact",
+        "tool_action_hint": "catalog.service_query",
+        "pack_refs": list(expected_pack_refs),
+        "slots": {"service": grounded_service},
+        "expected_reply_type": "time",
+        "next_question": "datetime",
+        "open_questions": ["datetime"],
+        "needs_manager": False,
+        "risk_signals": [],
+        "language": payload.get("language") if isinstance(payload, Mapping) else None,
+        "confidence": payload.get("confidence") if isinstance(payload, Mapping) else None,
+        "reason": "standalone_promotions_head_with_grounded_service_booking_request",
+        "goal": "booking",
+        "entity_refs": [],
+        "referents": normalized_referents,
+        "subject_kind": "service",
+        "capability": "promotions",
+        "temporal_scope": "none",
+        "alternate_datetime": None,
+        "resolution_mode": "policy_fact",
+        "pending_question_act": "ask_about_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "ask_about_requested_slot",
+        "resolver_id": None,
+        "resolver_version": None,
+    }
+
+
 def _policy_core_is_active_booking_live_availability_followup_contract(
     contract: LlmPolicyCoreOutput,
     normalized_memory_profile: Mapping[str, Any] | None,
@@ -1430,15 +3050,18 @@ def _policy_core_is_active_booking_temporal_clue_followup_contract(
     ) or _policy_core_memory_grounded_service(normalized_memory_profile)
     if not grounded_service:
         return False
+    message_has_grounded_temporal_clue = (
+        _policy_core_current_message_has_message_grounded_temporal_clue(current_message)
+    )
     grounded_specialist = _policy_core_contract_grounded_specialist(
         contract
     ) or _policy_core_memory_grounded_specialist(normalized_memory_profile)
-    if grounded_specialist:
+    if grounded_specialist and not message_has_grounded_temporal_clue:
         return False
     if _policy_core_current_message_is_generic_booking_availability_question(current_message):
         return False
     temporal_scope = _policy_core_payload_token(contract.temporal_scope)
-    if temporal_scope in {None, "none"}:
+    if temporal_scope in {None, "none"} and not message_has_grounded_temporal_clue:
         return False
     if (
         contract.pending_question_act == "fill_requested_slot"
@@ -1446,8 +3069,19 @@ def _policy_core_is_active_booking_temporal_clue_followup_contract(
     ):
         return False
     if contract.pending_question_target not in {None, "time"}:
-        return False
+        if not (
+            message_has_grounded_temporal_clue
+            and contract.pending_question_target == "specialist"
+        ):
+            return False
     alternate_datetime = _policy_core_payload_token(contract.alternate_datetime)
+    if _policy_core_temporal_clue_requires_message_grounded_alternate_datetime(
+        alternate_datetime,
+        current_message,
+    ):
+        return True
+    if temporal_scope in {None, "none"}:
+        return True
     if not alternate_datetime:
         return True
     if contract.pending_question_act != "slot_constraint":
@@ -1505,6 +3139,880 @@ def _policy_core_is_active_booking_requested_slot_availability_followup_contract
     return False
 
 
+def _policy_core_is_booking_missing_service_availability_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if contract.intent != "booking" or contract.action != "collect":
+        return False
+    if not isinstance(current_message, str):
+        return False
+    normalized_message = " ".join(current_message.split())
+    if not normalized_message:
+        return False
+    if not any(
+        pattern.search(normalized_message)
+        for pattern in _POLICY_CORE_GENERIC_AVAILABILITY_QUERY_PATTERNS
+    ):
+        return False
+    if not _policy_core_current_message_has_message_grounded_temporal_clue(
+        normalized_message
+    ):
+        return False
+    grounded_service_hint = _policy_core_context_service_hint(
+        normalized_message,
+        context_payload,
+        client_slug=client_slug,
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if grounded_service_hint:
+        return False
+    open_questions = {
+        item.strip().casefold()
+        for item in list(contract.open_questions or [])
+        if isinstance(item, str) and item.strip()
+    }
+    temporal_scope_hint = _policy_core_current_message_grounded_temporal_scope_hint(
+        normalized_message
+    )
+    if _policy_core_contract_grounded_service(contract):
+        return True
+    if contract.expected_reply_type != "service_choice":
+        return True
+    if contract.next_question != "service" or "service" not in open_questions:
+        return True
+    if contract.pending_question_act is not None:
+        return True
+    if contract.pending_question_target is not None:
+        return True
+    if contract.active_question_relation is not None:
+        return True
+    if contract.subject_kind not in {None, "general"}:
+        return True
+    if contract.capability != "bookability":
+        return True
+    if contract.resolution_mode != "clarify_missing_subject":
+        return True
+    if temporal_scope_hint and contract.temporal_scope != temporal_scope_hint:
+        return True
+    return False
+
+
+def _policy_core_is_canonical_promotions_booking_fact_followup_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+        current_message
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service:
+        return False
+    open_questions = {
+        item.strip().casefold()
+        for item in list(contract.open_questions or [])
+        if isinstance(item, str) and item.strip()
+    }
+    if contract.intent not in {"promotions", "booking"}:
+        return False
+    if contract.action != "fact":
+        return False
+    if contract.tool_action_hint not in {"catalog.service_query", "info"}:
+        return False
+    if _policy_core_catalog_service_pack_refs(contract) != expected_pack_refs:
+        return False
+    if contract.expected_reply_type != "service_choice":
+        return False
+    if contract.next_question != "service" or "service" not in open_questions:
+        return False
+    if contract.pending_question_act is not None:
+        return False
+    if contract.pending_question_target is not None:
+        return False
+    if contract.active_question_relation is not None:
+        return False
+    if contract.subject_kind not in {None, "general"}:
+        return False
+    if contract.capability != "promotions":
+        return False
+    if contract.resolution_mode != "policy_fact":
+        return False
+    if _policy_core_payload_token(contract.goal) != "booking":
+        return False
+    return True
+
+
+def _policy_core_is_promotions_booking_fact_followup_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+        current_message
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service:
+        return False
+    return not _policy_core_is_canonical_promotions_booking_fact_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    )
+
+
+def _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+        current_message
+    )
+    if expected_pack_refs is None:
+        return False
+    if _policy_core_current_message_has_message_grounded_temporal_clue(current_message):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service:
+        return False
+    if contract.intent not in {"promotions", "booking"}:
+        return False
+    if contract.action != "fact":
+        return False
+    if contract.tool_action_hint not in {"catalog.service_query", "info"}:
+        return False
+    if _policy_core_catalog_service_pack_refs(contract) != expected_pack_refs:
+        return False
+    if contract.expected_reply_type != "time":
+        return False
+    if contract.next_question != "datetime":
+        return False
+    if list(contract.open_questions or []) != ["datetime"]:
+        return False
+    if contract.pending_question_act != "ask_about_requested_slot":
+        return False
+    if contract.pending_question_target != "time":
+        return False
+    if contract.active_question_relation != "ask_about_requested_slot":
+        return False
+    if contract.subject_kind != "service":
+        return False
+    if contract.capability != "promotions":
+        return False
+    if contract.resolution_mode != "policy_fact":
+        return False
+    if _policy_core_payload_token(contract.goal) != "booking":
+        return False
+    return True
+
+
+def _policy_core_is_promotions_grounded_service_booking_followup_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_booking_collect_pack_refs(
+        current_message
+    )
+    if expected_pack_refs is None:
+        return False
+    if _policy_core_current_message_has_message_grounded_temporal_clue(current_message):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract) or _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service:
+        return False
+    return not _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    )
+
+
+def _policy_core_is_mixed_first_turn_hours_service_fact_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_is_canonical_hours_location_service_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_hours_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service and not grounded_service_hint:
+        return False
+    normalized_pack_refs = {
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    }
+    asks_hours = (
+        contract.intent == "hours"
+        or contract.capability == "hours"
+        or "hours" in _policy_core_catalog_location_pack_refs(contract)
+    )
+    if not asks_hours:
+        return False
+    if not grounded_service:
+        return True
+    if contract.action != "fact":
+        return True
+    if contract.tool_action_hint != "info":
+        return True
+    if normalized_pack_refs != set(expected_pack_refs):
+        return True
+    if contract.subject_kind != "service":
+        return True
+    if contract.capability != "hours":
+        return True
+    if contract.resolution_mode != "policy_fact":
+        return True
+    if contract.expected_reply_type is not None:
+        return True
+    if contract.next_question is not None:
+        return True
+    if list(contract.open_questions or []):
+        return True
+    if contract.pending_question_act is not None:
+        return True
+    if contract.pending_question_target is not None:
+        return True
+    if contract.active_question_relation is not None:
+        return True
+    return False
+
+
+def _policy_core_is_canonical_hours_location_service_fact_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_hours_location_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service and not grounded_service_hint:
+        return False
+    normalized_pack_refs = {
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    }
+    if contract.action != "fact":
+        return False
+    if contract.tool_action_hint != "info":
+        return False
+    if normalized_pack_refs != set(expected_pack_refs):
+        return False
+    if contract.subject_kind != "service":
+        return False
+    if contract.resolution_mode != "policy_fact":
+        return False
+    if contract.expected_reply_type is not None:
+        return False
+    if contract.next_question is not None:
+        return False
+    if list(contract.open_questions or []):
+        return False
+    if contract.pending_question_act is not None:
+        return False
+    if contract.pending_question_target is not None:
+        return False
+    if contract.active_question_relation is not None:
+        return False
+    return (contract.intent, contract.capability) in {
+        ("hours", "hours"),
+        ("location", "location"),
+    }
+
+
+def _policy_core_is_canonical_hours_location_fact_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_hours_location_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service or grounded_service_hint:
+        return False
+    normalized_pack_refs = [
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if contract.action != "fact":
+        return False
+    if contract.tool_action_hint != "info":
+        return False
+    if normalized_pack_refs != list(expected_pack_refs):
+        return False
+    if contract.intent not in {"hours", "location"}:
+        return False
+    if contract.capability != contract.intent:
+        return False
+    if contract.subject_kind != "general":
+        return False
+    if contract.resolution_mode != "policy_fact":
+        return False
+    if contract.expected_reply_type is not None:
+        return False
+    if contract.next_question is not None:
+        return False
+    if list(contract.open_questions or []):
+        return False
+    if contract.pending_question_act is not None:
+        return False
+    if contract.pending_question_target is not None:
+        return False
+    if contract.active_question_relation is not None:
+        return False
+    return True
+
+
+def _policy_core_is_mixed_first_turn_hours_location_fact_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_hours_location_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if grounded_service or grounded_service_hint:
+        return False
+    return not _policy_core_is_canonical_hours_location_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    )
+
+
+def _policy_core_is_mixed_first_turn_location_service_fact_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_is_canonical_hours_location_service_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_location_service_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service and not grounded_service_hint:
+        return False
+    normalized_pack_refs = [
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if contract.action != "fact":
+        return True
+    if contract.tool_action_hint != "info":
+        return True
+    if normalized_pack_refs != list(expected_pack_refs):
+        return True
+    if contract.intent != "location":
+        return True
+    if contract.subject_kind != "service":
+        return True
+    if contract.capability != "location":
+        return True
+    if contract.resolution_mode != "policy_fact":
+        return True
+    if contract.expected_reply_type is not None:
+        return True
+    if contract.next_question is not None:
+        return True
+    if list(contract.open_questions or []):
+        return True
+    if contract.pending_question_act is not None:
+        return True
+    if contract.pending_question_target is not None:
+        return True
+    if contract.active_question_relation is not None:
+        return True
+    return grounded_service is None
+
+
+def _policy_core_is_mixed_first_turn_service_fact_booking_side_precedence_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_service_scoped_fact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    expected_ref = expected_pack_refs[0]
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service and not grounded_service_hint:
+        return False
+    normalized_pack_refs = [
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if contract.action != "fact":
+        return True
+    if contract.tool_action_hint != "catalog.service_query":
+        return True
+    if normalized_pack_refs != [expected_ref]:
+        return True
+    if contract.intent != expected_ref:
+        return True
+    if contract.subject_kind != "service":
+        return True
+    if contract.capability != expected_ref:
+        return True
+    if contract.resolution_mode != "policy_fact":
+        return True
+    if contract.expected_reply_type is not None:
+        return True
+    if contract.next_question is not None:
+        return True
+    if list(contract.open_questions or []):
+        return True
+    if contract.pending_question_act is not None:
+        return True
+    if contract.pending_question_target is not None:
+        return True
+    if contract.active_question_relation is not None:
+        return True
+    return grounded_service is None
+
+
+def _policy_core_is_service_query_multifact_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_service_multifact_pack_refs(
+        current_message,
+        client_slug=client_slug,
+    )
+    if expected_pack_refs is None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    grounded_service_hint = _policy_core_resolve_message_grounded_service_hint(
+        current_message=current_message,
+        context_payload=context_payload,
+        normalized_memory_profile=normalized_memory_profile,
+        client_slug=client_slug,
+    )
+    if not grounded_service and not grounded_service_hint:
+        return False
+    normalized_pack_refs = _policy_core_catalog_service_pack_refs(contract)
+    if contract.action != "fact":
+        return True
+    if contract.tool_action_hint != "catalog.service_query":
+        return True
+    if normalized_pack_refs != expected_pack_refs:
+        return True
+    contract_intent_ref = "master" if contract.intent == "master_query" else contract.intent
+    if contract_intent_ref not in expected_pack_refs:
+        return True
+    if contract.subject_kind != "service":
+        return True
+    if contract.capability not in expected_pack_refs:
+        return True
+    if contract.resolution_mode != "policy_fact":
+        return True
+    if contract.temporal_scope != "none":
+        return True
+    if contract.alternate_datetime is not None:
+        return True
+    if contract.expected_reply_type is not None:
+        return True
+    if contract.next_question is not None:
+        return True
+    if list(contract.open_questions or []):
+        return True
+    if contract.pending_question_act is not None:
+        return True
+    if contract.pending_question_target is not None:
+        return True
+    if contract.active_question_relation is not None:
+        return True
+    return grounded_service is None
+
+
+def _policy_core_is_canonical_standalone_promotions_fact_contract(
+    contract: LlmPolicyCoreOutput,
+) -> bool:
+    if contract.action != "fact":
+        return False
+    if contract.intent in {"out_of_domain", "other"}:
+        return False
+    normalized_pack_refs = {
+        item.strip().casefold()
+        for item in list(contract.pack_refs or [])
+        if isinstance(item, str) and item.strip()
+    }
+    if "promotions" not in normalized_pack_refs:
+        return False
+    if contract.tool_action_hint not in {"info", "catalog.service_query"}:
+        return False
+    if contract.capability != "promotions":
+        return False
+    if contract.resolution_mode != "policy_fact":
+        return False
+    if contract.expected_reply_type is not None:
+        return False
+    if contract.next_question is not None:
+        return False
+    if list(contract.open_questions or []):
+        return False
+    if contract.pending_question_act is not None:
+        return False
+    if contract.pending_question_target is not None:
+        return False
+    if contract.active_question_relation is not None:
+        return False
+    grounded_service = _policy_core_contract_grounded_service(contract)
+    expected_subject_kind = "service" if grounded_service else "general"
+    return contract.subject_kind == expected_subject_kind
+
+
+def _policy_core_is_mixed_first_turn_promotions_precedence_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+    context_payload: Mapping[str, Any] | None,
+    client_slug: str | None,
+) -> bool:
+    if _policy_core_active_pending_contract(normalized_memory_profile) or _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ):
+        return False
+    if not _policy_core_current_message_has_promotions_query(current_message):
+        return False
+    if not _policy_core_current_message_has_booking_or_location_side_ask(current_message):
+        return False
+    if contract.action == "handoff":
+        return False
+    if _policy_core_is_canonical_hours_location_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    if _policy_core_is_canonical_hours_location_service_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    if _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    if _policy_core_is_canonical_promotions_booking_fact_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return False
+    expected_pack_refs = _policy_core_current_message_promotions_location_pack_refs(current_message)
+    if expected_pack_refs is not None:
+        normalized_pack_refs = _policy_core_catalog_service_pack_refs(contract)
+        if normalized_pack_refs != expected_pack_refs:
+            return True
+    return not _policy_core_is_canonical_standalone_promotions_fact_contract(contract)
+
+
+def _policy_core_is_start_booking_temporal_clue_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+) -> bool:
+    if contract.intent != "booking" or contract.action != "collect":
+        return False
+    if contract.tool_action_hint != "collect":
+        return False
+    carry_contract = _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ) or _policy_core_active_pending_contract(normalized_memory_profile)
+    if _policy_core_is_booking_time_followup_contract(carry_contract):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(
+        contract
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if not grounded_service:
+        return False
+    if not _policy_core_current_message_has_message_grounded_temporal_clue(
+        current_message
+    ):
+        return False
+    if _policy_core_current_message_has_explicit_clock_time(current_message):
+        return False
+    temporal_scope = _policy_core_payload_token(contract.temporal_scope)
+    alternate_datetime = _policy_core_payload_token(contract.alternate_datetime)
+    if _policy_core_temporal_clue_requires_message_grounded_alternate_datetime(
+        alternate_datetime,
+        current_message,
+    ):
+        return True
+    if contract.expected_reply_type != "time":
+        return True
+    if contract.next_question != "datetime":
+        return True
+    if list(contract.open_questions or []) != ["datetime"]:
+        return True
+    if contract.pending_question_act != "slot_constraint":
+        return True
+    if contract.pending_question_target != "time":
+        return True
+    if contract.active_question_relation != "slot_constraint":
+        return True
+    if contract.subject_kind != "booking":
+        return True
+    if temporal_scope in {None, "none"}:
+        return True
+    if not alternate_datetime:
+        return True
+    return False
+
+
+def _policy_core_is_start_booking_exact_datetime_progression_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+) -> bool:
+    if contract.intent != "booking":
+        return False
+    carry_contract = _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ) or _policy_core_active_pending_contract(normalized_memory_profile)
+    if _policy_core_is_booking_time_followup_contract(carry_contract):
+        return False
+    if not _policy_core_current_message_exact_datetime_surface(current_message):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(
+        contract
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if not grounded_service:
+        return False
+    if _policy_core_has_customer_identity(contract, normalized_memory_profile):
+        return False
+    if contract.action != "collect" or contract.tool_action_hint != "collect":
+        return True
+    contract_datetime = _policy_core_normalize_surface_text(contract.slots.get("datetime"))
+    if not contract_datetime:
+        return True
+    if contract.expected_reply_type != "name":
+        return True
+    if contract.next_question != "name":
+        return True
+    if list(contract.open_questions or []) != ["name"]:
+        return True
+    if contract.pending_question_act != "fill_requested_slot":
+        return True
+    if contract.pending_question_target != "time":
+        return True
+    if contract.active_question_relation != "fill_requested_slot":
+        return True
+    if contract.subject_kind != "booking":
+        return True
+    if contract.capability != "bookability":
+        return True
+    if contract.temporal_scope != "specific_time":
+        return True
+    if not _policy_core_normalize_surface_text(contract.alternate_datetime):
+        return True
+    return False
+
+
 def _policy_core_is_active_booking_subject_info_interrupt_contract(
     contract: LlmPolicyCoreOutput,
     normalized_memory_profile: Mapping[str, Any] | None,
@@ -1530,6 +4038,33 @@ def _policy_core_is_active_booking_subject_info_interrupt_contract(
     return contract.active_question_relation == "generic_info_interrupt"
 
 
+def _policy_core_is_active_booking_manage_interrupt_handoff_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+) -> bool:
+    if _policy_core_is_explicit_manager_handoff_contract(contract):
+        return False
+    carry_contract = _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ) or _policy_core_active_pending_contract(normalized_memory_profile)
+    if not _policy_core_is_booking_time_followup_contract(carry_contract):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(
+        contract
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if not grounded_service:
+        return False
+    if contract.action != "handoff":
+        return False
+    if contract.tool_action_hint != "handoff":
+        return False
+    if contract.subject_kind != "booking":
+        return False
+    if contract.capability != "booking_manage":
+        return False
+    return bool(contract.needs_manager)
+
+
 def _policy_core_is_active_booking_specialist_preference_followup_contract(
     contract: LlmPolicyCoreOutput,
     normalized_memory_profile: Mapping[str, Any] | None,
@@ -1552,6 +4087,15 @@ def _policy_core_is_active_booking_specialist_preference_followup_contract(
         contract
     ) or _policy_core_memory_grounded_specialist(normalized_memory_profile)
     if not grounded_specialist:
+        return False
+    if _policy_core_current_message_has_explicit_customer_name_intro(current_message):
+        return False
+    if _policy_core_contract_customer_entity_name(contract):
+        return False
+    if (
+        _policy_core_current_message_has_message_grounded_temporal_clue(current_message)
+        and not _policy_core_has_customer_identity(contract, normalized_memory_profile)
+    ):
         return False
     if (
         _policy_core_current_message_has_explicit_clock_time(current_message)
@@ -1623,6 +4167,159 @@ def _policy_core_is_active_booking_time_fill_progression_contract(
     return False
 
 
+def _policy_core_is_active_booking_commit_progression_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+) -> bool:
+    carry_contract = _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ) or _policy_core_active_pending_contract(normalized_memory_profile)
+    if not _policy_core_is_booking_time_followup_contract(carry_contract):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(
+        contract
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if not grounded_service:
+        return False
+    if not _policy_core_memory_has_datetime_context(normalized_memory_profile):
+        return False
+    if not _policy_core_current_message_has_explicit_clock_time(current_message):
+        return False
+    if _policy_core_current_message_is_generic_booking_availability_question(current_message):
+        return False
+    if not _policy_core_has_customer_identity(contract, normalized_memory_profile):
+        return False
+    if contract.intent != "booking" or contract.action != "fact":
+        return True
+    if contract.tool_action_hint != "calendar.book_slot":
+        return True
+    if contract.subject_kind != "booking":
+        return True
+    if contract.capability != "bookability":
+        return True
+    if contract.resolution_mode != "live_calendar":
+        return True
+    contract_datetime = _policy_core_payload_token(contract.slots.get("datetime"))
+    if not contract_datetime or not _policy_core_current_message_has_explicit_clock_time(
+        contract_datetime
+    ):
+        return True
+    if not _policy_core_payload_token(contract.slots.get("name")):
+        return True
+    if not _policy_core_booking_commit_ready(contract, normalized_memory_profile):
+        return True
+    if contract.expected_reply_type is not None:
+        return True
+    if contract.next_question is not None:
+        return True
+    if list(contract.open_questions or []) != []:
+        return True
+    if any(
+        (
+            contract.pending_question_act,
+            contract.pending_question_target,
+            contract.active_question_relation,
+        )
+    ):
+        return True
+    return False
+
+
+def _policy_core_is_active_booking_customer_name_carryover_contract(
+    contract: LlmPolicyCoreOutput,
+    normalized_memory_profile: Mapping[str, Any] | None,
+    *,
+    current_message: str | None,
+) -> bool:
+    carry_contract = _policy_core_resume_pending_contract(
+        normalized_memory_profile
+    ) or _policy_core_active_pending_contract(normalized_memory_profile)
+    if not _policy_core_is_booking_time_followup_contract(carry_contract):
+        return False
+    grounded_service = _policy_core_contract_grounded_service(
+        contract
+    ) or _policy_core_memory_grounded_service(normalized_memory_profile)
+    if not grounded_service:
+        return False
+    has_explicit_name_intro = _policy_core_current_message_has_explicit_customer_name_intro(
+        current_message
+    )
+    customer_name = _policy_core_contract_customer_entity_name(contract)
+    if not (customer_name or has_explicit_name_intro):
+        return False
+    if (
+        has_explicit_name_intro
+        and not _policy_core_current_message_has_message_grounded_temporal_clue(current_message)
+    ):
+        carried_alternate_datetime = _policy_core_memory_alternate_datetime(
+            normalized_memory_profile
+        )
+        contract_alternate_datetime = _policy_core_normalize_surface_text(
+            contract.alternate_datetime
+        )
+        if isinstance(carried_alternate_datetime, str) and carried_alternate_datetime:
+            carried_signature = carried_alternate_datetime.casefold()
+            contract_signature = contract_alternate_datetime.casefold() if isinstance(contract_alternate_datetime, str) else None
+            if contract_signature != carried_signature:
+                return True
+        carried_temporal_scope = _policy_core_memory_temporal_scope(normalized_memory_profile)
+        if (
+            isinstance(carried_temporal_scope, str)
+            and carried_temporal_scope
+            and _policy_core_payload_token(contract.temporal_scope) != carried_temporal_scope
+        ):
+            return True
+    if (
+        _policy_core_current_message_has_explicit_clock_time(current_message)
+        and _policy_core_memory_has_datetime_context(normalized_memory_profile)
+        and contract.intent == "booking"
+        and contract.action == "fact"
+        and contract.tool_action_hint == "calendar.book_slot"
+        and contract.subject_kind == "booking"
+        and contract.capability == "bookability"
+        and contract.resolution_mode == "live_calendar"
+        and _policy_core_booking_commit_ready(contract, normalized_memory_profile)
+    ):
+        return False
+    if contract.intent != "booking" or contract.action != "collect":
+        return True
+    if _policy_core_payload_token(contract.capability) == "live_availability":
+        return True
+    if contract.tool_action_hint != "collect":
+        return True
+    if contract.subject_kind != "booking":
+        return True
+    if contract.resolution_mode == "referent_followup":
+        return True
+    if not _policy_core_has_customer_identity(contract, normalized_memory_profile):
+        return True
+    expected_reply_type = carry_contract.get("expected_reply_type")
+    expected_next_question = carry_contract.get("next_question")
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        if contract.expected_reply_type != expected_reply_type:
+            return True
+    if isinstance(expected_next_question, str) and expected_next_question.strip():
+        if contract.next_question != expected_next_question:
+            return True
+        if list(contract.open_questions or []) != _policy_core_expected_open_questions(carry_contract):
+            return True
+    pending_act = carry_contract.get("pending_question_act")
+    if isinstance(pending_act, str) and pending_act.strip():
+        if contract.pending_question_act != pending_act:
+            return True
+    pending_target = carry_contract.get("pending_question_target")
+    if isinstance(pending_target, str) and pending_target.strip():
+        if contract.pending_question_target != pending_target:
+            return True
+    active_relation = carry_contract.get("active_question_relation")
+    if isinstance(active_relation, str) and active_relation.strip():
+        if contract.active_question_relation != active_relation:
+            return True
+    return False
+
+
 def _policy_core_is_active_booking_generic_specialist_query_followup_contract(
     contract: LlmPolicyCoreOutput,
     normalized_memory_profile: Mapping[str, Any] | None,
@@ -1690,8 +4387,10 @@ def _validate_policy_core_runtime_contract(
         contract,
         normalized_memory_profile,
     )
+    explicit_manager_handoff = _policy_core_is_explicit_manager_handoff_contract(contract)
     if (
         not has_booking_ref
+        and not explicit_manager_handoff
         and (
             (
                 contract.capability == "booking_manage"
@@ -1701,7 +4400,7 @@ def _validate_policy_core_runtime_contract(
             or booking_manage_reference_followup_shape
         )
     ):
-        direct_lookup_context = _policy_core_existing_booking_lookup_context(
+        direct_lookup_context = _policy_core_booking_manage_reference_direct_lookup_context(
             contract,
             normalized_memory_profile,
         )
@@ -1726,13 +4425,6 @@ def _validate_policy_core_runtime_contract(
             )
         ):
             return "llm_policy_core_error:booking_manage_reference_stale_axes"
-
-    if (
-        contract.tool_action_hint == "calendar.book_slot"
-        and _policy_core_booking_commit_ready(contract, normalized_memory_profile)
-        and contract.action != "fact"
-    ):
-        return "llm_policy_core_error:booking_commit_action_invalid"
         if (
             not direct_lookup_context
             and not has_customer
@@ -1745,6 +4437,25 @@ def _validate_policy_core_runtime_contract(
             )
         ):
             return "llm_policy_core_error:booking_manage_reference_stale_axes"
+
+    if (
+        has_booking_ref
+        and contract.capability == "booking_manage"
+        and contract.subject_kind == "booking"
+        and contract.action == "fact"
+        and contract.tool_action_hint == "calendar.cancel"
+        and _policy_core_current_message_is_hypothetical_cancel_query(
+            current_message
+        )
+    ):
+        return "llm_policy_core_error:booking_manage_grounded_ref_cancel_requires_direct_commit"
+
+    if (
+        contract.tool_action_hint == "calendar.book_slot"
+        and _policy_core_booking_commit_ready(contract, normalized_memory_profile)
+        and contract.action != "fact"
+    ):
+        return "llm_policy_core_error:booking_commit_action_invalid"
 
     pending_contract = _policy_core_active_pending_contract(normalized_memory_profile)
     resume_contract = _policy_core_resume_pending_contract(normalized_memory_profile)
@@ -1778,6 +4489,12 @@ def _validate_policy_core_runtime_contract(
         expected_relation = resume_contract.get("active_question_relation")
         if expected_relation and contract.active_question_relation != expected_relation:
             return "llm_policy_core_error:consult_media_relation_invalid"
+
+    if _policy_core_is_active_booking_manage_interrupt_handoff_contract(
+        contract,
+        normalized_memory_profile,
+    ):
+        return "llm_policy_core_error:active_booking_manage_interrupt_reclassification_required"
 
     if _policy_core_is_active_booking_subject_info_interrupt_contract(
         contract,
@@ -1864,6 +4581,20 @@ def _validate_policy_core_runtime_contract(
     ):
         return "llm_policy_core_error:active_booking_live_availability_reclassification_required"
 
+    if _policy_core_is_start_booking_temporal_clue_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+    ):
+        return "llm_policy_core_error:start_booking_temporal_clue_reclassification_required"
+
+    if _policy_core_is_start_booking_exact_datetime_progression_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+    ):
+        return "llm_policy_core_error:start_booking_exact_datetime_progression_required"
+
     if _policy_core_is_active_booking_requested_slot_availability_followup_contract(
         contract,
         normalized_memory_profile,
@@ -1878,6 +4609,20 @@ def _validate_policy_core_runtime_contract(
     ):
         return "llm_policy_core_error:active_booking_time_fill_progression_required"
 
+    if _policy_core_is_active_booking_commit_progression_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+    ):
+        return "llm_policy_core_error:active_booking_commit_progression_required"
+
+    if _policy_core_is_active_booking_customer_name_carryover_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+    ):
+        return "llm_policy_core_error:active_booking_customer_name_carryover_required"
+
     if _policy_core_is_active_booking_specialist_preference_followup_contract(
         contract,
         normalized_memory_profile,
@@ -1890,6 +4635,87 @@ def _validate_policy_core_runtime_contract(
         normalized_memory_profile,
     ):
         return "llm_policy_core_error:active_booking_generic_specialist_query_reclassification_required"
+
+    if _policy_core_is_booking_missing_service_availability_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:booking_availability_missing_service_reclassification_required"
+
+    if _policy_core_is_mixed_first_turn_hours_location_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:mixed_first_turn_hours_location_fact_scope_required"
+
+    if _policy_core_is_mixed_first_turn_location_service_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:mixed_first_turn_location_service_fact_reclassification_required"
+
+    if _policy_core_is_service_query_multifact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:service_query_multifact_reclassification_required"
+
+    if _policy_core_is_mixed_first_turn_service_fact_booking_side_precedence_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:mixed_first_turn_service_fact_booking_side_precedence_required"
+
+    if _policy_core_is_mixed_first_turn_hours_service_fact_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:mixed_first_turn_hours_service_fact_reclassification_required"
+
+    if _policy_core_is_promotions_grounded_service_booking_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:promotions_grounded_service_booking_followup_reclassification_required"
+
+    if _policy_core_is_promotions_booking_fact_followup_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:promotions_booking_followup_reclassification_required"
+
+    if _policy_core_is_mixed_first_turn_promotions_precedence_contract(
+        contract,
+        normalized_memory_profile,
+        current_message=current_message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    ):
+        return "llm_policy_core_error:mixed_first_turn_promotions_precedence_reclassification_required"
 
     if _policy_core_is_active_booking_temporal_clue_followup_contract(
         contract,
@@ -1910,6 +4736,23 @@ def _validate_policy_core_runtime_contract(
     if contract.action == "fact" and contract.tool_action_hint == "catalog.service_query":
         expected_service_pack_ref = _policy_core_expected_catalog_service_pack_ref(contract)
         service_pack_refs = _policy_core_catalog_service_pack_refs(contract)
+        expected_service_multifact_pack_refs = _policy_core_current_message_service_multifact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        )
+        expected_promotions_location_pack_refs = _policy_core_current_message_promotions_location_pack_refs(
+            current_message
+        )
+        if (
+            expected_service_multifact_pack_refs
+            and service_pack_refs == expected_service_multifact_pack_refs
+        ):
+            expected_service_pack_ref = None
+        if (
+            expected_promotions_location_pack_refs
+            and service_pack_refs == expected_promotions_location_pack_refs
+        ):
+            expected_service_pack_ref = None
         if expected_service_pack_ref and service_pack_refs != [expected_service_pack_ref]:
             return "llm_policy_core_error:catalog_service_query_pack_refs_invalid"
 
@@ -1934,7 +4777,25 @@ def _validate_policy_core_runtime_contract(
             and isinstance(carry_next_question, str)
             and carry_next_question.strip()
         )
-        if has_followup_contract and not carried_followup_contract:
+        promotions_booking_followup_contract = _policy_core_is_canonical_promotions_booking_fact_followup_contract(
+            contract,
+            normalized_memory_profile,
+            current_message=current_message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+        if (
+            has_followup_contract
+            and not carried_followup_contract
+            and not promotions_booking_followup_contract
+            and not _policy_core_is_canonical_promotions_grounded_service_booking_followup_contract(
+                contract,
+                normalized_memory_profile,
+                current_message=current_message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
+        ):
             return "llm_policy_core_error:standalone_fact_followup_contract_invalid"
 
     if (
@@ -2023,6 +4884,21 @@ def _build_policy_core_contract_repair_instruction(
             f"`open_questions=[\"{expected_next_question}\"]`. "
             "If the missing follow-up is `name`, omit "
             "`pending_question_act`, `pending_question_target`, and "
+            "`active_question_relation`. Return corrected JSON only."
+        )
+
+    if token == "booking_manage_grounded_ref_cancel_requires_direct_commit":
+        return (
+            "The previous JSON attempted to cancel an existing booking on a "
+            "hypothetical/question-form turn. With grounded `referents.booking_ref`, "
+            "do NOT execute `calendar.cancel` for messages like "
+            '`"А если я захочу отменить запись?"` or `"Как отменить эту запись?"`. '
+            'Keep `intent="check_booking"`, `action="fact"`, '
+            '`tool_action_hint="calendar.get_booking"`, `subject_kind="booking"`, '
+            '`capability="booking_manage"`, and `resolution_mode="direct"`. '
+            "Preserve grounded `referents.booking_ref` and leave "
+            "`expected_reply_type=null`, `next_question=null`, `open_questions=[]`. "
+            "Omit `pending_question_act`, `pending_question_target`, and "
             "`active_question_relation`. Return corrected JSON only."
         )
 
@@ -2357,8 +5233,10 @@ def _build_policy_core_contract_repair_instruction(
         parts: list[str] = [
             "The previous JSON incorrectly treated a booking-subject interrupt as generic `info` during an active booking time follow-up.",
             "Re-read the current user message and classify it as either existing-booking management or the original booking collect, but do NOT keep `intent=\"other\"`, `tool_action_hint=\"info\"`, or `capability=\"bookability\"` for this interrupt.",
-            "If the user is asking to cancel, reschedule, confirm, or otherwise manage an existing booking without `referents.booking_ref`, return `subject_kind=\"booking\"`, `capability=\"booking_manage\"`, `action=\"handoff\"`, `tool_action_hint=\"handoff\"`, and `needs_manager=true`.",
-            "If the user is asking to check or verify an existing booking, return `subject_kind=\"booking\"`, `capability=\"booking_manage\"`, `intent=\"check_booking\"` or `intent=\"verify_booking\"`, `action=\"fact\"`, and `tool_action_hint=\"calendar.get_booking\"`.",
+            "If the user explicitly asks to contact a manager or human, return `subject_kind=\"booking\"`, `capability=\"booking_manage\"`, `intent=\"booking\"`, `action=\"handoff\"`, `tool_action_hint=\"handoff\"`, and `needs_manager=true`.",
+            "If the user is asking to cancel, reschedule, confirm, check, verify, or otherwise manage an existing booking without `referents.booking_ref`, return `subject_kind=\"booking\"`, `capability=\"booking_manage\"`, `intent=\"check_booking\"` or `intent=\"verify_booking\"`, `action=\"fact\"`, and `tool_action_hint=\"calendar.get_booking\"`.",
+            "When `referents.customer` is still missing, preserve the governed lookup follow-up: `expected_reply_type=\"name\"`, `next_question=\"name\"`, `open_questions=[\"name\"]`.",
+            "When the customer referent is already grounded but the booking reference is still missing, preserve the governed lookup follow-up: `expected_reply_type=\"time\"`, `next_question=\"datetime\"`, `open_questions=[\"datetime\"]`.",
             "Only if the current message is still about the new booking slot should you keep the active booking collect contract.",
             "Return corrected JSON only.",
         ]
@@ -2368,26 +5246,362 @@ def _build_policy_core_contract_repair_instruction(
         if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
             return None
         open_questions = _policy_core_expected_open_questions(carry_contract)
+        temporal_scope_hint = _policy_core_current_message_grounded_temporal_scope_hint(
+            current_message
+        )
+        grounded_specialist = _policy_core_contract_grounded_specialist(
+            contract
+        ) or _policy_core_memory_grounded_specialist(normalized_memory_profile)
         parts: list[str] = [
             "The previous JSON kept an active booking temporal-clue follow-up on the generic datetime collect path.",
-            "The user already supplied a partial candidate slot, so this turn must stay in booking collect but become a slot-constraint follow-up.",
+            "The user already supplied a partial candidate slot in the current message, so this turn must stay in booking collect but become a slot-constraint follow-up.",
             'Return `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, and `subject_kind="booking"`.',
             'Set `pending_question_act="slot_constraint"`, `pending_question_target="time"`, and `active_question_relation="slot_constraint"`.',
             f'Preserve `expected_reply_type="{carry_reply_type}"`,',
             f'`next_question="{carry_next_question}"`,',
             f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
             'Copy the user-provided candidate slot into `alternate_datetime` as a short grounded value (for example `пятницу утром`, `завтра вечером`, `после 17:00`).',
-            "Do NOT fall back to the generic booking prompt that asks again for both date and time once `temporal_scope` is already not `none`.",
+            "Do NOT fall back to the generic booking prompt that asks again for both date and time, even if the previous JSON left `temporal_scope` as `none`.",
         ]
+        if temporal_scope_hint:
+            parts.append(
+                f'Set `temporal_scope="{temporal_scope_hint}"`; do NOT leave `temporal_scope="none"` for this turn.'
+            )
+        else:
+            parts.append(
+                "Set `temporal_scope` to the grounded non-`none` scope implied by the current message."
+            )
         pending_act = carry_contract.get("pending_question_act")
         if isinstance(pending_act, str) and pending_act.strip():
             parts.append(
                 f'The carried booking follow-up was `pending_question_act="{pending_act}"`; only tighten it to `slot_constraint` for this temporal clue turn.'
             )
+        if grounded_specialist:
+            parts.append(
+                f'Preserve the carried specialist preference through `referents.specialist.value="{grounded_specialist}"`, but do NOT switch `subject_kind`, `active_question_relation`, or `resolution_mode` back to a specialist follow-up.'
+            )
         if isinstance(current_message, str) and current_message.strip():
             parts.append(
                 f'Ground `alternate_datetime` from the current message: "{current_message.strip()}".'
             )
+            parts.append(
+                "Do NOT translate `alternate_datetime` into another language; preserve the user-language surface from the current message."
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("booking_availability_missing_service_reclassification_required"):
+        temporal_scope_hint = _policy_core_current_message_grounded_temporal_scope_hint(
+            current_message
+        )
+        parts: list[str] = [
+            "The previous JSON treated a booking availability question with a day/date clue as if the service were already grounded.",
+            "The current message still lacks a grounded service, so booking must stay incomplete and ask for the missing service instead of tightening into a time follow-up.",
+            'Return `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, `capability="bookability"`, `subject_kind="general"`, and `resolution_mode="clarify_missing_subject"`.',
+            'Set `expected_reply_type="service_choice"`, `next_question="service"`, and `open_questions=["service"]`.',
+            "Do NOT emit `slots.service` or `referents.service` unless the service is grounded in the current message or canonical memory.",
+            "Clear `pending_question_act`, `pending_question_target`, and `active_question_relation` for this missing-service collect turn.",
+            "Preserve the message-grounded day/date clue in semantic constraints instead of dropping it.",
+        ]
+        if temporal_scope_hint:
+            parts.append(
+                f'Set `temporal_scope="{temporal_scope_hint}"` so the day clue stays grounded while service is still missing.'
+            )
+        else:
+            parts.append(
+                "Keep the grounded non-`none` `temporal_scope` implied by the current message."
+            )
+        if isinstance(current_message, str) and current_message.strip():
+            parts.append(
+                f'If you keep `alternate_datetime`, ground it directly from the current message surface: "{current_message.strip()}".'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("mixed_first_turn_location_service_fact_reclassification_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_resolve_message_grounded_service_hint(
+            current_message=current_message,
+            context_payload=context_payload,
+            normalized_memory_profile=normalized_memory_profile,
+            client_slug=client_slug,
+        )
+        expected_pack_refs = _policy_core_current_message_location_service_fact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        ) or ["location", "pricing"]
+        parts: list[str] = [
+            "This standalone first turn explicitly asks about location/address and one or more grounded service facts.",
+            "Keep the explicit location scope as the head fact family and do not fabricate working-hours intent.",
+            'Return `intent="location"` and `action="fact"`.',
+            'Use `tool_action_hint="info"` so runtime keeps the mixed fact scope together.',
+            f"Set `pack_refs={json.dumps(expected_pack_refs, ensure_ascii=False)}` exactly.",
+            '`subject_kind="service"`, `capability="location"`, and `resolution_mode="policy_fact"`.',
+            'Clear standalone follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+            'Do NOT switch this turn to `intent="hours"` and do NOT convert it into booking collect.',
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `referents.service.value="{grounded_service}"` or `slots.service="{grounded_service}"`.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("mixed_first_turn_hours_location_fact_scope_required"):
+        expected_pack_refs = _policy_core_current_message_hours_location_fact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        ) or ["hours", "location"]
+        head_ref = (
+            contract.intent
+            if isinstance(contract, LlmPolicyCoreOutput) and contract.intent in {"hours", "location"}
+            else "hours"
+        )
+        requested_promotions = "promotions" in expected_pack_refs
+        scope_line = (
+            "This standalone first turn explicitly asks working hours, location/address, and promotions/discounts."
+            if requested_promotions
+            else "This standalone first turn explicitly asks only working hours and location/address."
+        )
+        extra_scope_line = (
+            "Preserve the explicit promotions ask in the same mixed fact scope; do not collapse this turn to only hours/location or to promotions-only."
+            if requested_promotions
+            else "Do not add service overview, contact, pricing, duration, or booking scopes unless the user explicitly asked for them."
+        )
+        parts: list[str] = [
+            scope_line,
+            extra_scope_line,
+            f'Return `intent="{head_ref}"`, `action="fact"`, and `tool_action_hint="info"`.',
+            f"Set `pack_refs={json.dumps(expected_pack_refs, ensure_ascii=False)}` exactly.",
+            f'Use `subject_kind="general"`, `capability="{head_ref}"`, `resolution_mode="policy_fact"`, and `temporal_scope="none"`.',
+            'Set `alternate_datetime=null`.',
+            'Clear standalone follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+            "Return corrected JSON only.",
+        ]
+        return " ".join(parts)
+
+    if token.startswith("mixed_first_turn_service_fact_booking_side_precedence_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_resolve_message_grounded_service_hint(
+            current_message=current_message,
+            context_payload=context_payload,
+            normalized_memory_profile=normalized_memory_profile,
+            client_slug=client_slug,
+        )
+        expected_pack_refs = _policy_core_current_message_service_scoped_fact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        ) or ["pricing"]
+        expected_ref = expected_pack_refs[0]
+        parts: list[str] = [
+            "This standalone first turn asks for a grounded service fact and only adds booking as a side request.",
+            "Keep the service fact as the head intent even if the side request mentions a concrete time/date.",
+            f'Return `intent="{expected_ref}"`, `action="fact"`, and `tool_action_hint="catalog.service_query"`.',
+            f"Set `pack_refs={json.dumps([expected_ref], ensure_ascii=False)}` exactly.",
+            f'Use `capability="{expected_ref}"`, `subject_kind="service"`, and `resolution_mode="policy_fact"`.',
+            'Clear standalone follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+            'Do NOT switch this turn to booking collect or `calendar.book_slot`.',
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `referents.service.value="{grounded_service}"` or `slots.service="{grounded_service}"`.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("service_query_multifact_reclassification_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_resolve_message_grounded_service_hint(
+            current_message=current_message,
+            context_payload=context_payload,
+            normalized_memory_profile=normalized_memory_profile,
+            client_slug=client_slug,
+        )
+        expected_pack_refs = _policy_core_current_message_service_multifact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        ) or list(_SERVICE_QUERY_MULTI_FACT_REFS)
+        head_ref = (
+            contract.intent
+            if isinstance(contract, LlmPolicyCoreOutput) and contract.intent in expected_pack_refs
+            else expected_pack_refs[0]
+        )
+        head_intent = "master_query" if head_ref == "master" else head_ref
+        parts: list[str] = [
+            "This standalone turn explicitly asks multiple fact families for the grounded service and related business info.",
+            f'Return `intent="{head_intent}"`, `action="fact"`, and `tool_action_hint="catalog.service_query"`.',
+            f"Set `pack_refs={json.dumps(expected_pack_refs, ensure_ascii=False)}` exactly.",
+            f'Use `capability="{head_ref}"`, `subject_kind="service"`, `resolution_mode="policy_fact"`, and `temporal_scope="none"`.',
+            'Set `alternate_datetime=null`.',
+            'Clear standalone follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+            "Do NOT collapse this turn to only one service fact family.",
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `referents.service.value="{grounded_service}"` or `slots.service="{grounded_service}"`.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("mixed_first_turn_hours_service_fact_reclassification_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or service_hint
+        expected_pack_refs = _policy_core_current_message_hours_service_fact_pack_refs(
+            current_message,
+            client_slug=client_slug,
+        ) or ["hours", "services_overview"]
+        parts: list[str] = [
+            "This standalone first turn asks working hours plus another service fact for a concrete service already named in the current message.",
+            "Do not answer only the hours part and do not reopen missing-service collect.",
+            'Keep `intent="hours"` and `action="fact"`.',
+            'Use `tool_action_hint="info"` so runtime preserves the mixed fact scope instead of a partial single-family answer.',
+            f"Set `pack_refs={json.dumps(expected_pack_refs, ensure_ascii=False)}` exactly.",
+            '`subject_kind="service"`, `capability="hours"`, and `resolution_mode="policy_fact"`.',
+            'Clear standalone follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `referents.service.value="{grounded_service}"` or `slots.service="{grounded_service}"`.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("mixed_first_turn_promotions_precedence_reclassification_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        )
+        expected_pack_refs = _policy_core_current_message_promotions_location_pack_refs(
+            current_message
+        ) or ["promotions"]
+        parts: list[str] = [
+            "This standalone first turn explicitly asks about promotions or discounts and also includes side booking/location asks.",
+            "Keep the promotions/discounts question as the head intent instead of answering only the side ask.",
+            f'Return `intent="promotions"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `pack_refs={json.dumps(expected_pack_refs, ensure_ascii=False)}`, `capability="promotions"`, and `resolution_mode="policy_fact"`.',
+            "If the current message explicitly asks for address/location, preserve that fact in the same response scope instead of dropping it.",
+            'Clear standalone follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+            "Do NOT switch this turn to `catalog.location`, do NOT convert it into booking collect, and do NOT use `intent=\"out_of_domain\"` or `intent=\"other\"`.",
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `referents.service.value="{grounded_service}"` or `slots.service="{grounded_service}"`, and keep `subject_kind="service"`.'
+            )
+        else:
+            parts.append(
+                'If no concrete service is grounded, keep `subject_kind="general"` and leave `slots.service` / `referents.service` empty.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("promotions_booking_followup_reclassification_required"):
+        parts: list[str] = [
+            "This standalone first turn asks about promotions or discounts and also explicitly asks to book, but the service is still missing.",
+            "Keep the promotions fact in this same turn and preserve booking progression instead of dropping booking or switching to collect-only output.",
+            'Return `intent="promotions"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `pack_refs=["promotions"]`, `capability="promotions"`, `goal="booking"`, and `resolution_mode="policy_fact"`.',
+            'Set `expected_reply_type="service_choice"`, `next_question="service"`, and `open_questions=["service"]` so runtime asks for the missing service after the promotions fact.',
+            'Keep `subject_kind="general"` and leave `slots.service` / `referents.service` empty because no concrete service is grounded yet.',
+            'Clear `pending_question_act`, `pending_question_target`, and `active_question_relation` for this standalone fact follow-up.',
+            "Do NOT drop the booking ask, do NOT answer with promotions only, and do NOT switch this turn to pure collect.",
+            "Return corrected JSON only.",
+        ]
+        return " ".join(parts)
+
+    if token.startswith("promotions_grounded_service_booking_followup_reclassification_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_resolve_message_grounded_service_hint(
+            current_message=current_message,
+            context_payload=context_payload,
+            normalized_memory_profile=normalized_memory_profile,
+            client_slug=client_slug,
+        )
+        parts: list[str] = [
+            "This standalone first turn asks about promotions or discounts, already grounds the service in the current message, and also asks to book.",
+            "Do not reopen service-choice collect because the service is already known.",
+            'Return `intent="promotions"`, `action="fact"`, `tool_action_hint="catalog.service_query"`, `pack_refs=["promotions"]`, `capability="promotions"`, `goal="booking"`, and `resolution_mode="policy_fact"`.',
+            'Set `expected_reply_type="time"`, `next_question="datetime"`, and `open_questions=["datetime"]` so booking continues by asking only for date/time.',
+            'Set `pending_question_act="ask_about_requested_slot"`, `pending_question_target="time"`, and `active_question_relation="ask_about_requested_slot"`.',
+            'Keep `subject_kind="service"` and preserve the grounded service in `slots.service` or `referents.service`.',
+            "Do NOT ask the user to choose the service again and do NOT drop the promotions fact.",
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Use `slots.service="{grounded_service}"` or `referents.service.value="{grounded_service}"`.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("start_booking_temporal_clue_reclassification_required"):
+        temporal_scope_hint = _policy_core_current_message_grounded_temporal_scope_hint(
+            current_message
+        )
+        parts: list[str] = [
+            "The previous JSON kept a first-turn booking request with a grounded day/date clue on the generic datetime collect path.",
+            "The current message already narrows the requested slot, so this turn must start booking on the slot-constraint path instead of asking for both date and time again.",
+            'Return `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, and `subject_kind="booking"`.',
+            'Set `expected_reply_type="time"`, `next_question="datetime"`, and `open_questions=["datetime"]`.',
+            'Set `pending_question_act="slot_constraint"`, `pending_question_target="time"`, and `active_question_relation="slot_constraint"`.',
+            'Copy the message-grounded partial slot into `alternate_datetime` as a short user-surface value (for example `понедельник`, `завтра вечером`, `в пятницу`).',
+            "Do NOT fall back to the generic booking prompt that asks again for both date and time.",
+        ]
+        if temporal_scope_hint:
+            parts.append(
+                f'Set `temporal_scope="{temporal_scope_hint}"`; do NOT leave `temporal_scope="none"` for this turn.'
+            )
+        else:
+            parts.append(
+                "Set `temporal_scope` to the grounded non-`none` scope implied by the current message."
+            )
+        if isinstance(service_hint, str) and service_hint:
+            parts.append(
+                f'Preserve the grounded service through `slots.service="{service_hint}"` or `referents.service.value="{service_hint}"`.'
+            )
+        if isinstance(current_message, str) and current_message.strip():
+            parts.append(
+                f'Ground `alternate_datetime` from the current message: "{current_message.strip()}".'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("start_booking_exact_datetime_progression_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or service_hint
+        exact_datetime = _policy_core_current_message_exact_datetime_surface(current_message)
+        parts = [
+            "The previous JSON kept a start-booking turn on a non-canonical path even though the current message already supplied a full requested datetime.",
+            "Because the service is already grounded, this turn must advance to the next missing booking slot: customer name.",
+            "Do not commit calendar.book_slot until customer identity is grounded.",
+            'Return `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, and `subject_kind="booking"`.',
+            'Set `expected_reply_type="name"`, `next_question="name"`, and `open_questions=["name"]`.',
+            'Set `pending_question_act="fill_requested_slot"`, `pending_question_target="time"`, and `active_question_relation="fill_requested_slot"`.',
+            'Set `temporal_scope="specific_time"` and preserve the exact current-message datetime in `slots.datetime` and `alternate_datetime`.',
+            "Do NOT ask for date/time again.",
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `slots.service="{grounded_service}"` or `referents.service.value="{grounded_service}"`.'
+            )
+        if isinstance(exact_datetime, str) and exact_datetime:
+            parts.append(f'Use `slots.datetime="{exact_datetime}"`.')
+            parts.append(f'Use `alternate_datetime="{exact_datetime}"`.')
         parts.append("Return corrected JSON only.")
         return " ".join(parts)
 
@@ -2439,6 +5653,125 @@ def _build_policy_core_contract_repair_instruction(
         if isinstance(current_message, str) and current_message.strip():
             parts.append(
                 f'Ground the fulfilled time from the current message "{current_message.strip()}" together with the carried date/day context.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("active_booking_commit_progression_required"):
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or service_hint
+        specialist_name = (
+            _policy_core_contract_grounded_specialist(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_memory_grounded_specialist(normalized_memory_profile)
+        customer_name = (
+            _policy_core_payload_token(contract.slots.get("name"))
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or (
+            _policy_core_contract_customer_entity_name(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_memory_slot_value(normalized_memory_profile, "name")
+        parts: list[str] = [
+            "The previous JSON kept an active booking time follow-up on collect even though the current turn completed the requested booking slot.",
+            "Service, carried date/day context, and customer identity are already grounded, so this turn must advance to booking commit.",
+            'Return `intent="booking"`, `action="fact"`, `tool_action_hint="calendar.book_slot"`, `subject_kind="booking"`, `capability="bookability"`, and `resolution_mode="live_calendar"`.',
+            'Clear stale collect follow-up fields: `expected_reply_type=null`, `next_question=null`, `open_questions=[]`, `pending_question_act=null`, `pending_question_target=null`, and `active_question_relation=null`.',
+            'Do NOT keep `action="collect"` or `tool_action_hint="collect"` once booking inputs are complete.',
+        ]
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `slots.service="{grounded_service}"` or `referents.service.value="{grounded_service}"`.'
+            )
+        if isinstance(customer_name, str) and customer_name:
+            parts.append(
+                f'Ground the customer canonically through `slots.name="{customer_name}"`.'
+            )
+        if isinstance(current_message, str) and current_message.strip():
+            parts.append(
+                f'Ground `slots.datetime` by combining the explicit clock time from "{current_message.strip()}" with the carried date/day context already in memory.'
+            )
+        if isinstance(specialist_name, str) and specialist_name:
+            parts.append(
+                f'Preserve the grounded specialist through `referents.specialist.value="{specialist_name}"`.'
+            )
+        parts.append("Return corrected JSON only.")
+        return " ".join(parts)
+
+    if token.startswith("active_booking_customer_name_carryover_required"):
+        if not isinstance(carry_reply_type, str) or not isinstance(carry_next_question, str):
+            return None
+        open_questions = _policy_core_expected_open_questions(carry_contract)
+        grounded_service = (
+            _policy_core_contract_grounded_service(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or service_hint
+        specialist_name = (
+            _policy_core_contract_grounded_specialist(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_memory_grounded_specialist(normalized_memory_profile)
+        customer_name = (
+            _policy_core_contract_customer_entity_name(contract)
+            if isinstance(contract, LlmPolicyCoreOutput)
+            else None
+        ) or _policy_core_memory_slot_value(normalized_memory_profile, "name")
+        carried_alternate_datetime = _policy_core_memory_alternate_datetime(
+            normalized_memory_profile
+        )
+        carried_temporal_scope = _policy_core_memory_temporal_scope(normalized_memory_profile)
+        parts: list[str] = [
+            "The previous JSON kept an active booking time follow-up but left the provided customer name only as an auxiliary entity.",
+            "When the current turn already grounds the customer's own name, canonicalize it in the booking contract instead of ignoring it.",
+            'Return `intent="booking"`, `action="collect"`, `tool_action_hint="collect"`, and `subject_kind="booking"`.',
+            f'Preserve `expected_reply_type="{carry_reply_type}"`,',
+            f'`next_question="{carry_next_question}"`,',
+            f"`open_questions={json.dumps(open_questions, ensure_ascii=False)}`.",
+            "Do NOT switch the turn to booking-manage.",
+            "Do NOT keep `subject_kind=\"specialist\"` or `resolution_mode=\"referent_followup\"` just because a specialist preference is already carried in memory.",
+            "Do NOT change the active booking time contract just because the customer name arrived out of order.",
+        ]
+        pending_act = carry_contract.get("pending_question_act")
+        if isinstance(pending_act, str) and pending_act.strip():
+            parts.append(f'Keep `pending_question_act="{pending_act}"`.')
+        pending_target = carry_contract.get("pending_question_target")
+        if isinstance(pending_target, str) and pending_target.strip():
+            parts.append(f'Keep `pending_question_target="{pending_target}"`.')
+        active_relation = carry_contract.get("active_question_relation")
+        if isinstance(active_relation, str) and active_relation.strip():
+            parts.append(f'Keep `active_question_relation="{active_relation}"`.')
+        if isinstance(customer_name, str) and customer_name:
+            parts.append(
+                f'Ground the customer name through `slots.name="{customer_name}"`.'
+            )
+        elif _policy_core_current_message_has_explicit_customer_name_intro(current_message):
+            parts.append(
+                "Ground the customer's own name from the current message through `slots.name`."
+            )
+        if isinstance(carried_temporal_scope, str) and carried_temporal_scope:
+            parts.append(
+                f'Keep carried `temporal_scope="{carried_temporal_scope}"`.'
+            )
+        if isinstance(carried_alternate_datetime, str) and carried_alternate_datetime:
+            parts.append(
+                f'Keep carried `alternate_datetime="{carried_alternate_datetime}"`.'
+            )
+            parts.append(
+                "Do NOT rewrite `alternate_datetime` from the current self-intro text when this turn only adds customer identity."
+            )
+        if isinstance(grounded_service, str) and grounded_service:
+            parts.append(
+                f'Preserve the grounded service through `slots.service="{grounded_service}"` or `referents.service.value="{grounded_service}"`.'
+            )
+        if isinstance(specialist_name, str) and specialist_name:
+            parts.append(
+                f'Preserve the grounded specialist through `referents.specialist.value="{specialist_name}"`.'
             )
         parts.append("Return corrected JSON only.")
         return " ".join(parts)
@@ -4584,6 +7917,13 @@ def route_llm_policy_core(
         return result
 
     payload, tool_args_sanitized = _sanitize_policy_core_payload(payload)
+    payload = _policy_core_apply_prevalidate_boundary_normalizations(
+        payload=payload,
+        normalized_memory_profile=normalized_memory_profile,
+        current_message=message,
+        context_payload=context_payload,
+        client_slug=client_slug,
+    )
     if tool_args_sanitized:
         result["tool_args_sanitized"] = True
     contract, schema_error = validate_llm_policy_core_output(payload)
@@ -4607,6 +7947,13 @@ def route_llm_policy_core(
                 )
                 return result
             payload, tool_args_sanitized = _sanitize_policy_core_payload(payload)
+            payload = _policy_core_apply_prevalidate_boundary_normalizations(
+                payload=payload,
+                normalized_memory_profile=normalized_memory_profile,
+                current_message=message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
             if tool_args_sanitized:
                 result["tool_args_sanitized"] = True
             contract, schema_error = validate_llm_policy_core_output(payload)
@@ -4674,6 +8021,186 @@ def route_llm_policy_core(
                 context_payload=context_payload,
                 client_slug=client_slug,
             )
+    if (
+        schema_error == "llm_policy_core_error:mixed_first_turn_hours_location_fact_scope_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_hours_location_payload = _policy_core_build_mixed_first_turn_hours_location_fact_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+        if normalized_hours_location_payload is not None:
+            payload = normalized_hours_location_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:mixed_first_turn_location_service_fact_reclassification_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_location_service_payload = _policy_core_build_mixed_first_turn_location_service_fact_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+        if normalized_location_service_payload is not None:
+            payload = normalized_location_service_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:service_query_multifact_reclassification_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_service_multifact_payload = _policy_core_build_service_query_multifact_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+        if normalized_service_multifact_payload is not None:
+            payload = normalized_service_multifact_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:mixed_first_turn_service_fact_booking_side_precedence_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_service_fact_payload = _policy_core_build_mixed_first_turn_service_fact_booking_side_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=message,
+            context_payload=context_payload,
+            client_slug=client_slug,
+        )
+        if normalized_service_fact_payload is not None:
+            payload = normalized_service_fact_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:start_booking_exact_datetime_progression_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_start_exact_datetime_payload = (
+            _policy_core_build_start_booking_exact_datetime_boundary_payload(
+                payload=payload,
+                normalized_memory_profile=normalized_memory_profile,
+                current_message=message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
+        )
+        if normalized_start_exact_datetime_payload is not None:
+            payload = normalized_start_exact_datetime_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:promotions_grounded_service_booking_followup_reclassification_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_promotions_grounded_booking_payload = (
+            _policy_core_build_promotions_grounded_service_booking_followup_boundary_payload(
+                payload=payload,
+                normalized_memory_profile=normalized_memory_profile,
+                current_message=message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
+        )
+        if normalized_promotions_grounded_booking_payload is not None:
+            payload = normalized_promotions_grounded_booking_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:promotions_booking_followup_reclassification_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_promotions_booking_payload = (
+            _policy_core_build_promotions_booking_fact_followup_boundary_payload(
+                payload=payload,
+                normalized_memory_profile=normalized_memory_profile,
+                current_message=message,
+                context_payload=context_payload,
+                client_slug=client_slug,
+            )
+        )
+        if normalized_promotions_booking_payload is not None:
+            payload = normalized_promotions_booking_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
+    if (
+        schema_error == "llm_policy_core_error:mixed_first_turn_promotions_precedence_reclassification_required"
+        and isinstance(payload, dict)
+    ):
+        normalized_promotions_payload = _policy_core_build_mixed_first_turn_promotions_boundary_payload(
+            payload=payload,
+            normalized_memory_profile=normalized_memory_profile,
+            current_message=message,
+        )
+        if normalized_promotions_payload is not None:
+            payload = normalized_promotions_payload
+            contract, schema_error = validate_llm_policy_core_output(payload)
+            if contract is not None and schema_error is None:
+                schema_error = _validate_policy_core_runtime_contract(
+                    contract,
+                    normalized_memory_profile=normalized_memory_profile,
+                    current_message=message,
+                    context_payload=context_payload,
+                    client_slug=client_slug,
+                )
     if schema_error:
         repair_instruction = _build_policy_core_contract_repair_instruction(
             schema_error=schema_error,
@@ -4714,6 +8241,13 @@ def route_llm_policy_core(
                         payload, repair_tool_args_sanitized = _sanitize_policy_core_payload(payload)
                         if repair_tool_args_sanitized:
                             result["tool_args_sanitized"] = True
+                        payload = _policy_core_apply_prevalidate_boundary_normalizations(
+                            payload=payload,
+                            normalized_memory_profile=normalized_memory_profile,
+                            current_message=message,
+                            context_payload=context_payload,
+                            client_slug=client_slug,
+                        )
                         contract, schema_error = validate_llm_policy_core_output(payload)
                         if schema_error and _policy_core_schema_requires_master_query_reclassification(
                             payload=payload,
@@ -4780,6 +8314,204 @@ def route_llm_policy_core(
                                     context_payload=context_payload,
                                     client_slug=client_slug,
                                 )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:mixed_first_turn_hours_location_fact_scope_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_hours_location_payload = (
+                                _policy_core_build_mixed_first_turn_hours_location_fact_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_hours_location_payload is not None:
+                                payload = normalized_hours_location_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:mixed_first_turn_location_service_fact_reclassification_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_location_service_payload = (
+                                _policy_core_build_mixed_first_turn_location_service_fact_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_location_service_payload is not None:
+                                payload = normalized_location_service_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:service_query_multifact_reclassification_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_service_multifact_payload = (
+                                _policy_core_build_service_query_multifact_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_service_multifact_payload is not None:
+                                payload = normalized_service_multifact_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:mixed_first_turn_service_fact_booking_side_precedence_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_service_fact_payload = (
+                                _policy_core_build_mixed_first_turn_service_fact_booking_side_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_service_fact_payload is not None:
+                                payload = normalized_service_fact_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                            context_payload=context_payload,
+                                            client_slug=client_slug,
+                                        )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:start_booking_exact_datetime_progression_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_start_exact_datetime_payload = (
+                                _policy_core_build_start_booking_exact_datetime_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_start_exact_datetime_payload is not None:
+                                payload = normalized_start_exact_datetime_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:promotions_grounded_service_booking_followup_reclassification_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_promotions_grounded_booking_payload = (
+                                _policy_core_build_promotions_grounded_service_booking_followup_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_promotions_grounded_booking_payload is not None:
+                                payload = normalized_promotions_grounded_booking_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:promotions_booking_followup_reclassification_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_promotions_booking_payload = (
+                                _policy_core_build_promotions_booking_fact_followup_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                    context_payload=context_payload,
+                                    client_slug=client_slug,
+                                )
+                            )
+                            if normalized_promotions_booking_payload is not None:
+                                payload = normalized_promotions_booking_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
+                        if (
+                            schema_error
+                            == "llm_policy_core_error:mixed_first_turn_promotions_precedence_reclassification_required"
+                            and isinstance(payload, dict)
+                        ):
+                            normalized_promotions_payload = (
+                                _policy_core_build_mixed_first_turn_promotions_boundary_payload(
+                                    payload=payload,
+                                    normalized_memory_profile=normalized_memory_profile,
+                                    current_message=message,
+                                )
+                            )
+                            if normalized_promotions_payload is not None:
+                                payload = normalized_promotions_payload
+                                contract, schema_error = validate_llm_policy_core_output(payload)
+                                if contract is not None and schema_error is None:
+                                    schema_error = _validate_policy_core_runtime_contract(
+                                        contract,
+                                        normalized_memory_profile=normalized_memory_profile,
+                                        current_message=message,
+                                        context_payload=context_payload,
+                                        client_slug=client_slug,
+                                    )
                 elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
                 result["elapsed_ms"] = elapsed_ms
                 result["attempt_count"] = attempt_count

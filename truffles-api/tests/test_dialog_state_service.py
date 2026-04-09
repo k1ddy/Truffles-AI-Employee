@@ -2945,6 +2945,97 @@ def test_dialog_state_service_clear_booking_collapses_active_booking_continuatio
     assert "active_question_relation" not in contract
 
 
+def test_dialog_state_service_booking_lookup_execution_persists_booking_ref_for_canonical_owner() -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 4, 7, 12, 0, tzinfo=timezone.utc)
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "check_booking",
+            "action": "fact",
+            "tool_action_hint": "calendar.get_booking",
+            "pack_refs": [],
+            "slots": {
+                "name": "Амина",
+                "datetime": "завтра 18:00",
+            },
+            "expected_reply_type": None,
+            "next_question": None,
+            "open_questions": [],
+            "needs_manager": False,
+            "risk_signals": [],
+            "language": "ru",
+            "confidence": 0.88,
+            "reason": "calendar_get_booking_existing_booking_context_carries_customer_and_datetime_reference",
+            "goal": "booking",
+            "subject_kind": "booking",
+            "capability": "booking_manage",
+            "temporal_scope": "none",
+            "resolution_mode": "direct",
+            "referents": {
+                "customer": {
+                    "value": "Амина",
+                    "entity_type": "customer",
+                    "source_ref": "decision_slots",
+                },
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                },
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="calendar.get_booking",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        {},
+        decision=decision,
+        execution_meta={
+            "tool_action": "calendar.get_booking",
+            "tool_decision": "ok",
+            "appointment_id": "apt-lookup-1",
+            "slot_values": {
+                "service": "маникюр",
+                "datetime": "завтра 18:00",
+                "name": "Амина",
+            },
+        },
+        now=now,
+    )
+
+    loaded = service.load_runtime_payload(updated)
+    contract = dict(dialog_state.meta.get("semantic_contract") or {})
+    referents = dict(contract.get("referents") or {})
+    loaded_projection_referents = dict(
+        (
+            loaded.get("conversation_projection").semantic_contract.get("referents")
+            if loaded.get("conversation_projection")
+            else {}
+        )
+        or {}
+    )
+
+    assert booking_payload is None
+    assert referents.get("booking_ref") == {
+        "value": "apt-lookup-1",
+        "source_ref": "execution",
+    }
+    assert loaded_projection_referents["booking_ref"]["value"] == "apt-lookup-1"
+    assert (
+        dialog_state.projections.session_memory_interaction_state.grounded_referents[
+            "booking_ref"
+        ]
+        == "apt-lookup-1"
+    )
+
+
 def test_dialog_state_service_prepares_conversation_context_write_with_simulation_and_trace_merge() -> None:
     service = DialogStateService()
     prepared = service.prepare_conversation_context_write(

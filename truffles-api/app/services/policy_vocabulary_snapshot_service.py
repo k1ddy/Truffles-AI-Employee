@@ -60,6 +60,7 @@ def build_policy_core_vocabulary_snapshot() -> PolicyCoreVocabularySnapshotV1:
             "master_query",
             "consult",
             "greeting",
+            "thanks",
             "out_of_domain",
             "other",
         ),

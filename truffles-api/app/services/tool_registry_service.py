@@ -1224,7 +1224,7 @@ def _catalog_location(
 
     allowed_fact_ref_set = _normalize_allowed_fact_ref_set(allowed_fact_refs)
     if allowed_fact_ref_set:
-        if not (allowed_fact_ref_set & {"location", "hours", "parking"}):
+        if not (allowed_fact_ref_set & {"location", "hours", "parking", "contact"}):
             return None, "fact_scope_not_allowed", {}
         include_parking = "parking" in allowed_fact_ref_set
     else:
@@ -1246,8 +1246,9 @@ def _catalog_location(
     if allowed_fact_ref_set:
         exact_sections = [
             section
-            for section in ("location", "hours", "parking")
+            for section in normalize_fact_ref_list(allowed_fact_refs or [])
             if section in allowed_fact_ref_set
+            and section in {"location", "hours", "parking", "contact"}
         ]
         if exact_sections:
             exact_parts: list[str] = []

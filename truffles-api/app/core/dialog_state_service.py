@@ -1814,15 +1814,18 @@ class DialogStateService:
             projected.get("active_question_relation")
         )
         if (
-            not pending_question_target
-            and self._normalize_projection_token(normalized_booking.get("service"))
+            self._normalize_projection_token(normalized_booking.get("service"))
             and not self._normalize_projection_token(normalized_booking.get("datetime"))
         ):
-            pending_question_act = pending_question_act or "ask_about_requested_slot"
-            pending_question_target = "time"
-            active_question_relation = (
-                active_question_relation or "ask_about_requested_slot"
-            )
+            if pending_question_target != "time":
+                pending_question_act = "ask_about_requested_slot"
+                pending_question_target = "time"
+                active_question_relation = "ask_about_requested_slot"
+            else:
+                pending_question_act = pending_question_act or "ask_about_requested_slot"
+                active_question_relation = (
+                    active_question_relation or "ask_about_requested_slot"
+                )
         if pending_question_target != "time":
             return None
         if current_goal_token != "booking" and not self._pending_contract_implies_booking_followup_goal(
@@ -2710,7 +2713,7 @@ class DialogStateService:
                 grounded_referents=None,
                 booking_payload=None,
                 decision=decision,
-                execution_payload=None,
+                execution_payload=execution_payload,
                 execution_contract=execution_contract,
             )
             if referents:
