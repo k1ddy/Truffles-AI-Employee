@@ -1,13 +1,13 @@
 # ТЕХНИЧЕСКИЙ ROADMAP
 
-**Статус:** CANON  
-**Owner:** Жанбол  
-**Обновлено:** 2026-02-02  
-**Scope:** приоритеты и фазы развития технической части.  
-**Out of scope:** реализация задач, evidence.  
+**Статус:** CANON
+**Owner:** Жанбол
+**Обновлено:** 2026-02-02
+**Scope:** приоритеты и фазы развития технической части.
+**Out of scope:** реализация задач, evidence.
 **Links:** `STATE.md`, `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`.
 
-**Цель:** управляемый LLM‑консультант для салонов с LLM policy core и hard‑safety/policy защитой.
+**Цель:** beauty-first multi-tenant платформа управляемого LLM‑консультанта для салонов с LLM policy core, Console Plane и hard‑safety/policy защитой.
 
 ---
 
@@ -40,7 +40,7 @@
 
 **Goal:** runtime соответствует канону для старта бизнеса (стабильно + быстрый онбординг), только evidence-first.
 
-**Scope:** P0 инварианты (LAW/policy, truth-first, booking/consult, trace/meta, pending/outbox, observability, onboarding).  
+**Scope:** P0 инварианты (LAW/policy, truth-first, booking/consult, trace/meta, pending/outbox, observability, onboarding).
 **Out of scope:** внедрение новых фич; любые фиксы идут отдельными задачами после аудита.
 
 **Canon sources:** `STRATEGY/REQUIREMENTS.md`, `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`.
@@ -274,11 +274,11 @@ _Сводка для ориентира; актуальный статус и ev
 
 ## 5) Мост A0 → A1…A7 (совместимость и исправления)
 
-**Зачем:** старые ошибки и зависимости (LLM‑ключи/внешние индексы) ломают базовые сценарии и CI.  
+**Зачем:** старые ошибки и зависимости (LLM‑ключи/внешние индексы) ломают базовые сценарии и CI.
 **Принцип:** исправления должны быть совместимы с новой архитектурой и потом “переезжать” в A1–A7 без переделок.
 
 ### A0.1 Offline-safe Expected Reply (service)
-**Почему:** expected_reply=service не должен зависеть от LLM‑ключа или внешнего индекса.  
+**Почему:** expected_reply=service не должен зависеть от LLM‑ключа или внешнего индекса.
 **Stage Card:**
 - Вход: `truffles-api/app/services/intent_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `SALON_TRUTH.yaml`.
 - Действия (шаги):
@@ -290,7 +290,7 @@ _Сводка для ориентира; актуальный статус и ev
 - Риски/Stop-line: если сервисный матч зависит от LLM или внешнего индекса — stop.
 
 ### A0.2 Offline‑safe Service Match
-**Почему:** semantic_service_match (внешний индекс) не всегда доступен.  
+**Почему:** semantic_service_match (внешний индекс) не всегда доступен.
 **Stage Card:**
 - Вход: `truffles-api/app/services/demo_salon_knowledge.py`, `knowledge_service.py`, data pack.
 - Действия (шаги):
@@ -301,7 +301,7 @@ _Сводка для ориентира; актуальный статус и ev
 - Риски/Stop-line: подмена логики на эвристику вместо данных.
 
 ### A0.3 Trace‑evidence для A0‑путей
-**Почему:** A0 должен быть измерим и проверяем.  
+**Почему:** A0 должен быть измерим и проверяем.
 **Stage Card:**
 - Вход: `truffles-api/app/routers/webhook/trace.py`, `_legacy.py`.
 - Действия (шаги):
@@ -463,3 +463,72 @@ _Сводка для ориентира; актуальный статус и ev
 - TTL consult‑контекста должен соответствовать длине long‑eval (E564).
 - YAML‑turns с `:` требуют кавычек, иначе тест валится на parsing (E564).
 - Явная фраза “меня зовут …” должна побеждать шум сервис/время (E563).
+
+---
+
+## 11) Lead-24/7 фаза-план — Cordon-And-Rebuild — 2026-05-12
+
+Закрепляет последовательность работ для первичной продуктовой боли, зафиксированной в `docs/PRODUCT_SYSTEM_CANON.md` §9.29 и `docs/DECISION_LEDGER.yaml` `DL-2026-05-12-024`. Acceptance-критерий — §13 `docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md` (Lead-24/7 Acceptance Gate).
+
+### 11.1 Стратегия
+
+Cordon-and-rebuild. Легаси hot-path классифицирован `STRANGLE` (по `AGENTS.md` §7), v3-стэк — `KEEP`. Никакого нового поведения в STRANGLE-файлах. Удаление легаси одним PR после прохождения acceptance gate.
+
+STRANGLE:
+- `truffles-api/app/core/intent_service.py`
+- `truffles-api/app/core/consultant_runtime.py`
+- `truffles-api/app/core/policy_timeout_*_boundary_service.py` (4 файла)
+- `truffles-api/app/core/pack_runtime_*_adapter.py` (7 файлов)
+
+KEEP:
+- `truffles-api/app/policy_core_v3/`
+- `truffles-api/app/pack_v1/`
+- `truffles-api/app/policy_core_v3_shadow/`
+- `truffles-api/app/policy_core_v3_shadow_hook/`
+- `truffles-api/app/policy_core_v3_corpus/`
+
+### 11.2 Фазы
+
+**Phase A — Corpus.**
+- A1. Собрать 30-50 реалистичных «грязных» диалогов через owner-narrated walkthrough (`DL-2026-05-11-023`), партиями по 5-10, каждая партия с `owner_approved=true`.
+- A2. Заменить DRAFT `truffles-api/tests/corpora/beauty_salon_pilot_v0.jsonl`.
+- A3. Перезапустить `scripts/policy_core_v3_shadow_corpus_run.py --llm openai` и `scripts/policy_core_v3_shadow_aggregate.py`. Зафиксировать настоящий `semantic_match_rate` отдельным ledger-входом.
+- A4. Выделить `gold/` подмножество (≈10 диалогов), которое ни один PR не имеет права ломать.
+
+Гейт: до завершения A1-A3 acceptance gate §4.1/§4.2 неизмерим, §4.5 недостижим.
+
+**Phase B — v3-стэк до production. Без касания легаси.**
+- B1. **Boundary v2** — один сервис вместо 4 `policy_timeout_*_boundary_service.py`. Контракт: приём UI/таймера → нормализованное событие в Policy-Core. Гард на запрет старых boundary-сервисов.
+- B2. **Pack Runtime v1** — один адаптер вместо 7 `pack_runtime_*_adapter.py`. Только через `pack_v1.loader` → `pack_view_adapter`. Гард на запрет старых адаптеров.
+- B3. **Executor v1** — изолированный слой исполнения tool-вызовов с журналом, совместимым с `decision_ledger`.
+- B4. **WhatsApp channel** — единственный канал на старте. Pack-описание канала; адаптер ingress/outbox с двумя реализациями: mock и live. Mock используется до восстановления коммерческого доступа провайдера.
+- B5. **Observability v1** — структурный JSONL per-turn: `turn_id`, `intent`, `chosen_action`, `pack_ref`, `cost`, `latency`, `divergence_from_shadow`.
+
+Каждый из B1-B5 открывается отдельной записью в ledger (DL-2026-05-XX-025 и далее).
+
+**Phase C — Lead-24/7 продукт на v3 (только после A1-A3 и минимум {B1, B2, B4}).**
+- C1. Sales playbook для Mira в Pack: приветствие → квалификация → предложение слота → подтверждение → fallback на владельца.
+- C2. Запуск в shadow-mode на Mira 1-2 недели (v3 пишет в лог, владелец отвечает клиенту вручную).
+- C3. Сравнение ответов v3 vs владельца → добивка корпуса.
+- C4. Включение в assist-mode (v3 предлагает черновик одной кнопкой).
+- C5. Включение в autonomous-mode пер-интент. Каждый интент — только после прохождения corpus-gate §9.29.4.5.
+
+**Phase D — Репо-гигиена. Фоном, не блокирует A/B/C.**
+- D1. `STRUCTURE.md` сократить с 1766 строк до ≤ 300 (только контракты слоёв и owner-законы).
+- D2. Перенести мёртвые governance/legacy доки в `docs/archive/`.
+- D3. Заголовок `# FROZEN — see DL-2026-05-12-024` на все STRANGLE-файлы.
+- D4. Удаление легаси одним PR — только после прохождения acceptance gate §13 `BEAUTY_SALON_V1_CAPABILITY_MAP.md`.
+
+### 11.3 Ограничения последовательности
+
+- A блокирует всё. Без A нет ни одной измеримой метрики acceptance gate.
+- B и D могут идти параллельно после A1.
+- C может начинаться только после A1-A3 и минимум {B1, B2, B4}.
+- Любая попытка добавить новое поведение в STRANGLE-файлы — `STOP-THE-LINE` (`AGENTS.md` §14).
+
+### 11.4 Связанные ledger-записи
+
+- `DL-2026-05-11-015` … `DL-2026-05-11-022` — фактическая постройка v3-стэка и shadow-механизма.
+- `DL-2026-05-11-023` — корпус-realism gap, основание Phase A.
+- `DL-2026-05-12-024` — настоящая стратегия и lock.
+- Phase B/C/D откроют последовательные записи начиная с `DL-2026-05-XX-025`.

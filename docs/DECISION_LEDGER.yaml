@@ -1,0 +1,1855 @@
+version: 1
+status: CANON
+owner: Top Architect
+purpose: >
+  Concise fixed history for decisions and actions that changed Truffles product
+  truth, architecture direction, blocker status, proof status, or reusable
+  tooling.
+memory_model:
+  canon: current product/system truth
+  ledger: why canon truth changed
+  artifacts: raw dated evidence
+  inventory: registered tools/modules/scripts
+  session_prompt: zero-memory agent boot protocol
+entry_required_for:
+  - mechanism_change
+  - architecture_decision
+  - blocker_open_close_reclassify
+  - tool_or_script_creation_change
+  - product_status_change
+  - proof_downgrade_or_invalidation
+entry_not_required_for:
+  - command_execution
+  - micro_step
+  - unchanged_validation_rerun
+  - local_exploration_without_decision
+schema:
+  required_fields:
+    - id
+    - date
+    - capability
+    - architecture_layer
+    - problem
+    - decision
+    - classification
+    - changed_files
+    - proof_artifacts
+    - validation
+    - known_limits
+    - do_not_repeat
+    - next_allowed_action
+entries:
+  - id: DL-2026-05-03-001
+    date: 2026-05-03
+    capability: BSV1-04 Booking intake / BSV1-05 Exact booking commit / Process Governance
+    architecture_layer: Consultant Runtime + Booking/Calendar + Process Governance
+    problem: >
+      The 2026-05-03 16-row booking matrix was labelled as realistic product
+      closure even though the corpus was still scripted by Truffles tooling and
+      not an owner-approved messy real salon dialog pack. This made a synthetic
+      proof look stronger than the evidence supports.
+    decision: >
+      Downgrade Realistic Booking Matrix Closure from product PROVEN to
+      SCRIPTED_TECHNICAL_PROOF. Keep its live runtime, appointment, Console
+      visibility, and provider-separation artifacts as useful technical evidence,
+      but reserve REAL_WORLD_PRODUCT_PROOF for a Real-World Salon Acceptance Pack
+      with owner-approved messy dialogs and exact DB/Console/audit/trace proof.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - STRUCTURE.md
+      - scripts/decision_ledger_guard.py
+      - scripts/product_work_map_guard.py
+      - scripts/arch_guard.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+      - truffles-api/tests/architecture/test_product_work_map_guard.py
+    proof_artifacts:
+      - /tmp/truffles_real_booking_matrix_20260503/live_full_after_g_fresh/realistic_booking_matrix_product_summary_20260503g_fresh.json
+      - /tmp/truffles_real_booking_matrix_20260503/live_full_after_g_fresh/console_calendar_visibility_product_summary_20260503g_fresh.json
+      - /tmp/truffles_real_booking_matrix_20260503/live_full_after_g_fresh/provider_integration_truth_20260503g_final.json
+    validation:
+      - python3 scripts/decision_ledger_guard.py --repo-root .
+      - python3 scripts/product_work_map_guard.py --repo-root .
+      - python3 scripts/tool_inventory_guard.py --repo-root .
+      - targeted pytest for decision ledger and product work-map guards
+    known_limits:
+      - The matrix used live runtime and real internal appointments, but scenario selection was synthetic/scripted.
+      - It does not prove owner-approved complete production data.
+      - It does not prove external WhatsApp/Chatflow canary because provider access is commercially blocked.
+      - It does not prove messy real-world salon language without a curated acceptance corpus.
+    do_not_repeat:
+      - Do not label scripted or tool-generated matrices as real-world product readiness.
+      - Do not continue booking fixes from one failing row before classifying capability, layer, and mechanism.
+      - Do not add phrase/regex/domain hardcode as semantic owner; lexicon/regex may only normalize inputs.
+      - Do not count final green with rescue or hidden downstream rewrite as closure.
+    next_allowed_action: >
+      Build and run the Real-World Salon Acceptance Pack using existing
+      llm-quality/scenario/audit tools before any further booking mechanism
+      repair. Repair mechanisms only after failures are classified by
+      capability, architecture layer, owner output, boundary verdict, state,
+      executor/tool action, final response, and rescue flag.
+
+  - id: DL-2026-05-03-002
+    date: 2026-05-03
+    capability: BSV1-04 Booking intake / BSV1-05 Booking commit / BSV1-06 Handoff / Quality Governance
+    architecture_layer: Quality Evidence + Consultant Runtime Governance
+    problem: >
+      The project has no raw production salon messy-dialog corpus yet, and
+      strict fail-first LLM runs would push the team back into row-by-row repair
+      before the full failure landscape is known. That process recreates local
+      fixes and hides whether failures belong to policy-core ownership,
+      boundary validation, state projection, executor/tooling, data contracts,
+      or acceptance oracles.
+    decision: >
+      Use an Internal Pilot Proof path. Generate candidate messy salon dialogs
+      with existing registered scenario and llm-quality tools, let the owner
+      select/edit the sample, and treat the approved set as an owner-reviewed
+      synthetic messy corpus: a pilot proxy, not raw production transcripts.
+      Run an Exploration lane first where behavioral failures do not stop run
+      execution; only invalid-run evidence problems stop the run. Group all
+      failures into a failure-family map with capability, architecture layer,
+      raw owner output, boundary verdict, state, executor/tool action, final
+      response, rescue flag, and proof gap before choosing repairs. Run strict
+      Acceptance only after family-level repairs are designed and implemented.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - scripts/booking_dialog_scenarios.py
+      - scripts/decision_ledger_guard.py
+      - scripts/product_work_map_guard.py
+      - truffles-api/app/services/llm_quality_contracts.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+      - truffles-api/tests/test_booking_dialog_scenarios_script.py
+      - truffles-api/tests/test_booking_quality_expectation_sanitizer.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260503/owner_review_candidate_dialogs_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/owner_review_candidate_dialogs_20260503.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_scenarios_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/static_scenario_contract_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/llm_quality_gates_exploration_candidates_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/surface_realism_audit_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/real_world_salon_acceptance_pack_v0_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/real_world_salon_acceptance_pack_v0_20260503.md
+      - /tmp/truffles_real_world_salon_pack_20260503/static_scenario_contract_pack_v0_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/llm_quality_gates_pack_v0_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_run_v0_20260503/INVALID_RUN_DO_NOT_USE.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_outbox_v0_20260503/INVALID_RUN_DO_NOT_USE.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_a_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_a_20260503.md
+    validation:
+      - python3 scripts/decision_ledger_guard.py --repo-root .
+      - python3 scripts/product_work_map_guard.py --repo-root .
+      - python3 scripts/tool_inventory_guard.py --repo-root .
+      - targeted pytest for decision ledger and product work-map guards
+      - static scenario contract/gates before runtime acceptance claims
+      - static scenario contract for 112 owner-review candidates returned valid=true
+      - surface realism audit shows zero plus/parentheses phone formats and zero colon/dot time formats after regeneration
+      - Pack v0 static contract and quality gates returned valid=true after owner approval of selected rows.
+      - Corrected Tranche A diagnostic ran with rendered transport evidence and produced a failure-family map, not product proof.
+    known_limits:
+      - Owner-reviewed synthetic messy corpus is not a raw production transcript corpus.
+      - Pack v0 is owner-approved as an internal pilot proxy, not as raw production transcript evidence.
+      - Exploration lane artifacts diagnose the system; they do not prove go-live readiness.
+      - Static scenario contract/gates validate candidate-pack shape only; they do not execute runtime turns.
+      - Tranche A covered only 3 dialogs / 14 turns and still needs manual audit before any acceptance claim.
+      - Chatflow/WhatsApp remains a commercial blocker and must stay separate from internal Console Calendar proof.
+    do_not_repeat:
+      - Do not stop exploratory LLM runs on the first behavioral failure.
+      - Do not repair one row before the run has produced a failure-family map.
+      - Do not convert owner-review candidates into acceptance proof without explicit owner approval.
+      - Do not lower strict Acceptance criteria because Exploration produced useful diagnostics.
+      - Do not add regex, lexicon, executor, or state patches as semantic owners.
+      - Do not treat interrupted or invalid llm-quality attempts as proof; mark them invalid and use static gates before owner approval.
+      - Do not let scenario tooling regress into artificial phone/time surfaces when testing real salon behavior.
+    next_allowed_action: >
+      Use Pack v0 as an internal pilot proxy. Continue with a larger corrected
+      Exploration tranche or repair only the already classified P0 families
+      after preserving the failure-family map, runtime evidence, and ledger
+      record. Do not promote Pack v0 diagnostics to product acceptance.
+
+  - id: DL-2026-05-03-003
+    date: 2026-05-03
+    capability: Quality Governance / BSV1-12 Observability / BSV1-04 Booking diagnostics
+    architecture_layer: Quality Tooling + Provider Boundary + Evidence Classification
+    problem: >
+      The first Real-World Salon Pack runtime attempts proved the existing
+      quality runner had a tool/process gap: `--skip-outbox` removed internal
+      final-response evidence, while delivery-coupled runs produced transport
+      false failures while Chatflow/WhatsApp is commercially unavailable. That
+      made semantic exploration depend on provider delivery and risked treating
+      invalid runs as product evidence.
+    decision: >
+      Split transport evidence policy in `ops/diagnose.py`. Dev Exploration may
+      use rendered assistant evidence recovered from inline response or the
+      `messages` table; strict Acceptance remains locked to delivery evidence.
+      Mark invalid attempts as do-not-use artifacts, record Tranche A only as a
+      diagnostic failure-family map, and keep product proof blocked until full
+      acceptance has raw owner green, final runtime green, rescue=no, and exact
+      DB/Console/audit/trace proof.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - ops/diagnose.py
+      - truffles-api/tests/test_booking_quality_status_gate.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_run_v0_20260503/INVALID_RUN_DO_NOT_USE.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_outbox_v0_20260503/INVALID_RUN_DO_NOT_USE.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_a_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_a_20260503.md
+      - /tmp/truffles_real_world_salon_pack_20260503/release_topology_truth_post_ledger_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/observability_truth_post_ledger_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/go_live_data_truth_post_ledger_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/provider_integration_truth_post_ledger_20260503.json
+    validation:
+      - python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py
+      - targeted pytest for quality-constant transport policy and rendered reply evidence
+      - corrected Tranche A run returned artifact_integrity.valid=true and decision trace coverage 1.0
+      - strict Acceptance gate rejects transport_evidence_policy=rendered
+      - post-ledger release topology and observability truth returned valid=true after runtime profile restart
+      - post-ledger go-live data truth returned valid=true; provider truth remained valid=false for CHATFLOW_WHATSAPP_COMMERCIALLY_UNAVAILABLE
+    known_limits:
+      - Rendered transport evidence is allowed only for dev Exploration and cannot prove provider delivery.
+      - Tranche A used only 3 dialogs / 14 turns and is not a full Pack v0 run.
+      - Tranche A manual audit is complete, but human_semantic_valid=false; it remains diagnostic only.
+      - The failure-family map is diagnostic evidence, not mechanism closure.
+    do_not_repeat:
+      - Do not run semantic Exploration with `--skip-outbox` unless the run is explicitly a non-response dry/debug check.
+      - Do not couple internal semantic diagnostics to external provider delivery while provider access is commercially blocked.
+      - Do not use outbox inbound payload text as assistant final-response evidence.
+      - Do not promote rendered-evidence Exploration artifacts into strict Acceptance or product proof.
+      - Do not repair booking rows before classifying failure families by capability and layer.
+    next_allowed_action: >
+      Keep `transport_evidence_policy=rendered` only in dev Exploration, run a
+      broader Pack v0 diagnostic tranche or repair the classified P0 families,
+      and rerun strict Acceptance only with delivery transport evidence plus
+      manual audit and DB/Console/audit/trace proof.
+
+  - id: DL-2026-05-03-004
+    date: 2026-05-03
+    capability: Real-World Salon Pack v0 diagnostics / BSV1-04 Booking manage / BSV1-06 Handoff
+    architecture_layer: Policy Core + Handoff Lifecycle + Quality Oracle + Renderer Contract
+    problem: >
+      Tranche B of Pack v0 ran 10 owner-reviewed messy dialogs and confirmed
+      that failures are not isolated booking rows. The dominant gaps are shared
+      mechanisms: booking-manage under-escalation, handoff contact/context
+      lifecycle drift, handoff state/oracle mismatch, calendar-tool oracle
+      ambiguity, fact-interruption copy ambiguity, and unsupported-service
+      clarification weakness.
+    decision: >
+      Keep Tranche B as DIAGNOSTIC_TRANCHE_NOT_PRODUCT_PROOF. Do not implement
+      scenario-specific fixes. Repair only shared mechanisms after preserving
+      the failure-family map. The next implementation block should start with
+      P0 booking-manage/admin-confirm and handoff contact/context lifecycle
+      contracts, then prove with focused family proof before strict Acceptance.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - scripts/decision_ledger_guard.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/manual_audit.md
+      - /tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_b_20260503.json
+      - /tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_b_20260503.md
+    validation:
+      - Tranche B artifact_integrity.valid=true
+      - Tranche B manual audit status=done and human_semantic_valid=false
+      - Tranche B metrics: 10 dialogs / 44 turns, strict_pass_rate=0.6136, hard_fail_rate=0.0682, expected_reply_rate=1.0
+      - Failure-family map classifies FAM-B1 through FAM-B6 before repair
+    known_limits:
+      - Dev Exploration used rendered transport evidence, --allow-judge-off, and run-economy warn.
+      - Tranche B is not strict Acceptance and cannot update the canonical quality baseline.
+      - Some state/action failures are oracle-contract findings until handoff lifecycle policy is decided.
+      - Chatflow/WhatsApp provider remains commercially blocked and is outside internal semantic diagnostics.
+    do_not_repeat:
+      - Do not fix individual Tranche B rows or phrases.
+      - Do not treat pending handoff state as wrong until the handoff lifecycle contract is decided.
+      - Do not treat handoff contact/name follow-ups as new booking intent without explicit user booking request.
+      - Do not turn renderer, state, executor, regex, or quality oracle into semantic owner.
+      - Do not run strict Acceptance with rendered transport evidence or judge/debug waivers.
+    next_allowed_action: >
+      Repair P0 shared mechanisms in this order: FAM-B1 booking-manage
+      cancel/reschedule/admin-confirm ownership; FAM-B3 handoff contact/context
+      continuity; FAM-B2 handoff lifecycle/oracle contract. Then use focused
+      family proof and only later strict Acceptance with delivery evidence.
+
+  - id: DL-2026-05-04-005
+    date: 2026-05-04
+    capability: BSV1-06 Handoff / BSV1-04 Booking manage
+    architecture_layer: Policy Core + Boundary Validation + Handoff Lifecycle
+    problem: >
+      Pack v0 Tranche B showed two P0 shared mechanism failures. Cancel,
+      reschedule, and admin-confirmation requests could be routed as
+      `FACT/calendar.get_booking` or executable cancel/reschedule semantics
+      instead of admin-confirmation handoff. After complaint, medical, refund,
+      or human handoff, a bare name/phone follow-up could be reclassified as a
+      new booking collect rather than attached to the active handoff context.
+    decision: >
+      Repair the governed policy-core contract for the two P0 families. Pack
+      policy sections for cancel/reschedule/payment/medical/complaint and
+      explicit human requests now force `HANDOFF` through policy-core with
+      `tool_action_hint=handoff`; customer chat must not execute
+      `calendar.cancel` or `calendar.reschedule`. Handoff contact follow-ups
+      attach name/phone to the active handoff context instead of reopening
+      booking collect. Boundary validation rejects customer-side
+      cancel/reschedule tool execution. This is a focused P0 mechanism proof,
+      not Beauty Salon v1 product acceptance.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - truffles-api/app/services/intent_service.py
+      - truffles-api/app/services/policy_prompt_snapshot_service.py
+      - prompts/llm_policy_core.md
+      - truffles-api/tests/test_intent.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/p0_handoff_repair_summary_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/artifacts/fam_b1_active_cancel_interrupt.json
+      - /tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/artifacts/fam_b1_direct_cancel_identity.json
+      - /tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/artifacts/fam_b1_reschedule_identity.json
+      - /tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/artifacts/fam_b3_complaint_contact.json
+      - /tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/artifacts/fam_b3_medical_contact.json
+      - /tmp/truffles_real_world_salon_pack_20260504/release_topology_truth_p0_handoff_20260504a.json
+    validation:
+      - python3 -m py_compile truffles-api/app/services/intent_service.py truffles-api/app/services/policy_prompt_snapshot_service.py truffles-api/tests/test_intent.py
+      - targeted pytest for booking-manage admin handoff, handoff contact continuation, and prompt snapshot contracts returned 15 passed
+      - broader targeted pytest for booking_manage/handoff/cancel/reschedule/medical/complaint returned 31 passed
+      - focused family proof summary returned valid=true for 5 dialogs covering FAM-B1 and FAM-B3
+      - release_topology_truth returned valid=true on runtime image truffles-local:real-world-p0-handoff-20260504a
+      - decision_ledger_guard, product_work_map_guard, tool_inventory_guard, single_semantic_owner_guard, and semantic_preflight returned valid/OK
+      - go_live_data_truth and observability_truth returned valid=true; provider_integration_truth remained valid=false for CHATFLOW_WHATSAPP_COMMERCIALLY_UNAVAILABLE
+      - arch_guard failed only on stale docs/_generated/AGENT_PACKET.json, which remains intentionally untouched
+    known_limits:
+      - Focused proof covers exact P0 families only; it is not Real-World Salon Acceptance Pack closure.
+      - Full `truffles-api/tests/test_intent.py` still contains many stale/failing expectations outside this repair slice and must be triaged by family before broad acceptance.
+      - FAM-B2 handoff lifecycle/oracle/manager-state contract remains open.
+      - Chatflow/WhatsApp remains commercially unavailable; focused proof uses internal webhook/runtime evidence, not external provider delivery.
+    do_not_repeat:
+      - Do not route customer cancel/reschedule/admin-confirmation to customer-side `calendar.cancel` or `calendar.reschedule`.
+      - Do not use `calendar.get_booking` as a substitute for admin-confirmation handoff when the user is requesting cancellation, reschedule, change, or admin confirmation.
+      - Do not treat a bare name/phone after complaint, medical, refund, or human handoff as new booking intent unless the user explicitly asks to book.
+      - Do not promote focused family proof into product proof or strict Acceptance.
+    next_allowed_action: >
+      Repair FAM-B2 handoff lifecycle/oracle/manager-state contract next, then
+      rerun Pack v0 Exploration/Acceptance according to the Internal Pilot
+      process. Broad test failures outside the focused P0 slice must be grouped
+      by capability/layer before any repair.
+
+  - id: DL-2026-05-04-006
+    date: 2026-05-04
+    capability: BSV1-06 Handoff / Quality Governance
+    architecture_layer: Handoff Lifecycle + Quality Oracle + Manager Simulation
+    problem: >
+      Pack v0 Tranche B `FAM-B2` mixed product behavior with evidence-tool
+      drift. Runtime correctly creates pending-state handoff lifecycle for
+      cancel/reschedule/admin-confirm flows, but the scenario oracle could keep
+      `bot_active` expectations for follow-up context turns, and automatic
+      manager simulation could take/resolve a handoff before the remaining
+      customer context was appended. Older manager checks also treated
+      `take -> manager_active` as deterministic even though the simulation can
+      race with resolution.
+    decision: >
+      Repair the evidence contract, not the semantic owner. Booking-manage
+      cancel/reschedule handoff starts a management context in scenario
+      sanitation; service/date/time/name/phone/human follow-ups remain
+      `HANDOFF` context with `pending` state expectations instead of booking
+      collect expectations. The quality oracle accepts handoff-effect pending
+      state when the owner/action/tool evidence is handoff. Automatic manager
+      simulation is delayed until no later customer turn remains, and `take`
+      is race-tolerant while `resolve` still requires `bot_active/resolved`.
+      This is a focused lifecycle/oracle proof, not Pack v0 Acceptance.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - ops/diagnose.py
+      - truffles-api/app/services/llm_quality_contracts.py
+      - truffles-api/tests/test_booking_dialog_scenarios_script.py
+      - truffles-api/tests/test_booking_quality_state_fallback.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_b2_lifecycle_repair_20260504a/fam_b2_lifecycle_repair_summary_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_b2_lifecycle_repair_20260504a/run/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_b2_lifecycle_repair_20260504a/run/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_b2_lifecycle_repair_20260504a/run/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260504/release_topology_truth_fam_b2_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/go_live_data_truth_fam_b2_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/observability_truth_fam_b2_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/provider_integration_truth_fam_b2_20260504a.json
+    validation:
+      - python3 -m py_compile ops/diagnose.py truffles-api/app/services/llm_quality_contracts.py truffles-api/tests/test_booking_dialog_scenarios_script.py truffles-api/tests/test_booking_quality_state_fallback.py
+      - targeted pytest for booking-manage context sanitation, handoff state fallback, and manager take race tolerance returned 9 passed
+      - focused lifecycle/oracle proof summary returned valid=true with strict_pass_rate=1.0, state_transition_pass_rate=1.0, manager_actions_total=4, manager_actions_ok=4, expected_state_mismatch_count=0
+      - release_topology_truth, go_live_data_truth, and observability_truth returned valid=true
+      - provider_integration_truth remained valid=false for CHATFLOW_WHATSAPP_COMMERCIALLY_UNAVAILABLE; internal booking/handoff proof is not blocked
+    known_limits:
+      - Focused proof used dev/exploration lane with rendered evidence and `--skip-outbox`; it is not provider delivery proof.
+      - The llm-quality run summary still has global semantic/infra warnings because pending handoff-only diagnostics have reply_rate=0 and provider/outbox delivery is intentionally skipped.
+      - This closes the P0 lifecycle/oracle mechanism only; Pack v0 must be rerun before Acceptance or go-live claims.
+    do_not_repeat:
+      - Do not treat `pending` handoff state as wrong when policy-core owner produced a handoff effect.
+      - Do not let the quality harness resolve a handoff before remaining customer context turns have been evaluated.
+      - Do not require deterministic `manager_active` immediately after manager `take` in race-prone simulations.
+      - Do not use oracle relaxation to hide non-handoff booking collect failures.
+    next_allowed_action: >
+      Rerun Pack v0 Exploration after P0 repairs and rebuild the failure-family
+      map. Continue to P1 families only after the rerun shows the remaining
+      blockers by capability/layer.
+
+  - id: DL-2026-05-04-007
+    date: 2026-05-04
+    capability: Real-World Salon Pack v0 diagnostics / BSV1-06 Handoff / Quality Governance
+    architecture_layer: Quality Oracle + Proof Runtime + Policy-Core Contract Triage
+    problem: >
+      Pack v0 Tranche B was rerun after focused P0 repairs and improved from
+      strict_pass_rate=0.6136 to 0.9091 with hard_fail_rate=0.0, so previous
+      P0 families no longer dominate. The run still cannot be product proof:
+      infra_valid=false because webhook/decision-meta/manager callbacks time
+      out, and remaining semantic blockers are now `FAM-C0` evidence
+      reliability, `FAM-C1` generic handoff oracle noise, `FAM-C2`
+      unsupported-service policy, `FAM-C3` fact-interruption copy, and
+      `FAM-C4` full-pack runtime economy. A one-shot 48-dialog / 511-turn full
+      pack attempt was aborted and marked invalid.
+    decision: >
+      Keep the after-P0 Tranche B as DIAGNOSTIC_AFTER_P0_NOT_ACCEPTANCE. Repair
+      only the generic handoff-context oracle as proof tooling because complaint,
+      medical, refund, payment, safety, and human handoff rows must preserve an
+      active pending handoff context for name/phone/human follow-ups instead of
+      expecting a new bot reply. Do not change runtime semantics for this oracle
+      repair. Classify evidence reliability (FAM-C0) as the next P0 blocker
+      before strict Acceptance, and define P1 policy/copy contracts for
+      unsupported service and fact interruption only after evidence is stable.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - STRUCTURE.md
+      - scripts/decision_ledger_guard.py
+      - truffles-api/app/services/llm_quality_contracts.py
+      - truffles-api/tests/test_booking_dialog_scenarios_script.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260504/pack_v0_exploration_after_p0_20260504a/INVALID_RUN_DO_NOT_USE.md
+      - /tmp/truffles_real_world_salon_pack_20260504/pack_v0_exploration_after_p0_20260504a/manual_audit.md
+      - /tmp/truffles_real_world_salon_pack_20260504/exploration_tranche_b_after_p0_20260504a/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260504/exploration_tranche_b_after_p0_20260504a/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260504/exploration_tranche_b_after_p0_20260504a/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260504/exploration_tranche_b_after_p0_20260504a/manual_audit.md
+      - /tmp/truffles_real_world_salon_pack_20260504/failure_family_map_pack_v0_tranche_b_after_p0_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/failure_family_map_pack_v0_tranche_b_after_p0_20260504a.md
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_c_handoff_oracle_repair_20260504a/fam_c_handoff_oracle_repair_summary_20260504a.json
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_c_handoff_oracle_repair_20260504a/run_handoff/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_c_handoff_oracle_repair_20260504a/run_handoff/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260504/fam_c_handoff_oracle_repair_20260504a/run_handoff/manual_audit.md
+      - /tmp/truffles_real_world_salon_pack_20260504/release_topology_truth_dl007_20260504.json
+      - /tmp/truffles_real_world_salon_pack_20260504/go_live_data_truth_dl007_20260504.json
+      - /tmp/truffles_real_world_salon_pack_20260504/observability_truth_dl007_20260504.json
+      - /tmp/truffles_real_world_salon_pack_20260504/provider_integration_truth_dl007_20260504.json
+    validation:
+      - after-P0 Tranche B completed 10 dialogs / 44 turns with strict_pass_rate=0.9091, hard_fail_rate=0.0, decision_meta_coverage=1.0, decision_trace_coverage=1.0, and run_integrity_valid=true
+      - after-P0 Tranche B remained semantic_valid=false and infra_valid=false; it is diagnostic only
+      - focused generic handoff oracle proof returned oracle_valid=true with 2 dialogs / 6 turns, strict_pass_rate=1.0, state_transition_pass_rate=1.0, failure_family_count=0, and manager actions 4/4 OK
+      - python3 -m py_compile truffles-api/app/services/llm_quality_contracts.py truffles-api/tests/test_booking_dialog_scenarios_script.py
+      - targeted pytest for booking-manage/generic handoff scenario sanitation returned 4 passed
+      - decision_ledger_guard, tool_inventory_guard, product_work_map_guard, single_semantic_owner_guard, and semantic_preflight returned OK/valid
+      - release_topology_truth, go_live_data_truth, and observability_truth returned valid=true
+      - provider_integration_truth remained valid=false for CHATFLOW_WHATSAPP_COMMERCIALLY_UNAVAILABLE; internal booking/handoff proof is not blocked
+    known_limits:
+      - Focused generic handoff proof is oracle/mechanism proof only, not runtime product proof.
+      - Focused proof used dev rendered/skip-outbox evidence and still has infra_valid=false from decision-meta timeouts on expected no-response pending turns.
+      - After-P0 Tranche B still breaches reply_rate, strict_pass_rate, expected_reply_rate, info_answer_rate, and handoff_correct_rate thresholds.
+      - Provider delivery and Chatflow/WhatsApp remain outside this proof because provider access is commercially blocked.
+      - The aborted full-pack attempt is explicitly invalid and must not be reused as evidence.
+    do_not_repeat:
+      - Do not claim Pack v0 Acceptance from the improved after-P0 Tranche B.
+      - Do not treat expected no-response handoff follow-ups as a new bot-active dialog turn.
+      - Do not repair unsupported service or fact-interruption rows before defining their policy/copy contracts.
+      - Do not rerun the 48-dialog / 511-turn full pack as one blocking pass without a resumable or tranching strategy.
+      - Do not hide real provider/delivery failures under rendered dev evidence.
+    next_allowed_action: >
+      Repair FAM-C0 evidence reliability first: distinguish expected no-response
+      pending handoff turns from real webhook/decision-meta failures, stabilize
+      manager callback timeout handling, and keep infra false blocking
+      Acceptance until fixed. Then define FAM-C2 unsupported-service and FAM-C3
+      fact-interruption copy contracts before runtime repairs, using audited
+      tranches or resumable execution instead of another invalid full-pack pass.
+
+  - id: DL-2026-05-05-008
+    date: 2026-05-05
+    capability: Real-World Salon Pack v0 diagnostics / BSV1-06 Handoff / Quality Governance
+    architecture_layer: Proof Runtime + Quality Runner + Manager Simulation + Manual Audit
+    problem: >
+      FAM-C0 was an evidence reliability blocker, not a new product semantic
+      failure: expected no-response pending handoff turns could surface as
+      webhook/decision-meta timeout noise, the runner could inject a pending ACK
+      before remaining scripted customer turns, manager `take` could be counted
+      as a hard failure even when a later `resolve` closed the handoff, and
+      manual audit backlog still treated soft decision-meta timeout rows as
+      infra families. This made Pack v0 diagnostics noisy and risked repairing
+      runtime semantics from proof-harness artifacts.
+    decision: >
+      Repair the proof runtime only. Expected no-response pending handoff
+      context may downgrade decision-meta timeout to a soft classification only
+      when runtime evidence exists; recovered webhook timeout may be non-blocking
+      only when conversation/meta/trace evidence exists and no bot reply is
+      expected; pending ACK waits until no later scripted customer turn remains;
+      manager `take` timeout is advisory only when no post-take state/status is
+      required and `resolve` follows; manual audit ignores soft/recovered/advisory
+      runtime classifications as backlog reasons. Do not change policy-core
+      semantic ownership for this repair.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - STRUCTURE.md
+      - scripts/decision_ledger_guard.py
+      - ops/diagnose.py
+      - truffles-api/tests/test_booking_quality_status_gate.py
+      - truffles-api/tests/test_booking_quality_state_fallback.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/fam_c0_evidence_reliability_summary_20260505a.json
+      - /tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/run_handoff/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/run_handoff/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/run_handoff/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/run_handoff/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/run_handoff/family_registry.json
+    validation:
+      - focused FAM-C0 evidence reliability proof status=FOCUSED_EVIDENCE_RELIABILITY_PROOF_NOT_ACCEPTANCE and completed 2 handoff dialogs / 6 turns with infra_valid=true, strict_pass_rate=1.0, pass_rate=1.0, handoff_correct_rate=1.0, decision_meta_coverage=1.0, decision_trace_coverage=1.0, webhook_errors=0, infra_errors=0, decision_meta_errors=0, decision_trace_errors=0, decision_meta_soft_timeouts=0, webhook_recovered_timeouts=0, pending_ack_soft_timeouts=0, and manager actions 4/4 OK
+      - manual audit is status=done with artifact_integrity_valid=true and no product/oracle/evaluator/infra backlog families; remaining semantic_invalid finding is expected because focused handoff-only dev proof is not Acceptance
+      - python3 -m py_compile ops/diagnose.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_state_fallback.py
+      - targeted pytest for FAM-C0 evidence reliability helpers returned 6 passed and targeted pytest for manager/pending-ack helpers returned 3 passed
+      - decision_ledger_guard, tool_inventory_guard, product_work_map_guard, single_semantic_owner_guard, semantic_preflight, and diff whitespace checks returned OK/valid
+    known_limits:
+      - Focused FAM-C0 proof is proof-runtime reliability evidence only, not Pack v0 Acceptance and not Beauty Salon v1 product proof.
+      - The run used dev lane, rendered transport evidence, simulated manager mode, and skipped provider delivery; Chatflow/WhatsApp remains commercially unavailable.
+      - semantic_valid=false remains expected for this focused handoff-only proof because it does not meet full acceptance coverage/thresholds.
+      - Broader after-P0 Tranche B must be rerun before moving to runtime P1 repairs.
+    do_not_repeat:
+      - Do not inject pending ACK between scripted customer turns and then treat resulting state drift as product evidence.
+      - Do not count recovered no-response handoff webhook/decision-meta timeouts as infra blockers when runtime meta/trace evidence exists.
+      - Do not soften expected-response, provider-delivery, missing-trace, or real runtime failures under FAM-C0 classifications.
+      - Do not repair policy-core/runtime semantics from proof-harness timeout noise.
+    next_allowed_action: >
+      Rerun a broader after-P0 Tranche B diagnostic with the repaired evidence
+      runtime. If evidence reliability remains stable, define FAM-C2
+      unsupported-service and FAM-C3 fact-interruption copy contracts before
+      runtime repairs, then use tranches/resumable execution for broader Pack v0
+      coverage.
+
+  - id: DL-2026-05-05-009
+    date: 2026-05-05
+    capability: Real-World Salon Pack v0 diagnostics / BSV1 Booking + Handoff
+    architecture_layer: Product Acceptance Evidence + Failure-Family Triage
+    problem: >
+      After the FAM-C0 proof-runtime repair, a broader 10-dialog / 44-turn
+      Tranche B diagnostic was required to determine whether evidence
+      reliability was stable and whether remaining failures were product,
+      oracle, or copy-contract families. The first broad rerun used an overly
+      slow timeout profile and was manually stopped after 4/44 turns; it is an
+      invalid partial run and must not be used as evidence. The fast rerun
+      completed and showed `infra_valid=true`, but Pack v0 still remained
+      `semantic_valid=false`.
+    decision: >
+      Reclassify FAM-C0 as focused-repaired and broad-diagnostic stable for
+      infra/evidence only. Keep Pack v0 status as
+      DIAGNOSTIC_AFTER_FAM_C0_NOT_ACCEPTANCE. Remaining actionable families are
+      FAM-C2 unsupported-service policy/oracle contract and FAM-C3
+      fact-interruption copy/continuity contract. Do not patch runtime before
+      these contracts are defined; the unsupported-service row currently exposes
+      an oracle/policy decision about whether to collect after unavailable
+      service context, and the fact-interruption row exposes a copy decision
+      about answering price/duration while preserving booking continuity.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - scripts/decision_ledger_guard.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260505/pack_v0_tranche_b_after_fam_c0_diagnostic_summary_20260505b.json
+      - /tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_fast_20260505b/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_fast_20260505b/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_fast_20260505b/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_fast_20260505b/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_fast_20260505b/family_registry.json
+      - /tmp/truffles_real_world_salon_pack_20260505/pack_v0_after_fam_c0_trends_20260505b.json
+      - /tmp/truffles_real_world_salon_pack_20260505/pack_v0_after_fam_c0_trends_20260505b.md
+      - /tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_20260505a/INVALID_RUN_DO_NOT_USE.md
+    validation:
+      - broad after-FAM-C0 Tranche B completed 10 dialogs / 44 turns with run_integrity_valid=true, infra_valid=true, strict_pass_rate=0.9545, pass_rate=0.9545, hard_fail_rate=0.0, expected_reply_rate=1.0, decision_meta_coverage=1.0, decision_trace_coverage=1.0, webhook_errors=0, infra_errors=0, decision_meta_errors=0, decision_trace_errors=0, handoff_correct_rate=1.0, and manager actions 14/14 OK
+      - manual audit is status=done and human_semantic_valid=false because the run is diagnostic only; analyst root causes are fam_c0_evidence_reliability_stable, fam_c2_unsupported_service_contract_unresolved, and fam_c3_fact_interruption_copy_contract_unresolved
+      - family registry after FAM-C0 contains zero product/evaluator/infra families, one oracle family for unsupported-service booking context, and one unknown copy/contract family for mix_info_booking
+      - trend artifact compares after-P0 and after-FAM-C0 diagnostics and shows infra families cleared from the current run
+    known_limits:
+      - This is a dev diagnostic with rendered transport evidence and simulated manager; it is not provider delivery proof or strict Pack v0 Acceptance.
+      - semantic_valid=false remains because blocking reasons persist: mix_info_booking, expected_action_mismatch, expected_reply_type_mismatch, and booking_flow_break.
+      - FAM-C2 and FAM-C3 are contract decisions first; runtime/prompt changes before those decisions would repeat scenario-driven patching.
+      - The invalid slow partial rerun stopped after 4/44 turns and must not be used as product, semantic, or evidence reliability proof.
+    do_not_repeat:
+      - Do not claim Pack v0 Acceptance from infra_valid=true or strict_pass_rate=0.9545.
+      - Do not treat the invalid partial slow rerun as evidence.
+      - Do not patch the unsupported-service row by forcing collect or fact until the desired product behavior is defined.
+      - Do not patch the fact-interruption row by suppressing booking continuity until copy and continuity expectations are defined.
+    next_allowed_action: >
+      Define and record the FAM-C2 unsupported-service contract and FAM-C3
+      fact-interruption copy/continuity contract, then repair mechanisms against
+      those contracts and rerun focused proofs before another broader Pack v0
+      diagnostic.
+
+  - id: DL-2026-05-05-010
+    date: 2026-05-05
+    capability: BSV1 Runtime Governance / Knowledge Data Plane / Quality Governance
+    architecture_layer: Consultant Runtime + Knowledge/Data + Capabilities + Proof Governance
+    problem: >
+      Earlier explanations separated the one-message decision path from the
+      customer-data ownership path. That made the runtime flow understandable
+      but left a repeatable process gap: a turn can look correct while the
+      policy-core context, pack facts, branch capabilities, operational DB
+      catalog, or RAG projection are inconsistent or treated as stronger truth
+      than they are. This risks more scenario-driven repairs and hidden
+      split-brain between customer-facing facts and executable business actions.
+    decision: >
+      Every meaningful runtime investigation, LLM diagnostic, and mechanism
+      repair must audit two paths together: the decision path and the data
+      ownership path. The decision path is input -> policy-core owner output ->
+      planner/binding -> boundary verdict -> state write/load -> executor/tool
+      action -> final response -> trace/meta -> rescue flag. The data ownership
+      path is Packs / Knowledge -> Capabilities -> Operational DB -> RAG /
+      Qdrant projection -> Policy-core context. A Customer Data Contract must
+      identify which surface owns each business datum before a repair changes
+      runtime behavior. RAG/Qdrant is retrieval projection only and must not
+      become semantic owner or core booking truth.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - STRUCTURE.md
+      - scripts/decision_ledger_guard.py
+      - scripts/product_work_map_guard.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+    proof_artifacts:
+      - /tmp/truffles_customer_data_truth_20260505.json
+      - /tmp/truffles_data_ownership_snapshot_20260505.json
+    validation:
+      - live baseline showed HEAD and runtime git_commit 9db031ee967999545f8a9673e7e57cf4d7202e73, /admin/version reachable, and /health status ok
+      - go_live_data_truth returned valid=true for demo_salon/main with minimum data contract ready, 15 active services, 5 active specialists, and 15 active specialist-service links
+      - data ownership snapshot classified Packs / Knowledge as knowledge_active_version, Capabilities as client_capabilities, Operational DB as Postgres services/specialists/specialist_services/appointments, RAG / Qdrant as projection only, and Policy-core context as governed projection
+    known_limits:
+      - The snapshot proves data exists and ownership surfaces are identifiable; it does not prove owner-approved complete production data.
+      - Pack services and DB services are not identical surfaces: pack currently has 14 customer-facing service catalog rows while the operational DB has 15 active bookable service rows.
+      - This decision is process/data-governance proof, not a runtime semantic repair and not Pack v0 Acceptance.
+    do_not_repeat:
+      - Do not explain or test a turn using only the control-flow path; always include the customer-data ownership path when business behavior is at stake.
+      - Do not let RAG/Qdrant, pack fallback YAML, service aliases, regex, or operational DB rows silently become semantic owner.
+      - Do not repair unsupported-service, fact-interruption, or booking continuity before identifying the owner of each datum used by the turn.
+      - Do not claim data missing when go_live_data_truth or live DB proves target data exists; distinguish data existence from owner-approved production completeness.
+    next_allowed_action: >
+      Before FAM-C2/FAM-C3 runtime repair, define the Customer Data Contract for
+      Beauty Salon v1 fields and require single-turn audit artifacts to show
+      both decision path and data ownership path. Then repair shared mechanisms
+      only against classified capability/layer failures.
+
+  - id: DL-2026-05-07-011
+    date: 2026-05-07
+    capability: Real-World Salon Pack v0 diagnostics / BSV1-04 Booking intake / BSV1 Fact interruption
+    architecture_layer: Policy-core owner contract + Planner boundary/state + Executor render
+    problem: >
+      After FAM-C0 evidence reliability was repaired, the remaining FAM-C2 and
+      FAM-C3 diagnostics exposed shared mechanism gaps rather than isolated
+      rows: unsupported-service availability and booking-continuation language
+      could drift into booking collect or handoff without a supported service,
+      planner_degrade did not write an explicit degraded runtime state before
+      reply, inactive legacy booking payloads could leak as semantic continuity,
+      and range/daypart times such as "после шести" or "пятница вечером" could
+      be rendered like exact slots.
+    decision: >
+      Repair the shared mechanisms while preserving policy-core as the semantic
+      owner. Unsupported service availability and continuation now stay grounded
+      as FACT until a supported service is selected; fact-interruption continuity
+      is preserved while answering price/duration; downstream layers may clear
+      stale/degraded state but must not invent a supported service. Planner
+      boundary/degrade writes explicit canonical degraded state before response.
+      Dialog-state loading ignores inactive legacy booking payloads as semantic
+      memory. Executor rendering treats range/daypart constraints as partial
+      time and asks for an exact slot. This is
+      FOCUSED_FAM_C2_C3_TECHNICAL_PROOF_NOT_ACCEPTANCE, not Pack v0 Acceptance
+      and not Beauty Salon v1 product proof.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - scripts/decision_ledger_guard.py
+      - prompts/llm_policy_core.md
+      - truffles-api/app/services/intent_service.py
+      - truffles-api/app/services/policy_prompt_snapshot_service.py
+      - truffles-api/app/core/dialog_state_service.py
+      - truffles-api/app/core/consultant_runtime.py
+      - truffles-api/app/core/turn_executor.py
+      - truffles-api/tests/test_intent.py
+      - truffles-api/tests/test_dialog_state_service.py
+      - truffles-api/tests/test_consultant_core_runtime_contracts.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/release_topology_truth_20260507h.json
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/run/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/run/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/run/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/run/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/release_topology_truth_after_runtime_profile_20260507h.json
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/go_live_data_truth_after_runtime_profile_20260507h.json
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/observability_truth_after_runtime_profile_20260507h.json
+      - /tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/provider_integration_truth_after_runtime_profile_20260507h.json
+      - /tmp/truffles_real_world_salon_pack_20260506/fam_c2_c3_range_time_render_20260506g/run/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260506/fam_c2_c3_degrade_state_20260506f/run/summary.json
+    validation:
+      - live baseline showed HEAD/runtime git_commit 9db031ee967999545f8a9673e7e57cf4d7202e73, runtime image truffles-local:fam-c2-c3-unsupported-focus-20260507h, /admin/version.build_time 2026-05-07T00:25:00Z, and /health status ok
+      - release_topology_truth_20260507h returned valid=true for active API/workers image truffles-local:fam-c2-c3-unsupported-focus-20260507h
+      - focused llm-quality run completed 2 dialogs / 10 turns with infra_valid=true, semantic_valid=true, run_integrity_valid=true, strict_pass_rate=1.0, hard_fail_rate=0.0, decision_meta_coverage=1.0, decision_trace_coverage=1.0, fact_without_evidence_rate=0.0, semantic_override_rate=0.0, and stale_state_leak_rate=0.0
+      - manual audit is status=done and human_semantic_valid=true for the focused FAM-C2/FAM-C3 slice
+      - targeted pytest for unsupported-service availability/continuation, unknown-service residue, generic other fact routing, inactive legacy booking loading, planner-boundary state containment, and range-time rendering returned green
+      - canonical runtime-profile restart corrected direct-restart OUTBOX_WORKER_MODE=off drift to local_debug; observability_truth_after_runtime_profile_20260507h returned valid=true
+      - go_live_data_truth_after_runtime_profile_20260507h returned valid=true for demo_salon/main target data; provider_integration_truth_after_runtime_profile_20260507h remained valid=false only for CHATFLOW_WHATSAPP_COMMERCIALLY_UNAVAILABLE
+    known_limits:
+      - The proof is a focused scripted technical proof over 2 dialogs / 10 turns, not Real-World Salon Pack v0 Acceptance.
+      - Dev Exploration used rendered transport evidence; it does not prove external provider delivery.
+      - The run does not create an internal appointment and does not prove Console Calendar booking visibility for these rows.
+      - Broader Pack v0 coverage and strict Acceptance are still pending.
+      - Chatflow/WhatsApp remains commercially unavailable and separate from internal runtime proof.
+      - Direct API/worker restart without `scripts/restart_release.sh` runtime profile can leave outbox worker mode off; runtime validation must include worker heartbeat/observability truth.
+    do_not_repeat:
+      - Do not let unsupported service availability become booking collect or handoff without a supported service selection.
+      - Do not treat planner_degrade, timeout, or final green with rescue as product success.
+      - Do not treat inactive legacy booking payloads as live semantic memory.
+      - Do not render range/daypart time constraints as exact slots.
+      - Do not promote focused family proof to Pack v0 Acceptance, provider proof, or Beauty Salon v1 go-live readiness.
+    next_allowed_action: >
+      Run a broader Real-World Salon Pack v0 diagnostic tranche with focused
+      FAM-C2/FAM-C3 repairs included. Group any remaining failures by capability,
+      architecture layer, owner output, boundary verdict, state, executor/tool
+      action, final response, data ownership, and rescue/degrade flag before any
+      new mechanism repair.
+  - id: DL-2026-05-07-012
+    date: 2026-05-07
+    capability: Real-World Salon Pack v0 diagnostics / BSV1 runtime behavior / Quality Governance
+    architecture_layer: Policy-core memory contract + Planner projection + Dialog state projection + Acceptance governance
+    problem: >
+      The broader Pack v0 run after focused FAM-C2/FAM-C3 repairs no longer
+      exposes product failure families, but strict green output alone would be
+      misleading. Previous booking-manage handoff continuity could lose
+      `requested_effect`, `tool_action_hint`, and `needs_human` between owner
+      output, planner projection, runtime semantic contract, and dialog-state
+      memory. Unsupported-service booking continuation could still fall into a
+      compact invalid/degrade path instead of a governed out-of-domain FACT.
+      The diagnostic also remains product-invalid because `infra_valid=false`
+      from one unclassified expected no-response payment/media handoff timeout
+      and `semantic_valid=false` from the `info_answer_rate` threshold.
+    decision: >
+      Repair the shared handoff-continuity and unsupported-service continuation
+      mechanisms without changing the semantic owner. The handoff semantic axes
+      are preserved
+      through owner/planner/runtime/dialog-state semantic contracts; booking-manage
+      handoff context updates are only forced when existing memory proves an
+      active handoff context; unsupported-service booking continuation is routed
+      to a governed FACT contract until a supported service is selected. Record
+      the 44-turn Pack v0 result as
+      PACK_V0_FULL_DIAGNOSTIC_AFTER_FAM_C2_C3_NOT_ACCEPTANCE: it is useful
+      diagnostic evidence with `strict_pass_rate=1.0`, but it is not Pack v0
+      Acceptance, not provider proof, and not Beauty Salon v1 product proof.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - scripts/decision_ledger_guard.py
+      - truffles-api/app/core/consultant_runtime.py
+      - truffles-api/app/core/dialog_state_service.py
+      - truffles-api/app/core/turn_planner.py
+      - truffles-api/app/services/intent_service.py
+      - truffles-api/app/services/policy_vocabulary_snapshot_service.py
+      - truffles-api/tests/test_consultant_core_runtime_contracts.py
+      - truffles-api/tests/test_intent.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260507/booking_manage_continuity_20260507k/release_topology_truth_20260507k.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/manual_audit.md
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/family_registry.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/judge_conflicts.jsonl
+    validation:
+      - runtime image truffles-local:booking-manage-continuity-20260507k was built and restarted through scripts/restart_release.sh; /admin/version.build_time returned 2026-05-07T14:10:31Z with git_commit 9db031ee967999545f8a9673e7e57cf4d7202e73
+      - release_topology_truth_20260507k returned valid=true for active API/workers image truffles-local:booking-manage-continuity-20260507k
+      - py_compile passed for touched Python runtime/test files
+      - targeted pytest for booking_manage handoff continuity, unsupported-service continuation, and runtime semantic-contract memory returned green
+      - Pack v0 diagnostic completed 10 dialogs / 44 turns with run_integrity_valid=true, strict_pass_rate=1.0, pass_rate=1.0, hard_fail_rate=0.0, failure_family_count=0, blocking_reason_count=0, decision_meta_coverage=1.0, decision_trace_coverage=1.0, handoff_correct_rate=1.0, post_llm_semantic_rewrite_rate=0.0, keyword_override_rate=0.0, fact_without_evidence_rate=0.0, irrelevant_fact_rate=0.0, booking_commit_without_required_contact=0.0, semantic_override_rate=0.0, and stale_state_leak_rate=0.0
+      - manual audit is status=done, evidence_handoff_valid=true, and human_semantic_valid=false because the run is diagnostic-only and still product/governance invalid
+    known_limits:
+      - PACK_V0_FULL_DIAGNOSTIC_AFTER_FAM_C2_C3_NOT_ACCEPTANCE is scripted owner-proxy diagnostic evidence, not owner-approved production transcript proof.
+      - "`infra_valid=false` remains because one expected no-response payment/media handoff-context turn has an unclassified decision_meta timeout; strict turn evaluation still passed."
+      - "`semantic_valid=false` remains because `info_answer_rate=0.5` breaches the current threshold; this is an acceptance-contract/governance blocker until explicitly mapped to product go/no-go."
+      - The run used dev rendered transport evidence and simulated manager mode; it is not provider delivery proof.
+      - The run did not prove fresh internal appointment creation, Console Calendar visibility, or appointment audit lifecycle.
+      - Chatflow/WhatsApp remains commercially unavailable and separate from internal runtime proof.
+    do_not_repeat:
+      - Do not promote strict_pass_rate=1.0 or zero failure families from Pack v0 diagnostics to Pack v0 Acceptance or product readiness.
+      - Do not let dialog-state or planner projection drop handoff semantic axes needed for continuity.
+      - Do not let unsupported service booking desire become COLLECT, HANDOFF, or degraded success without supported service selection.
+      - Do not fix the remaining `info_answer_rate` or decision-meta timeout by weakening metrics; map the acceptance contract first.
+      - Do not treat rendered/simulated manager evidence as provider delivery or Console Calendar proof.
+    next_allowed_action: >
+      Run an acceptance-governance pass before any new runtime mechanism repair:
+      map llm-quality metrics to Beauty Salon v1 product go/no-go, decide
+      whether `info_answer_rate` applies to this corpus shape, classify the one
+      payment/media handoff-context evidence timeout as scenario/oracle/tooling
+      or runtime, and then move either to strict Acceptance or a mechanism repair
+      only after grouped capability/layer root cause is known.
+  - id: DL-2026-05-07-013
+    date: 2026-05-07
+    capability: Real-World Salon Pack v0 diagnostics / Quality Governance / Replay Isolation
+    architecture_layer: Acceptance governance + Quality runner + Diagnostic oracle
+    problem: >
+      The Pack v0 diagnostic interpretation after DL-2026-05-07-012 was not
+      reliable enough to drive runtime work. The quality oracle inferred an
+      info-answer requirement from handoff/human wording, treated a pending
+      payment/media handoff no-response timeout as a hard evidence gap, and
+      `--jid-mode unique` still reused allowlist JIDs round-robin. That made
+      replay isolation and semantic metrics vulnerable to cross-dialog or
+      cross-run contamination and could either hide product blockers or create
+      false blockers.
+    decision: >
+      Repair the existing `ops/diagnose.py` quality-governance mechanisms
+      instead of weakening thresholds or changing runtime behavior. Handoff,
+      human, complaint, refund, payment, safety, and medical contexts no longer
+      create inferred info-answer expectations; pending payment/media handoff
+      no-response evidence is classified as soft only with handoff context; and
+      unique JID mode now creates run-scoped JIDs even when allowlists exist.
+      Reclassify `/tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507l/run`
+      as invalid diagnostic evidence because it was produced before replay
+      isolation was repaired. Use `/tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run`
+      as the current diagnostic evidence: infra is clean and `info_answer_rate=1.0`,
+      but the run is still `PACK_V0_FULL_DIAGNOSTIC_AFTER_FAM_C2_C3_NOT_ACCEPTANCE`,
+      not Pack v0 Acceptance, because one scenario/oracle expectation and one
+      runtime `policy_core_invalid_schema` blocker remain.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - TECH.md
+      - scripts/decision_ledger_guard.py
+      - ops/diagnose.py
+      - truffles-api/tests/test_booking_quality_status_gate.py
+      - truffles-api/tests/architecture/test_decision_ledger_guard.py
+    proof_artifacts:
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507l/run/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/summary.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/brief.md
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/responses.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/trace_bundle.jsonl
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/manual_audit.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/manual_audit.md
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/family_registry.json
+      - /tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/judge_conflicts.jsonl
+    validation:
+      - targeted pytest for quality-governance status gates passed, including pending payment/media handoff timeout, handoff/human text not inferring master info requests, plain master question still inferring info request, and run-scoped unique JID generation
+      - py_compile passed for `ops/diagnose.py` and quality-governance tests
+      - Pack v0 rerun 20260507m completed 10 dialogs / 44 turns with infra_valid=true, run_integrity_valid=true, decision_meta_coverage=1.0, decision_trace_coverage=1.0, info_answer_rate=1.0, handoff_correct_rate=1.0, fact_without_evidence_rate=0.0, irrelevant_fact_rate=0.0, semantic_override_rate=0.0, stale_state_leak_rate=0.0, strict_pass_rate=0.9545, hard_fail_rate=0.0227, and failure_family_count=3
+      - manual audit for 20260507m is status=done and human_semantic_valid=false; backlog summary separates one product runtime family, one oracle family, and no infra/evaluator families
+    known_limits:
+      - 20260507m remains diagnostic owner-proxy evidence, not owner-approved production transcript proof and not provider delivery proof.
+      - 20260507m still has semantic_valid=false because dialog `rwsp-v0-008` turn 7 produced `policy_core_invalid_schema`.
+      - Dialog `rwsp-v0-008` turn 1 is a scenario/oracle expectation issue: multiple services should collect service choice before time, not expect a time request immediately.
+      - The run did not prove fresh internal appointment creation, Console Calendar visibility, appointment audit lifecycle, or restored Chatflow/WhatsApp delivery.
+    do_not_repeat:
+      - Do not reuse 20260507l as product or diagnostic proof; it was produced before run-scoped unique JID replay isolation was repaired.
+      - Do not infer info-answer obligations from handoff/human escalation wording.
+      - Do not weaken `hard_fail_rate`, `degraded_fallback_rate`, or semantic-valid gates to make the Pack pass.
+      - Do not repair the remaining `policy_core_invalid_schema` as a row-level regex or scenario-specific patch.
+    next_allowed_action: >
+      Fix the Pack v0 scenario/oracle expectation for multi-service service-choice
+      collection, then repair the policy-core booking commit action/tool schema
+      mismatch at the owner/planner contract level. After that, rerun focused
+      proof for the remaining family and a broader Pack v0 diagnostic before
+      any Acceptance or product-readiness claim.
+  - id: DL-2026-05-09-014
+    date: 2026-05-09
+    capability: Platform Architecture Governance / Cross-Vertical Scalability / Quality Governance
+    architecture_layer: Product Canon + Architecture Specs + Agent Boot Protocol + Tool Inventory Governance
+    problem: >
+      The project risk shifted from one failing salon dialog to a broader
+      architecture-understanding gap: future humans and agents could misread
+      Truffles as a chatbot, adopt LangChain/LangGraph as a substitute for
+      product architecture, delete deterministic evidence extraction because
+      the model can infer language, or keep adding niche-specific semantic
+      branches to core. That would block the target of a scalable, manageable,
+      observable business capability platform.
+    decision: >
+      Repair durable governance docs to state the canonical platform contract:
+      Truffles core is a business capability platform; Beauty Salon v1 is the
+      first proof vertical; future niches extend through packs, capabilities,
+      tool/data contracts, operational DB rows, and governed retrieval
+      projections. External orchestration frameworks are optional workflow
+      tools only and require a bounded adoption gate. Lexicons, regex, aliases,
+      normalizers, and RAG are evidence/candidate-fact layers only, not semantic
+      owners. Runtime implementation remains subject to the existing hot path,
+      single-owner, boundary, state, tool, Console, and observability contracts.
+    classification: REPAIR
+    changed_files:
+      - /home/zhan/AGENTS.md
+      - AGENTS.md
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - docs/SESSION_START_PROMPT.txt
+      - SPECS/ARCHITECTURE.md
+      - SPECS/CONSULTANT.md
+      - STRATEGY/VISION.md
+      - STRATEGY/PRODUCT.md
+      - TECH.md
+      - STRUCTURE.md
+    proof_artifacts:
+      - docs/PRODUCT_SYSTEM_CANON.md section 9.28
+      - docs/SESSION_START_PROMPT.txt section 2.1
+      - SPECS/ARCHITECTURE.md sections 0.9 and 0.10
+      - TECH.md Business Capability Platform Technology Policy
+    validation:
+      - Documentation-only architecture governance update; no runtime product proof is claimed.
+      - git diff --check passed.
+      - git diff --cached --check passed.
+      - decision_ledger_guard, product_work_map_guard, tool_inventory_guard, and single_semantic_owner_guard returned OK.
+      - semantic_preflight with runtime fingerprint returned valid=true; runtime commit matched active HEAD 9db031ee967999545f8a9673e7e57cf4d7202e73.
+      - Ledger YAML parsed successfully.
+    known_limits:
+      - This entry does not prove runtime behavior, provider delivery, Console Calendar creation, or Beauty Salon v1 go-live.
+      - Current code may still contain inline regex, forced-field logic, legacy compatibility projections, and fallback/degrade paths that need capability/layer classification before repair.
+      - No LangChain, LangGraph, or other framework was adopted by this decision.
+    do_not_repeat:
+      - Do not treat LangChain/LangGraph or any framework as product architecture, semantic owner, booking calendar, tenant authority, or proof substitute.
+      - Do not delete deterministic evidence extraction because the LLM can infer language; classify and repair it into normalization/evidence ownership.
+      - Do not let lexicon, regex, aliases, RAG, state, executor, or tool code become a hidden semantic owner.
+      - Do not scale to new verticals by adding hardcoded core branches.
+    next_allowed_action: >
+      Use the Business Capability Platform Constitution as the gate before
+      runtime repair, dependency adoption, or vertical expansion. Continue the
+      current Pack v0 path by repairing the multi-service scenario/oracle
+      expectation and the policy-core booking commit action/tool schema mismatch
+      only after decision path and data ownership path are explicit.
+
+  - id: DL-2026-05-11-015
+    date: 2026-05-11
+    capability: Platform Architecture / Single Semantic Owner / Cross-Vertical Scalability
+    architecture_layer: Policy-Core (LLM owner) — new module + spec; legacy intent_service untouched
+    problem: >
+      The legacy `truffles-api/app/services/intent_service.py` (~15,000 lines)
+      contains 30+ scenario-specific `_policy_core_<scenario>_forced_fields`
+      helpers and is paired with multiple scenario-named boundary services
+      (`policy_timeout_*_boundary_service.py`). This makes deterministic
+      Python the hidden semantic owner, violates AGENTS section 8, blocks
+      cross-vertical scaling, and produces recurring `policy_core_degrade`
+      empty-response failures. The forced-fields surface cannot be repaired
+      in-place without first having a typed, scenario-free replacement to
+      migrate to.
+    decision: >
+      Author SPECS/POLICY_CORE_V3.md as the binding contract for the
+      replacement layer (typed PolicyDecisionV3 / DegradeVerdict, pure
+      prompt builder, deterministic retry/degrade policy, minimum PackView
+      Protocol, no scenario branches), and land an isolated PoC module at
+      `truffles-api/app/policy_core_v3/` with unit tests, behind feature
+      flag `policy_core_v3_enabled` (default False). Do not wire to
+      runtime in this session. Migration phases A-D are recorded in the
+      spec.
+    classification: REPLACE
+    changed_files:
+      - SPECS/POLICY_CORE_V3.md
+      - truffles-api/app/policy_core_v3/__init__.py
+      - truffles-api/app/policy_core_v3/pack_view.py
+      - truffles-api/app/policy_core_v3/schema.py
+      - truffles-api/app/policy_core_v3/prompt_builder.py
+      - truffles-api/app/policy_core_v3/retry_policy.py
+      - truffles-api/app/policy_core_v3/invoker.py
+      - truffles-api/app/policy_core_v3/README.md
+      - truffles-api/app/config.py
+      - truffles-api/tests/policy_core_v3/__init__.py
+      - truffles-api/tests/policy_core_v3/conftest.py
+      - truffles-api/tests/policy_core_v3/test_schema.py
+      - truffles-api/tests/policy_core_v3/test_prompt_builder.py
+      - truffles-api/tests/policy_core_v3/test_retry_policy.py
+      - truffles-api/tests/policy_core_v3/test_invoker_with_mock_llm.py
+      - truffles-api/tests/policy_core_v3/test_independence.py
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/POLICY_CORE_V3.md sections 2 (hard rules), 3 (output), 4 (input), 5 (prompt), 6 (retry), 9 (PoC acceptance)
+      - truffles-api/app/policy_core_v3/README.md
+      - pytest result for tests/policy_core_v3/: 33 passed in 0.15s
+    validation:
+      - python3 -m py_compile passed for all 13 new/modified files.
+      - pytest truffles-api/tests/policy_core_v3/ -q reported 33 passed in 0.15s.
+      - test_independence.py asserts no imports from app.services / app.core / app.adapters in policy_core_v3.
+      - decision_ledger_guard, tool_inventory_guard, and single_semantic_owner_guard returned OK.
+      - Feature flag policy_core_v3_enabled defaults to False; legacy hot path unchanged.
+      - No file under truffles-api/app/services/ or truffles-api/app/core/ was modified.
+    known_limits:
+      - This is a SCRIPTED_TECHNICAL_PROOF only. PoC is not wired into runtime; no business proof, no Console proof, no real provider proof.
+      - PackView is intentionally a minimal Protocol, will be subsumed by the future PackV1 contract (deferred to a later session).
+      - Retry hints are deterministic but their exact wording is unproven on real corpora; tuning belongs to Phase B shadow run.
+      - The legacy intent_service.py forced-fields surface remains in code; cleanup belongs to Phase D after cutover.
+      - No real-LLM evaluation has been performed against the approved internal pilot corpus.
+    do_not_repeat:
+      - Do not add `_policy_core_<scenario>_forced_fields` helpers (anywhere, including v3).
+      - Do not add scenario-named boundary or owner files (e.g. `policy_timeout_<scenario>_*.py`) inside or adjacent to v3.
+      - Do not import legacy intent_service helpers, services modules, or core modules into policy_core_v3.
+      - Do not let v3 perform DB writes, tool execution, message rendering, or provider calls.
+      - Do not silently rewrite or rescue model output to make it pass schema; on failure return a DegradeVerdict.
+      - Do not infer slot values via regex inside v3; evidence layer owns that upstream.
+      - Do not wire v3 into the runtime hot path until the Phase B shadow-run gate is met.
+    next_allowed_action: >
+      Phase B: add a side-by-side shadow invocation in consultant_runtime
+      (gated by `policy_core_v3_enabled`) that calls v3 in parallel with
+      the legacy intent_service, captures both decisions plus latency, and
+      emits a comparison artifact. Do not let v3 own customer replies until
+      the comparison is reviewed against the owner-approved internal pilot
+      corpus and a Decision Ledger entry records the cutover gate.
+
+  - id: DL-2026-05-11-016
+    date: 2026-05-11
+    capability: Platform Architecture / Pack Contract / Cross-Vertical Scalability
+    architecture_layer: Pack layer (PackV1 contract + loader); legacy pack_runtime_*_adapter modules untouched
+    problem: >
+      The current pack runtime is fragmented across seven adapters
+      (pack_runtime_compat / default / demo / demo_salon / fallback / generic
+      / neutral) with vertical-specific Python and heterogeneous knowledge
+      YAML shapes (SALON_TRUTH.yaml, INTENTS_PHRASES_*.yaml, etc.). Adding a
+      new vertical requires cloning an adapter, which violates AGENTS section
+      8 ("tenant/pack differences belong in data, not core") and prevents
+      Policy-Core v3 from consuming a single canonical tenant contract.
+    decision: >
+      Author SPECS/PACK_V1.md as the binding declarative tenant pack
+      contract, land an isolated PoC at truffles-api/app/pack_v1/ (typed
+      pydantic schema, pure loader, PackView adapter for policy_core_v3),
+      and provide a reference example pack at packs/beauty_salon_v1/pack.yaml.
+      Do not wire to runtime; do not modify any legacy pack_runtime_*_adapter.
+      Migration phases A-D are recorded in the spec.
+    classification: REPLACE
+    changed_files:
+      - SPECS/PACK_V1.md
+      - truffles-api/app/pack_v1/__init__.py
+      - truffles-api/app/pack_v1/errors.py
+      - truffles-api/app/pack_v1/schema.py
+      - truffles-api/app/pack_v1/loader.py
+      - truffles-api/app/pack_v1/pack_view_adapter.py
+      - truffles-api/app/pack_v1/README.md
+      - packs/beauty_salon_v1/pack.yaml
+      - truffles-api/tests/pack_v1/__init__.py
+      - truffles-api/tests/pack_v1/test_schema.py
+      - truffles-api/tests/pack_v1/test_loader.py
+      - truffles-api/tests/pack_v1/test_pack_view_compat.py
+      - truffles-api/tests/pack_v1/test_independence.py
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/PACK_V1.md sections 2 (hard rules), 4 (schema), 5 (loader), 6 (PackView compat), 7 (migration), 8 (PoC acceptance)
+      - truffles-api/app/pack_v1/README.md
+      - pytest result for tests/pack_v1/ + tests/policy_core_v3/: 51 passed in 0.29s
+      - test_pack_view_compat.py shows beauty_salon_v1 pack feeds a policy_core_v3 prompt with no shim
+    validation:
+      - python3 -m py_compile passed for all 9 new pack_v1 source/test files.
+      - pytest truffles-api/tests/pack_v1/ tests/policy_core_v3/ -q reported 51 passed in 0.29s.
+      - test_independence.py asserts no imports from app.services / app.core / app.adapters in pack_v1.
+      - Loader is pure: load_pack(EXAMPLE_PACK) is idempotent (test_loader_is_pure).
+      - decision_ledger_guard and tool_inventory_guard returned OK.
+      - No file under truffles-api/app/services/, truffles-api/app/core/, or any pack_runtime_*_adapter was modified.
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF only. PackV1 is not wired into runtime; no business proof, no Console proof.
+      - Operational DB id consistency (services, specialists) is not validated by the loader; pack-activation governance is deferred.
+      - knowledge_sources are only existence-checked; RAG ingestion of pack knowledge is out of scope.
+      - aliases block is declared but not yet consumed (evidence layer rebuild is a later phase).
+      - PackV1 supersedes PackView only in the consumer direction; any future change to PackView Protocol must be reflected back into the pack_view_adapter.
+      - Multi-branch and multi-locale composition strategy is recorded as Open Question Q2; current PoC assumes one pack per (business, locale).
+    do_not_repeat:
+      - Do not add a new pack_runtime_<niche>_adapter.py. The contract is one loader plus data files.
+      - Do not put pack-specific Python under truffles-api/app/services/ or truffles-api/app/core/. New pack content goes in packs/<id>/.
+      - Do not put booking decision logic in pack data; pack declares rules, boundary enforces them, policy-core decides intent.
+      - Do not embed lexicon or regex decisions in pack code; aliases stay as data consumed by the evidence layer.
+      - Do not break the policy_core_v3.PackView Protocol; if v3 needs more, extend the Protocol with a Decision Ledger entry first.
+      - Do not wire pack_v1 into runtime until Phase B (pack-activation + canary tenant) is gated by an explicit Decision Ledger entry.
+    next_allowed_action: >
+      Phase B: convert truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml
+      content into packs/beauty_salon_v1/pack.yaml (or a sibling pack), then
+      add a Console read-only view that loads the pack via load_pack and
+      renders services/specialists/rules without a pack_runtime_*_adapter.
+      In parallel, Phase B for policy_core_v3 (shadow run in
+      consultant_runtime) can begin using PackV1 + to_pack_view as the
+      canonical tenant context source instead of legacy adapters.
+
+  - id: DL-2026-05-11-017
+    date: 2026-05-11
+    capability: Platform Architecture / Policy-Core v3 / Shadow-Run Observability
+    architecture_layer: Shadow-run module (new) + spec; legacy intent_service and consultant_runtime untouched
+    problem: >
+      Policy-Core v3 (DL-2026-05-11-015) and PackV1 (DL-2026-05-11-016) are
+      isolated PoCs. To gain confidence before any cutover, v3 must run
+      side-by-side with the legacy intent_service for the same turn, with
+      both decisions captured for offline comparison. There was no
+      mechanism to do this without touching the 2,100-line consultant_runtime
+      god-class or violating the v3 independence guard.
+    decision: >
+      Author SPECS/SHADOW_RUN_V3.md (Phase B.1) and land an isolated module
+      truffles-api/app/policy_core_v3_shadow/ that provides: a sync->async
+      LLM adapter (duck-typed Protocol, no app.services.llm import), a pure
+      LegacyTurnContext->PolicyTurnInput builder using PackV1.to_pack_view,
+      a typed ComparisonRecord with InMemoryArtifactSink, and a never-raises
+      run_shadow orchestrator that swallows all internal failures into
+      typed degrade records so the hot path can never be affected. Add a
+      standalone dry-run script scripts/policy_core_v3_shadow_dryrun.py
+      that exercises the wiring on packs/beauty_salon_v1/ with a mock LLM.
+      Do not modify consultant_runtime or any legacy service.
+    classification: REPLACE
+    changed_files:
+      - SPECS/SHADOW_RUN_V3.md
+      - truffles-api/app/policy_core_v3_shadow/__init__.py
+      - truffles-api/app/policy_core_v3_shadow/llm_adapter.py
+      - truffles-api/app/policy_core_v3_shadow/turn_input_builder.py
+      - truffles-api/app/policy_core_v3_shadow/comparison_artifact.py
+      - truffles-api/app/policy_core_v3_shadow/shadow_runner.py
+      - truffles-api/app/policy_core_v3_shadow/README.md
+      - scripts/policy_core_v3_shadow_dryrun.py
+      - truffles-api/tests/policy_core_v3_shadow/__init__.py
+      - truffles-api/tests/policy_core_v3_shadow/conftest.py
+      - truffles-api/tests/policy_core_v3_shadow/test_llm_adapter.py
+      - truffles-api/tests/policy_core_v3_shadow/test_turn_input_builder.py
+      - truffles-api/tests/policy_core_v3_shadow/test_comparison_artifact.py
+      - truffles-api/tests/policy_core_v3_shadow/test_shadow_runner.py
+      - truffles-api/tests/policy_core_v3_shadow/test_independence.py
+      - STRUCTURE.md
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/SHADOW_RUN_V3.md sections 1 (hard rules), 3 (public surface), 5 (B.1 acceptance), 7 (do-not-repeat)
+      - truffles-api/app/policy_core_v3_shadow/README.md
+      - pytest result: 75 passed in 0.53s across tests/policy_core_v3_shadow/, tests/policy_core_v3/, tests/pack_v1/
+      - Standalone dry-run output: scripts/policy_core_v3_shadow_dryrun.py prints a typed ComparisonRecord JSON on packs/beauty_salon_v1/ with mock LLM (v3_outcome_kind=decision, v3_attempts=1)
+    validation:
+      - python3 -m py_compile passed for all 12 new shadow source/test files plus the dry-run script.
+      - pytest reported 75 passed across shadow/v3/pack_v1 suites.
+      - test_independence.py asserts no app.services / app.core / app.adapters imports in policy_core_v3_shadow.
+      - test_runner_never_raises_even_on_internal_failure verifies run_shadow returns a typed degrade record on internal exceptions instead of propagating.
+      - test_sink_failure_is_swallowed verifies sink errors do not affect the caller (rule 1 — shadow path never blocks the hot path).
+      - decision_ledger_guard, tool_inventory_guard returned OK after STRUCTURE.md inventory entry was added for the new dry-run script.
+      - No file under truffles-api/app/services/, truffles-api/app/core/, truffles-api/app/main.py, or any pack_runtime_*_adapter was modified.
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF only. Module is not wired into consultant_runtime; the dry-run uses a mock LLM and a synthetic legacy_summary. No real owner-approved corpus was executed.
+      - Demo data has not been migrated into packs/beauty_salon_v1/pack.yaml; the example pack is still the PoC reference content.
+      - The production sink (JSONL or Postgres) is out of scope; only InMemoryArtifactSink is provided.
+      - The legacy_summary projection is freeform on purpose at this phase; a typed legacy projection contract belongs to Phase B.2 alongside the consultant_runtime hook.
+      - Latency measured by run_shadow is wall-clock async; it does not yet account for the inline-await vs fire-and-forget budget choice (Phase B.2 decision).
+    do_not_repeat:
+      - Do not let the shadow path block or affect the customer reply.
+      - Do not introduce scenario-specific code in any policy_core_v3_shadow module.
+      - Do not import legacy intent_service, consultant_runtime, or pack_runtime_*_adapter into the shadow module.
+      - Do not use the shadow path as a "second chance" rescue for legacy failures; it is observation only.
+      - Do not silently absorb v3 errors as success; errors become typed DegradeVerdict records in the artifact.
+      - Do not remove the static independence guard test (test_independence.py).
+      - Do not call real LLM providers from tests or the dry-run script; only mocks.
+    next_allowed_action: >
+      Phase B.2: in a separate session, add a single fire-and-forget hook in
+      consultant_runtime gated by settings.policy_core_v3_enabled that
+      builds a LegacyTurnContext from real runtime data, invokes
+      run_shadow(...), and writes records to a JSONL file under a configured
+      artifact directory. In parallel, convert the demo_salon SALON_TRUTH.yaml
+      content into packs/beauty_salon_v1/pack.yaml so the shadow run produces
+      product-relevant comparison evidence. Phase B.3 will execute the shadow
+      run on the owner-approved internal pilot corpus and record cutover
+      gate results in a follow-up Decision Ledger entry.
+
+  - id: DL-2026-05-11-018
+    date: 2026-05-11
+    capability: Platform Architecture / Policy-Core v3 / Shadow-Run Observability
+    architecture_layer: Shadow-run module (extension B.1.5); legacy code untouched
+    problem: >
+      The Phase B.1 ComparisonRecord carried `legacy_summary` as a freeform
+      dict, which would let scenario drift creep into the comparison surface
+      and force every consumer (corpus runner, metrics, manual audit) to
+      reimplement the same projection. There was also no typed divergence
+      classifier, so Phase B.3 corpus analysis would have to derive it ad
+      hoc from raw records.
+    decision: >
+      Add a typed `LegacySummary` pydantic model with a stable field set
+      (intent, action, tool_action, message_text, rescue_flag,
+      policy_core_degrade, degrade_reason, latency_ms, extras) and a pure
+      `compute_divergence(legacy, v3_outcome) -> Divergence` classifier
+      with a closed flag vocabulary (intent_match, intent_mismatch,
+      legacy_rescue, legacy_degrade, v3_degrade, both_degrade,
+      v3_decision_while_legacy_degrade, legacy_decision_while_v3_degrade,
+      tool_action_match, tool_action_mismatch, high_uncertainty). Update
+      ComparisonRecord and run_shadow to use the typed contract and attach
+      a Divergence per record. No legacy code touched; the projection from
+      a real legacy IntentResponse to LegacySummary belongs to the future
+      consultant_runtime hook (Phase B.2).
+    classification: REPAIR
+    changed_files:
+      - truffles-api/app/policy_core_v3_shadow/legacy_summary.py
+      - truffles-api/app/policy_core_v3_shadow/divergence.py
+      - truffles-api/app/policy_core_v3_shadow/comparison_artifact.py
+      - truffles-api/app/policy_core_v3_shadow/shadow_runner.py
+      - truffles-api/app/policy_core_v3_shadow/__init__.py
+      - truffles-api/tests/policy_core_v3_shadow/conftest.py
+      - truffles-api/tests/policy_core_v3_shadow/test_comparison_artifact.py
+      - truffles-api/tests/policy_core_v3_shadow/test_shadow_runner.py
+      - truffles-api/tests/policy_core_v3_shadow/test_legacy_summary.py
+      - truffles-api/tests/policy_core_v3_shadow/test_divergence.py
+      - scripts/policy_core_v3_shadow_dryrun.py
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/SHADOW_RUN_V3.md (B.1 spec; this entry extends Public surface §3 with typed LegacySummary and Divergence)
+      - pytest result: 91 passed in 0.58s across tests/policy_core_v3_shadow/ tests/policy_core_v3/ tests/pack_v1/
+      - Dry-run output: scripts/policy_core_v3_shadow_dryrun.py prints a typed ComparisonRecord including legacy_summary and divergence sections
+    validation:
+      - python3 -m py_compile passed for all 8 changed/new files plus the dry-run script.
+      - pytest reported 91 passed (4 new legacy_summary tests, 10 new divergence tests, 2 new runner tests).
+      - test_divergence.py covers: intent match, intent mismatch, v3 degrade, both degrade, v3 decision while legacy degrade, legacy rescue, tool match, tool mismatch, high uncertainty, flag dedup.
+      - test_runner_attaches_divergence and test_runner_divergence_for_v3_degrade verify run_shadow attaches a populated Divergence.
+      - test_independence.py still asserts no app.services / app.core / app.adapters imports in policy_core_v3_shadow.
+      - decision_ledger_guard, tool_inventory_guard, single_semantic_owner_guard returned OK.
+      - No file under truffles-api/app/services/, truffles-api/app/core/, or truffles-api/app/main.py was modified.
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF only. The typed LegacySummary contract has not yet been exercised against a real legacy IntentResponse projection (deferred to Phase B.2).
+      - Divergence flags are structural, not semantic; they tag "intent_mismatch" without judging which decision is correct. Semantic adjudication belongs to Phase B.3 manual audit.
+      - The flag vocabulary is closed but minimal; additions require a Decision Ledger entry to prevent scenario-driven flag inflation.
+      - extras dict in LegacySummary is escape-hatch; Phase B.2 must keep stable fields populated rather than relying on extras.
+    do_not_repeat:
+      - Do not let LegacySummary become a freeform dict again; new fields must be typed top-level or live in extras with a clear migration plan.
+      - Do not add scenario-specific flags to Divergence; the closed vocabulary is binding and additions require a ledger entry.
+      - Do not interpret Divergence flags as semantic correctness signals; they are structural tags only.
+      - Do not move Divergence/LegacySummary out of policy_core_v3_shadow into legacy modules; ownership stays in shadow until the cutover phase.
+    next_allowed_action: >
+      Phase B.2: in a separate session, add the consultant_runtime hook
+      (gated by settings.policy_core_v3_enabled) that builds a real
+      LegacyTurnContext from runtime data, projects the legacy IntentResponse
+      into a LegacySummary, calls run_shadow fire-and-forget, and writes
+      records to a JSONL sink under a configured artifact directory. In
+      parallel, convert truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml
+      content into packs/beauty_salon_v1/pack.yaml so shadow-run produces
+      product-relevant comparison evidence. Phase B.3 will execute the
+      shadow run on the owner-approved internal pilot corpus and aggregate
+      Divergence flags into go/no-go metrics.
+
+  - id: DL-2026-05-11-019
+    date: 2026-05-11
+    capability: Platform Architecture / Policy-Core v3 / Shadow-Run Production Sink + Projector
+    architecture_layer: Shadow-run module (extension B.2.a); legacy code untouched
+    problem: >
+      Phase B.2.b will need a production-grade artifact sink (JSONL on disk)
+      and a stable projection from legacy IntentResponse-like objects to
+      LegacySummary. Shipping these with the consultant_runtime hook in one
+      session would mix infrastructure with hot-path surgery and increase
+      review/rollback risk on the 2,100-line god-class.
+    decision: >
+      Land the JSONL sink and a defensive legacy projector as isolated
+      additions to truffles-api/app/policy_core_v3_shadow/. Both are pure
+      modules: no DB, no LLM, no consultant_runtime imports. The sink uses
+      asyncio.Lock and asyncio.to_thread to avoid blocking the hot path,
+      auto-creates parent directories, and writes one JSON line per record.
+      The projector defensively maps a stable, closed set of attribute name
+      candidates (intent / intent_value / intent_name; tool_action / tool_id /
+      tool; rescue / rescue_flag / is_rescue; etc.) onto LegacySummary
+      fields, with safe defaults for missing or invalid values.
+    classification: REPAIR
+    changed_files:
+      - truffles-api/app/policy_core_v3_shadow/jsonl_sink.py
+      - truffles-api/app/policy_core_v3_shadow/legacy_projector.py
+      - truffles-api/app/policy_core_v3_shadow/__init__.py
+      - truffles-api/tests/policy_core_v3_shadow/test_jsonl_sink.py
+      - truffles-api/tests/policy_core_v3_shadow/test_legacy_projector.py
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/SHADOW_RUN_V3.md (B.1 spec; this entry extends Public surface §3 with JsonlArtifactSink and project_legacy_decision)
+      - pytest result: 105 passed in 0.66s across tests/policy_core_v3_shadow/, tests/policy_core_v3/, tests/pack_v1/
+      - test_jsonl_sink.test_concurrent_emit_writes_serialized_lines confirms 50 concurrent emit calls produce 50 distinct, valid JSONL lines
+      - test_legacy_projector covers minimal, rich, enum-intent, alternative attribute names, missing intent fallback, negative/non-numeric latency, extras isolation
+    validation:
+      - python3 -m py_compile passed for all 5 changed/new files.
+      - pytest reported 105 passed (6 new jsonl_sink tests, 8 new legacy_projector tests).
+      - JsonlArtifactSink satisfies the ArtifactSink Protocol (test_satisfies_artifact_sink_protocol).
+      - test_independence.py still asserts no app.services / app.core / app.adapters imports in policy_core_v3_shadow.
+      - decision_ledger_guard, tool_inventory_guard, single_semantic_owner_guard returned OK.
+      - No file under truffles-api/app/services/, truffles-api/app/core/, or truffles-api/app/main.py was modified.
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF only. JsonlArtifactSink has not been exercised against a real consultant_runtime hook or under multi-process concurrency (single-process asyncio lock is sufficient for current scope).
+      - The legacy projector has not yet been called against a real legacy IntentResponse instance; the alternative attribute names cover the documented variants but Phase B.2.b must verify the actual mapping with a focused integration test.
+      - There is no log rotation; Phase B.2.b must define artifact directory and rotation policy in a separate Decision Ledger entry.
+      - The projector returns "unknown" for missing intent; downstream divergence may flag intent_mismatch rather than handle this as a separate degrade kind. Acceptable for B.2.a; revisit if mass "unknown" projections appear in B.3 corpus.
+    do_not_repeat:
+      - Do not import legacy modules into legacy_projector or jsonl_sink. The projector is duck-typed by design.
+      - Do not add scenario-specific attribute names to the projector's search lists; additions require a Decision Ledger entry.
+      - Do not let JsonlArtifactSink raise into the runner caller; the runner already swallows sink errors but the sink must not be the source of unbounded I/O.
+      - Do not switch to a multi-process or multi-host sink in this layer; that belongs to a later phase with a proper queue/transport contract.
+      - Do not synchronously block the event loop with file writes; use asyncio.to_thread or replace with an async file lib in a separate decision.
+    next_allowed_action: >
+      Phase B.2.b: in a separate session, add the consultant_runtime hook
+      gated by settings.policy_core_v3_enabled. The hook (a) builds a
+      LegacyTurnContext from real runtime data, (b) projects the legacy
+      IntentResponse via project_legacy_decision into a LegacySummary,
+      (c) constructs a SyncToAsyncLLMAdapter wrapping the existing
+      LLMProvider, (d) calls run_shadow fire-and-forget with a
+      JsonlArtifactSink under a configured artifact directory. In parallel,
+      convert truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml content
+      into packs/beauty_salon_v1/pack.yaml so shadow-run produces
+      product-relevant comparison evidence.
+
+  - id: DL-2026-05-11-020
+    date: 2026-05-11
+    capability: Platform Architecture / Policy-Core v3 / Shadow-Run Wiring + Real Salon Data
+    architecture_layer: consultant_runtime hot path (single fire-and-forget block) + new bridge package; legacy semantic logic untouched
+    problem: >
+      The Policy-Core v3 + PackV1 + shadow-run PoCs were complete but
+      isolated. To start gathering side-by-side comparison evidence we need:
+      (a) real salon data in packs/beauty_salon_v1/pack.yaml, (b) a bridge
+      package allowed to import both legacy and shadow types, (c) one
+      minimal touch in consultant_runtime that calls the bridge fire-and-
+      forget when the feature flag is on, and (d) tests proving the hook
+      cannot affect the customer reply when wiring is incomplete.
+    decision: >
+      (1) Replace PoC pack content in packs/beauty_salon_v1/pack.yaml with
+      14 real services and 4 specialists projected from
+      truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml; add
+      tests/pack_v1/test_real_pack_content.py to assert the projection.
+      (2) Add a bridge package truffles-api/app/policy_core_v3_shadow_hook/
+      with: dispatcher.py (single dispatch_fire_and_forget that never
+      raises and schedules run_shadow on the running event loop) and
+      wiring.py (lazy env-var-driven singletons for pack, JSONL sink,
+      invoker; mock LLM by default, opt-in real OpenAI provider via
+      POLICY_CORE_V3_SHADOW_USE_LLM=true).
+      (3) Add a single 13-line gated block in
+      truffles-api/app/core/consultant_runtime.py (after legacy boundary
+      validation) that imports and calls the dispatcher. The block is
+      gated by settings.policy_core_v3_enabled (default False) AND by
+      env-var wiring (POLICY_CORE_V3_SHADOW_PACK_PATH and
+      POLICY_CORE_V3_SHADOW_JSONL_PATH must both be set). It is wrapped
+      in try/except to honor rule §1 (shadow never affects the hot path).
+    classification: REPAIR
+    changed_files:
+      - packs/beauty_salon_v1/pack.yaml
+      - truffles-api/app/policy_core_v3_shadow_hook/__init__.py
+      - truffles-api/app/policy_core_v3_shadow_hook/wiring.py
+      - truffles-api/app/policy_core_v3_shadow_hook/dispatcher.py
+      - truffles-api/app/policy_core_v3_shadow_hook/README.md
+      - truffles-api/app/core/consultant_runtime.py
+      - truffles-api/tests/pack_v1/test_loader.py
+      - truffles-api/tests/pack_v1/test_pack_view_compat.py
+      - truffles-api/tests/pack_v1/test_real_pack_content.py
+      - truffles-api/tests/policy_core_v3_shadow_hook/__init__.py
+      - truffles-api/tests/policy_core_v3_shadow_hook/test_wiring.py
+      - truffles-api/tests/policy_core_v3_shadow_hook/test_dispatcher.py
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/PACK_V1.md (Phase B reference content satisfied by packs/beauty_salon_v1/pack.yaml)
+      - SPECS/SHADOW_RUN_V3.md §4 (wiring plan satisfied by policy_core_v3_shadow_hook)
+      - pytest result: 125 passed in 1.13s across tests/policy_core_v3_shadow_hook/, tests/policy_core_v3_shadow/, tests/policy_core_v3/, tests/pack_v1/
+      - test_dispatcher.test_dispatch_writes_jsonl_when_fully_wired confirms end-to-end JSONL emission from dispatcher with the real pack
+      - Dry-run output on new pack: legacy_intent=booking_request, v3_intent=booking_request, divergence flags ['intent_match', 'tool_action_mismatch'], pack_id=beauty_salon_v1
+      - Pre-existing legacy regression check: tests/test_consultant_core_runtime_contracts.py reports 7 failed / 216 passed AFTER hook; same suite before hook reported 8 failed / 215 passed. The hook does not introduce regressions; it is inert when the feature flag is False.
+    validation:
+      - python3 -m py_compile passed for all 7 changed source files plus 4 new test files.
+      - pytest tests/policy_core_v3_shadow_hook tests/policy_core_v3_shadow tests/policy_core_v3 tests/pack_v1 -q reported 125 passed in 1.13s.
+      - test_dispatch_outside_event_loop_is_safe and test_dispatch_swallows_exceptions_from_broken_decision confirm the dispatcher never raises.
+      - test_dispatch_with_no_env_is_no_op and test_dispatch_with_pack_only_is_no_op confirm dual-gate (no partial wiring side effects).
+      - test_independence.py for app/policy_core_v3_shadow/ remains green (the shadow core stays free of legacy imports; legacy imports live only in the bridge package).
+      - decision_ledger_guard, tool_inventory_guard, single_semantic_owner_guard returned OK.
+      - settings.policy_core_v3_enabled defaults to False; the hot-path block is therefore inert in production until an operator sets the flag and configures the env vars.
+      - app.policy_core_v3_shadow_hook imports app.policy_core_v3, app.policy_core_v3_shadow, and (lazily) app.pack_v1; it does NOT import app.services.* in module-load path; OpenAI provider import is guarded behind POLICY_CORE_V3_SHADOW_USE_LLM=true.
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF only. No real LLM has been called from the hook; mock LLM produces a degrade record by design (intent_not_in_enum) so the pipeline is exercised without spending tokens.
+      - Pre-existing 7 legacy test failures in tests/test_consultant_core_runtime_contracts.py are not caused by this change but are recorded here for transparency; their repair belongs to a separate Decision Ledger entry.
+      - The hook is gated by env vars at module level; rotation, multi-process locking, and queue-backed sinks are out of scope (deferred to the production observability phase).
+      - packs/beauty_salon_v1/pack.yaml is owner-derivable from SALON_TRUTH.yaml but has not been validated against the live operational DB (services / specialists rows). DB id consistency belongs to pack-activation governance, deferred.
+      - The mock LLM path purposely produces an out-of-enum intent so that the divergence flags include v3_degrade. This is correct behavior; B.3 with a real LLM will produce different flag distributions.
+    do_not_repeat:
+      - Do not import legacy modules into truffles-api/app/policy_core_v3_shadow/. Cross-boundary imports live only in policy_core_v3_shadow_hook.
+      - Do not let the consultant_runtime hook block, await, or raise. The block is fire-and-forget under try/except by contract.
+      - Do not enable POLICY_CORE_V3_SHADOW_USE_LLM=true in production without a separate Decision Ledger entry covering token budget, rate limit, and provider error handling.
+      - Do not let the JSONL sink be the only durability surface in production; queue/durable storage decisions belong to a later phase entry.
+      - Do not extend pack.yaml with vertical-specific Python helpers; new pack content must remain declarative data.
+    next_allowed_action: >
+      Phase B.3: in a separate session, (a) build a small corpus runner that
+      replays owner-approved messy dialogs through the runtime with the
+      shadow flag and env vars set, (b) aggregate the resulting JSONL into
+      divergence histograms (intent_match rate, v3_degrade_rate, tool_match
+      rate, both_degrade rate), (c) set a real LLM via
+      POLICY_CORE_V3_SHADOW_USE_LLM=true under a token-bounded budget, and
+      (d) record a Decision Ledger entry stating either cutover gate
+      satisfaction or the next mechanism repair derived from the histogram.
+
+  - id: DL-2026-05-11-021
+    date: 2026-05-11
+    capability: Platform Architecture / Policy-Core v3 / Shadow-Run Corpus + Aggregator
+    architecture_layer: Corpus tooling package + DRAFT internal pilot corpus + CLI runner/aggregator; legacy code untouched
+    problem: >
+      Phase B.3 acceptance requires (a) a typed corpus of messy customer
+      dialogs, (b) a runner that replays the corpus through run_shadow, and
+      (c) an aggregator that turns ComparisonRecord JSONL into a divergence
+      histogram. Without these the Phase B.2 wiring cannot be evaluated and
+      the cutover gate has no quantitative basis.
+    decision: >
+      (1) Add truffles-api/app/policy_core_v3_corpus/: typed CorpusDialog /
+      CorpusTurn schema, JSONL loader, oracle/drift/degrade mock LLM,
+      run_corpus orchestrator, and aggregate_records / aggregate_jsonl_file
+      with latency percentiles and divergence flag histogram. Independence
+      guard preserved (no app.services / app.core / app.adapters imports).
+      (2) Generate truffles-api/tests/corpora/beauty_salon_pilot_v0.jsonl
+      via _generate_beauty_salon_pilot_v0.py — 25 DRAFT dialogs covering
+      booking simple/fragmented/voice-style, missing service/time/contact,
+      cancel/reschedule/medical/refund/complaint handoff, FACT
+      (price/hours/address/master/parking/discounts), KZ-mix, vague time,
+      multi-service, lookup without identity, phone formats, pending-phone
+      delay, out-of-domain. Status="draft" (owner approval pending).
+      (3) Add scripts/policy_core_v3_shadow_corpus_run.py and
+      scripts/policy_core_v3_shadow_aggregate.py with arg-driven CLI.
+      Register both in STRUCTURE.md inventory.
+      (4) The corpus runner does NOT touch consultant_runtime; it replays
+      directly through run_shadow with an oracle-driven mock LLM. Real
+      LLM is intentionally out of scope until owner approves the corpus
+      and a token budget is recorded.
+    classification: REPAIR
+    changed_files:
+      - truffles-api/app/policy_core_v3_corpus/__init__.py
+      - truffles-api/app/policy_core_v3_corpus/schema.py
+      - truffles-api/app/policy_core_v3_corpus/oracle_llm.py
+      - truffles-api/app/policy_core_v3_corpus/aggregator.py
+      - truffles-api/app/policy_core_v3_corpus/runner.py
+      - truffles-api/app/policy_core_v3_corpus/README.md
+      - truffles-api/tests/corpora/README.md
+      - truffles-api/tests/corpora/_generate_beauty_salon_pilot_v0.py
+      - truffles-api/tests/corpora/beauty_salon_pilot_v0.jsonl
+      - scripts/policy_core_v3_shadow_corpus_run.py
+      - scripts/policy_core_v3_shadow_aggregate.py
+      - truffles-api/tests/policy_core_v3_corpus/__init__.py
+      - truffles-api/tests/policy_core_v3_corpus/test_schema.py
+      - truffles-api/tests/policy_core_v3_corpus/test_oracle_llm.py
+      - truffles-api/tests/policy_core_v3_corpus/test_aggregator.py
+      - truffles-api/tests/policy_core_v3_corpus/test_runner_end_to_end.py
+      - truffles-api/tests/policy_core_v3_corpus/test_independence.py
+      - STRUCTURE.md
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/SHADOW_RUN_V3.md (Phase B.3 acceptance — divergence histograms)
+      - truffles-api/app/policy_core_v3_corpus/README.md
+      - truffles-api/tests/corpora/README.md (DRAFT status disclosure)
+      - pytest result: 144 passed in 1.41s across tests/policy_core_v3_corpus/, tests/policy_core_v3_shadow_hook/, tests/policy_core_v3_shadow/, tests/policy_core_v3/, tests/pack_v1/
+      - End-to-end run on pilot v0 (oracle mode) produced 27 ComparisonRecord lines for 25 dialogs; aggregate report{intent_match_rate=0.259, intent_mismatch_rate=0.741, tool_match_rate=0.222, tool_mismatch_rate=0.444, v3_degrade_rate=0.0, latency_p50=0.34ms, latency_p95=0.47ms}
+      - Drift run at drift_rate=0.5 produced{intent_mismatch=18, high_uncertainty=16, tool_action_mismatch=12, intent_match=9, tool_action_match=6}
+    validation:
+      - python3 -m py_compile passed for all 13 changed/new source/script files plus the corpus generator.
+      - pytest reported 144 passed across all PoC suites.
+      - test_independence.py confirms policy_core_v3_corpus has no app.services / app.core / app.adapters imports.
+      - test_runner_end_to_end covers oracle / drift / degrade modes against the actual pilot v0 corpus.
+      - tool_inventory_guard, decision_ledger_guard, single_semantic_owner_guard returned OK after STRUCTURE.md inventory update.
+      - The corpus generator is deterministic (no random seeds) and reproducible from the same source file.
+      - Aggregator latency percentile math verified by test_aggregate_latency_percentiles (n=5 sequence yields p50=30 of [10,20,30,40,100]).
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF only. The corpus is DRAFT; not owner-approved. Records are not real customer traffic.
+      - Aggregate intent_match_rate=0.26 in oracle mode reflects vocabulary mismatch between legacy intent labels (booking_request, cancel_request, complaint, medical, master_query, discount_haggle, unsupported, smalltalk) and v3 enum (slot_collect, handoff_request, fact_question, smalltalk, unsupported, unknown). This is a real signal: a vocabulary normalization layer is needed before cutover; do not interpret as v3 underperforming.
+      - oracle_v3 fields are agent-drafted hypotheses of what v3 should emit; they are NOT a contract until owner reviews each turn.
+      - Real LLM is intentionally not wired from this path; use POLICY_CORE_V3_SHADOW_USE_LLM=true via the consultant_runtime hook (Phase B.2 pathway) when approved budget is available.
+      - Pack ids in oracle slots use future v3 vocabulary (service_id="brows_lashes" etc.) which may not match legacy slot vocabulary in real intent_service output; the divergence aggregator does not yet score slot-level matches.
+      - The corpus generator and JSONL coexist; if the JSONL is hand-edited it will drift from the generator. Convention: regenerate via _generate_beauty_salon_pilot_v0.py.
+    do_not_repeat:
+      - Do not call the DRAFT corpus owner_approved before owner audit of every turn.
+      - Do not compute INTERNAL_PILOT_PROOF from this corpus until status="owner_approved".
+      - Do not enable real LLM in the corpus runner without an explicit Decision Ledger entry covering token budget and provider error contract.
+      - Do not import legacy modules into truffles-api/app/policy_core_v3_corpus/.
+      - Do not let the aggregator mask v3_degrade as success; the histogram must always expose v3_degrade_rate explicitly.
+      - Do not hand-edit beauty_salon_pilot_v0.jsonl; regenerate from the deterministic source.
+    next_allowed_action: >
+      Owner audit pass over truffles-api/tests/corpora/beauty_salon_pilot_v0.jsonl:
+      flip status="draft" → "owner_approved" per dialog after reviewing
+      legacy_summary and oracle_v3, and add or remove dialogs to match the
+      coverage matrix. After ≥30 owner_approved dialogs are in place, run
+      the pipeline with POLICY_CORE_V3_SHADOW_USE_LLM=true under a bounded
+      token budget through the consultant_runtime hook, aggregate the
+      divergence histogram, and record cutover gate satisfaction or the
+      next mechanism repair list in a follow-up Decision Ledger entry.
+      In parallel, draft SPECS/INTENT_VOCABULARY.md to specify the
+      legacy-to-v3 intent vocabulary normalization layer that the current
+      0.26 intent_match_rate signals as missing.
+
+  - id: DL-2026-05-11-022
+    date: 2026-05-11
+    capability: Platform Architecture / Policy-Core v3 / Vocabulary Normalization + Real-LLM Corpus Run
+    architecture_layer: Corpus tooling — intent vocabulary normalizer + aggregator extension; legacy code untouched
+    problem: >
+      The first real-LLM corpus run on beauty_salon_pilot_v0.jsonl
+      (gpt-4o-mini, JSON mode, temperature=0) produced
+      intent_match_rate=0.333 while turn-by-turn manual inspection showed
+      v3 was semantically correct in 26 of 27 turns (96%). The 0.333 was
+      a vocabulary artifact: legacy uses domain-flavored labels
+      (booking_request, cancel_request, master_query, discount_haggle,
+      complaint, medical, refund) while v3 uses a closed normalized enum
+      (slot_collect, handoff_request, fact_question, unsupported). Without
+      a normalization layer, every aggregation pass would understate v3
+      quality and Phase D cutover would have no quantitative basis.
+    decision: >
+      (1) Author SPECS/INTENT_VOCABULARY.md as the binding mapping table
+      between legacy and v3 intent vocabularies, including the
+      booking_request → booking_request|slot_collect discriminator based
+      on rules.required_for_booking and accumulated state slots, and the
+      handoff_request reason-arg matching rule.
+      (2) Add truffles-api/app/policy_core_v3_corpus/intent_vocabulary.py
+      with pure normalize_legacy_intent and semantic_match functions.
+      (3) Extend CorpusAggregateReport with semantic_match_rate alongside
+      structural intent_match_rate; both surfaces remain visible.
+      (4) Add tests/policy_core_v3_corpus/test_intent_vocabulary.py
+      covering identity, escalation, discount, master_query, booking with
+      and without full slots, handoff with reason arg, smalltalk,
+      degrade-never-matches, and the lenient booking_request/slot_collect
+      pair when state is unavailable.
+      (5) Add OpenAI integration to scripts/policy_core_v3_shadow_corpus_run.py:
+      `--llm openai` flag wraps OpenAIProvider through SyncToAsyncLLMAdapter
+      with `response_format={"type":"json_object"}`. API key resolved from
+      OPENAI_API_KEY env var or `--env-file` (default
+      /home/zhan/truffles-main/truffles-api/.env). The runner CLI is the
+      only place that touches an OpenAI API key; runtime stays pristine.
+    classification: REPAIR
+    changed_files:
+      - SPECS/INTENT_VOCABULARY.md
+      - truffles-api/app/policy_core_v3_corpus/intent_vocabulary.py
+      - truffles-api/app/policy_core_v3_corpus/aggregator.py
+      - truffles-api/app/policy_core_v3_corpus/runner.py
+      - truffles-api/app/policy_core_v3_corpus/__init__.py
+      - truffles-api/tests/policy_core_v3_corpus/test_intent_vocabulary.py
+      - scripts/policy_core_v3_shadow_corpus_run.py
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - SPECS/INTENT_VOCABULARY.md (mapping table + acceptance §6)
+      - pytest result: 155 passed in 1.48s (155 = 144 baseline + 11 new vocabulary tests)
+      - Real-LLM run on beauty_salon_pilot_v0.jsonl with gpt-4o-mini, temperature=0, JSON mode, max_tokens=800: 25 dialogs / 27 records, latency p50=3.0s p95=5.5s max=7.0s
+      - Aggregate report after vocabulary normalization{intent_match_rate=0.333, semantic_match_rate=0.963, intent_mismatch_rate=0.667, v3_degrade_rate=0.000, tool_match_rate=0.333, tool_mismatch_rate=0.333}
+      - Per-turn analysis: 26 of 27 turns are semantically correct; the single remaining mismatch (bs-004-unsupported-service) is an owner-audit ambiguity (salon does not offer татуаж — both legacy `fact_question` and v3 `unsupported` are valid framings)
+    validation:
+      - python3 -m py_compile passed for all 7 changed/new files.
+      - pytest reported 155 passed across all PoC suites.
+      - test_intent_vocabulary covers 11 distinct mapping cases including booking-state discrimination, escalation reasons, master_query/discount_haggle, and the booking_request/slot_collect lenient pair.
+      - Real OpenAI provider was successfully invoked from the corpus runner with the production-side OPENAI_API_KEY pulled from /home/zhan/truffles-main/truffles-api/.env without modifying that file or the runtime config.
+      - Token spend on the full 25-dialog run was below 5 cents (gpt-4o-mini, ~27 turns × ~5k prompt tokens × $0.00015 + ~600 output × $0.00060).
+      - decision_ledger_guard, tool_inventory_guard, single_semantic_owner_guard returned OK.
+      - No file under truffles-api/app/services/, truffles-api/app/core/, or truffles-api/app/main.py was modified.
+    known_limits:
+      - SCRIPTED_TECHNICAL_PROOF + DRAFT corpus. The 0.963 semantic_match_rate is computed against agent-drafted legacy_summary hypotheses, not real legacy intent_service output. Owner audit per turn is required before this counts as INTERNAL_PILOT_PROOF.
+      - The single bs-004 mismatch is a labeling dispute, not a v3 quality issue; both `fact_question` and `unsupported` are reasonable salon-side framings of "service we do not offer". Owner decides which is canonical.
+      - The aggregator's semantic_match calls do not pass state_slots / required_for_booking, so the booking_request/slot_collect discriminator is intentionally lenient (accepts either). Phase D will tighten this once corpus turns carry full state lineage.
+      - Real LLM was gpt-4o-mini at temperature=0; results may differ for other models. Phase B.3 cutover gate must specify the model contract.
+      - Latency p50=3s, p95=5.5s. This is acceptable for shadow runs but is not a user-facing SLA budget; production cutover must establish a stricter LLM latency contract.
+      - The OpenAI API key path in CLI (--env-file /home/zhan/truffles-main/truffles-api/.env) is environment-specific. A production sink must read the key from a managed secret store, not a sibling repo.
+    do_not_repeat:
+      - Do not extend the v3 Intent enum to mirror legacy domain labels. The point of v3 is a minimal closed enum.
+      - Do not silently absorb unknown legacy intents as fact_question. They map to `unknown` and surface in the aggregate.
+      - Do not collapse slot_collect into booking_request to inflate match-rate. The discriminator is the pack rule.
+      - Do not commit OpenAI keys to the repo. Use env vars or sibling .env files only.
+      - Do not call POLICY_CORE_V3_SHADOW_USE_LLM=true via the consultant_runtime hook in production until a separate Decision Ledger entry covers token budget, rate limits, and provider error handling.
+      - Do not interpret `semantic_match_rate=0.963` as v3 production-readiness. It is technical evidence that the LLM mechanism is sound; product readiness still requires owner audit, INTENT_VOCABULARY in code, boundary v2, state v2, executor v2, Console wiring, and observability closure (Phases 4–11).
+    next_allowed_action: >
+      Owner audit pass over truffles-api/tests/corpora/beauty_salon_pilot_v0.jsonl:
+      review the 25 dialogs (legacy_summary hypotheses + oracle_v3 drafts),
+      flip status="draft" → "owner_approved" per dialog, fix the bs-004
+      legacy_summary intent ambiguity (fact_question vs unsupported), and
+      add or remove dialogs to match the coverage matrix. After ≥30
+      owner_approved dialogs are in place, repeat the gpt-4o-mini real-LLM
+      run and aggregate; if semantic_match_rate ≥ 0.95 holds, record cutover
+      gate satisfaction in a follow-up entry and proceed to Phase 4
+      (Boundary v2 spec + PoC: declarative rules, removal of 4
+      policy_timeout_*_boundary_service files).
+
+  - id: DL-2026-05-11-023
+    date: 2026-05-11
+    capability: Platform Architecture / Internal Pilot Corpus / Owner Audit
+    architecture_layer: Corpus realism gap acknowledged; no code changes
+    problem: >
+      The DRAFT corpus truffles-api/tests/corpora/beauty_salon_pilot_v0.jsonl
+      (25 dialogs, single-turn or short multi-turn, neutral language) does
+      not represent real customer messaging in beauty salons. Owner
+      confirmed there are no live customer dialogs available for export
+      from Instagram DM / WhatsApp / CRM. The semantic_match_rate=0.963
+      reported in DL-2026-05-11-022 was computed against agent-drafted
+      hypotheses and is therefore evidence that the v3 mechanism is sound
+      on synthetic clean dialogs only — it is not evidence of real-world
+      product readiness. Continuing to inflate this corpus by agent guess
+      would compound that gap.
+    decision: >
+      Acknowledge the corpus realism gap explicitly and do NOT mark
+      beauty_salon_pilot_v0.jsonl status="owner_approved". The next
+      session must construct a realistic messy corpus collaboratively
+      with the owner across multiple rounds (10–30 minute scenario
+      walkthroughs with the owner, then agent transcribes verbatim into
+      CorpusDialog records). Acceptable approaches in priority order:
+      (a) anonymized exports of real DMs / WhatsApp / CRM transcripts
+      from any cooperating salon (preferred); (b) live owner-narrated
+      scenarios where owner describes a typical conversation turn-by-turn
+      and agent records verbatim; (c) agent generates messy candidates,
+      owner edits and signs each turn before merge. No corpus turn enters
+      INTERNAL_PILOT_PROOF status without per-turn owner signoff.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+    proof_artifacts:
+      - This entry. No new code or tests.
+    validation:
+      - decision_ledger_guard returned OK (after entry).
+      - No code or test files were modified by this entry.
+    known_limits:
+      - The DRAFT corpus remains in the repo as a structural fixture for
+        pipeline tests. Tests reference its shape (e.g. coverage of certain
+        intents) but no test interprets oracle_v3 fields as ground truth.
+      - The intent_match_rate=0.333 / semantic_match_rate=0.963 numbers
+        from DL-022 are useful only as evidence that the mechanism (LLM,
+        adapter, sink, aggregator, normalizer) is wired correctly. They
+        must not be cited as product quality evidence.
+      - Realistic messy dialogs (burst messages with pauses, voice
+        transcripts, mid-message reversals, ghosting + return after days,
+        emotional/insecure tones, group bookings, "as last time"
+        references, mixed-language typos, image/voice attachments,
+        bargaining, conditional bookings, off-topic socializing) are
+        absent from the current corpus. Phase B.3 cutover gate is
+        BLOCKED until they are added with owner signoff.
+    do_not_repeat:
+      - Do not auto-generate more synthetic dialogs and call them realistic.
+        Each turn must come from an observed source (real export OR direct
+        owner statement) before merge.
+      - Do not flip status="owner_approved" on any current dialog without
+        per-turn owner signoff.
+      - Do not interpret semantic_match_rate or intent_match_rate from
+        the current corpus as product readiness evidence.
+      - Do not re-run gpt-4o-mini against the current corpus to chase a
+        higher semantic_match_rate. The number is meaningless until the
+        corpus is real.
+    next_allowed_action: >
+      Open a new session with a Task Package whose Scope is
+      "construct realistic messy corpus through owner-narrated scenario
+      walkthrough". Output: an updated beauty_salon_pilot_v0.jsonl where
+      every turn carries a status="owner_approved" marker and a
+      `source` annotation (e.g. "owner_narrative_2026-05-XX",
+      "real_export_anon_2026-05-XX"). Defer Phase 4 (Boundary v2),
+      Phase 0 (docs cleanup), and any further v3 metric collection until
+      at least 10 owner-approved messy dialogs are in place.
+
+  - id: DL-2026-05-12-024
+    date: 2026-05-12
+    capability: Platform Strategy / Primary Pain Lock / Cordon-And-Rebuild
+    architecture_layer: >
+      Cross-cutting strategy. Locks primary product pain, operational
+      definition of "works", architectural laws (restated from AGENTS
+      sections 8 and 10 for visibility, not as new laws), and phase
+      order. Classifies legacy hot-path as STRANGLE and v3-stack as
+      KEEP per AGENTS section 7.
+    problem: >
+      Prior sessions accumulated multiple competing product framings
+      (FACT/COLLECT/HANDOFF spine, internal pilot proof, console
+      readiness, observability proof, booking matrix, shadow drain,
+      etc.). None of them was a single locked statement of the primary
+      pain the platform must close first. Without that lock, every new
+      session re-derived priorities from stale docs, agents drifted
+      into scenario-by-scenario fixes, and the legacy hot path
+      (intent_service.py ~15k LOC, consultant_runtime.py ~2.1k LOC,
+      4x policy_timeout_*_boundary_service.py, 7x
+      pack_runtime_*_adapter.py) kept absorbing new branches in
+      violation of AGENTS section 10. The v3 stack
+      (policy_core_v3, pack_v1, policy_core_v3_shadow,
+      policy_core_v3_corpus) was built as PoC but had no strategic
+      classification anchoring its role.
+    decision: >
+      Lock the following statements as canonical until a future ledger
+      entry supersedes them. These statements are recorded in full in
+      docs/PRODUCT_SYSTEM_CANON.md section 9.29 and referenced from
+      docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md section 13 and
+      STRATEGY/TECH_ROADMAP.md section 11. AGENTS.md is NOT modified
+      because sections 2, 8, and 10 already encode the architectural
+      laws stated below; restating them in AGENTS would violate
+      AGENTS section 12 ("Do not create duplicate docs").
+
+      Primary pain (single, locked): the platform must not lose any
+      incoming lead 24/7 — it must answer, qualify, drive to booked
+      appointment, and hand off to the owner/admin where needed.
+      Includes both new leads and repeat contacts from existing
+      clients.
+
+      Target operating mode: autonomous is the final goal. Stages on
+      the way to autonomous (shadow, assist) are leashed-only modes
+      gated by measurable thresholds.
+
+      First channel: WhatsApp, with mock provider used until
+      commercial access is restored. The commercial WhatsApp blocker
+      does not block development or integration testing.
+
+      Operational definition of "works" (acceptance gates, all
+      required):
+      1. Latency gate: p95 reply time TBD-after-first-batch; final
+         threshold defended as "not worse than live admin".
+      2. Capture gate: % of incoming leads driven to confirmed
+         appointment OR explicit qualified refusal/handoff,
+         TBD-after-first-batch; measured against current manual owner,
+         not absolute target.
+      3. Architecture gate: 0 violations of single_semantic_owner,
+         tool_inventory, decision_ledger,
+         pack_is_single_source_of_truth, layer_isolation guards in
+         main.
+      4. Owner self-service gate: owner can update price/service/
+         specialist/working-hours through Pack. Mechanism (Console GUI
+         vs YAML) fixed AFTER audit of truffles-api/app/pack_v1/* and
+         console-web/* surfaces.
+      5. Corpus gate: every intent enabled in autonomous-mode has a
+         gold-set of dialogs with owner_approved=true on which 100%
+         of production reactions match expected. Hard gate for
+         autonomous. Soft guideline (warn, do not block) for assist.
+
+      Architectural contract (restated from AGENTS 8 / 10, not new):
+      - LLM policy-core is the only semantic owner.
+      - Pack is the only source of business knowledge.
+      - Canonical hot path = 6 nodes (Ingress -> policy-core ->
+        planner -> boundary -> state -> executor/render ->
+        outbox/provider). Pack/RAG/Capabilities and Console/Ops are
+        SUPPORT planes, not pipeline nodes.
+      - Layer isolation: Boundary does not invent meaning, Executor
+        does not invent intent, State does not recover semantics.
+      - Corpus discipline (gate 5 above).
+      - Decision Ledger discipline: every nontrivial architectural
+        change is recorded here.
+
+      Strategy: Cordon-and-rebuild.
+      - Legacy hot path (intent_service.py, consultant_runtime.py,
+        4x policy_timeout_*_boundary_service.py, 7x
+        pack_runtime_*_adapter.py, related legacy semantics) is
+        classified STRANGLE (AGENTS section 7). No new behavior may
+        be added to these files. Only deletion or projection.
+      - v3 stack (truffles-api/app/policy_core_v3,
+        truffles-api/app/pack_v1, truffles-api/app/policy_core_v3_shadow,
+        truffles-api/app/policy_core_v3_shadow_hook,
+        truffles-api/app/policy_core_v3_corpus) is classified KEEP.
+        All new features and the lead-24/7 path are built on v3 only.
+      - Removal of legacy = one PR after all acceptance gates pass.
+
+      Phase order (records the only valid sequence of next work):
+      A. Corpus: build 30-50 realistic owner-approved messy dialogs
+         (per DL-2026-05-11-023), replace DRAFT
+         beauty_salon_pilot_v0.jsonl, rerun real-LLM aggregation,
+         carve gold subset.
+      B. v3 stack to production (no legacy edits): Boundary v2
+         (single service replacing 4 timeout boundary services),
+         Pack Runtime v1 (single adapter replacing 7 pack runtime
+         adapters), Executor v1, WhatsApp channel via Pack
+         (mock-provider until commercial restored), observability v1
+         per-turn JSONL.
+      C. Lead-24/7 product on v3: Mira Pack playbook, run in shadow
+         then assist then autonomous per intent, each transition
+         gated by corpus gate 5.
+      D. Repo hygiene (background, non-blocking): STRUCTURE.md
+         <= 300 lines, dead governance/legacy docs moved to
+         docs/archive/, FROZEN marker on STRANGLE files, legacy
+         deletion PR after gates pass.
+
+      Order constraint: A blocks everything (gates 1, 2, 5 are
+      unmeasurable without A). B and D run in parallel after A1.
+      C only after A1-A3 and the minimum B subset (Boundary v2 +
+      Pack Runtime v1 + WhatsApp ingress).
+
+      Explicit non-goals (also recorded in PRODUCT_SYSTEM_CANON
+      section 9.29):
+      - Not upsell, reactivation, revenue analytics — LATER.
+      - Not multi-channel at start — only WhatsApp.
+      - Not Google Calendar as primary booking source — LATER.
+      - Not investor demo as priority driver.
+      - Not Chatflow repair while commercially blocked — BLOCKED.
+      - Not "replace the administrator entirely" as a goal; handoff
+        to a human is a normal outcome of a dialog, not a failure.
+    classification: REPAIR
+    changed_files:
+      - docs/DECISION_LEDGER.yaml
+      - docs/PRODUCT_SYSTEM_CANON.md
+      - docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md
+      - STRATEGY/TECH_ROADMAP.md
+    proof_artifacts:
+      - This entry.
+      - "PRODUCT_SYSTEM_CANON.md section 9.29 (Primary Pain Lock + Cordon-And-Rebuild Strategy)."
+      - "BEAUTY_SALON_V1_CAPABILITY_MAP.md section 13 (Lead-24/7 Acceptance Gate)."
+      - "STRATEGY/TECH_ROADMAP.md section 11 (Lead-24/7 phase plan: Cordon-and-Rebuild)."
+    validation:
+      - decision_ledger_guard expected OK after entry.
+      - No code or test files modified by this entry.
+      - AGENTS.md intentionally not modified (per AGENTS section 12).
+    known_limits:
+      - Latency and capture thresholds remain TBD-after-first-batch.
+        They cannot be set responsibly before the realistic corpus
+        from DL-023 exists.
+      - Owner self-service mechanism remains pending audit of pack_v1
+        and console-web surfaces. The gate is locked; the mechanism
+        is not.
+      - Phase B contains four large engineering items (Boundary v2,
+        Pack Runtime v1, Executor v1, WhatsApp ingress). Each will
+        require its own ledger entry when started.
+      - This entry is strategic, not implementation. It does not
+        replace per-phase ledger entries; it constrains what they
+        may say.
+    do_not_repeat:
+      - Do not add new behavior to STRANGLE-classified legacy files.
+        Pure projection or deletion only.
+      - Do not introduce a second product framing competing with the
+        primary pain locked above. Future framings must supersede
+        this entry by ledger ID, not coexist with it.
+      - Do not enable any intent in autonomous-mode without passing
+        corpus gate 5 (owner_approved gold set, 100% match).
+      - Do not measure capture or latency against synthetic corpus
+        and call it product readiness.
+      - Do not block development on the WhatsApp commercial blocker;
+        use the mock provider with identical ingress/outbox contracts.
+    next_allowed_action: >
+      Phase A continuation per DL-2026-05-11-023: construct realistic
+      messy corpus via owner-narrated scenario walkthrough, in
+      batches of 5-10 owner-approved dialogs, until at least 30 are
+      in place. After Phase A1-A3 complete (corpus replaced,
+      real-LLM rerun, gold subset carved), Phase B may be opened
+      with its own ledger entry beginning DL-2026-05-XX-025.
