@@ -21,6 +21,7 @@ from app.logging_config import (
     set_knowledge_activation_health,
     set_outbox_backlog,
     set_qdrant_health,
+    set_worker_heartbeat,
     setup_logging,
 )
 from app.models import Conversation, Handover, Message, User
@@ -38,6 +39,7 @@ from app.routers import (
     webhook,
 )
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
+from app.services.worker_heartbeat_service import build_worker_heartbeat_snapshot
 
 setup_logging()
 
@@ -237,6 +239,16 @@ def metrics(db: Session = Depends(get_db)):
         )
         set_knowledge_activation_health({})
 
+    try:
+        worker_snapshot = build_worker_heartbeat_snapshot()
+        set_worker_heartbeat(worker_snapshot)
+    except Exception as exc:
+        metrics_logger.warning(
+            "Worker heartbeat snapshot failed",
+            extra={"context": {"error": str(exc)[:200]}},
+        )
+        set_worker_heartbeat({})
+
     qdrant_healthy = True
     qdrant_latency_ms = None
     qdrant_url = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
@@ -365,6 +377,11 @@ async def _compute_admin_health_payload(db: Session) -> dict:
             overall_healthy = False
     except Exception as e:
         checks["knowledge_activation"] = {"status": "error", "error": str(e)[:100]}
+
+    try:
+        checks["workers"] = build_worker_heartbeat_snapshot()
+    except Exception as e:
+        checks["workers"] = {"status": "error", "error": str(e)[:100]}
     
     # Active handovers
     try:

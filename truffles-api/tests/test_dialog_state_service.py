@@ -189,6 +189,25 @@ def test_dialog_state_service_load_runtime_payload_prefers_canonical_question_co
     assert loaded["dialog_state"].pending_question_contract.active_question_relation == "generic_info_interrupt"
 
 
+def test_dialog_state_service_load_runtime_payload_ignores_inactive_legacy_booking_slots() -> None:
+    service = DialogStateService()
+
+    loaded = service.load_runtime_payload(
+        {
+            "booking": {
+                "active": False,
+                "service": "маникюр",
+                "datetime": "сегодня вечером",
+                "last_question": "datetime",
+            }
+        }
+    )
+
+    assert loaded["booking_payload"] == {}
+    assert loaded["current_goal"] is None
+    assert loaded["dialog_state"].current_referents.service is None
+
+
 def test_dialog_state_service_load_runtime_payload_preserves_explicit_contract_over_semantic_frame() -> None:
     service = DialogStateService()
 
@@ -4306,6 +4325,621 @@ def test_dialog_state_service_check_booking_fact_keeps_owner_reference_followup_
     assert "pending_question_target" not in dialog_state.meta["semantic_contract"]
     assert "active_question_relation" not in dialog_state.meta["semantic_contract"]
     assert booking_payload["service"] == "Наращивание гелем"
+
+
+def test_dialog_state_service_owner_backed_parking_interrupt_skips_synthetic_booking_rewrite(
+    monkeypatch,
+) -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 4, 15, 14, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "current_referents": {
+                    "service": "Маникюр",
+                    "specialist": None,
+                    "branch": None,
+                    "booking": None,
+                    "customer": None,
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": "ask_about_requested_slot",
+                    "pending_question_target": "time",
+                    "active_question_relation": "ask_about_requested_slot",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "interaction_state": {
+                    "interaction_owner": "llm_policy_core",
+                    "interaction_target": "time",
+                    "interaction_relation": "ask_about_requested_slot",
+                },
+                "projections": {
+                    "expected_reply_type": "time",
+                    "expected_reply_reason": "collect:datetime",
+                },
+                "meta": {
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "subject_kind": "service",
+                        "capability": "bookability",
+                        "temporal_scope": "none",
+                        "resolution_mode": "ask_about_requested_slot",
+                        "pending_question_act": "ask_about_requested_slot",
+                        "pending_question_target": "time",
+                        "active_question_relation": "ask_about_requested_slot",
+                        "referents": {
+                            "service": {
+                                "value": "Маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            }
+                        },
+                    },
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "last_question": "datetime",
+            },
+        }
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action_hint": "catalog.location",
+            "pack_refs": ["parking"],
+            "reason": "parking_info_interrupt_during_active_booking_datetime_collection",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "location",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "pending_question_act": "ask_about_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="catalog.location",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    def _unexpected_contract(**_kwargs):
+        raise AssertionError("synthetic continuity semantic contract should not run")
+
+    def _unexpected_state(**_kwargs):
+        raise AssertionError("synthetic continuity semantic state should not run")
+
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_contract",
+        _unexpected_contract,
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_state",
+        _unexpected_state,
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"tool_decision": "ok", "slot_values": {"service": "Маникюр"}},
+        now=now,
+        conversation_id="conv-1",
+        trace_id="trace-1",
+    )
+
+    projection = ConversationProjectionV1.model_validate(
+        updated["consultant_runtime"]["conversation_projection"]
+    )
+
+    assert dialog_state.meta["semantic_contract"]["capability"] == "location"
+    assert dialog_state.meta["semantic_contract"]["resolution_mode"] == "policy_fact"
+    assert dialog_state.meta["semantic_contract"]["subject_kind"] == "service"
+    assert dialog_state.meta["semantic_contract"]["pending_question_target"] == "time"
+    assert dialog_state.meta["semantic_contract"]["active_question_relation"] == "generic_info_interrupt"
+    assert projection.semantic_contract["capability"] == "location"
+    assert projection.semantic_contract["resolution_mode"] == "policy_fact"
+    assert projection.pending_question_contract["active_question_relation"] == "generic_info_interrupt"
+    assert booking_payload["service"] == "Маникюр"
+
+
+def test_dialog_state_service_owner_backed_specialist_interrupt_skips_synthetic_booking_rewrite(
+    monkeypatch,
+) -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 4, 15, 14, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "current_referents": {
+                    "service": "Маникюр",
+                    "specialist": "Айдана",
+                    "branch": None,
+                    "booking": None,
+                    "customer": None,
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "time",
+                    "reason": "collect:datetime",
+                    "pending_question_act": None,
+                    "pending_question_target": "specialist",
+                    "active_question_relation": "referent_followup",
+                    "next_question": "datetime",
+                    "open_questions": ["datetime"],
+                },
+                "interaction_state": {
+                    "interaction_owner": "llm_policy_core",
+                    "interaction_target": "specialist",
+                    "interaction_relation": "referent_followup",
+                },
+                "projections": {
+                    "expected_reply_type": "time",
+                    "expected_reply_reason": "collect:datetime",
+                },
+                "meta": {
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "subject_kind": "specialist",
+                        "capability": "bookability",
+                        "temporal_scope": "none",
+                        "resolution_mode": "referent_followup",
+                        "pending_question_target": "specialist",
+                        "active_question_relation": "referent_followup",
+                        "referents": {
+                            "service": {
+                                "value": "Маникюр",
+                                "entity_id": "svc:manicure",
+                                "entity_type": "service",
+                                "source_ref": "carryover",
+                            },
+                            "specialist": {
+                                "value": "Айдана",
+                                "entity_id": "spec:aidana",
+                                "entity_type": "specialist",
+                                "source_ref": "carryover",
+                            },
+                        },
+                    },
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "specialist": "Айдана",
+                "last_question": "datetime",
+            },
+        }
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "duration",
+            "action": "fact",
+            "tool_action_hint": "catalog.service_query",
+            "pack_refs": ["duration"],
+            "reason": "duration_info_interrupt_during_active_booking_specialist_followup",
+            "goal": "booking",
+            "subject_kind": "service",
+            "capability": "duration",
+            "temporal_scope": "none",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "time",
+            "pending_question_act": None,
+            "pending_question_target": "specialist",
+            "active_question_relation": "generic_info_interrupt",
+            "next_question": "datetime",
+            "open_questions": ["datetime"],
+            "referents": {
+                "service": {
+                    "value": "Маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="catalog.service_query",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    def _unexpected_contract(**_kwargs):
+        raise AssertionError("synthetic continuity semantic contract should not run")
+
+    def _unexpected_state(**_kwargs):
+        raise AssertionError("synthetic continuity semantic state should not run")
+
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_contract",
+        _unexpected_contract,
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_state",
+        _unexpected_state,
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"tool_decision": "ok", "slot_values": {"service": "Маникюр"}},
+        now=now,
+        conversation_id="conv-1",
+        trace_id="trace-1",
+    )
+
+    projection = ConversationProjectionV1.model_validate(
+        updated["consultant_runtime"]["conversation_projection"]
+    )
+
+    assert dialog_state.meta["semantic_contract"]["capability"] == "duration"
+    assert dialog_state.meta["semantic_contract"]["resolution_mode"] == "policy_fact"
+    assert dialog_state.meta["semantic_contract"]["subject_kind"] == "service"
+    assert dialog_state.meta["semantic_contract"]["pending_question_target"] == "specialist"
+    assert dialog_state.meta["semantic_contract"]["active_question_relation"] == "generic_info_interrupt"
+    assert projection.semantic_contract["capability"] == "duration"
+    assert projection.semantic_contract["resolution_mode"] == "policy_fact"
+    assert projection.pending_question_contract["pending_question_target"] == "specialist"
+    assert projection.pending_question_contract["active_question_relation"] == "generic_info_interrupt"
+    assert booking_payload["service"] == "Маникюр"
+
+
+def test_dialog_state_service_owner_backed_missing_service_interrupt_skips_synthetic_booking_rewrite(
+    monkeypatch,
+) -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 4, 15, 14, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "current_referents": {
+                    "service": None,
+                    "specialist": None,
+                    "branch": None,
+                    "booking": None,
+                    "customer": None,
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "service_choice",
+                    "reason": "collect:service",
+                    "pending_question_act": None,
+                    "pending_question_target": None,
+                    "active_question_relation": None,
+                    "next_question": "service",
+                    "open_questions": ["service"],
+                },
+                "interaction_state": {
+                    "interaction_owner": "llm_policy_core",
+                    "interaction_target": "service",
+                    "interaction_relation": None,
+                },
+                "projections": {
+                    "expected_reply_type": "service_choice",
+                    "expected_reply_reason": "collect:service",
+                },
+                "meta": {
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "subject_kind": "booking",
+                        "capability": "bookability",
+                        "temporal_scope": "specific_time",
+                        "alternate_datetime": "завтра в 18:00",
+                        "resolution_mode": "clarify_missing_subject",
+                    },
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": None,
+                "last_question": "service",
+            },
+        }
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "location",
+            "action": "fact",
+            "tool_action_hint": "catalog.location",
+            "pack_refs": ["parking"],
+            "reason": "parking_info_interrupt_during_active_booking_missing_service_followup",
+            "goal": "booking",
+            "subject_kind": "general",
+            "capability": "location",
+            "temporal_scope": "specific_time",
+            "alternate_datetime": "завтра в 18:00",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "service_choice",
+            "pending_question_act": None,
+            "pending_question_target": None,
+            "active_question_relation": "generic_info_interrupt",
+            "next_question": "service",
+            "open_questions": ["service"],
+            "referents": {},
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="catalog.location",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    def _unexpected_contract(**_kwargs):
+        raise AssertionError("synthetic continuity semantic contract should not run")
+
+    def _unexpected_state(**_kwargs):
+        raise AssertionError("synthetic continuity semantic state should not run")
+
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_contract",
+        _unexpected_contract,
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_state",
+        _unexpected_state,
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={"tool_decision": "ok"},
+        now=now,
+        conversation_id="conv-1",
+        trace_id="trace-1",
+    )
+
+    projection = ConversationProjectionV1.model_validate(
+        updated["consultant_runtime"]["conversation_projection"]
+    )
+
+    assert dialog_state.meta["semantic_contract"]["capability"] == "location"
+    assert dialog_state.meta["semantic_contract"]["resolution_mode"] == "policy_fact"
+    assert dialog_state.meta["semantic_contract"]["subject_kind"] == "general"
+    assert dialog_state.meta["semantic_contract"]["active_question_relation"] == "generic_info_interrupt"
+    assert dialog_state.pending_question_contract.expected_reply_type == "service_choice"
+    assert dialog_state.pending_question_contract.next_question == "service"
+    assert projection.semantic_contract["subject_kind"] == "general"
+    assert projection.semantic_contract["resolution_mode"] == "policy_fact"
+    assert projection.pending_question_contract["expected_reply_type"] == "service_choice"
+    assert projection.pending_question_contract["next_question"] == "service"
+    assert projection.pending_question_contract["active_question_relation"] == "generic_info_interrupt"
+    assert booking_payload.get("service") is None
+
+
+def test_dialog_state_service_owner_backed_service_grounding_name_interrupt_keeps_owner_contract_and_datetime_slot_state(
+    monkeypatch,
+) -> None:
+    service = DialogStateService()
+    planner = TurnPlanner()
+    now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+    context = {
+        "consultant_runtime": {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": {
+                "schema_version": "dialog_state.v1",
+                "semantic_state": {
+                    "schema_version": "canonical_semantic_state.v1",
+                    "materialized_frame": {
+                        "schema_version": "semantic_frame.v2",
+                        "user_goal": "booking",
+                        "requested_effect": "collect_missing_input",
+                        "subject": {"kind": "general"},
+                        "constraints": {
+                            "temporal_scope": "specific_time",
+                            "alternate_datetime": "завтра в 18:00",
+                        },
+                        "preferences": {},
+                        "continuation": {
+                            "expected_reply_type": "service_choice",
+                            "reason": "booking_availability_exact_datetime_missing_service",
+                            "next_question": "service",
+                            "open_questions": ["service"],
+                            "slot_values": {"datetime": "завтра в 18:00"},
+                        },
+                        "capability_selection": {
+                            "capability": "bookability",
+                            "resolution_mode": "clarify_missing_subject",
+                        },
+                        "needs_human": False,
+                        "reason": "booking_availability_exact_datetime_missing_service",
+                    },
+                    "event_log": [],
+                },
+                "pending_question_contract": {
+                    "expected_reply_type": "service_choice",
+                    "reason": "collect:service",
+                    "next_question": "service",
+                    "open_questions": ["service"],
+                },
+                "interaction_state": {
+                    "interaction_owner": "llm_policy_core",
+                },
+                "projections": {
+                    "expected_reply_type": "service_choice",
+                    "expected_reply_reason": "collect:service",
+                },
+                "meta": {
+                    "current_goal": "booking",
+                    "semantic_contract": {
+                        "contract_version": "semantic_contract.v1",
+                        "subject_kind": "general",
+                        "capability": "bookability",
+                        "temporal_scope": "specific_time",
+                        "alternate_datetime": "завтра в 18:00",
+                        "resolution_mode": "clarify_missing_subject",
+                    },
+                },
+            },
+            "booking": {
+                "active": True,
+                "service": None,
+                "datetime": "завтра в 18:00",
+                "last_question": "service",
+            },
+        },
+        "booking": {
+            "active": True,
+            "service": None,
+            "datetime": "завтра в 18:00",
+            "last_question": "service",
+        },
+    }
+    semantic_decision = SemanticDecisionV1.from_policy_core_payload(
+        {
+            "intent": "master_query",
+            "action": "fact",
+            "tool_action": "catalog.service_query",
+            "tool_action_hint": "info",
+            "goal": "booking",
+            "reason": "message_grounded_service_in_missing-service_booking_continuity",
+            "subject_kind": "service",
+            "capability": "master",
+            "temporal_scope": "specific_time",
+            "alternate_datetime": "завтра в 18:00",
+            "resolution_mode": "policy_fact",
+            "expected_reply_type": "name",
+            "pending_question_act": "fill_requested_slot",
+            "pending_question_target": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "next_question": "name",
+            "open_questions": ["name"],
+            "referents": {
+                "service": {
+                    "value": "маникюр",
+                    "entity_id": "svc:manicure",
+                    "entity_type": "service",
+                    "source_ref": "carryover",
+                }
+            },
+        }
+    )
+    decision = planner.build_from_semantic_decision(
+        semantic_decision,
+        binding_tool_action="catalog.service_query",
+        interaction_owner="llm_policy_core",
+        source="llm_policy_core",
+    )
+
+    def _unexpected_contract(**_kwargs):
+        raise AssertionError("synthetic continuity semantic contract should not run")
+
+    def _unexpected_state(**_kwargs):
+        raise AssertionError("synthetic continuity semantic state should not run")
+
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_contract",
+        _unexpected_contract,
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_booking_followup_continuity_semantic_state",
+        _unexpected_state,
+    )
+
+    updated, dialog_state, booking_payload = service.write_runtime_payload(
+        context,
+        decision=decision,
+        execution_meta={
+            "tool_decision": "master",
+            "slot_values": {"service": "маникюр"},
+        },
+        now=now,
+        conversation_id="conv-1",
+        trace_id="trace-1",
+    )
+
+    assert booking_payload == {
+        "active": True,
+        "datetime": "завтра в 18:00",
+        "service": "маникюр",
+        "started_at": "2026-04-16T12:00:00+00:00",
+        "last_question": "service",
+    }
+    assert dialog_state.meta["semantic_contract"] == {
+        "contract_version": "semantic_contract.v1",
+        "subject_kind": "service",
+        "capability": "master",
+        "temporal_scope": "specific_time",
+        "alternate_datetime": "завтра в 18:00",
+        "resolution_mode": "policy_fact",
+        "pending_question_act": "fill_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "generic_info_interrupt",
+        "referents": {
+            "service": {
+                "value": "маникюр",
+                "entity_id": "svc:manicure",
+                "entity_type": "service",
+                "source_ref": "carryover",
+            }
+        },
+    }
+    assert dialog_state.meta["slot_state"] == {
+        "service": "маникюр",
+        "datetime": "завтра в 18:00",
+    }
+    assert dialog_state.pending_question_contract.model_dump(mode="json", exclude_none=True) == {
+        "expected_reply_type": "name",
+        "reason": "message_grounded_service_in_missing-service_booking_continuity",
+        "pending_question_act": "fill_requested_slot",
+        "pending_question_target": "time",
+        "active_question_relation": "generic_info_interrupt",
+        "next_question": "name",
+        "open_questions": ["name"],
+    }
+    frame = dialog_state.semantic_state.materialized_frame.model_dump(mode="json", exclude_none=True)
+    assert frame["constraints"] == {
+        "temporal_scope": "specific_time",
+        "alternate_datetime": "завтра в 18:00",
+    }
+    assert frame["continuation"]["slot_values"] == {
+        "datetime": "завтра в 18:00",
+        "service": "маникюр",
+    }
+
+    loaded = service.load_runtime_payload(updated)
+
+    assert loaded["dialog_state"].meta["semantic_contract"] == dialog_state.meta["semantic_contract"]
+    assert loaded["dialog_state"].meta["slot_state"] == dialog_state.meta["slot_state"]
 
 
 def test_dialog_state_service_clears_expected_reply_contract_on_handoff() -> None:

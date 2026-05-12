@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from ipaddress import ip_address, ip_network
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -81,7 +82,22 @@ class RuntimeSafetySnapshot:
         }
 
 
-def classify_database_target(database_url: str | None) -> tuple[str, bool]:
+def _parse_local_database_cidrs(env: dict[str, str] | None) -> list:
+    source_env = env if env is not None else os.environ
+    raw = (source_env.get("DATABASE_LOCAL_CIDRS") or "").strip()
+    networks = []
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            networks.append(ip_network(token, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def classify_database_target(database_url: str | None, *, env: dict[str, str] | None = None) -> tuple[str, bool]:
     raw = (database_url or "").strip()
     if not raw:
         return "", True
@@ -92,7 +108,17 @@ def classify_database_target(database_url: str | None) -> tuple[str, bool]:
     host = (parsed.hostname or "").strip().lower()
     if not host:
         return "", True
-    return host, host in LOCAL_DB_HOSTS
+    if host in LOCAL_DB_HOSTS:
+        return host, True
+    try:
+        host_ip = ip_address(host)
+    except ValueError:
+        return host, False
+
+    for network in _parse_local_database_cidrs(env):
+        if host_ip in network:
+            return host, True
+    return host, False
 
 
 def build_runtime_safety_snapshot(
@@ -120,7 +146,7 @@ def build_runtime_safety_snapshot(
     resolved_database_url = database_url if database_url is not None else source_env.get("DATABASE_URL")
     if resolved_database_url is None:
         resolved_database_url = getattr(settings, "database_url", None)
-    database_host, database_is_local = classify_database_target(resolved_database_url)
+    database_host, database_is_local = classify_database_target(resolved_database_url, env=source_env)
 
     danger_flags: list[str] = []
     warning_flags: list[str] = []

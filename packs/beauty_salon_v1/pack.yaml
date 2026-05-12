@@ -1,0 +1,332 @@
+# Beauty Salon v1 — реальные данные салона "Mira" (Алматы).
+# Источник: truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml.
+# Контракт: SPECS/PACK_V1.md
+pack_id: beauty_salon_v1
+pack_version: 1
+vertical: beauty_salon
+locale: ru-KZ
+
+business:
+  name: Салон красоты Mira
+  summary: >
+    Салон красоты Mira в Алматы (ул. Абая 150). Парикмахерские услуги, маникюр и педикюр,
+    брови и ресницы, уход за лицом, депиляция. Работаем ежедневно с 9:00 до 21:00,
+    последняя запись 20:00–20:30.
+  address: Алматы, ул. Абая 150, угол Розыбакиева. Вход со стороны Розыбакиева, 2 этаж.
+  hours: ежедневно 9:00–21:00, без выходных
+  contacts:
+    instagram: https://instagram.com/mira_beauty_kz
+
+rules:
+  bot_can_confirm: false
+  required_for_booking:
+    - service
+    - datetime
+    - name
+    - phone
+  identity_for_lookup:
+    - name_or_phone
+  escalate_topics:
+    - medical
+    - refund
+    - complaint
+    - legal
+    - cancel
+    - reschedule
+    - payment
+  cancellation_policy: >
+    Отмену записи подтверждает администратор. Бот собирает имя, услугу
+    и контактный номер и передаёт диалог администратору.
+  reschedule_policy: >
+    Перенос записи подтверждает администратор. Бот собирает желаемое
+    время и передаёт диалог администратору.
+
+capabilities:
+  - FACT
+  - COLLECT
+  - BOOKING
+  - MANAGE
+  - HANDOFF
+
+services:
+  # Ногти
+  - id: manicure
+    name: Маникюр
+    aliases:
+      - маник
+      - маникюр
+      - ногти
+      - маникюр классический
+      - классический маникюр
+      - аппаратный маникюр
+      - комбинированный маникюр
+      - мужской маникюр
+      - маникюр с гель-лаком
+      - маникюр с покрытием гель-лак
+    duration_min: 75
+    price_display: от 6000 KZT
+    description: Классический, аппаратный, комбинированный маникюр; возможно покрытие гель-лак.
+    category: nails
+
+  - id: nail_design
+    name: Дизайн ногтей
+    aliases:
+      - дизайн ногтей
+      - дизайн на ногтях
+      - нейл дизайн
+      - роспись ногтей
+      - стразы на ногтях
+    category: nails
+
+  - id: gel_polish
+    name: Покрытие гель-лак
+    aliases:
+      - покрытие гель-лак
+      - гель лак
+      - гельлак
+    category: nails
+
+  - id: nail_strengthening
+    name: Укрепление ногтей
+    aliases:
+      - укрепление ногтей
+      - укрепление биогелем
+      - укрепление акриловой пудрой
+    category: nails
+
+  - id: gel_polish_removal
+    name: Снятие гель-лака
+    aliases:
+      - снятие гель-лака
+      - снять гель-лак
+      - снятие покрытия
+    category: nails
+
+  - id: foreign_polish_removal
+    name: Снятие чужого покрытия
+    aliases:
+      - снятие чужого покрытия
+      - снятие чужого гель-лака
+    category: nails
+
+  - id: nail_extension_gel
+    name: Наращивание гелем
+    aliases:
+      - наращивание гелем
+      - гелевое наращивание
+      - наращивание на формах
+    category: nails
+
+  - id: nail_extension_polygel
+    name: Наращивание полигелем
+    aliases:
+      - наращивание полигелем
+      - полигель
+      - акригель
+    category: nails
+
+  - id: pedicure
+    name: Педикюр
+    aliases:
+      - педик
+      - педикюр
+      - аппаратный педикюр
+      - комбинированный педикюр
+      - педикюр с гель-лаком
+    duration_min: 90
+    price_display: от 8000 KZT
+    description: Классический, аппаратный, комбинированный педикюр.
+    category: nails
+
+  # Лицо
+  - id: facial_care
+    name: Уход за лицом
+    aliases:
+      - уход за лицом
+      - чистка лица
+      - пилинг лица
+      - пилинг
+      - массаж лица
+    duration_min: 75
+    price_display: уточнить у администратора
+    description: Чистка, пилинг, уходовая процедура, массаж лица.
+    category: face
+
+  # Депиляция
+  - id: depilation
+    name: Депиляция
+    aliases:
+      - депиляция
+      - эпиляция
+      - депиляция воском
+      - восковая депиляция
+      - шугаринг
+      - депиляция сахаром
+    duration_min: 30
+    price_display: уточнить у администратора
+    description: "Воск, сахар. Зоны: подмышки, бикини классика/глубокое, ноги, руки."
+    category: depilation
+
+  # Волосы
+  - id: haircut
+    name: Стрижка
+    aliases:
+      - стрижка
+      - постричь
+      - подстричь
+      - женская стрижка
+      - мужская стрижка
+      - детская стрижка
+      - подравнивание кончиков
+      - стрижка чёлки
+    duration_min: 45
+    price_display: от 5000 KZT
+    description: Женская 40–60 мин, мужская 20–30, детская до 10 лет.
+    category: hair
+
+  - id: coloring
+    name: Окрашивание
+    aliases:
+      - окрашивание
+      - окраска
+      - окрашивание волос
+      - покраска
+      - покраска волос
+      - покрасить
+      - тонирование
+      - мелирование
+      - балаяж
+    duration_min: 180
+    price_display: уточнить у администратора
+    description: Однотонное окрашивание, корни, тонирование, мелирование, балаяж.
+    category: hair
+
+  # Брови и ресницы
+  - id: brows_lashes
+    name: Брови и ресницы
+    aliases:
+      - брови
+      - бровки
+      - ресницы
+      - ламинирование бровей
+      - ламинирование ресниц
+      - наращивание ресниц
+      - наращивание ресниц классика
+      - наращивание ресниц 2d
+      - наращивание ресниц 3d
+      - коррекция бровей
+      - окрашивание бровей
+      - покраска бровей
+    duration_min: 75
+    price_display: уточнить у администратора
+    description: Коррекция и окрашивание бровей; ламинирование бровей и ресниц; наращивание ресниц 1D/2D/3D.
+    category: brows_lashes
+
+specialists:
+  - id: aigerim
+    name: Айгерим
+    service_ids:
+      - manicure
+      - pedicure
+      - nail_extension_gel
+      - nail_extension_polygel
+    bio: 6 лет опыта; аппаратные техники и укрепление.
+
+  - id: madina
+    name: Мадина
+    service_ids:
+      - haircut
+      - coloring
+    bio: 5 лет опыта; длинные волосы, сложные окрашивания и блонд.
+
+  - id: dinara
+    name: Динара
+    service_ids:
+      - brows_lashes
+    bio: 4 года опыта; брови и ресницы.
+
+  - id: asem
+    name: Асем
+    service_ids:
+      - facial_care
+    bio: 5 лет опыта; деликатный уход за лицом, мягкие пилинги.
+
+tools:
+  - id: calendar.list_slots
+    description: List available booking slots for a service and date.
+    args_schema:
+      service_query: text
+      date: text
+      duration_min: number
+      specialist_id: text
+    requires_capability: BOOKING
+
+  - id: calendar.book_slot
+    description: Create a pending appointment.
+    args_schema:
+      service_query: text
+      start_at: datetime
+      customer_name: text
+      customer_phone: text
+      specialist_id: text
+    requires_capability: BOOKING
+
+  - id: calendar.get_booking
+    description: Look up an existing appointment by customer identity.
+    args_schema:
+      service_query: text
+      customer_name: text
+      customer_phone: text
+      lookup_datetime: text
+    requires_capability: MANAGE
+
+  - id: handoff.create
+    description: Escalate the conversation to a human admin.
+    args_schema:
+      reason: text
+      summary: text
+    requires_capability: HANDOFF
+
+aliases:
+  service:
+    manicure:
+      - маник
+      - маникюр
+      - ногти
+    pedicure:
+      - педик
+      - педикюр
+    brows_lashes:
+      - брови
+      - бровки
+      - ресницы
+      - ламинирование
+      - наращивание ресниц
+    haircut:
+      - стрижка
+      - постричь
+      - подстричь
+    coloring:
+      - покраска
+      - окрашивание
+      - мелирование
+      - балаяж
+    facial_care:
+      - уход за лицом
+      - чистка лица
+      - пилинг
+    depilation:
+      - депиляция
+      - шугаринг
+      - эпиляция
+  time:
+    morning:
+      - утром
+      - с утра
+    afternoon:
+      - днём
+      - в обед
+    evening:
+      - вечером
+      - после работы
+      - после шести

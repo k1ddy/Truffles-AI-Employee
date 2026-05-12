@@ -37,7 +37,15 @@
 - `ops/diagnose.py dialog-report` — one‑command отчёт по диалогу (таймлайн + решения + outbox + media/ASR).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
-- `/home/zhan/truffles-main/scripts/restart_release.sh` — единый release API+workers (+ optional knowledge activation service, migration gate + parity/canary check).
+- `/home/zhan/truffles-main/scripts/restart_release.sh` — единый release API+workers+console (+ optional knowledge activation service, migration gate + topology truth artifact).
+- `/home/zhan/truffles-main/scripts/release_topology_truth.py` — live truth for required release cohort (API/workers/console/optional activation service + shadow-runtime target-state report).
+- `/home/zhan/truffles-main/scripts/observability_truth.py` — live truth for required observability surfaces against the canonical repo contract.
+- `/home/zhan/truffles-main/scripts/go_live_data_truth.py` — live truth for first go-live tenant data readiness against the canonical repo contract.
+- `/home/zhan/truffles-main/scripts/provider_integration_truth.py` — live truth for first go-live tenant provider/webhook readiness against the canonical repo contract.
+- `docs/OBSERVABILITY_SURFACES.yaml` — machine-readable observability contract: required surfaces, current proofs, and explicit gaps.
+- `docs/RELEASE_TOPOLOGY_TRUTH.yaml` — machine-readable contract for required release cohort and shadow-runtime target states; topology assumptions must live here, not in session memory.
+- `docs/GO_LIVE_DATA_READINESS.yaml` — machine-readable contract for first Beauty v1 target data readiness; fleet residuals remain explicit and do not get hidden by target readiness.
+- `docs/PROVIDER_INTEGRATION_READINESS.yaml` — machine-readable contract for first Beauty v1 provider/webhook readiness; stale inbound traffic is a warning/canary gap, not a hard integration failure by default.
 - `/home/zhan/truffles-main/ops/knowledge_activation_closeout.py` — tenant-level closeout artifact (`release guard + branch preview/live invariants`).
 - `/home/zhan/truffles-main/scripts/restart_api.sh` — restart API контейнера (используется release flow).
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
@@ -175,11 +183,11 @@ python3 ops/diagnose.py dialog-report \
 
 ## 4. Деплой
 
-**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. Прод релиз — через `/home/zhan/truffles-main/scripts/restart_release.sh` (API + workers + optional activation service canary). `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
+**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. Прод релиз — через `/home/zhan/truffles-main/scripts/restart_release.sh` (API + workers + console + optional activation service canary + topology truth artifact). `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 **Стандарт (CI/GHCR):**
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 RUN_KNOWLEDGE_ACTIVATION_CANARY=1 KNOWLEDGE_ACTIVATION_CANARY_OUTPUT=/tmp/knowledge_activation_release_guard.json bash /home/zhan/truffles-main/scripts/restart_release.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main RESTART_CONSOLE_WEB=1 RUN_RELEASE_TOPOLOGY_TRUTH=1 RELEASE_TOPOLOGY_TRUTH_OUTPUT=/tmp/release_topology_truth.json RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1 KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1 RUN_KNOWLEDGE_ACTIVATION_CANARY=1 KNOWLEDGE_ACTIVATION_CANARY_OUTPUT=/tmp/knowledge_activation_release_guard.json bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
 
 **Fallback (локальная сборка):**
@@ -193,13 +201,20 @@ ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto RE
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
-`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`, `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1`, `KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1`, `RUN_KNOWLEDGE_ACTIVATION_CANARY=1`, `KNOWLEDGE_ACTIVATION_CANARY_OUTPUT`, `ACTIVATION_GUARD_PYTHON`.
+`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`, `RESTART_CONSOLE_WEB=1`, `RUN_RELEASE_TOPOLOGY_TRUTH=1`, `RELEASE_TOPOLOGY_TRUTH_OUTPUT`, `RESTART_KNOWLEDGE_ACTIVATION_SERVICE=1`, `KNOWLEDGE_ACTIVATION_SERVICE_ENABLED=1`, `RUN_KNOWLEDGE_ACTIVATION_CANARY=1`, `KNOWLEDGE_ACTIVATION_CANARY_OUTPUT`, `ACTIVATION_GUARD_PYTHON`, `RELEASE_ENV_FILE`, `RELEASE_RUNTIME_NETWORK`, `RUNTIME_PROFILE_OUTPUT`.
 `restart_api.sh` поддерживает `EXPECTED_IMAGE` и `MIGRATION_BOOTSTRAP_MODE`.
+`release_topology_truth.py` использует `docs/RELEASE_TOPOLOGY_TRUTH.yaml`; изменение required cohort, optional active services и shadow target state делается через этот канон. Shadow surfaces now prove either `stopped` or `shadow_only_disabled` via live health flags.
+`release_runtime_profile.py` вычисляет derived release/runtime profile из env + docker network truth и передаёт его в `restart_api.sh` / `restart_workers.sh`, чтобы `OUTBOX_WORKER_MODE` и `DATABASE_LOCAL_CIDRS` были согласованы между API, workers и runtime safety.
+`observability_truth.py` использует `docs/OBSERVABILITY_SURFACES.yaml`; required observability surfaces и их gaps должны жить в этом контракте, а не в session notes. Worker liveness now enters this contract through `/metrics` (`worker_heartbeat_status`, `worker_heartbeat_age_seconds`) and `/admin/health/check` (`checks.workers`).
+
+`go_live_data_truth.py` использует `docs/GO_LIVE_DATA_READINESS.yaml`; first Beauty v1 target data readiness доказывается отдельно от fleet-wide `/admin/health` residuals, provider integration recovery, and booking semantic closure.
+
+`provider_integration_truth.py` использует `docs/PROVIDER_INTEGRATION_READINESS.yaml`; provider/webhook readiness доказывается отдельно от traffic freshness. `no_recent_inbound` is warning-by-default because stale/absent traffic does not prove provider misconfiguration; hard degradation remains for secret/instance mismatch and inbound-without-outbound failures.
 
 **restart_release.sh:**
 - canonical path: `/home/zhan/truffles-main/scripts/restart_release.sh`
-- порядок: `docker pull` (optional) → digest resolve → `restart_api.sh` → `restart_workers.sh` → optional `restart_knowledge_activation_service.sh` → parity check image id → optional `knowledge_activation_release_guard.py` JSON artifact
-- устраняет drift API vs workers, при включённом activation rollout ещё и drift activation service, и защищает от mutable tag ошибок.
+- порядок: `docker pull` (optional) → digest resolve → `restart_api.sh` → `restart_workers.sh` → optional `restart_knowledge_activation_service.sh` → `restart_console_web.sh` → runtime parity check → `release_topology_truth.py` JSON artifact → optional `knowledge_activation_release_guard.py` JSON artifact
+- устраняет drift API vs workers, включает Console Plane в required release cohort, при включённом activation rollout ещё и drift activation service, и защищает от mutable tag ошибок.
 - финальный tenant closeout после deploy выполняется отдельным чтением `ops/knowledge_activation_closeout.py`, который объединяет guard artifact и branch-level invariants в один `go|no_go`.
 - CI post-deploy automation uses `scripts/knowledge_activation_postdeploy.sh` to turn the guard artifact into a machine-readable manifest and to run hard-required tenant closeout on `main`; target precedence is `workflow_dispatch override -> repo vars -> repo-coded default demo_salon/main`, and owner-surface rollout remains evidence-only inside `ops/knowledge_activation_closeout.py`.
 

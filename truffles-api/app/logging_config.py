@@ -34,15 +34,28 @@ class JSONFormatter(logging.Formatter):
     """Format log records as JSON."""
 
     def format(self, record: logging.LogRecord) -> str:
+        trace_context = _current_trace_context()
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
         }
+        if trace_context:
+            log_data.update(trace_context)
 
-        if hasattr(record, "context") and record.context:
-            log_data["context"] = record.context
+        context = record.context if hasattr(record, "context") and record.context else None
+        if isinstance(context, dict):
+            context = dict(context)
+        else:
+            context = {}
+        if trace_context:
+            if not context.get("trace_id"):
+                context["trace_id"] = trace_context["trace_id"]
+            if trace_context.get("span_id") and not context.get("span_id"):
+                context["span_id"] = trace_context["span_id"]
+        if context:
+            log_data["context"] = context
 
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
@@ -213,6 +226,18 @@ KNOWLEDGE_ACTIVATION_OLDEST_RUNNING_HEARTBEAT_AGE_SECONDS = _get_or_create_metri
     "knowledge_activation_oldest_running_heartbeat_age_seconds",
     "Age in seconds of the oldest active knowledge activation heartbeat.",
     (),
+)
+WORKER_HEARTBEAT_STATUS = _get_or_create_metric(
+    Gauge,
+    "worker_heartbeat_status",
+    "Worker heartbeat status (1=healthy, 0=missing/stale/error).",
+    ("worker",),
+)
+WORKER_HEARTBEAT_AGE_SECONDS = _get_or_create_metric(
+    Gauge,
+    "worker_heartbeat_age_seconds",
+    "Age in seconds of the most recent worker heartbeat.",
+    ("worker",),
 )
 
 # HTTP request metrics
@@ -487,16 +512,53 @@ def set_knowledge_activation_health(snapshot: dict | None) -> None:
         KNOWLEDGE_ACTIVATION_OLDEST_RUNNING_HEARTBEAT_AGE_SECONDS.set(oldest_running)
 
 
-def get_trace_id() -> str | None:
+def set_worker_heartbeat(snapshot: dict[str, dict[str, Any]] | None) -> None:
+    if WORKER_HEARTBEAT_STATUS is not None and hasattr(WORKER_HEARTBEAT_STATUS, "clear"):
+        WORKER_HEARTBEAT_STATUS.clear()
+    if WORKER_HEARTBEAT_AGE_SECONDS is not None and hasattr(WORKER_HEARTBEAT_AGE_SECONDS, "clear"):
+        WORKER_HEARTBEAT_AGE_SECONDS.clear()
+    if not isinstance(snapshot, dict):
+        return
+
+    for worker_name, worker_snapshot in snapshot.items():
+        if not isinstance(worker_snapshot, dict):
+            continue
+        status = str(worker_snapshot.get("status") or "").strip().lower()
+        age_seconds = worker_snapshot.get("age_seconds")
+        if WORKER_HEARTBEAT_STATUS is not None:
+            WORKER_HEARTBEAT_STATUS.labels(worker=worker_name).set(1 if status == "healthy" else 0)
+        if WORKER_HEARTBEAT_AGE_SECONDS is not None:
+            age_value = float(age_seconds) if isinstance(age_seconds, (int, float)) and age_seconds >= 0 else 0
+            WORKER_HEARTBEAT_AGE_SECONDS.labels(worker=worker_name).set(age_value)
+
+
+def _current_trace_context() -> dict[str, str]:
     if trace is None:
-        return None
-    span = trace.get_current_span()
+        return {}
+    try:
+        span = trace.get_current_span()
+    except Exception:
+        return {}
     if span is None:
-        return None
-    context = span.get_span_context()
+        return {}
+    try:
+        context = span.get_span_context()
+    except Exception:
+        return {}
     if not context or not context.is_valid:
+        return {}
+    payload = {"trace_id": f"{context.trace_id:032x}"}
+    span_id = getattr(context, "span_id", None)
+    if isinstance(span_id, int) and span_id > 0:
+        payload["span_id"] = f"{span_id:016x}"
+    return payload
+
+
+def get_trace_id() -> str | None:
+    trace_context = _current_trace_context()
+    if not trace_context:
         return None
-    return f"{context.trace_id:032x}"
+    return trace_context.get("trace_id")
 
 
 _TRACE_ATTR_KEYS = (

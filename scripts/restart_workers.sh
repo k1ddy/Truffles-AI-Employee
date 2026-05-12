@@ -13,6 +13,8 @@ SENTINEL_ENABLED="${SENTINEL_ENABLED:-1}"
 OUTBOX_OTEL_SERVICE_NAME="${OUTBOX_OTEL_SERVICE_NAME:-truffles-outbox}"
 KNOWLEDGE_ACTIVATION_OTEL_SERVICE_NAME="${KNOWLEDGE_ACTIVATION_OTEL_SERVICE_NAME:-truffles-knowledge-activation}"
 SENTINEL_OTEL_SERVICE_NAME="${SENTINEL_OTEL_SERVICE_NAME:-truffles-sentinel}"
+OUTBOX_WORKER_MODE_OVERRIDE="${OUTBOX_WORKER_MODE_OVERRIDE:-}"
+DATABASE_LOCAL_CIDRS="${DATABASE_LOCAL_CIDRS:-}"
 
 is_ghcr_image_ref() {
   local image_ref="$1"
@@ -53,14 +55,30 @@ run_worker() {
     $cmd
 }
 
+outbox_extra_args=()
+if [ -n "$OUTBOX_WORKER_MODE_OVERRIDE" ]; then
+  outbox_extra_args+=(-e "OUTBOX_WORKER_MODE=$OUTBOX_WORKER_MODE_OVERRIDE")
+fi
+if [ -n "$DATABASE_LOCAL_CIDRS" ]; then
+  outbox_extra_args+=(-e "DATABASE_LOCAL_CIDRS=$DATABASE_LOCAL_CIDRS")
+fi
+
+common_runtime_args=()
+if [ -n "$DATABASE_LOCAL_CIDRS" ]; then
+  common_runtime_args+=(-e "DATABASE_LOCAL_CIDRS=$DATABASE_LOCAL_CIDRS")
+fi
+
 run_worker "truffles-outbox" "python -m app.workers.outbox" \
   -e OUTBOX_WORKER_ENABLED="$OUTBOX_WORKER_ENABLED" \
+  "${outbox_extra_args[@]}" \
   -e OTEL_SERVICE_NAME="$OUTBOX_OTEL_SERVICE_NAME"
 run_worker "truffles-knowledge-activation" "python -m app.workers.knowledge_activation" \
   -e KNOWLEDGE_ACTIVATION_WORKER_ENABLED="$KNOWLEDGE_ACTIVATION_WORKER_ENABLED" \
+  "${common_runtime_args[@]}" \
   -e OTEL_SERVICE_NAME="$KNOWLEDGE_ACTIVATION_OTEL_SERVICE_NAME"
 run_worker "truffles-sentinel" "python -m app.workers.sentinel" \
   -e SENTINEL_ENABLED="$SENTINEL_ENABLED" \
+  "${common_runtime_args[@]}" \
   -e OTEL_SERVICE_NAME="$SENTINEL_OTEL_SERVICE_NAME"
 
 expected_ref="${EXPECTED_IMAGE:-$IMAGE_NAME}"

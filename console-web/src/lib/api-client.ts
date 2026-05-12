@@ -92,7 +92,7 @@ export type ConsoleAction = "read" | "write";
 
 export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRole[]>> = {
     inbox: {
-        read: ["platform_admin", "owner", "admin", "manager", "viewer"],
+        read: ["platform_admin", "owner", "admin", "manager", "support", "viewer"],
         write: ["platform_admin", "owner", "admin", "manager"],
     },
     outreach: {
@@ -132,11 +132,11 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin", "owner", "admin"],
     },
     ops: {
-        read: ["platform_admin", "owner", "admin"],
+        read: ["platform_admin", "owner", "admin", "support"],
         write: ["platform_admin", "owner", "admin"],
     },
     audit: {
-        read: ["platform_admin", "owner", "admin", "viewer"],
+        read: ["platform_admin", "owner", "admin", "support", "viewer"],
         write: [],
     },
     integrations: {
@@ -148,7 +148,7 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin"],
     },
     provisioning: {
-        read: ["platform_admin", "owner", "admin"],
+        read: ["platform_admin", "owner", "admin", "support"],
         write: ["platform_admin", "owner", "admin"],
     },
 };
@@ -757,6 +757,56 @@ export type BusinessSummaryResponse = {
     unresolved_cases: number;
     oldest_unresolved_minutes?: number | null;
     first_response_p90_seconds?: number | null;
+    actions: BusinessSummaryAction[];
+    metric_meta: Record<string, MetricFactMeta>;
+};
+export type GoNoGoReadinessFinding = {
+    code: string;
+    severity: "blocker" | "warning" | "info";
+    category:
+        | "provider"
+        | "onboarding"
+        | "data_trust"
+        | "business"
+        | "booking"
+        | "runtime"
+        | "knowledge"
+        | "support";
+    title: string;
+    detail: string;
+    source: string;
+    href?: string | null;
+    owner_lane?: string | null;
+    blocking_go_live: boolean;
+    blocks_external_channel: boolean;
+    blocks_internal_booking: boolean;
+};
+export type GoNoGoReadinessEvidence = {
+    id: string;
+    status: "pass" | "warn" | "fail" | "unknown";
+    source: string;
+    summary: string;
+    href?: string | null;
+    blocking: boolean;
+    meta: Record<string, string | number | boolean | null>;
+};
+export type GoNoGoReadinessResponse = {
+    generated_at: string;
+    company_id?: string | null;
+    client_id: string;
+    branch_id: string;
+    verdict: "go" | "no_go" | "blocked";
+    status_label: string;
+    external_channel_ready: boolean;
+    internal_booking_ready: boolean;
+    provider_ready: boolean;
+    onboarding_ready: boolean;
+    data_trust_ready: boolean;
+    business_ready: boolean;
+    runtime_ready: boolean;
+    blockers: GoNoGoReadinessFinding[];
+    warnings: GoNoGoReadinessFinding[];
+    evidence: GoNoGoReadinessEvidence[];
     actions: BusinessSummaryAction[];
     metric_meta: Record<string, MetricFactMeta>;
 };
@@ -1562,6 +1612,7 @@ export const opsApi = {
 /** Owner/Admin business control endpoints */
 export const businessApi = {
     getSummary: () => apiClient.get<BusinessSummaryResponse>("/business/summary"),
+    getGoNoGoReadiness: () => apiClient.get<GoNoGoReadinessResponse>("/business/go-no-go-readiness"),
     getIncidents: () => apiClient.get<IncidentListResponse>("/business/incidents"),
     getConsultantVerificationOverview: () =>
         apiClient.get<ConsultantVerificationOverviewResponse>("/business/consultant-verification/overview"),

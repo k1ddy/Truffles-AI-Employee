@@ -724,14 +724,36 @@ def _is_permanent_delivery_error(error_text: str) -> bool:
 
 def _classify_transport_degradation(error_text: str | None) -> dict[str, str] | None:
     classified = classify_provider_error(error_text)
-    if classified.kind != "billing_blocked":
+    if classified.kind == "unknown" or classified.retryable:
         return None
+    default_error_codes = {
+        "billing_blocked": "CHATFLOW_BILLING_BLOCKED",
+        "invalid_recipient": "CHATFLOW_INVALID_RECIPIENT",
+        "transport_guard": "CHATFLOW_TRANSPORT_GUARD",
+    }
     return {
         "delivery_state": "transport_degraded",
-        "delivery_error_code": classified.error_code or "CHATFLOW_BILLING_BLOCKED",
+        "delivery_error_code": classified.error_code
+        or default_error_codes.get(classified.kind, classified.incident_reason_code.upper()),
         "delivery_error_class": classified.incident_reason_code,
         "delivery_error_kind": classified.kind,
     }
+
+
+def _extract_decision_trace_id(decision_meta: object) -> str | None:
+    if not isinstance(decision_meta, dict):
+        return None
+    direct_trace_id = decision_meta.get("trace_id")
+    if isinstance(direct_trace_id, str) and direct_trace_id.strip():
+        return direct_trace_id.strip()
+    for key in ("decision_trace", "runtime_trace_contract"):
+        payload = decision_meta.get(key)
+        if not isinstance(payload, dict):
+            continue
+        trace_id = payload.get("trace_id")
+        if isinstance(trace_id, str) and trace_id.strip():
+            return trace_id.strip()
+    return None
 
 
 async def _prepare_skip_persist(
@@ -1053,6 +1075,15 @@ async def _process_outbox_rows(
             if isinstance(sim_ctx, dict):
                 sim_id = sim_ctx.get("id")
         return is_simulation_context(conversation), sim_id
+
+    def _mark_outbox_sent(outbox_id: object) -> None:
+        mark_outbox_status(
+            db,
+            outbox_id=outbox_id,
+            status="SENT",
+            last_error=None,
+            next_attempt_at=None,
+        )
 
     for row in rows:
         outbox_id = row.get("id")
@@ -1434,9 +1465,7 @@ async def _process_outbox_rows(
         decision_meta = {}
         if isinstance(message.message_metadata, dict):
             decision_meta = message.message_metadata.get("decision_meta") or {}
-        trace_id = None
-        if isinstance(decision_meta, dict):
-            trace_id = decision_meta.get("trace_id")
+        trace_id = _extract_decision_trace_id(decision_meta)
         outbox_meta_update = {
             "timing": payload["outbox"],
             "correlation": {
@@ -1460,8 +1489,7 @@ async def _process_outbox_rows(
         message = _resolve_outbox_message(outbox_id)
         if message and isinstance(message.message_metadata, dict):
             decision_meta = message.message_metadata.get("decision_meta")
-            if isinstance(decision_meta, dict):
-                trace_id = decision_meta.get("trace_id")
+            trace_id = _extract_decision_trace_id(decision_meta)
         wait_ms = None
         process_ms = None
         if isinstance(created_at, datetime) and isinstance(picked_at_info, datetime):
@@ -1571,13 +1599,7 @@ async def _process_outbox_rows(
                 _update_message_decision_metadata(message, {"outbox_simulated": True})
             outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
             _log_outbox_done(outbox_id_str, total_ms=outbox_total_ms)
-            mark_outbox_status(
-                db,
-                outbox_id=outbox_id,
-                status="SENT",
-                last_error=None,
-                next_attempt_at=None,
-            )
+            _mark_outbox_sent(outbox_id)
             results["sent"] += 1
             return
         span_context = {
@@ -1591,8 +1613,9 @@ async def _process_outbox_rows(
             span_context["branch_id"] = str(branch_id)
         if message and isinstance(message.message_metadata, dict):
             decision_meta = message.message_metadata.get("decision_meta")
-            if isinstance(decision_meta, dict) and decision_meta.get("trace_id"):
-                span_context["trace_id"] = decision_meta.get("trace_id")
+            trace_id = _extract_decision_trace_id(decision_meta)
+            if trace_id:
+                span_context["trace_id"] = trace_id
 
         try:
             if _is_outbox_event(payload_json):
@@ -1645,6 +1668,7 @@ async def _process_outbox_rows(
                             results["failed"] += 1
                             return
                         raise RuntimeError(f"calendar_sync_failed:{error or 'unknown'}")
+                    _mark_outbox_sent(outbox_id)
                     results["sent"] += 1
                     return
                 if event_type == OUTBOX_EVENT_KNOWLEDGE_SYNC:
@@ -1673,6 +1697,7 @@ async def _process_outbox_rows(
                         )
                         results["failed"] += 1
                         return
+                    _mark_outbox_sent(outbox_id)
                     results["sent"] += 1
                     return
                 if event_type not in {"whatsapp.send_text", "whatsapp.send_media"}:
@@ -1871,18 +1896,12 @@ async def _process_outbox_rows(
                 },
             )
             _log_outbox_done(outbox_id_str, total_ms=outbox_total_ms)
-            mark_outbox_status(
-                db,
-                outbox_id=outbox_id,
-                status="SENT",
-                last_error=None,
-                next_attempt_at=None,
-            )
+            _mark_outbox_sent(outbox_id)
             results["sent"] += 1
         except Exception as exc:
             commit_on_failure = (
                 isinstance(exc, RuntimeError)
-                and str(exc).strip() == "ChatFlow delivery failed"
+                and str(exc).strip().startswith("ChatFlow delivery failed")
             )
             if commit_on_failure:
                 try:
@@ -1932,6 +1951,30 @@ async def _process_outbox_rows(
             else:
                 _record_outbox_action_error(outbox_id=outbox_id_str, error=str(exc))
             _log_outbox_done(outbox_id_str, error=str(exc), total_ms=outbox_total_ms)
+            if commit_on_failure:
+                classified = classify_provider_error(str(exc))
+                provider_name = payload_json.get("provider") or "chatflow"
+                failure_reason = (
+                    degradation_meta.get("delivery_error_class")
+                    if isinstance(degradation_meta, dict)
+                    else classified.incident_reason_code
+                )
+                mark_outbox_status(
+                    db,
+                    outbox_id=outbox_id,
+                    status="FAILED",
+                    last_error=str(exc)[:500],
+                    next_attempt_at=None,
+                )
+                _notify_outbox_failure(
+                    outbox_id=outbox_id_str,
+                    reason=failure_reason,
+                    error=str(exc),
+                    provider=provider_name,
+                    attempts=int(row.get("attempts") or 0),
+                )
+                results["failed"] += 1
+                return
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
             if _is_permanent_delivery_error(str(exc)):
@@ -2109,22 +2152,33 @@ async def _process_outbox_rows(
                     }
                 },
             )
+            span_context = {
+                "message_id": inbound_message_ids[-1] if inbound_message_ids else None,
+                "outbox_id": ",".join(str(oid) for oid in outbox_ids if oid),
+                "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                "client_slug": base_payload.client_slug,
+                "conversation_id": conversation_id,
+            }
+            branch_id = valid_rows[-1][0].get("branch_id")
+            if branch_id:
+                span_context["branch_id"] = str(branch_id)
 
             try:
                 from app.core.consultant_core_v2 import handle_webhook_payload as handle_consultant_core_v2
 
                 timing_start = time.monotonic()
-                response = await handle_consultant_core_v2(
-                    base_payload,
-                    db,
-                    provided_secret=None,
-                    enforce_secret=False,
-                    skip_persist=True,
-                    conversation_id=UUID(conversation_id),
-                    batch_messages=message_texts,
-                    outbox_ids=[str(oid) for oid in outbox_ids if oid],
-                    outbox_created_at=group_created_at,
-                )
+                with start_span("outbox.process", context=span_context):
+                    response = await handle_consultant_core_v2(
+                        base_payload,
+                        db,
+                        provided_secret=None,
+                        enforce_secret=False,
+                        skip_persist=True,
+                        conversation_id=UUID(conversation_id),
+                        batch_messages=message_texts,
+                        outbox_ids=[str(oid) for oid in outbox_ids if oid],
+                        outbox_created_at=group_created_at,
+                    )
                 if not response.success:
                     raise RuntimeError(response.message)
                 outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
@@ -2145,13 +2199,7 @@ async def _process_outbox_rows(
                         _log_outbox_done(str(outbox_id), total_ms=outbox_total_ms)
                 for outbox_id in outbox_ids:
                     if outbox_id:
-                        mark_outbox_status(
-                            db,
-                            outbox_id=outbox_id,
-                            status="SENT",
-                            last_error=None,
-                            next_attempt_at=None,
-                        )
+                        _mark_outbox_sent(outbox_id)
                 results["sent"] += len(outbox_ids)
                 logger.info(
                     "Outbox processed",
@@ -2163,13 +2211,33 @@ async def _process_outbox_rows(
                     },
                 )
             except Exception as exc:
-                try:
-                    db.rollback()
-                except Exception as rollback_exc:
-                    logger.warning(
-                        "Outbox rollback failed",
-                        extra={"context": {"error": str(rollback_exc)}},
-                    )
+                commit_on_failure = (
+                    isinstance(exc, RuntimeError)
+                    and str(exc).strip().startswith("ChatFlow delivery failed")
+                )
+                if commit_on_failure:
+                    try:
+                        db.commit()
+                    except Exception as commit_exc:
+                        logger.warning(
+                            "Outbox commit failed after delivery error",
+                            extra={"context": {"error": str(commit_exc)}},
+                        )
+                        try:
+                            db.rollback()
+                        except Exception as rollback_exc:
+                            logger.warning(
+                                "Outbox rollback failed",
+                                extra={"context": {"error": str(rollback_exc)}},
+                            )
+                else:
+                    try:
+                        db.rollback()
+                    except Exception as rollback_exc:
+                        logger.warning(
+                            "Outbox rollback failed",
+                            extra={"context": {"error": str(rollback_exc)}},
+                        )
                 outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
                 logger.info(
                     "Outbox timing",
@@ -2184,9 +2252,17 @@ async def _process_outbox_rows(
                     }
                     },
                 )
+                degradation_meta = _classify_transport_degradation(str(exc))
                 for outbox_id in outbox_ids:
                     if outbox_id:
-                        _record_outbox_action_error(outbox_id=str(outbox_id), error=str(exc))
+                        if degradation_meta:
+                            _record_outbox_transport_degraded(
+                                outbox_id=str(outbox_id),
+                                error=str(exc),
+                                degradation_meta=degradation_meta,
+                            )
+                        else:
+                            _record_outbox_action_error(outbox_id=str(outbox_id), error=str(exc))
                 for outbox_id in outbox_ids:
                     if outbox_id:
                         _log_outbox_done(
@@ -2194,6 +2270,33 @@ async def _process_outbox_rows(
                             error=str(exc),
                             total_ms=outbox_total_ms,
                         )
+                if commit_on_failure:
+                    classified = classify_provider_error(str(exc))
+                    failure_reason = (
+                        degradation_meta.get("delivery_error_class")
+                        if isinstance(degradation_meta, dict)
+                        else classified.incident_reason_code
+                    )
+                    for row, _ in valid_rows:
+                        outbox_id = row.get("id")
+                        if not outbox_id:
+                            continue
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="FAILED",
+                            last_error=str(exc)[:500],
+                            next_attempt_at=None,
+                        )
+                        _notify_outbox_failure(
+                            outbox_id=str(outbox_id),
+                            reason=failure_reason,
+                            error=str(exc),
+                            provider="chatflow",
+                            attempts=int(row.get("attempts") or 0),
+                        )
+                        results["failed"] += 1
+                    continue
                 now = datetime.now(timezone.utc)
                 for row, _ in valid_rows:
                     outbox_id = row.get("id")

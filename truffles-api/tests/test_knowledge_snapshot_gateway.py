@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import get_db
-from app.knowledge_gateway_app import app
+from app.main import app
 from app.schemas.outbox_payload import TenantContext
 from app.services.knowledge_snapshot_service import build_knowledge_snapshot
 from app.services.pack_compiler_service import compile_pack_payload, inject_compiled_artifacts
@@ -32,16 +32,6 @@ def test_snapshot_disabled_returns_404(client, monkeypatch):
     monkeypatch.delenv("KNOWLEDGE_SNAPSHOT_ENABLED", raising=False)
     response = client.post("/knowledge/snapshot", json=_snapshot_request())
     assert response.status_code == 404
-
-
-def test_health_reports_snapshot_enabled(client, monkeypatch):
-    monkeypatch.setenv("KNOWLEDGE_SNAPSHOT_ENABLED", "1")
-    response = client.get("/health")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "ok"
-    assert payload["service"] == "knowledge_gateway"
-    assert payload["snapshot_enabled"] is True
 
 
 def test_snapshot_enabled_calls_builder(client, monkeypatch):

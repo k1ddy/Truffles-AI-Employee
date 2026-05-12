@@ -1,8 +1,8 @@
 # ВИДЕНИЕ TRUFFLES
 
-**Scope:** ДНК проекта: суть, ценность, позиционирование, принципы (что нельзя нарушать).  
-**Out of scope:** реализация, тарифы, детальный roadmap задач (см. `STRATEGY/PRODUCT.md`, `STRATEGY/TECH_ROADMAP.md`, `STATE.md`).  
-**Links:** `STRATEGY/PRODUCT.md`, `STRATEGY/REQUIREMENTS.md`, `STATE.md`.
+**Scope:** ДНК проекта: суть, ценность, позиционирование, принципы (что нельзя нарушать).
+**Out of scope:** реализация, тарифы, детальный roadmap задач (см. `STRATEGY/PRODUCT.md`, `STRATEGY/TECH_ROADMAP.md`, `STATE.md`).
+**Links:** `docs/PRODUCT_SYSTEM_CANON.md`, `docs/DECISION_LEDGER.yaml`, `STRATEGY/PRODUCT.md`, `STRATEGY/REQUIREMENTS.md`.
 
 > Этот документ — компас. Если сомневаешься — начинай отсюда.
 
@@ -11,7 +11,7 @@
 ## Что такое Truffles
 
 **Одной фразой:**
-> Виртуальный консультант, который отвечает по фактам в любое время и ведёт к следующему шагу.
+> Truffles — multi-tenant платформа виртуального консультанта для сервисного бизнеса: отвечает по фактам, ведёт к следующему шагу и управляется через Console Plane.
 
 **Формула:**
 ```
@@ -20,6 +20,22 @@ Truffles = LLM Policy Core (решение действий/слотов/исх�
         + Escalation (выход к человеку)
         + Data in KZ (суверенность и изоляция)
 ```
+
+## Системная форма продукта
+
+Truffles нельзя понимать только как runtime-бот. Каноническая форма системы состоит из четырёх связанных плоскостей:
+
+- **Consultant Runtime Plane** — ведёт диалог к `FACT / COLLECT / HANDOFF` в каналах клиента.
+- **Console Plane** — основной профессиональный интерфейс для `Platform Admin`, `Platform Support`, `Owner`, `Admin`, `Manager`.
+- **Knowledge / Data Plane** — tenant-scoped packs, capabilities, published artifacts, интеграции и изоляция данных.
+- **Observability / Ops Plane** — health, alerts, logs, traces, metrics, deploy discipline и доказуемость работы.
+
+Первый go-live vertical:
+- **Beauty Salon v1** — салоны красоты как первый коммерческий продукт.
+
+Расширение в другие сервисные ниши:
+- только через `packs + tools + capabilities`, а не через переписывание core.
+- core остаётся business capability platform: новые ниши добавляют данные, capability contracts, tools, policies и proof, но не становятся отдельными hardcoded ветками сервера.
 
 ---
 
@@ -43,9 +59,9 @@ Truffles = LLM Policy Core (решение действий/слотов/исх�
 
 ## Почему мы существуем (ключевые боли)
 
-1) **«Не успеваю отвечать — теряю клиентов»** (ночь/выходные/пиковые часы).  
-2) **«Одни и те же вопросы каждый день»** (FAQ‑80%).  
-3) **«Заявки теряются без статуса и эскалации»** (нет прозрачности).  
+1) **«Не успеваю отвечать — теряю клиентов»** (ночь/выходные/пиковые часы).
+2) **«Одни и те же вопросы каждый день»** (FAQ‑80%).
+3) **«Заявки теряются без статуса и эскалации»** (нет прозрачности).
 4) **«Данные нельзя отдавать куда попало»** (локализация/безопасность).
 
 ---
@@ -56,7 +72,7 @@ Truffles = LLM Policy Core (решение действий/слотов/исх�
 Если бот отвечает плохо — всё остальное бессмысленно.
 
 ## Принцип 2: Truth‑first, а не “умный чат”
-- **Факты только из data packs** (client_pack/domain_pack).  
+- **Факты только из data packs** (client_pack/domain_pack).
 - Нет факта → **уточнение (до 2 раз)** → **эскалация**.
 
 ## Принцип 3: LLM Policy Core, hard‑safety only
@@ -80,6 +96,12 @@ LLM не создаёт факты. Если факта нет → уточне�
 
 ## Принцип 9: EVAL‑gate в CI
 CORE‑eval блокирует релиз. Без этого проект превращается в ручной хрупкий набор исключений.
+
+## Принцип 10: Frameworks are tools, not architecture
+LangChain, LangGraph и похожие frameworks можно рассматривать только как orchestration/checkpointing/runtime tools. Они не могут быть semantic owner, source of truth, booking calendar, tenant authority или заменой proof.
+
+## Принцип 11: Signals are evidence, not decisions
+Lexicons, regex, aliases, normalizers и RAG retrieval помогают дать policy-core проверяемые evidence/candidate facts. Они не принимают смысловое решение и не создают бизнес-факты.
 
 ---
 

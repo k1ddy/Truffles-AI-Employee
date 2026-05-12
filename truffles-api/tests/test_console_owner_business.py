@@ -1623,6 +1623,225 @@ async def test_business_summary_requires_business_permission(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_business_summary_surfaces_go_no_go_blockers(monkeypatch):
+    branch_id = uuid4()
+    client_id = uuid4()
+    branch = SimpleNamespace(id=branch_id, client_id=client_id)
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=client_id),
+        branch_restricted=False,
+        selected_branch_id=branch_id,
+        effective_branch_id=branch_id,
+        branches=[branch],
+    )
+
+    class Query:
+        def __init__(self, rows=None):
+            self.rows = list(rows or [])
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def join(self, *_args, **_kwargs):
+            return self
+
+        def order_by(self, *_args, **_kwargs):
+            return self
+
+        def group_by(self, *_args, **_kwargs):
+            return self
+
+        def distinct(self):
+            return self
+
+        def count(self):
+            return 0
+
+        def first(self):
+            return self.rows[0] if self.rows else None
+
+        def all(self):
+            return self.rows
+
+    class ExecuteResult:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return None
+
+    class DB:
+        def query(self, *args):
+            if args and args[0] is console_router.Branch:
+                return Query([branch])
+            return Query([])
+
+        def execute(self, *_args, **_kwargs):
+            return ExecuteResult()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda _db, _branch: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            readiness_kernel=SimpleNamespace(blocker_codes=["go_no_go:payment_confirmed"]),
+        ),
+    )
+
+    response = await console_router.get_business_summary(request=SimpleNamespace(), db=DB())
+
+    assert response.status == "unhealthy"
+    assert "Запуск заблокирован" in response.status_label
+    assert response.actions[0].id == "review_go_no_go_readiness"
+    assert response.metric_meta["go_no_go_readiness"].note == "go_no_go:payment_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_go_no_go_readiness_consolidates_blockers_without_blocking_internal_booking(monkeypatch):
+    company_id = uuid4()
+    client_id = uuid4()
+    branch_id = uuid4()
+    branch = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        slug="main",
+        name="Main",
+        is_active=True,
+        booking_settings={
+            "calendar_provider": "local",
+            "booking_mode": "confirm_slots",
+        },
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=client_id, company_id=company_id, name="demo_salon"),
+        companies=[SimpleNamespace(id=company_id)],
+        branch_restricted=False,
+        selected_branch_id=branch_id,
+        effective_branch_id=branch_id,
+        branches=[branch],
+    )
+
+    class Query:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return branch
+
+    class DB:
+        def query(self, *_args, **_kwargs):
+            return Query()
+
+    async def fake_business_summary(*_args, **_kwargs):
+        return console_router.ConsoleBusinessSummaryResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            status="unhealthy",
+            status_label="Запуск заблокирован: проверьте Go/No-Go readiness перед операционной работой.",
+            scheduled_visits_today=0,
+            arrived_visits_today=0,
+            no_show_visits_today=0,
+            cancelled_visits_today=0,
+            reminder_delivery_failures_today=0,
+            no_show_followup_pending=0,
+            outbox_backlog=0,
+            outbox_failed_24h=0,
+            pending_cases=0,
+            active_cases=0,
+            unresolved_cases=0,
+            actions=[
+                console_router.ConsoleBusinessActionItem(
+                    id="review_go_no_go_readiness",
+                    title="Разберите блокеры запуска",
+                    description="Go/No-Go не готов: go_no_go:payment_confirmed",
+                    href="/onboarding",
+                    severity="critical",
+                )
+            ],
+        )
+
+    async def fake_data_trust(*_args, **_kwargs):
+        return console_router.ConsoleDataTrustSummaryResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            status="unhealthy",
+            status_label="Высокий риск: качество данных и трассировок может быть недостоверным.",
+            knowledge_stale_hours=900,
+            audit_events_24h=1,
+            critical_audit_events_24h=0,
+            actions=[
+                console_router.ConsoleBusinessActionItem(
+                    id="refresh_knowledge",
+                    title="Обновите базу знаний",
+                    description="Публикация знаний устарела.",
+                    href="/knowledge",
+                    severity="critical",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "get_business_summary", fake_business_summary)
+    monkeypatch.setattr(console_router, "get_business_data_trust", fake_data_trust)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda _db, _branch: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            readiness_kernel=SimpleNamespace(
+                blocker_codes=["go_no_go:payment_confirmed", "traffic:whatsapp_capability_mismatch"]
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_go_no_go_provider_status",
+        lambda **_kwargs: console_router.ConsoleBranchIntegrationStatus(
+            client_id=client_id,
+            client_slug="demo_salon",
+            branch_id=branch_id,
+            branch_slug="main",
+            branch_name="Main",
+            is_active=True,
+            instance_id="instance-1",
+            telegram_chat_id=None,
+            webhook_url=None,
+            webhook_url_valid=False,
+            whatsapp_status="no_recent_inbound",
+            telegram_status="ok",
+            provider_binding_payment_status="rejected",
+            provider_binding_alert_state="critical",
+            provider_binding_owner="Platform Admin",
+            drift_issues=["provider_binding_payment_rejected"],
+            status="error",
+        ),
+    )
+
+    response = await console_router.get_business_go_no_go_readiness(
+        request=SimpleNamespace(),
+        db=DB(),
+    )
+
+    codes = {item.code for item in response.blockers}
+    assert response.verdict == "blocked"
+    assert response.external_channel_ready is False
+    assert response.internal_booking_ready is True
+    assert response.provider_ready is False
+    assert response.onboarding_ready is False
+    assert response.data_trust_ready is False
+    assert "provider_binding_payment_rejected" in codes
+    assert "go_no_go:payment_confirmed" in codes
+    assert "data_trust_unhealthy" in codes
+    assert any(item.blocks_external_channel for item in response.blockers)
+    assert not any(item.blocks_internal_booking for item in response.blockers)
+    assert response.metric_meta["internal_booking_ready"].note == "internal_console_calendar"
+
+
+@pytest.mark.asyncio
 async def test_consultant_verification_overview_requires_business_permission(monkeypatch):
     context = _build_context(role="support")
     monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)

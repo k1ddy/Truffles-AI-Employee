@@ -14,6 +14,7 @@ from app.services.health_service import (
     check_and_heal_conversations,
 )
 from app.services.integration_guardrails_service import run_integration_watchdog
+from app.services.worker_heartbeat_service import touch_worker_heartbeat
 
 setup_logging()
 logger = get_logger("sentinel_worker")
@@ -135,6 +136,10 @@ async def run_worker():
     logger.info("Starting Sentinel Worker...")
     while True:
         try:
+            try:
+                touch_worker_heartbeat("truffles-sentinel")
+            except Exception as exc:
+                logger.warning("Sentinel heartbeat update failed", extra={"context": {"error": str(exc)[:200]}})
             interval, heal_enabled, integration_watchdog_enabled = _get_sentinel_settings()
             
             # Legacy behavior: sleep FIRST (avoid boot storm / wait for DB)

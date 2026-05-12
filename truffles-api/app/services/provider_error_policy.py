@@ -14,6 +14,7 @@ from typing import Literal, Optional
 
 ProviderErrorKind = Literal[
     "billing_blocked",
+    "transport_guard",
     "invalid_recipient",
     "auth",
     "rate_limited",
@@ -22,6 +23,7 @@ ProviderErrorKind = Literal[
 ]
 ProviderIncidentReasonCode = Literal[
     "provider_billing_blocked",
+    "provider_transport_guard",
     "provider_invalid_recipient",
     "provider_auth",
     "provider_rate_limited",
@@ -67,6 +69,18 @@ _PROVIDER_ERROR_RULES: tuple[ProviderErrorRule, ...] = (
             "not paid",
             "payment required",
             "invoice overdue",
+        ),
+    ),
+    ProviderErrorRule(
+        kind="transport_guard",
+        incident_reason_code="provider_transport_guard",
+        incident_reason_label="Исходящая отправка заблокирована runtime transport guard",
+        retryable=False,
+        markers=(
+            "transport mode guard",
+            "transport_allowlist_guard",
+            "outbound blocked by transport",
+            "blocked by transport mode",
         ),
     ),
     ProviderErrorRule(

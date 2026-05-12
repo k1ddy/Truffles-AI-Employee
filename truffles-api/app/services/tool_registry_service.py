@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -95,6 +96,18 @@ class ToolExecutionResult:
     expected_reply_type: str | None = None
 
 
+@dataclass(frozen=True)
+class CalendarBookingProviderConfig:
+    effective_provider: str
+    availability_provider: str | None
+    calendar_provider: str | None
+    booking_mode: str | None
+    requires_provider_health: bool
+    external_sync_required: bool
+    collect_preferences_only: bool
+    collect_reason: str | None = None
+
+
 class BookingWriteBoundaryError(RuntimeError):
     def __init__(self, *, stage: str, error_code: str | None) -> None:
         super().__init__(f"{stage}:{error_code or 'unknown'}")
@@ -111,6 +124,75 @@ def is_tool_action(action: str | None) -> bool:
 
 def _calendar_provider_should_block(reason: str | None) -> bool:
     return (reason or "") in _CALENDAR_PROVIDER_HARD_FAILURES
+
+
+def _normalize_provider_token(value: Any) -> str | None:
+    if value is None:
+        return None
+    token = str(value).strip().casefold()
+    return token or None
+
+
+def _resolve_calendar_booking_provider(branch: Branch) -> CalendarBookingProviderConfig:
+    settings = branch.booking_settings if isinstance(branch.booking_settings, dict) else {}
+    availability_provider = _normalize_provider_token(settings.get("availability_provider"))
+    calendar_provider = _normalize_provider_token(settings.get("calendar_provider"))
+    booking_mode = _normalize_provider_token(settings.get("booking_mode"))
+
+    runtime = get_runtime_capabilities()
+    if runtime:
+        if availability_provider is None:
+            availability_provider = _normalize_provider_token(
+                runtime.payload.providers.availability_provider
+            )
+        if calendar_provider is None:
+            calendar_provider = _normalize_provider_token(
+                runtime.payload.providers.calendar_provider
+            )
+        if booking_mode is None:
+            booking_mode = _normalize_provider_token(runtime.payload.features.booking_mode)
+
+    if availability_provider == "google_calendar" or calendar_provider == "google_calendar":
+        return CalendarBookingProviderConfig(
+            effective_provider="google_calendar",
+            availability_provider=availability_provider,
+            calendar_provider=calendar_provider,
+            booking_mode=booking_mode,
+            requires_provider_health=True,
+            external_sync_required=True,
+            collect_preferences_only=False,
+        )
+
+    internal_tokens = {"local", "console_calendar", "internal_calendar"}
+    if availability_provider in internal_tokens or (
+        calendar_provider in internal_tokens and booking_mode == "confirm_slots"
+    ):
+        return CalendarBookingProviderConfig(
+            effective_provider="console_calendar",
+            availability_provider=availability_provider,
+            calendar_provider=calendar_provider,
+            booking_mode=booking_mode,
+            requires_provider_health=False,
+            external_sync_required=False,
+            collect_preferences_only=False,
+        )
+
+    reason = "booking_mode_collect_preferences"
+    if booking_mode == "confirm_slots" and availability_provider in {"bitrix", "amocrm"}:
+        reason = f"unsupported_availability_provider:{availability_provider}"
+    elif booking_mode == "confirm_slots" and availability_provider in {"none", "manual", None}:
+        reason = "no_confirm_slot_provider"
+
+    return CalendarBookingProviderConfig(
+        effective_provider=availability_provider or calendar_provider or "none",
+        availability_provider=availability_provider,
+        calendar_provider=calendar_provider,
+        booking_mode=booking_mode,
+        requires_provider_health=False,
+        external_sync_required=False,
+        collect_preferences_only=True,
+        collect_reason=reason,
+    )
 
 
 def _with_provider_health_meta(
@@ -440,6 +522,10 @@ def _normalize_expected_reply_hint(expected_reply_type: str | None) -> str | Non
 
 def _calendar_get_booking_not_found_followup_text(
     expected_reply_type: str | None,
+    *,
+    customer_name: str | None = None,
+    customer_phone: str | None = None,
+    lookup_datetime: str | None = None,
 ) -> str:
     normalized = _normalize_expected_reply_hint(expected_reply_type)
     if normalized == "name":
@@ -448,6 +534,20 @@ def _calendar_get_booking_not_found_followup_text(
         return "Подскажите, пожалуйста, примерную дату и время записи."
     if normalized == "service_choice":
         return "Подскажите, пожалуйста, о какой записи идёт речь."
+    has_customer = bool(
+        (isinstance(customer_name, str) and customer_name.strip())
+        or (isinstance(customer_phone, str) and customer_phone.strip())
+    )
+    has_lookup_datetime = isinstance(lookup_datetime, str) and bool(lookup_datetime.strip())
+    if has_customer and has_lookup_datetime:
+        return (
+            "По указанным данным запись не нашла. "
+            "Если нужно, передам администратору на ручную проверку."
+        )
+    if has_lookup_datetime:
+        return "Подскажите, пожалуйста, имя или номер телефона, и проверю ещё раз."
+    if has_customer:
+        return "Подскажите, пожалуйста, примерную дату и время записи, и проверю ещё раз."
     return (
         "Если нужно перенести, подтвердить или отменить запись, "
         "подскажите номер телефона и примерную дату/время, и я помогу найти."
@@ -564,7 +664,15 @@ def _validate_tool_args_contract(
             ]
         )
     elif tool_action == "calendar.get_booking":
-        checks.append(_validate_optional_uuid("appointment_id"))
+        checks.extend(
+            [
+                _validate_optional_uuid("appointment_id"),
+                _validate_optional_text("service_query"),
+                _validate_optional_text("customer_name"),
+                _validate_optional_text("customer_phone"),
+                _validate_optional_text("lookup_datetime"),
+            ]
+        )
     elif tool_action == "calendar.reschedule":
         checks.extend(
             [
@@ -943,16 +1051,243 @@ def _list_slots(
     return _format_slot_list(slots_by_specialist), None
 
 
+def _has_booking_lookup_reference(
+    *,
+    service_query: str | None,
+    customer_name: str | None,
+    customer_phone: str | None,
+    lookup_datetime: str | None,
+) -> bool:
+    return any(
+        isinstance(value, str) and bool(value.strip())
+        for value in (service_query, customer_name, customer_phone, lookup_datetime)
+    )
+
+
+def _has_booking_lookup_identity(
+    *,
+    customer_name: str | None,
+    customer_phone: str | None,
+) -> bool:
+    return any(
+        isinstance(value, str) and bool(value.strip())
+        for value in (customer_name, customer_phone)
+    )
+
+
+def _booking_lookup_timezone(timezone_name: str | None):
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(timezone_name or "Asia/Almaty")
+    except Exception:
+        return timezone.utc
+
+
+def _booking_lookup_datetime_window(
+    lookup_datetime: str | None,
+    *,
+    timezone_name: str | None,
+    now: datetime | None,
+) -> tuple[datetime | None, datetime | None, str | None]:
+    if not isinstance(lookup_datetime, str) or not lookup_datetime.strip():
+        return None, None, None
+    timezone_value = _booking_lookup_timezone(timezone_name)
+    reference_now = now or datetime.now(timezone.utc)
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=timezone.utc)
+    parsed = _parse_datetime(
+        lookup_datetime,
+        fallback_tz=timezone_name,
+        now=reference_now,
+    )
+    if parsed is None:
+        return None, None, None
+    parsed_local = parsed.astimezone(timezone_value)
+    has_date_signal = bool(
+        _extract_relative_date_token(lookup_datetime)
+        or _has_explicit_date_signal(lookup_datetime)
+    )
+    daypart = _extract_daypart_token(lookup_datetime)
+    time_token = _extract_time_token(lookup_datetime)
+    if not has_date_signal and not time_token:
+        return None, None, daypart
+    day_start = parsed_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if time_token:
+        return day_start, day_start + timedelta(days=1), "exact_time"
+    if daypart == "morning":
+        return (
+            day_start.replace(hour=6),
+            day_start.replace(hour=12),
+            "morning",
+        )
+    if daypart == "day":
+        return (
+            day_start.replace(hour=12),
+            day_start.replace(hour=17),
+            "day",
+        )
+    if daypart == "evening":
+        return (
+            day_start.replace(hour=17),
+            day_start + timedelta(days=1),
+            "evening",
+        )
+    return day_start, day_start + timedelta(days=1), "day"
+
+
+def _appointment_lookup_service_name(db: Session, appointment: Appointment) -> str | None:
+    service_name = (
+        db.query(AppointmentServiceModel.service_name)
+        .filter(AppointmentServiceModel.appointment_id == appointment.id)
+        .scalar()
+    )
+    return service_name if isinstance(service_name, str) and service_name.strip() else None
+
+
+def _appointment_lookup_score(
+    db: Session,
+    appointment: Appointment,
+    *,
+    service_query: str | None,
+    customer_name: str | None,
+    customer_phone: str | None,
+    datetime_match_kind: str | None,
+) -> int | None:
+    score = 0
+    normalized_phone = _normalize_booking_idempotency_phone(customer_phone)
+    existing_phone = _normalize_booking_idempotency_phone(
+        getattr(appointment, "customer_phone", None)
+    )
+    if normalized_phone:
+        if not existing_phone or existing_phone != normalized_phone:
+            return None
+        score += 50
+
+    normalized_name = _normalize_booking_idempotency_text(customer_name)
+    existing_name = _normalize_booking_idempotency_text(
+        getattr(appointment, "customer_name", None)
+    )
+    if normalized_name:
+        if not existing_name:
+            return None
+        if existing_name == normalized_name:
+            score += 35
+        elif normalized_name in existing_name or existing_name in normalized_name:
+            score += 20
+        else:
+            return None
+
+    normalized_service = _normalize_booking_idempotency_text(service_query)
+    if normalized_service:
+        existing_service = _normalize_booking_idempotency_text(
+            _appointment_lookup_service_name(db, appointment)
+        )
+        if existing_service:
+            if existing_service == normalized_service:
+                score += 25
+            elif normalized_service in existing_service or existing_service in normalized_service:
+                score += 15
+            else:
+                return None
+
+    if datetime_match_kind:
+        score += 10
+        if datetime_match_kind == "exact_time":
+            score += 10
+    return score
+
+
+def _find_booking_by_lookup_reference(
+    db: Session,
+    *,
+    branch: Branch,
+    service_query: str | None,
+    customer_name: str | None,
+    customer_phone: str | None,
+    lookup_datetime: str | None,
+    now: datetime | None,
+    timezone_name: str | None,
+) -> Appointment | None:
+    window_start, window_end, datetime_match_kind = _booking_lookup_datetime_window(
+        lookup_datetime,
+        timezone_name=timezone_name,
+        now=now,
+    )
+    query = db.query(Appointment).filter(
+        Appointment.client_id == branch.client_id,
+        Appointment.branch_id == branch.id,
+        Appointment.status != "CANCELLED",
+    )
+    if window_start is not None:
+        query = query.filter(Appointment.start_at >= window_start)
+    else:
+        reference_now = now or datetime.now(timezone.utc)
+        if reference_now.tzinfo is None:
+            reference_now = reference_now.replace(tzinfo=timezone.utc)
+        query = query.filter(Appointment.start_at >= reference_now - timedelta(days=1))
+    if window_end is not None:
+        query = query.filter(Appointment.start_at < window_end)
+
+    scored_appointments: list[tuple[int, float, Appointment]] = []
+    for appointment in query.order_by(Appointment.start_at.asc()).limit(50).all():
+        score = _appointment_lookup_score(
+            db,
+            appointment,
+            service_query=service_query,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            datetime_match_kind=datetime_match_kind,
+        )
+        if score is None:
+            continue
+        start_at = appointment.start_at if isinstance(appointment.start_at, datetime) else None
+        sort_timestamp = start_at.timestamp() if start_at is not None else 0.0
+        scored_appointments.append((score, sort_timestamp, appointment))
+    if not scored_appointments:
+        return None
+    scored_appointments.sort(key=lambda item: (-item[0], item[1]))
+    return scored_appointments[0][2]
+
+
 def _get_booking(
     db: Session,
     *,
     appointment_id: UUID | None,
     conversation_id: UUID | None,
+    branch: Branch | None = None,
+    service_query: str | None = None,
+    customer_name: str | None = None,
+    customer_phone: str | None = None,
+    lookup_datetime: str | None = None,
+    now: datetime | None = None,
+    timezone_name: str | None = None,
 ) -> tuple[Appointment | None, str | None]:
     query = db.query(Appointment)
+    has_lookup_reference = _has_booking_lookup_reference(
+        service_query=service_query,
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+        lookup_datetime=lookup_datetime,
+    )
+    has_lookup_identity = _has_booking_lookup_identity(
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+    )
     if appointment_id:
         appointment = query.filter(Appointment.id == appointment_id).first()
-    elif conversation_id:
+    elif branch is not None and has_lookup_reference and has_lookup_identity:
+        appointment = _find_booking_by_lookup_reference(
+            db,
+            branch=branch,
+            service_query=service_query,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            lookup_datetime=lookup_datetime,
+            now=now,
+            timezone_name=timezone_name,
+        )
+    elif conversation_id and not has_lookup_reference:
         appointment = (
             query.filter(Appointment.conversation_id == conversation_id)
             .order_by(Appointment.created_at.desc())
@@ -993,6 +1328,71 @@ def _appointment_time_token(appointment: Appointment | None) -> str | None:
     return start_at.strftime("%H:%M")
 
 
+def _normalize_booking_idempotency_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.casefold().split())
+    return normalized or None
+
+
+def _normalize_booking_idempotency_phone(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
+def _find_idempotent_existing_booking(
+    db: Session,
+    *,
+    branch: Branch,
+    specialist_id: UUID | None,
+    start_at: datetime | None,
+    service_name: str | None,
+    customer_name: str | None,
+    customer_phone: str | None,
+    conversation_id: UUID | None,
+) -> Appointment | None:
+    if not isinstance(start_at, datetime):
+        return None
+    normalized_name = _normalize_booking_idempotency_text(customer_name)
+    normalized_phone = _normalize_booking_idempotency_phone(customer_phone)
+    normalized_service = _normalize_booking_idempotency_text(service_name)
+    if not normalized_name and not normalized_phone:
+        return None
+    query = db.query(Appointment).filter(
+        Appointment.client_id == branch.client_id,
+        Appointment.branch_id == branch.id,
+        Appointment.start_at == start_at,
+        Appointment.status != "CANCELLED",
+    )
+    if specialist_id is not None:
+        query = query.filter(Appointment.specialist_id == specialist_id)
+    for appointment in query.order_by(Appointment.created_at.desc()).limit(10).all():
+        existing_name = _normalize_booking_idempotency_text(appointment.customer_name)
+        existing_phone = _normalize_booking_idempotency_phone(appointment.customer_phone)
+        same_customer = bool(
+            (normalized_phone and existing_phone == normalized_phone)
+            or (normalized_name and existing_name == normalized_name)
+            or (conversation_id and appointment.conversation_id == conversation_id)
+        )
+        if not same_customer:
+            continue
+        if normalized_service:
+            existing_service = (
+                db.query(AppointmentServiceModel.service_name)
+                .filter(AppointmentServiceModel.appointment_id == appointment.id)
+                .scalar()
+            )
+            if (
+                _normalize_booking_idempotency_text(existing_service)
+                != normalized_service
+            ):
+                continue
+        return appointment
+    return None
+
+
 def _book_slot(
     db: Session,
     *,
@@ -1004,6 +1404,7 @@ def _book_slot(
     customer_name: str | None,
     customer_phone: str | None,
     conversation_id: UUID | None,
+    confirmation_policy: str | None = None,
     commit: bool = True,
 ) -> tuple[Appointment | None, str | None]:
     if not start_at:
@@ -1027,7 +1428,7 @@ def _book_slot(
         conversation_id=conversation_id,
         status="PENDING_CONFIRMATION",
         source="bot",
-        confirmation_policy=None,
+        confirmation_policy=confirmation_policy,
         audit={
             "actor_type": "bot",
             "channel": "whatsapp",
@@ -1477,6 +1878,7 @@ def execute_tool_action(
             decision_meta={"tool_action": tool_action, "tool_decision": "branch_missing"},
             trace={"stage": "tool_registry", "decision": "error", "reason": "branch_missing"},
         )
+    branch_tz = getattr(branch, "timezone", None) if branch is not None else None
 
     if tool_action == "calendar.list_slots":
         availability_provider = None
@@ -1630,8 +2032,16 @@ def execute_tool_action(
     if tool_action == "calendar.get_booking":
         appointment_id = tool_args.get("appointment_id")
         appointment_uuid = _parse_uuid(appointment_id)
-        requested_time = _extract_time_token(message_text)
-        requested_date = _extract_relative_date_token(message_text)
+        lookup_service_query = tool_args.get("service_query") or service_query
+        lookup_customer_name = tool_args.get("customer_name")
+        lookup_customer_phone = tool_args.get("customer_phone")
+        lookup_datetime = tool_args.get("lookup_datetime")
+        requested_time = _extract_time_token(message_text) or _extract_time_token(
+            lookup_datetime
+        )
+        requested_date = _extract_relative_date_token(message_text) or _extract_relative_date_token(
+            lookup_datetime
+        )
         requested_reference = _compose_requested_booking_reference(
             requested_date=requested_date,
             requested_time=requested_time,
@@ -1640,6 +2050,13 @@ def execute_tool_action(
             db,
             appointment_id=appointment_uuid,
             conversation_id=conversation_id,
+            branch=branch,
+            service_query=lookup_service_query,
+            customer_name=lookup_customer_name,
+            customer_phone=lookup_customer_phone,
+            lookup_datetime=lookup_datetime,
+            now=now,
+            timezone_name=branch_tz,
         )
         if error:
             response_parts: list[str] = []
@@ -1654,7 +2071,12 @@ def execute_tool_action(
                     "Да, конечно, можно прислать фото/референс. Это поможет менеджеру уточнить детали."
                 )
             response_parts.append(
-                _calendar_get_booking_not_found_followup_text(expected_reply_type)
+                _calendar_get_booking_not_found_followup_text(
+                    expected_reply_type,
+                    customer_name=lookup_customer_name,
+                    customer_phone=lookup_customer_phone,
+                    lookup_datetime=lookup_datetime,
+                )
             )
             return ToolExecutionResult(
                 handled=True,
@@ -1666,6 +2088,12 @@ def execute_tool_action(
                     "tool_decision": "not_found",
                     "requested_time": requested_time,
                     "requested_date": requested_date,
+                    "lookup_by_reference": _has_booking_lookup_reference(
+                        service_query=lookup_service_query,
+                        customer_name=lookup_customer_name,
+                        customer_phone=lookup_customer_phone,
+                        lookup_datetime=lookup_datetime,
+                    ),
                 },
                 trace={
                     "stage": "tool_registry",
@@ -1673,6 +2101,12 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "requested_time": requested_time,
                     "requested_date": requested_date,
+                    "lookup_by_reference": _has_booking_lookup_reference(
+                        service_query=lookup_service_query,
+                        customer_name=lookup_customer_name,
+                        customer_phone=lookup_customer_phone,
+                        lookup_datetime=lookup_datetime,
+                    ),
                 },
             )
         appointment_time = _appointment_time_token(appointment)
@@ -1741,31 +2175,64 @@ def execute_tool_action(
 
     if tool_action == "calendar.book_slot":
         provider_health_reason: str | None = None
-        health = get_provider_health(
-            db,
-            client_id=branch.client_id,
-            branch_id=branch.id,
-        )
-        if not health.ready and _calendar_provider_should_block(health.reason):
+        provider_config = _resolve_calendar_booking_provider(branch)
+        if provider_config.collect_preferences_only:
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text="Сейчас календарь недоступен. Напишите удобное время, и мы уточним.",
-                error_code="provider_unavailable",
+                response_text="Записала пожелания по записи. Менеджер подтвердит доступное время.",
+                error_code="collect_preferences",
                 decision_meta={
                     "tool_action": tool_action,
-                    "tool_decision": "provider_unavailable",
-                    "provider_reason": health.reason,
+                    "tool_decision": "collect_preferences",
+                    "booking_blocked_reason": provider_config.collect_reason,
+                    "availability_provider": provider_config.effective_provider,
+                    "raw_availability_provider": provider_config.availability_provider,
+                    "calendar_provider": provider_config.calendar_provider,
+                    "booking_mode": provider_config.booking_mode,
+                    "external_sync_required": provider_config.external_sync_required,
                 },
                 trace={
                     "stage": "tool_registry",
-                    "decision": "provider_unavailable",
+                    "decision": "collect_preferences",
                     "tool_action": tool_action,
-                    "provider_reason": health.reason,
+                    "booking_blocked_reason": provider_config.collect_reason,
+                    "availability_provider": provider_config.effective_provider,
+                    "external_sync_required": provider_config.external_sync_required,
                 },
             )
-        if not health.ready:
-            provider_health_reason = health.reason
+        if provider_config.requires_provider_health:
+            health = get_provider_health(
+                db,
+                client_id=branch.client_id,
+                branch_id=branch.id,
+            )
+            if not health.ready and _calendar_provider_should_block(health.reason):
+                return ToolExecutionResult(
+                    handled=True,
+                    ok=False,
+                    response_text="Сейчас календарь недоступен. Напишите удобное время, и мы уточним.",
+                    error_code="provider_unavailable",
+                    decision_meta={
+                        "tool_action": tool_action,
+                        "tool_decision": "provider_unavailable",
+                        "provider_reason": health.reason,
+                        "availability_provider": provider_config.effective_provider,
+                        "raw_availability_provider": provider_config.availability_provider,
+                        "calendar_provider": provider_config.calendar_provider,
+                        "external_sync_required": provider_config.external_sync_required,
+                    },
+                    trace={
+                        "stage": "tool_registry",
+                        "decision": "provider_unavailable",
+                        "tool_action": tool_action,
+                        "provider_reason": health.reason,
+                        "availability_provider": provider_config.effective_provider,
+                        "external_sync_required": provider_config.external_sync_required,
+                    },
+                )
+            if not health.ready:
+                provider_health_reason = health.reason
 
         start_at = _parse_datetime(
             tool_args.get("start_at"),
@@ -1879,6 +2346,11 @@ def execute_tool_action(
                     customer_name=resolved_customer_name,
                     customer_phone=resolved_customer_phone,
                     conversation_id=conversation_id,
+                    confirmation_policy=(
+                        "manager"
+                        if provider_config.effective_provider == "console_calendar"
+                        else None
+                    ),
                     commit=False,
                 )
                 if error:
@@ -1888,17 +2360,18 @@ def execute_tool_action(
                         stage="appointment_create",
                         error_code="appointment_missing",
                     )
-                enqueued, sync_error = enqueue_appointment_sync(
-                    db,
-                    appointment=appointment,
-                    action="create",
-                    commit=False,
-                )
-                if not enqueued and sync_error not in {None, "duplicate"}:
-                    raise BookingCreateBoundaryError(
-                        stage="calendar_sync",
-                        error_code=sync_error,
+                if provider_config.external_sync_required:
+                    enqueued, sync_error = enqueue_appointment_sync(
+                        db,
+                        appointment=appointment,
+                        action="create",
+                        commit=False,
                     )
+                    if not enqueued and sync_error not in {None, "duplicate"}:
+                        raise BookingCreateBoundaryError(
+                            stage="calendar_sync",
+                            error_code=sync_error,
+                        )
                 scheduled = schedule_default_reminders(
                     db,
                     appointment=appointment,
@@ -1911,6 +2384,36 @@ def execute_tool_action(
                 _create_booking_bundle,
             )
         except AppointmentConflictError:
+            existing_booking = _find_idempotent_existing_booking(
+                db,
+                branch=branch,
+                specialist_id=specialist.id if specialist else None,
+                start_at=start_at,
+                service_name=service_query,
+                customer_name=resolved_customer_name,
+                customer_phone=resolved_customer_phone,
+                conversation_id=conversation_id,
+            )
+            if existing_booking is not None:
+                return ToolExecutionResult(
+                    handled=True,
+                    ok=True,
+                    response_text=(
+                        "Эта заявка уже есть в календаре. Менеджер подтвердит время."
+                    ),
+                    error_code=None,
+                    decision_meta={
+                        "tool_action": tool_action,
+                        "tool_decision": "idempotent_duplicate",
+                        "appointment_id": str(existing_booking.id),
+                    },
+                    trace={
+                        "stage": "tool_registry",
+                        "decision": "idempotent_duplicate",
+                        "tool_action": tool_action,
+                        "appointment_id": str(existing_booking.id),
+                    },
+                )
             requested_time_from_message = _extract_time_token(message_text)
             requested_time_from_start = (
                 start_at.strftime("%H:%M") if isinstance(start_at, datetime) else None
@@ -1967,6 +2470,10 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "tool_decision": "provider_unavailable",
                     "provider_reason": exc.error_code,
+                    "availability_provider": provider_config.effective_provider,
+                    "raw_availability_provider": provider_config.availability_provider,
+                    "calendar_provider": provider_config.calendar_provider,
+                    "external_sync_required": provider_config.external_sync_required,
                     "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
                 },
                 {
@@ -1974,6 +2481,8 @@ def execute_tool_action(
                     "decision": "provider_unavailable",
                     "tool_action": tool_action,
                     "provider_reason": exc.error_code,
+                    "availability_provider": provider_config.effective_provider,
+                    "external_sync_required": provider_config.external_sync_required,
                     "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
                 },
                 reason=provider_health_reason or exc.error_code,
@@ -2019,6 +2528,11 @@ def execute_tool_action(
                 "specialist_name": specialist.name if specialist else None,
                 "specialist_selection": specialist_selection,
                 "booking_blocked_reason": None,
+                "availability_provider": provider_config.effective_provider,
+                "raw_availability_provider": provider_config.availability_provider,
+                "calendar_provider": provider_config.calendar_provider,
+                "booking_mode": provider_config.booking_mode,
+                "external_sync_required": provider_config.external_sync_required,
                 "customer_name_source": customer_name_source,
                 "customer_phone_source": customer_phone_source,
                 "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
@@ -2032,6 +2546,8 @@ def execute_tool_action(
                 "reminder_jobs_scheduled": len(scheduled),
                 "specialist_id": str(specialist.id) if specialist else None,
                 "specialist_selection": specialist_selection,
+                "availability_provider": provider_config.effective_provider,
+                "external_sync_required": provider_config.external_sync_required,
                 "customer_name_source": customer_name_source,
                 "customer_phone_source": customer_phone_source,
                 "write_boundary": BOOKING_CREATE_WRITE_BOUNDARY,
@@ -2484,7 +3000,10 @@ def execute_tool_action(
                         },
                     )
 
-        if allowed_fact_ref_set and not allow_pricing:
+        service_query_not_found_ref = (
+            "services_overview" if allow_services_overview and not allow_pricing else "pricing"
+        )
+        if allowed_fact_ref_set and not (allow_pricing or allow_services_overview):
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -2592,13 +3111,13 @@ def execute_tool_action(
                     decision_meta={
                         "tool_action": tool_action,
                         "tool_decision": "not_found_fallback",
-                        "info_sections": ["pricing"],
+                        "info_sections": [service_query_not_found_ref],
                     },
                     trace={
                         "stage": "tool_registry",
                         "decision": "not_found_fallback",
                         "tool_action": tool_action,
-                        "info_sections": ["pricing"],
+                        "info_sections": [service_query_not_found_ref],
                     },
                 )
         if error:

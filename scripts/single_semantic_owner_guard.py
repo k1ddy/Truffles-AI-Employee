@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import ast
 from collections import Counter
 from pathlib import Path
+import re
+import subprocess
+import sys
 
 
 CANONICAL_FIELDS = (
@@ -14,6 +18,41 @@ CANONICAL_FIELDS = (
     "active_question_relation",
     "semantic_contract",
     "semantic_frame",
+)
+
+HARDCODE_CORE_PREFIXES = (
+    "truffles-api/app/core/consultant_runtime.py",
+    "truffles-api/app/core/turn_executor.py",
+    "truffles-api/app/core/turn_planner.py",
+    "truffles-api/app/routers/webhook/decision.py",
+    "truffles-api/app/routers/webhook/booking.py",
+    "truffles-api/app/routers/webhook/info.py",
+    "truffles-api/app/services/tool_registry_service.py",
+    "truffles-api/app/services/booking_signal_service.py",
+    "truffles-api/app/services/info_signal_service.py",
+)
+HARDCODE_SCOPE_CORE_PREFIX = "truffles-api/app/core/"
+HARDCODE_SCOPE_WEBHOOK_PREFIX = "truffles-api/app/routers/webhook/"
+HARDCODE_SCOPE_SERVICE_PREFIX = "truffles-api/app/services/"
+HARDCODE_SCOPE_SERVICE_FILES = (
+    "truffles-api/app/services/tool_registry_service.py",
+    "truffles-api/app/services/pack_runtime_service.py",
+)
+HARDCODE_SCOPE_SERVICE_SUFFIXES = (
+    "_signal_service.py",
+    "_runtime_service.py",
+)
+HARDCODE_ALLOW_MARKER = "hardcode-gate: allow"
+HARDCODE_TECHNICAL_ALLOW_SNIPPETS = (
+    're.findall(r"\\w+",',
+    're.search(r"[а-яё]"',
+    're.search(r"[a-z]"',
+    're.findall(r"[a-z]"',
+    're.match(r"^(?P<year>\\d{4})-(?P<month>\\d{2})-(?P<day>\\d{2})',
+    're.search(r"\\d{4}-\\d{2}-\\d{2}"',
+    're.search(r"\\b\\d{1,2}[./-]\\d{1,2}(?:[./-]\\d{2,4})?\\b"',
+    're.fullmatch(r"([01]?\\d|2[0-3]):([0-5]\\d)"',
+    "str.maketrans(",
 )
 
 CANONICAL_WRITE_SCAN_PATHS = (
@@ -468,6 +507,11 @@ FILE_RULES = {
     },
 }
 
+LOCAL_SUBGUARD_SCRIPTS = (
+    "semantic_contract_sync_guard.py",
+    "boundary_rewrite_guard.py",
+)
+
 
 def _source_segment(source: str, node: ast.AST | None) -> str | None:
     if node is None:
@@ -622,7 +666,237 @@ def _canonical_write_violations(repo_root: Path) -> list[str]:
     return violations
 
 
-def evaluate(repo_root: Path) -> list[str]:
+def _collect_git_changed_files(repo_root: Path, base_ref: str) -> tuple[list[str], list[str]]:
+    changed: set[str] = set()
+    scan_warnings: list[str] = []
+    commands = [
+        (
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "diff",
+                "--name-only",
+                f"{base_ref}...HEAD",
+                "--",
+            ],
+            "base_diff",
+        ),
+        (["git", "-C", str(repo_root), "diff", "--name-only", "--"], "worktree_diff"),
+        (["git", "-C", str(repo_root), "diff", "--name-only", "--cached", "--"], "staged_diff"),
+    ]
+    for cmd, label in commands:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except Exception as exc:
+            scan_warnings.append(f"{label}_exec_error:{exc.__class__.__name__}")
+            continue
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            if stderr:
+                scan_warnings.append(f"{label}_error:{stderr[:120]}")
+            else:
+                scan_warnings.append(f"{label}_error:rc{result.returncode}")
+            continue
+        for line in (result.stdout or "").splitlines():
+            path = line.strip().replace("\\", "/")
+            if path:
+                changed.add(path)
+    return sorted(changed), scan_warnings
+
+
+def _is_hardcode_scope_file(path: str) -> bool:
+    normalized = str(path or "").strip().replace("\\", "/")
+    if not normalized:
+        return False
+    if normalized in HARDCODE_CORE_PREFIXES:
+        return True
+    if normalized.startswith(HARDCODE_SCOPE_CORE_PREFIX) and normalized.endswith(".py"):
+        return True
+    if normalized.startswith(HARDCODE_SCOPE_WEBHOOK_PREFIX) and normalized.endswith(".py"):
+        return True
+    if not normalized.startswith(HARDCODE_SCOPE_SERVICE_PREFIX):
+        return False
+    if normalized in HARDCODE_SCOPE_SERVICE_FILES:
+        return True
+    return normalized.endswith(HARDCODE_SCOPE_SERVICE_SUFFIXES)
+
+
+def _line_has_phrase_branching(line: str, *, path: str | None = None) -> bool:
+    if not isinstance(line, str):
+        return False
+    stripped = line.strip()
+    if not stripped:
+        return False
+    lowered = stripped.casefold()
+    normalized_path = str(path or "").strip().replace("\\", "/").casefold()
+    is_signal_file = normalized_path.endswith("_signal_service.py")
+    if lowered.startswith("#"):
+        return False
+    if HARDCODE_ALLOW_MARKER in lowered:
+        return False
+    if any(token in lowered for token in HARDCODE_TECHNICAL_ALLOW_SNIPPETS):
+        return False
+    if any(
+        token in lowered
+        for token in (
+            "get_signal_lexicon_list(",
+            "get_system_lexicon_list(",
+            "phrase_match_intent(",
+            "has_walkin_without_booking_signal(",
+        )
+    ):
+        return False
+    has_context_token = any(
+        token in lowered
+        for token in (
+            "message_text",
+            "normalized",
+            "normalize_for_matching",
+            "_normalize_text",
+        )
+    )
+    if not has_context_token and not is_signal_file:
+        return False
+    has_branch_operator = any(
+        token in lowered
+        for token in (
+            " in ",
+            ".startswith(",
+            ".endswith(",
+            "re.search(",
+            "re.match(",
+            "re.compile(",
+            "=",
+        )
+    )
+    if not has_branch_operator:
+        return False
+    literals: list[str] = []
+    pattern = r'"([^"\\]{3,}|[^"\\]{2,}\s[^"\\]*)"|\'([^\'\\]{3,}|[^\'\\]{2,}\s[^\'\\]*)\''
+    for match in re.finditer(pattern, stripped):
+        literal = match.group(1) or match.group(2)
+        if not isinstance(literal, str):
+            continue
+        literal = literal.strip()
+        if literal:
+            literals.append(literal)
+    if not literals:
+        return False
+    for literal in literals:
+        if re.fullmatch(r"[a-z_][a-z0-9_]{1,63}", literal.strip().casefold()):
+            continue
+        letters = sum(1 for ch in literal if ch.isalpha())
+        if letters >= 3:
+            return True
+    return False
+
+
+def _collect_hardcode_core_violations(
+    *,
+    repo_root: Path,
+    base_ref: str,
+    core_files: list[str],
+) -> tuple[list[dict[str, str]], list[str]]:
+    violations: list[dict[str, str]] = []
+    scan_warnings: list[str] = []
+    if not core_files:
+        return violations, scan_warnings
+    command_specs = [
+        (
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "diff",
+                "--unified=0",
+                f"{base_ref}...HEAD",
+                "--",
+            ],
+            "base_diff",
+        ),
+        (["git", "-C", str(repo_root), "diff", "--unified=0", "--"], "worktree_diff"),
+        (["git", "-C", str(repo_root), "diff", "--unified=0", "--cached", "--"], "staged_diff"),
+    ]
+    for command_prefix, source in command_specs:
+        cmd = [*command_prefix, *core_files]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except Exception as exc:
+            scan_warnings.append(f"{source}_exec_error:{exc.__class__.__name__}")
+            continue
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            if stderr:
+                scan_warnings.append(f"{source}_error:{stderr[:120]}")
+            else:
+                scan_warnings.append(f"{source}_error:rc{result.returncode}")
+            continue
+        current_file: str | None = None
+        for raw_line in (result.stdout or "").splitlines():
+            if raw_line.startswith("+++ b/"):
+                current_file = raw_line.replace("+++ b/", "", 1).strip()
+                continue
+            if not raw_line.startswith("+") or raw_line.startswith("+++"):
+                continue
+            content = raw_line[1:]
+            if not _line_has_phrase_branching(content, path=current_file):
+                continue
+            violations.append(
+                {
+                    "path": current_file or "<unknown>",
+                    "source": source,
+                    "line": content.strip(),
+                }
+            )
+    deduped: dict[tuple[str, str], dict[str, str]] = {}
+    for item in violations:
+        key = (str(item.get("path") or "").strip(), str(item.get("line") or "").strip())
+        deduped.setdefault(key, item)
+    return list(deduped.values()), scan_warnings
+
+
+def _hardcode_core_diff_violations(repo_root: Path, *, base_ref: str = "HEAD") -> list[str]:
+    if not (repo_root / ".git").exists():
+        return []
+    changed_files, _scan_warnings = _collect_git_changed_files(repo_root, base_ref)
+    core_changed_files = [path for path in changed_files if _is_hardcode_scope_file(path)]
+    violations, _scan_warnings_extra = _collect_hardcode_core_violations(
+        repo_root=repo_root,
+        base_ref=base_ref,
+        core_files=core_changed_files,
+    )
+    return [
+        f"{item['path']} contains forbidden semantic hardcode diff line via {item['source']}: {item['line']}"
+        for item in violations
+    ]
+
+
+def _local_subguard_violations(repo_root: Path) -> list[str]:
+    violations: list[str] = []
+    scripts_root = Path(__file__).resolve().parent
+    for script_name in LOCAL_SUBGUARD_SCRIPTS:
+        script_path = scripts_root / script_name
+        if not script_path.exists():
+            violations.append(f"required local subguard missing: scripts/{script_name}")
+            continue
+        result = subprocess.run(
+            [sys.executable, str(script_path), "--repo-root", str(repo_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            continue
+        stderr_lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
+        stdout_lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        messages = stderr_lines or stdout_lines or [f"{script_name} exited with code {result.returncode}"]
+        for message in messages:
+            violations.append(f"{script_name}: {message}")
+    return violations
+
+
+def evaluate(repo_root: Path, *, base_ref: str = "HEAD") -> list[str]:
     violations: list[str] = []
     app_root = repo_root / "truffles-api" / "app"
     for path in app_root.rglob("*.py"):
@@ -667,12 +941,26 @@ def evaluate(repo_root: Path) -> list[str]:
                     f"{relative_path} contains class-router compatibility token {token!r} outside the allowed boundary"
                 )
     violations.extend(_canonical_write_violations(repo_root))
+    violations.extend(_hardcode_core_diff_violations(repo_root, base_ref=base_ref))
+    violations.extend(_local_subguard_violations(repo_root))
     return violations
 
 
 def main() -> int:
-    repo_root = Path(__file__).resolve().parents[1]
-    violations = evaluate(repo_root)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--repo-root",
+        default=str(Path(__file__).resolve().parents[1]),
+        help="Repository root to scan",
+    )
+    parser.add_argument(
+        "--base-ref",
+        default="HEAD",
+        help="Git base ref for diff-scoped hardcode detection",
+    )
+    args = parser.parse_args()
+    repo_root = Path(args.repo_root).resolve()
+    violations = evaluate(repo_root, base_ref=args.base_ref)
     if violations:
         for item in violations:
             print(item)

@@ -17,6 +17,7 @@ class ToolRegistryEntrySnapshotV1(BaseModel):
     accepts_appointment_id: bool = False
     accepts_customer_name: bool = False
     accepts_customer_phone: bool = False
+    accepts_lookup_datetime: bool = False
 
 
 class ToolRegistrySnapshotV1(BaseModel):
@@ -53,6 +54,10 @@ _ENTRY_DEFINITIONS_V1: tuple[dict[str, object], ...] = (
         "tool_action": "calendar.get_booking",
         "tool_group": "calendar",
         "accepts_appointment_id": True,
+        "accepts_service_query": True,
+        "accepts_customer_name": True,
+        "accepts_customer_phone": True,
+        "accepts_lookup_datetime": True,
     },
     {
         "tool_action": "calendar.reschedule",

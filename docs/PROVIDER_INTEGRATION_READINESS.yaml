@@ -1,0 +1,77 @@
+version: 2026-04-21.v2
+contract_name: provider_integration_readiness
+objective: first_beauty_v1_target_provider_readiness
+
+target:
+  client_slug: demo_salon
+  branch_slug: main
+  vertical: beauty
+  description: First Beauty Salon v1 go-live target provider/webhook readiness.
+
+current_owner_truth:
+  chatflow_whatsapp_status: commercially_unavailable
+  reason: unpaid_or_not_enabled
+  effect: blocks_external_whatsapp_channel_go_live
+  does_not_block: internal_console_calendar_booking_proof
+  required_future_behavior:
+    - Console/Ops must show this provider blocker visibly.
+    - Logs and diagnostics should expose commercial/billing/provider blocked state.
+    - Do not spend code-closure work on Chatflow canary until commercial access is restored.
+    - Do not confuse WhatsApp provider readiness with Console Calendar booking readiness.
+
+calendar_truth:
+  primary_booking_calendar: console_calendar_postgres_appointments
+  google_calendar_role: optional_external_projection_or_busy_source
+  google_calendar_required_for_internal_booking: false
+
+repo_contract:
+  required_file_tokens:
+    - path: TECH.md
+      tokens:
+        - docs/PROVIDER_INTEGRATION_READINESS.yaml
+        - scripts/provider_integration_truth.py
+    - path: SPECS/SYSTEM_REFERENCE.md
+      tokens:
+        - docs/PROVIDER_INTEGRATION_READINESS.yaml
+        - scripts/provider_integration_truth.py
+    - path: STRUCTURE.md
+      tokens:
+        - docs/PROVIDER_INTEGRATION_READINESS.yaml
+        - scripts/provider_integration_truth.py
+        - truffles-api/tests/architecture/test_provider_integration_truth.py
+
+required_target_checks:
+  client_status: active
+  branch_active: true
+  branch_go_live_state: approved
+  instance_id_present: true
+  webhook_secret_present: true
+  public_base_url_present: true
+  provider_gateway_inbound_enabled: true
+  integration_state: ok
+  no_recent_inbound_hard_degrade_disabled: true
+  canonical_webhook_probe_ok: true
+
+warning_observations:
+  no_recent_inbound: true
+  latest_inbound_age_minutes: true
+  latest_inbound_origin: true
+  provider_gateway_outbound_disabled: true
+  external_provider_canary_absent: true
+
+hard_degrade_reasons:
+  - invalid_webhook_secret
+  - unknown_instance_id
+  - missing_instance_id
+  - instance_id_mismatch
+  - webhook_secret_drift
+  - inbound_without_outbound
+
+soft_warning_reasons:
+  - no_recent_inbound
+
+residual_policy:
+  stale_traffic_is_not_provider_failure: true
+  do_not_hide_external_canary_gap: true
+  do_not_change_policy_core_semantics: true
+  do_not_mutate_provider_credentials_by_default: true

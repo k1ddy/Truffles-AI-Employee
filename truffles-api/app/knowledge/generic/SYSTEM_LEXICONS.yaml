@@ -66,6 +66,78 @@ booking_relative_day_keywords:
     - сегодня
     - завтра
     - послезавтра
+  kk:
+    - бүгін
+    - бугин
+    - ертең
+    - ертен
+    - бүрсігүні
+    - бурсигуни
+    - bugun
+    - erten
+    - bursiguni
+datetime_lexicon:
+  months:
+    january:
+      canonical_ru: января
+      ru: [январь, января, янв]
+      kk: [қаңтар, кантар, qantar, qañtar]
+      en: [january, jan]
+    february:
+      canonical_ru: февраля
+      ru: [февраль, февраля, фев]
+      kk: [ақпан, акпан, aqpan]
+      en: [february, feb]
+    march:
+      canonical_ru: марта
+      ru: [март, марта]
+      kk: [наурыз, nawryz, nauryz]
+      en: [march, mar]
+    april:
+      canonical_ru: апреля
+      ru: [апрель, апреля, апр]
+      kk: [сәуір, сауир, säwir, sauir]
+      en: [april, apr]
+    may:
+      canonical_ru: мая
+      ru: [май, мая]
+      kk: [мамыр, mamyr]
+      en: [may]
+    june:
+      canonical_ru: июня
+      ru: [июнь, июня, июн]
+      kk: [маусым, mausym]
+      en: [june, jun]
+    july:
+      canonical_ru: июля
+      ru: [июль, июля, июл]
+      kk: [шілде, шильде, şilde, shilde]
+      en: [july, jul]
+    august:
+      canonical_ru: августа
+      ru: [август, августа, авг]
+      kk: [тамыз, tamyz]
+      en: [august, aug]
+    september:
+      canonical_ru: сентября
+      ru: [сентябрь, сентября, сен]
+      kk: [қыркүйек, кыркуйек, qyrküyek, qyrkuyek]
+      en: [september, sep]
+    october:
+      canonical_ru: октября
+      ru: [октябрь, октября, окт]
+      kk: [қазан, казан, qazan]
+      en: [october, oct]
+    november:
+      canonical_ru: ноября
+      ru: [ноябрь, ноября, ноя]
+      kk: [қараша, караша, qarasha]
+      en: [november, nov]
+    december:
+      canonical_ru: декабря
+      ru: [декабрь, декабря, дек]
+      kk: [желтоқсан, желтоксан, jeltoqsan]
+      en: [december, dec]
 consult_intent_cues:
   ru:
     - посовет
@@ -106,6 +178,23 @@ booking_required_details_keywords:
     - нужно для
     - какие нужны
     - нужн
+contact_delay_keywords:
+  ru:
+    - потом
+    - позже
+    - напиш
+    - скину
+    - отправлю
+    - дам позже
+  kz:
+    - кейін
+    - жазам
+    - жіберем
+    - жиберем
+  en:
+    - later
+    - send later
+    - write later
 booking_collect_detail_relative_markers:
   ru:
     - через
@@ -261,6 +350,26 @@ master_query_experience_terms:
     - опытнее
     - опыт
     - стаж
+specialist_relaxation_keywords:
+  ru:
+    - любой
+    - любому
+    - любая
+    - к любому
+    - к любому мастеру
+    - к любому специалисту
+    - можно к любому
+    - не важно
+    - неважно
+    - без разницы
+  kk:
+    - кез келген
+    - маңызды емес
+  en:
+    - any master
+    - any specialist
+    - anyone
+    - does not matter
 location_keywords:
   ru:
     - адрес

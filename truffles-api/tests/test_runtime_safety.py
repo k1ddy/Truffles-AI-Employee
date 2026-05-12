@@ -13,6 +13,16 @@ def test_classify_database_target_treats_sqlite_as_local():
     assert is_local is True
 
 
+def test_classify_database_target_accepts_configured_local_cidr():
+    host, is_local = classify_database_target(
+        "postgresql://n8n:pass@172.24.0.6:5432/chatbot",
+        env={"DATABASE_LOCAL_CIDRS": "172.24.0.0/16"},
+    )
+
+    assert host == "172.24.0.6"
+    assert is_local is True
+
+
 def test_runtime_safety_marks_nonlocal_test_mode_outbox_as_danger():
     snapshot = build_runtime_safety_snapshot(
         env={

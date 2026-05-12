@@ -312,6 +312,25 @@ _BOOKING_SCENARIO_RESCHEDULE_OBJECT_PATTERNS = (
     re.compile(r"\b(?:запис\w*|бронь\w*|дат\w*|врем\w*)\b", re.IGNORECASE),
     re.compile(r"\b(?:жазыл\w*|күн\w*|уақыт\w*)\b", re.IGNORECASE),
 )
+_BOOKING_SCENARIO_BOOKING_MANAGE_CONTEXT_TAGS = {
+    "service",
+    "date",
+    "time",
+    "name",
+    "phone",
+    "handoff",
+    "human",
+    "confirm",
+}
+_BOOKING_SCENARIO_HANDOFF_CONTEXT_START_TAGS = {
+    "handoff",
+    "human",
+    "complaint",
+    "medical",
+    "refund",
+    "payment",
+    "safety",
+}
 _BOOKING_SCENARIO_CHECK_BOOKING_FOLLOWUP_PATTERNS = (
     re.compile(r"\bкогда\b.*\b(запис|встреч|назнач)", re.IGNORECASE),
     re.compile(r"\b(?:моя|мою)\b.*\bзапис(?:ь|и|ью|е|ей)\b", re.IGNORECASE),
@@ -391,6 +410,16 @@ _BOOKING_SCENARIO_FALLBACK_TEMPLATES_BY_TAG = {
     "delay": "Я уточню и вернусь.",
     "handoff": "Можно связаться с менеджером?",
 }
+_BOOKING_SCENARIO_FALLBACK_CONTEXT = {
+    "greet": "Здравствуйте",
+    "service": "маникюр",
+    "master": "Алия",
+    "time_exact": "на 19:00",
+    "time_exact_alt": "на 18:30",
+    "name": "Лена",
+    "phone": "+7 701 111 22 33",
+    "noise": "Извините, отвлеклась.",
+}
 _BOOKING_SCENARIO_FALLBACK_TAG_PRIORITY = (
     "booking",
     "time",
@@ -443,6 +472,11 @@ _BOOKING_SCENARIO_RESCHEDULE_FOLLOWUP_EXPECT_OVERRIDE = {
     "state": "pending",
     "expected_reply": True,
 }
+_BOOKING_SCENARIO_BOOKING_MANAGE_CONTEXT_EXPECT_OVERRIDE = {
+    "action": "handoff",
+    "state": "pending",
+    "expected_reply": None,
+}
 _BOOKING_SCENARIO_CHECK_BOOKING_FOLLOWUP_EXPECT_OVERRIDE = {
     "expected_reply": True,
 }
@@ -466,6 +500,23 @@ _BOOKING_SCENARIO_TIME_COLLECT_EXPECT_OVERRIDE = {
         }
     ],
 }
+_BOOKING_SCENARIO_UNSUPPORTED_SERVICE_EXPECT_OVERRIDE = {
+    "action": "fact",
+    "state": "bot_active",
+    "expected_reply": True,
+    "reply_type": None,
+    "meta_any": {
+        "action": ["fact"],
+        "source": ["llm_policy_core"],
+        "intent": ["services_overview", "out_of_domain"],
+        "tool_action": ["catalog.service_query", "info"],
+    },
+}
+_BOOKING_SCENARIO_UNSUPPORTED_SERVICE_INQUIRY_PATTERNS = (
+    re.compile(r"\bдела(?:ете|й?те)?\b", re.IGNORECASE),
+    re.compile(r"\bесть\s+ли\b", re.IGNORECASE),
+    re.compile(r"\bможно\s+ли\b", re.IGNORECASE),
+)
 
 
 def normalize_expect_token(token: str | None) -> str | None:
@@ -1582,18 +1633,29 @@ def _booking_scenario_looks_like_assistant_turn(text: str | None) -> bool:
 
 
 def _booking_scenario_fallback_text_for_tags(tags: list[str], ctx: dict[str, str]) -> str:
+    format_ctx = dict(_BOOKING_SCENARIO_FALLBACK_CONTEXT)
+    format_ctx.update(
+        {
+            str(key): str(value)
+            for key, value in (ctx or {}).items()
+            if value is not None and str(value).strip()
+        }
+    )
     for tag in _BOOKING_SCENARIO_FALLBACK_TAG_PRIORITY:
         if tag in tags:
             template = _BOOKING_SCENARIO_FALLBACK_TEMPLATES_BY_TAG.get(tag)
             if template:
-                return template.format(**ctx)
-    return f"{ctx.get('greet', 'Здравствуйте')}, хочу записаться на {ctx.get('service', 'услугу')}."
+                return template.format(**format_ctx)
+    return (
+        f"{format_ctx.get('greet', 'Здравствуйте')}, "
+        f"хочу записаться на {format_ctx.get('service', 'услугу')}."
+    )
 
 
 def _booking_scenario_text_matches_tag_contract(text: str, tags: list[str]) -> bool:
     if not text:
         return False
-    lowered_tags = _booking_scenario_coerce_turn_tags(tags)
+    lowered_tags = set(_booking_scenario_coerce_turn_tags(tags))
     if "master" in lowered_tags:
         return looks_like_booking_scenario_specialist_reference(text)
     return True
@@ -1915,13 +1977,67 @@ def booking_scenario_looks_like_service_grounded_booking(
         ctx=ctx,
     ):
         return False
-    return bool(
-        _booking_scenario_matched_service_candidates(
-            text,
-            service_candidates=service_candidates,
-            ctx=ctx,
-        )
+    matches = _booking_scenario_matched_service_candidates(
+        text,
+        service_candidates=service_candidates,
+        ctx=ctx,
     )
+    if len(matches) >= 2:
+        return False
+    return bool(matches)
+
+
+def booking_scenario_looks_like_unsupported_service_inquiry(
+    text: str | None,
+    tags: list[str],
+    *,
+    service_candidates: tuple[str, ...] | list[str] = (),
+    ctx: Mapping[str, str] | None = None,
+) -> bool:
+    if not text:
+        return False
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if not (lowered_tags & {"consult", "interrupt", "info"}):
+        return False
+    if booking_scenario_looks_like_service_grounded_booking(
+        text,
+        service_candidates=service_candidates,
+        ctx=ctx,
+    ):
+        return False
+    return any(
+        pattern.search(text)
+        for pattern in _BOOKING_SCENARIO_UNSUPPORTED_SERVICE_INQUIRY_PATTERNS
+    )
+
+
+def advance_booking_scenario_unsupported_service_context(
+    active: bool,
+    *,
+    text: str | None,
+    tags: list[str],
+    service_candidates: tuple[str, ...] | list[str] = (),
+    ctx: Mapping[str, str] | None = None,
+) -> bool:
+    if booking_scenario_looks_like_unsupported_service_inquiry(
+        text,
+        tags,
+        service_candidates=service_candidates,
+        ctx=ctx,
+    ):
+        return True
+    if not active:
+        return False
+    if booking_scenario_looks_like_service_grounded_booking(
+        text,
+        service_candidates=service_candidates,
+        ctx=ctx,
+    ):
+        return False
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if lowered_tags & {"cancel", "reschedule", "check_booking"}:
+        return False
+    return True
 
 
 def booking_scenario_looks_like_partial_date_availability_slot_constraint(
@@ -1994,6 +2110,13 @@ def booking_scenario_looks_like_reschedule_followup(
     if has_reschedule_verb:
         return has_temporal_followup
     return has_temporal_followup
+
+
+def booking_scenario_looks_like_booking_manage_context_followup(tags: list[str]) -> bool:
+    lowered_tags = _booking_scenario_lowered_tags(tags)
+    if lowered_tags & {"booking", "check_booking"}:
+        return False
+    return bool(lowered_tags & _BOOKING_SCENARIO_BOOKING_MANAGE_CONTEXT_TAGS)
 
 
 def booking_scenario_looks_like_check_booking_followup(
@@ -2804,6 +2927,10 @@ def booking_scenario_reschedule_followup_expect_override() -> dict[str, Any]:
     return deepcopy(_BOOKING_SCENARIO_RESCHEDULE_FOLLOWUP_EXPECT_OVERRIDE)
 
 
+def booking_scenario_booking_manage_context_expect_override() -> dict[str, Any]:
+    return deepcopy(_BOOKING_SCENARIO_BOOKING_MANAGE_CONTEXT_EXPECT_OVERRIDE)
+
+
 def rewrite_booking_scenario_check_booking_followup_tags(tags: list[str]) -> list[str]:
     rewritten: list[str] = []
     for raw_tag in tags:
@@ -2829,6 +2956,10 @@ def booking_scenario_check_booking_confirm_expect_override() -> dict[str, Any]:
 
 def booking_scenario_time_collect_expect_override() -> dict[str, Any]:
     return deepcopy(_BOOKING_SCENARIO_TIME_COLLECT_EXPECT_OVERRIDE)
+
+
+def booking_scenario_unsupported_service_expect_override() -> dict[str, Any]:
+    return deepcopy(_BOOKING_SCENARIO_UNSUPPORTED_SERVICE_EXPECT_OVERRIDE)
 
 
 def has_booking_scenario_active_check_booking_confirm(
@@ -3636,10 +3767,20 @@ def apply_booking_scenario_multi_service_booking_clarify_expectations(
     lowered_tags = _booking_scenario_lowered_tags(tags)
     if "booking" not in lowered_tags:
         return expect
-    if not booking_scenario_looks_like_multi_service_booking_request(
-        text,
-        service_candidates=service_candidates,
-        ctx=ctx,
+    tagged_multi_service = "multi_service" in lowered_tags and len(
+        _booking_scenario_matched_service_candidates(
+            text,
+            service_candidates=service_candidates,
+            ctx=ctx,
+        )
+    ) >= 2
+    if (
+        not tagged_multi_service
+        and not booking_scenario_looks_like_multi_service_booking_request(
+            text,
+            service_candidates=service_candidates,
+            ctx=ctx,
+        )
     ):
         return expect
 
@@ -4109,11 +4250,15 @@ def advance_booking_scenario_management_context(
     tags: list[str],
     expect: dict[str, Any] | None,
 ) -> str | None:
-    lowered_tags = _booking_scenario_coerce_turn_tags(tags)
+    lowered_tags = set(_booking_scenario_coerce_turn_tags(tags))
+    if "cancel" in lowered_tags:
+        return "cancel"
     if "reschedule" in lowered_tags:
         return "reschedule"
     if "check_booking" in lowered_tags:
         return "check_booking"
+    if lowered_tags & _BOOKING_SCENARIO_HANDOFF_CONTEXT_START_TAGS:
+        return "handoff"
     if active_management_tag is None:
         return None
 
@@ -4131,6 +4276,7 @@ class BookingScenarioPostCoverageRepairState:
     partial_date_anchor_active: bool = False
     multi_service_clarify_active: bool = False
     active_management_tag: str | None = None
+    unsupported_service_context_active: bool = False
 
 
 @dataclass(frozen=True)
@@ -4294,6 +4440,31 @@ def _booking_scenario_select_post_coverage_repair_decision(
             tags=rewrite_booking_scenario_reschedule_followup_tags(effective_tags),
             expect_override=booking_scenario_reschedule_followup_expect_override(),
         )
+    if (
+        booking_scenario_looks_like_unsupported_service_inquiry(
+            text,
+            effective_tags,
+            service_candidates=callbacks.service_candidates,
+            ctx=None,
+        )
+    ):
+        return BookingScenarioPostCoverageRepairDecision(
+            tags=effective_tags,
+            expect_override=booking_scenario_unsupported_service_expect_override(),
+        )
+    if (
+        state.unsupported_service_context_active
+        and "booking" in _booking_scenario_lowered_tags(effective_tags)
+        and not booking_scenario_looks_like_service_grounded_booking(
+            text,
+            service_candidates=callbacks.service_candidates,
+            ctx=None,
+        )
+    ):
+        return BookingScenarioPostCoverageRepairDecision(
+            tags=effective_tags,
+            expect_override=booking_scenario_unsupported_service_expect_override(),
+        )
     if has_booking_scenario_orphan_pending_question_tags(
         effective_tags,
         active_reply_type=state.active_reply_type,
@@ -4425,6 +4596,25 @@ def repair_booking_scenario_post_coverage_dialogs(
                 text=text,
                 active_reply_type=state.active_reply_type,
             )
+            unsupported_service_followup = bool(
+                state.unsupported_service_context_active
+                and "booking" in _booking_scenario_lowered_tags(current_tags)
+                and not booking_scenario_looks_like_service_grounded_booking(
+                    text,
+                    service_candidates=callbacks.service_candidates,
+                    ctx=None,
+                )
+            )
+            unsupported_service_inquiry = booking_scenario_looks_like_unsupported_service_inquiry(
+                text,
+                current_tags,
+                service_candidates=callbacks.service_candidates,
+                ctx=None,
+            )
+            if unsupported_service_inquiry or unsupported_service_followup:
+                expectations.update(booking_scenario_unsupported_service_expect_override())
+                expectations["reply_type"] = None
+                expectations["trace_contains"] = []
             normalized_turn["expect"] = expectations
 
             next_active_reply_type = advance_booking_scenario_pending_question_context(
@@ -4453,6 +4643,13 @@ def repair_booking_scenario_post_coverage_dialogs(
                     state.active_management_tag,
                     tags=current_tags,
                     expect=expectations,
+                ),
+                unsupported_service_context_active=advance_booking_scenario_unsupported_service_context(
+                    state.unsupported_service_context_active,
+                    text=text,
+                    tags=current_tags,
+                    service_candidates=callbacks.service_candidates,
+                    ctx=None,
                 ),
             )
             repaired_turns.append(normalized_turn)
@@ -4737,6 +4934,25 @@ def sanitize_booking_scenario_llm_turns(
             state.active_management_tag == "reschedule"
             and booking_scenario_looks_like_reschedule_followup(text, tags)
         )
+        booking_manage_context_followup = bool(
+            state.active_management_tag in {"cancel", "reschedule", "handoff"}
+            and booking_scenario_looks_like_booking_manage_context_followup(tags)
+        )
+        unsupported_service_followup = bool(
+            state.unsupported_service_context_active
+            and "booking" in _booking_scenario_lowered_tags(tags)
+            and not booking_scenario_looks_like_service_grounded_booking(
+                text,
+                service_candidates=normalized_service_candidates,
+                ctx=ctx,
+            )
+        )
+        unsupported_service_inquiry = booking_scenario_looks_like_unsupported_service_inquiry(
+            text,
+            tags,
+            service_candidates=normalized_service_candidates,
+            ctx=ctx,
+        )
         if check_booking_followup_normalized:
             tags = rewrite_booking_scenario_check_booking_followup_tags(tags)
             normalized_turn["expect"] = booking_scenario_check_booking_followup_expect_override()
@@ -4748,6 +4964,14 @@ def sanitize_booking_scenario_llm_turns(
         elif reschedule_followup_normalized:
             tags = rewrite_booking_scenario_reschedule_followup_tags(tags)
             normalized_turn["expect"] = booking_scenario_reschedule_followup_expect_override()
+        elif booking_manage_context_followup:
+            if state.active_management_tag not in tags:
+                tags = [state.active_management_tag, *tags]
+            if "handoff" not in tags:
+                tags = [*tags, "handoff"]
+            normalized_turn["expect"] = booking_scenario_booking_manage_context_expect_override()
+        elif unsupported_service_inquiry or unsupported_service_followup:
+            normalized_turn["expect"] = booking_scenario_unsupported_service_expect_override()
         elif has_booking_scenario_orphan_pending_question_tags(
             tags,
             active_reply_type=state.active_reply_type,
@@ -4925,6 +5149,19 @@ def sanitize_booking_scenario_llm_turns(
             text=text,
             active_reply_type=state.active_reply_type,
         )
+        if booking_manage_context_followup:
+            expectations.update(
+                booking_scenario_booking_manage_context_expect_override()
+            )
+            expectations["reply_type"] = None
+            expectations["meta"] = {}
+            expectations["meta_any"] = {}
+            expectations["meta_contains"] = {}
+            expectations["trace_contains"] = []
+        if unsupported_service_inquiry or unsupported_service_followup:
+            expectations.update(booking_scenario_unsupported_service_expect_override())
+            expectations["reply_type"] = None
+            expectations["trace_contains"] = []
         normalized_turn["expect"] = expectations
 
         next_active_reply_type = advance_booking_scenario_pending_question_context(
@@ -4953,6 +5190,13 @@ def sanitize_booking_scenario_llm_turns(
                 tags=tags,
                 expect=expectations,
             ),
+            unsupported_service_context_active=advance_booking_scenario_unsupported_service_context(
+                state.unsupported_service_context_active,
+                text=text,
+                tags=tags,
+                service_candidates=normalized_service_candidates,
+                ctx=ctx,
+            ),
         )
         sanitized.append(normalized_turn)
     return sanitized
@@ -4963,6 +5207,7 @@ __all__ = [
     "BookingScenarioPostCoverageRepairDecision",
     "BookingScenarioPostCoverageRepairState",
     "booking_scenario_looks_like_ambiguous_time_fill",
+    "booking_scenario_looks_like_booking_manage_context_followup",
     "booking_scenario_looks_like_explicit_time_fill",
     "booking_scenario_looks_like_generic_master_info_question",
     "booking_scenario_looks_like_grounded_partial_date_daypart_fill",
@@ -4976,6 +5221,7 @@ __all__ = [
     "booking_scenario_looks_like_requested_slot_question_without_temporal_scope",
     "booking_scenario_check_booking_followup_expect_override",
     "booking_scenario_check_booking_confirm_expect_override",
+    "booking_scenario_booking_manage_context_expect_override",
     "booking_scenario_normalize_active_time_booking_fill_tags",
     "booking_scenario_normalize_active_time_weak_time_question_tags",
     "booking_scenario_normalize_booking_requested_slot_question_tags",
@@ -4993,6 +5239,7 @@ __all__ = [
     "booking_scenario_orphan_pending_question_expect_override",
     "booking_scenario_reschedule_followup_expect_override",
     "booking_scenario_time_collect_expect_override",
+    "booking_scenario_unsupported_service_expect_override",
     "BOOKING_SCENARIO_EXPECT_INFO_SECTIONS",
     "BOOKING_SCENARIO_PENDING_QUESTION_TAGS",
     "BOOKING_SCENARIO_TARGETED_PENDING_QUESTION_TAGS",
@@ -5000,6 +5247,7 @@ __all__ = [
     "advance_booking_scenario_multi_service_clarify_context",
     "advance_booking_scenario_partial_date_anchor_context",
     "advance_booking_scenario_pending_question_context",
+    "advance_booking_scenario_unsupported_service_context",
     "apply_booking_scenario_active_pending_question_cancel_interrupt_expectations",
     "apply_booking_scenario_active_pending_question_info_interrupt_expectations",
     "apply_booking_scenario_active_name_master_info_interrupt_expectations",
@@ -5026,6 +5274,7 @@ __all__ = [
     "booking_scenario_looks_like_specialist_availability_followup_question",
     "booking_scenario_looks_like_standalone_specialist_booking_request",
     "booking_scenario_looks_like_multi_service_booking_request",
+    "booking_scenario_looks_like_unsupported_service_inquiry",
     "booking_scenario_normalize_active_name_master_info_tags",
     "booking_scenario_normalize_active_time_master_info_tags",
     "booking_scenario_normalize_active_time_specialist_master_tags",

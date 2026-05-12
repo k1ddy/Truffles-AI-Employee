@@ -56,7 +56,13 @@ _TOOL_ARGS_ALLOWED_FIELDS: dict[str, set[str]] = {
         "customer_name",
         "customer_phone",
     },
-    "calendar.get_booking": {"appointment_id"},
+    "calendar.get_booking": {
+        "appointment_id",
+        "service_query",
+        "customer_name",
+        "customer_phone",
+        "lookup_datetime",
+    },
     "calendar.reschedule": {"appointment_id", "start_at", "end_at"},
     "calendar.cancel": {"appointment_id", "reason"},
     "catalog.service_query": {"service_query"},
@@ -92,6 +98,10 @@ _TOOL_ARGS_FIELD_KINDS: dict[str, dict[str, str]] = {
     },
     "calendar.get_booking": {
         "appointment_id": _TOOL_ARG_KIND_TEXT,
+        "service_query": _TOOL_ARG_KIND_TEXT,
+        "customer_name": _TOOL_ARG_KIND_TEXT,
+        "customer_phone": _TOOL_ARG_KIND_TEXT,
+        "lookup_datetime": _TOOL_ARG_KIND_TEXT,
     },
     "calendar.reschedule": {
         "appointment_id": _TOOL_ARG_KIND_TEXT,
@@ -172,6 +182,7 @@ SEMANTIC_PENDING_QUESTION_ACT_ALIASES = {
 }
 SEMANTIC_PENDING_QUESTION_TARGET_VALUES = {
     "time",
+    "phone",
     "specialist",
 }
 SEMANTIC_ACTIVE_QUESTION_RELATION_VALUES = {

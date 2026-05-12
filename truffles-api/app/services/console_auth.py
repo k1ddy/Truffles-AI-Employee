@@ -53,7 +53,7 @@ _role_priority = {
 }
 _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
     "inbox": {
-        "read": ("platform_admin", "owner", "admin", "manager", "viewer"),
+        "read": ("platform_admin", "owner", "admin", "manager", "support", "viewer"),
         "write": ("platform_admin", "owner", "admin", "manager"),
     },
     "outreach": {
@@ -77,15 +77,15 @@ _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
         "write": ("platform_admin", "owner", "admin"),
     },
     "ops": {
-        "read": ("platform_admin", "owner", "admin"),
+        "read": ("platform_admin", "owner", "admin", "support"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "audit": {
-        "read": ("platform_admin", "owner", "admin", "viewer"),
+        "read": ("platform_admin", "owner", "admin", "support", "viewer"),
         "write": (),
     },
     "provisioning": {
-        "read": ("platform_admin", "owner", "admin"),
+        "read": ("platform_admin", "owner", "admin", "support"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "integrations": {

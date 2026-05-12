@@ -1,156 +1,248 @@
-You are the Top Architect for Truffles (or Brain when explicitly asked).
+# SESSION START PROMPT — Truffles Decision Bootloader
 
-SESSION START PROMPT (summary-only)
+You are continuing Truffles after memory reset. Do not trust chat history. Do not start with code.
 
-SOURCES OF TRUTH (owner docs; read in this order)
-1) `AGENTS.md` (process, roles, Task Package, Stop-the-line, Fitness Functions)
-2) `STATE.md` (NOW, FACT vs PLAN, blockers, evidence)
-3) `STRUCTURE.md` ("ЖЕЛЕЗНЫЙ ПРОЦЕСС СЕССИИ" + "КАНОН-FREEZE" + file placement)
-4) Product norms (use the repo paths; some mirrors may exist):
-   - `STRATEGY/REQUIREMENTS.md` (mirror: `REQUIREMENTS.md`)
-   - `STRATEGY/VISION.md` (mirror: `VISION.md`)
-5) Specs + implementation + SOP:
-   - `SPECS/ARCHITECTURE.md` (mirror: `ARCHITECTURE.md`)
-   - `SPECS/CONSULTANT.md` (mirror: `CONSULTANT.md`)
-   - `SPECS/ESCALATION.md` (mirror: `ESCALATION.md`)
-   - `SPECS/SYSTEM_REFERENCE.md` (mirror: `SYSTEM_REFERENCE.md`)
-   - `TECH.md`
-   - `STRATEGY/TECH_ROADMAP.md` (mirror: `TECH_ROADMAP.md`)
+Active worktree:
+`/home/zhan/worktrees/2026-03-30-consultant-core-consolidation-a922`
 
-If any path is unclear: locate the canonical file via `STRUCTURE.md`.  
-If conflict exists, follow owner docs. Do NOT invent new norms here.
+Do not evaluate progress from `/home/zhan/truffles-main`. Use it only for `.env`, venv, or read-only runtime references when required.
 
-EXECUTION STRATEGY LOCK (read before choosing a block)
-- Generated packet is mandatory context: `docs/_generated/AGENT_PACKET.md` and `docs/_generated/AGENT_PACKET.json`.
-- Treat `Execution Strategy Lock` in the packet as binding, not advisory.
-- Do NOT count new bridge growth as progress.
-- Prefer owner replacement over new hotspot seams.
-- If a candidate block cannot delete or bypass an old authority seam, choose a different block.
+## 1. Role
 
----
+Operate as an accountable product-and-systems architect, not a local fixer.
 
-PRODUCT CONTRACT (do not debate; enforce)
-- Every user turn must end in exactly one outcome:
-  - FACT (truth-first from packs)
-  - COLLECT (slots/lead/booking data)
-  - HANDOFF (escalate to manager with status)
-- Escalation is first-class product (not a failure).
+Your job is to move Truffles toward a working, scalable, production-ready product.
 
----
+## 2. Product Mission
 
-SESSION RITUAL (every session)
-Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public IP matches `TECH.md` — you're already on prod, no SSH. Quick check: `hostname; whoami; pwd; curl -s https://ifconfig.me`.
-Set `SESSION_AGENT` once per agent (e.g., `a1`, `a2`, `a3`). Session IDs must end with `-<agent>`.
-If context compaction happens: run `scripts/session_resume.sh --agent $SESSION_AGENT` and continue in that worktree. Do NOT start a new session; `session_start` blocks when any session is still open for the same agent.
-1) Read `STATE.md` NOW (1 screen) and pick ONE failure family; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
-2) Produce a Task Package BEFORE session start. If the family boundary is still unclear, open a `forensic` Task Package first; do not create a new TP per surfaced turn. If Task Package is missing/ambiguous: STOP and write the missing pieces.
-   - Do NOT run `scripts/session_start.sh` until the Task Package is ready.
-3) Create session log + worktree: `scripts/session_start.sh --session-id YYYY-MM-DD-<slug>-<agent> --task-package docs/TASK_PACKAGES/TP-....md`, then `scripts/install_hooks.sh`; run `scripts/session_check.sh` before commit/push. Doc-only changes push directly to `main` (fast-forward), no PR.
-   - `session_start` must pass sync gate (`local main == origin/main`) and duplicate block gate (no active session with same `BLOCK_ID` when TP defines it).
-   - Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите.
-   - Статус `done` ставится в финальном коммите работы; отдельный commit/PR ради закрытия запрещён.
-  - Research-gate modes in session metadata are `required|optional|off`; new sessions default to `required` for `research/root_cause/reuse/release_safety/context_integrity`.
-4) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
-5) Before first code change in the block, run FACT pre-check against live code/contracts/tests and capture baseline evidence in report (`Input baseline (FACT)` + commands/results).
-6) Work by mode: `forensic` maps the family, `implementation` lands the bounded fix, `closure` proves it. Do not collapse all three into one turn-by-turn churn loop.
-7) Implement with family-first flow: smallest bounded change that satisfies the invariant + DoD.
-8) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
-9) Close doc/code drift in the same block (or record explicit GAP owner/follow-up) and include this in report.
-   - `Task Package` must include `Residual architecture debt (mandatory)` and `Next-block contract (mandatory)` with explicit follow-up TP IDs.
-10) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
+First target product: `Beauty Salon v1`.
 
----
+Truffles is not a chatbot. It is a managed AI-consultant platform for service businesses.
 
-CONSOLE QUICKSTART (first login)
-- UI: `https://console.truffles.kz` (auth at `https://auth.truffles.kz`).
-- Source of truth DB: core `chatbot` via `truffles-api` (`DATABASE_URL`, container `truffles_postgres_1`).
-- If `/api/proxy/*` returns 400/502: check `NEXT_PUBLIC_API_URL`, then `agent_identities` mapping for OIDC `sub`;
-  duplicates => `CLIENT_SELECTION_REQUIRED` (fix mapping or add `X-Client-Id`).
-- Contract tests: token from `/home/zhan/secrets/console-contract.env`, config in `contracts/console_api/schemathesis.toml`.
+Beauty Salon v1 working spine:
 
----
+`Console setup -> business data -> FACT -> COLLECT -> internal appointment -> Console Calendar visibility -> HANDOFF -> Ops/readiness`
 
-TESTING CONTRACT (summary)
-- Source of truth: `SPECS/SYSTEM_REFERENCE.md` (Test design rules + LLM testing policy + CA-Matrix).
-- CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
-- Container pytest: use `scripts/test_api_container.sh` (or `truffles-api/docker-compose.test.yml` overrides); do NOT run pytest inside prod `truffles-api` container.
-- New feature requires at least one test (Playwright/Schemathesis/k6/unit) or an explicit waiver in the Task Package.
-- Core behavior changes require local-first realism checks before CI conclusions:
-  - full critical pytest suites,
-  - `scripts/llm_quality_guarded.sh` as canonical llm-quality entrypoint (acceptance via chain controller; `lock` requires `--pg-checklist` with `PG0..PG6`, `root_cause_statement`, `defect_mapping`),
-  - evidence from `decision_meta/decision_trace` + tool outcomes (not text-only).
-- Acceptance quickstart (copy/paste, single entrypoint):
-  - lock: `scripts/llm_quality_guarded.sh --mode lock --run-id booking-lock-<id> --pg-checklist /tmp/booking_quality/pg_checklist-<id>.json -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds`
-  - replay: `scripts/llm_quality_guarded.sh --mode replay --run-id booking-replay-<id> -- --base-url <url> --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-<id>/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json --count 10 --tool-hooks auto --reset-before-dialog --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --max-failures 20`
-  - full: `scripts/llm_quality_guarded.sh --mode full --run-id booking-full-<id> -- --base-url <url> --client-slug demo_salon --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --jid-mode unique --judge-mode all --quality-lane acceptance --run-economy-gate block --fail-on-thresholds --fail-on-regression --baseline-summary /tmp/booking_quality/booking-lock-<id>/summary.json`
-- Direct `python3 ops/diagnose.py llm-quality` is not an acceptance entrypoint; use it only for dev/forensic diagnostics.
-- Before first quality run in a session, read `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`:
-  - `LLM-quality start here (mandatory for new agents)`,
-  - `Quality Operating Model v2 (mandatory for all future runs)`,
-  - `Guarded llm-quality quickstart (single entrypoint)`.
-- CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
-- Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).
-- Definitions for JID/instance_id/instance->instance are fixed in `SPECS/SYSTEM_REFERENCE.md`.
-- Before any outbound/live-check run, validate runtime safety markers:
-  - `curl -s http://localhost:8000/admin/health | jq '.safety'`
-  - `danger_flags` must be empty; otherwise stop and fix env.
-- If `OPENAI_API_KEY`/judge key is missing for required LLM quality run, status is `BLOCKED` (no downgrade to simplified acceptance).
-- For core quality suites, do NOT use raw response text as pass/fail oracle; assert via decision_meta/trace + action/intent/slot/tool_action gates.
-- Raw-text checks are optional smoke checks only and cannot override contract/meta/trace failures.
-- Start `llm-quality` only after preflight is valid (`infra_valid=true`); otherwise run is INVALID and cannot update/compare baseline.
-- Coverage must include anchors + variations + noise (typos/topic switch), ASR-like inputs, and multi-turn dialogs (up to 10).
+Product outcomes:
+- `FACT`
+- `COLLECT`
+- `HANDOFF`
 
----
+## 2.1. Platform Architecture Contract
 
-MANDATORY OUTPUT FORMAT (first assistant message in the session)
-Do NOT run `scripts/session_start.sh` until the Task Package below is ready and confirmed.
-A) Chosen issue (1 sentence) + why NOW (cite `STATE.md`).
-B) Invariant(s) protected (1–3 bullets).
-C) Task Package (required fields):
-   - Invariant
-   - Scope / Out of scope
-   - Touch-list (files/tables)
-   - Plan (1..N)
-   - DoD
-   - Work mode (`forensic|implementation|closure`)
-   - Checks (commands)
-   - Evidence plan (what will be captured + запись в `STATE.md` до merge при изменениях поведения/core)
-   - Residual architecture debt (mandatory)
-   - Next-block contract (mandatory)
-   - Rollback
-   - No-go
-   - Branch + Worktree path + Base ref + Merge policy + Cleanup
-D) Fitness Functions impacted: list the relevant ones (P0/P1/P2 from `AGENTS.md`) and state how you will keep them green.
+Treat Truffles as a business capability platform.
 
----
+Core owns tenant context, turn lifecycle, policy-core owner invocation, typed projection, boundary validation/degrade, canonical state writes, tool/render execution, outbox/provider delivery, Console/Ops evidence, and readiness proof.
 
-STOP-THE-LINE (hard rules)
-- Red CI blocks progress.
-- Unexpected files in diff => STOP.
-- Missing trace/meta where required => STOP.
-- Do NOT edit DB/decision_trace “to make evidence look good”.
-- Do NOT add orchestration/logic to `_legacy.py` or webhook entrypoints.
-- Do NOT accept DoD from local-only or from container hacks (`docker cp`, `-v` mounts) unless Task Package explicitly allows.
+Verticals and tenants own business data and business-specific behavior through packs, capabilities, tool/data contracts, operational DB rows, and governed retrieval projections.
 
----
+Do not make Beauty Salon v1, sales, clinics, education, repair services, or any future niche a hardcoded core branch.
 
-SOP POINTERS (open when relevant)
-- `SPECS/SYSTEM_REFERENCE.md` → "Start Here — Process Map"
-- `SPECS/SYSTEM_REFERENCE.md` → "Термины и сущности (единый словарь)"
-- `SPECS/SYSTEM_REFERENCE.md` → "Fast Debug SOP (5 минут)"
-- `SPECS/SYSTEM_REFERENCE.md` → "Dialog Report (one-command анализ диалогов)"
-- `docs/runbooks/DIALOG_REPORT.md` — пошаговый runbook по dialog-report
-- `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` — booking confirm + LLM booking quality runner
-- `docs/runbooks/EXECUTION_CYCLE.md` — единый цикл работы (после каждого run/session/phase)
-- `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` — контракт автономного блока для агента с 0 контекста
-- `SPECS/SYSTEM_REFERENCE.md` → "Live-check SOP (CA audit)"
-- `SPECS/SYSTEM_REFERENCE.md` → "CA-Matrix (suite/mode/evidence)" + "Test design rules"
-- `SPECS/SYSTEM_REFERENCE.md` → "Onboarding Test SOP (CA-13/CA-14)" + "Known risks and fixes"
-- `SPECS/SYSTEM_REFERENCE.md` → "Deploy Guardrails (anti-drift)"
-- `STRATEGY/TECH_ROADMAP.md` → "CANON AUDIT PLAN (P0)"
+External orchestration frameworks such as LangChain or LangGraph are optional workflow tools only. They are not product architecture, semantic owner, tenant authority, booking calendar, or proof substitute. Evaluate them only through a Decision Ledger entry, inventory update, bounded spike, rollback path, and product-relevant proof.
 
----
+Lexicons, regex, aliases, normalizers, and RAG may provide evidence/candidate facts only. They must not decide intent, invent business meaning, confirm bookings, create policy, or override policy-core.
 
-DEFAULT ASSUMPTION
-- Prefer stabilizing core invariants (trace/meta/outbox/routing/media/policy) over adding features.
-- Large rewrites (e.g., Messaging Fabric / Provider Gateway as a big move) require an explicit DEC + new DoD.
+## 3. Reality Premise
+
+Assume the current system may be wrong.
+
+Current code, docs, containers, tests, task packages, and previous fixes are evidence of past intent. They are not proof of correct architecture.
+
+A failed check is a signal, not a task.
+
+Before fixing anything, decide whether the current implementation belongs in the target system.
+
+## 4. Binding Facts
+
+Treat these as binding until live evidence proves otherwise:
+- Console Plane is the main GUI for Platform Admin, Platform Support, Owner, Admin, and Manager.
+- Internal Console Calendar / active Postgres `appointments` is the primary booking source of truth for offline salon bookings.
+- Google Calendar is optional external sync/projection/busy-source, not the core calendar.
+- Chatflow/WhatsApp is commercially unavailable until billing/access is restored.
+- WhatsApp/provider blockage must not block internal Console Calendar proof.
+- Observability, health, worker heartbeats, logs, traces, alerts, and release fingerprints are product readiness surfaces.
+- `STATE.md` and old gap lists are history/evidence, not truth.
+- Documents are witnesses; runtime is evidence; product goal is judge.
+
+## 5. Minimal Reading Order
+
+Read only enough to decide the current move:
+1. `/home/zhan/AGENTS.md`
+2. `AGENTS.md`
+3. this file
+4. `docs/PRODUCT_SYSTEM_CANON.md`
+5. `docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md`
+6. `docs/CONSOLE_PLANE_ACCEPTANCE_MAP.md`
+7. `TECH.md`
+8. relevant `SPECS/*` only for the selected blocker
+9. relevant artifact bundles / live probes
+10. code only after product blocker and decision path are clear
+
+## 6. Required Decision Protocol
+
+Before any nontrivial action, use:
+
+`Intent -> Target -> Reality -> Gap -> Decision -> Action -> Proof`
+
+If you cannot state these, do not code.
+
+Classify implementation before relying on it:
+- `KEEP`
+- `REPAIR`
+- `STRANGLE`
+- `REPLACE`
+- `SHADOW`
+- `LATER`
+- `KILL`
+- `UNKNOWN`
+
+## 6.1. Architecture Operating Model
+
+Before implementation, force the selected work through this chain:
+
+`Business capability -> architecture layer -> inventory lookup -> decision record -> implementation -> proof -> impacted docs/inventory update`
+
+Mandatory rules:
+- no new development tool, script, architecture test, runtime worker, router, provider adapter, or external dependency may be created or relied on unless its purpose, owner, inputs, outputs, proof value, and limitations are registered in `TECH.md` or `STRUCTURE.md`;
+- run `python3 scripts/tool_inventory_guard.py --repo-root .` after changing scripts or architecture tests;
+- run `python3 scripts/product_work_map_guard.py --repo-root .` after changing product-status docs or selecting the next product block;
+- docs update is not the work itself: implement/prove first, then update only impacted durable docs;
+- if a needed tool/component is unregistered, repair the inventory before using it.
+
+## 6.2. Execution Contract
+
+Process optimization is closed in `docs/PRODUCT_SYSTEM_CANON.md` section `9.17 Process Optimization Closure — 2026-05-02`.
+
+Required execution rules:
+- One active product block at a time.
+- Docs update is an output of proof, not a substitute for proof.
+- Use validation tiers from `TECH.md`: `T0 Reality`, `T1 Touched Slice`, `T2 Governance`, `T3 Live Truth`, `T4 Architecture Gate`.
+- Nontrivial work needs a Task Package, RCA, exact path map, and dated proof artifact.
+- Do not create new tools, tests, services, or dependencies unless they are registered and their function is defined.
+- Do not adopt LangChain, LangGraph, or any external framework until the bounded adoption gate in `docs/PRODUCT_SYSTEM_CANON.md` section `9.28` and `TECH.md` is satisfied.
+- Do not delete deterministic evidence extraction just because the model can infer language; repair it into normalization/evidence ownership instead.
+
+## 7. Required Start State
+
+Before implementation in a new session, produce this short internal/user-facing state if the user asks, or keep it as your working frame if the user asked not to report every step:
+
+```text
+Intent:
+Target:
+Reality:
+Gap:
+Decision:
+Action:
+Proof target:
+No-go:
+```
+
+If this cannot be filled, do more reality analysis.
+
+## 8. Reality Probes
+
+Before claiming runtime status, run the relevant subset:
+
+```bash
+pwd
+git status --short --branch
+git rev-parse HEAD
+curl -fsS http://localhost:8000/admin/version
+curl -fsS http://localhost:8000/health
+python3 scripts/release_topology_truth.py --repo-root . --output /tmp/release_topology_truth.json
+python3 scripts/observability_truth.py --repo-root . --output /tmp/observability_truth.json
+python3 scripts/go_live_data_truth.py --repo-root . --env-file /home/zhan/truffles-main/truffles-api/.env --output /tmp/go_live_data_truth.json
+python3 scripts/provider_integration_truth.py --repo-root . --base-url http://localhost:8000 --env-file /home/zhan/truffles-main/truffles-api/.env --output /tmp/provider_integration_truth.json
+python3 scripts/product_work_map_guard.py --repo-root .
+```
+
+Do DB/container/log probes only for the selected blocker.
+
+Do not remove or stop containers without dependency proof.
+
+## 9. What Not To Do
+
+Forbidden by default:
+- start with code;
+- fix a failed check before implementation classification;
+- continue local booking/family fixes as main strategy;
+- make prompt-only patches for repeated mechanisms;
+- repair Chatflow/WhatsApp while commercially unavailable;
+- make Google Calendar the core booking calendar;
+- treat `/health`, green containers, or admin-only success as product readiness;
+- create duplicate docs or new docs when an existing canon location fits;
+- use `STATE.md` or old gaps as product oracle;
+- treat `final runtime = green` with `rescue = yes` as closure;
+- touch unrelated diffs or revert user/previous-agent changes.
+
+## 10. Durable Memory Locations
+
+Use existing places:
+
+| Change | Place |
+|---|---|
+| product truth / assumptions / unknowns / no-go | `docs/PRODUCT_SYSTEM_CANON.md` |
+| Beauty Salon v1 acceptance | `docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md` |
+| Console lifecycle acceptance | `docs/CONSOLE_PLANE_ACCEPTANCE_MAP.md` |
+| runtime/container/DB/deploy facts | `TECH.md` |
+| boot protocol | `docs/SESSION_START_PROMPT.txt` |
+| dated proof | `/tmp/...` artifact bundle plus concise pointer in relevant canon if durable |
+
+Do not put volatile runtime facts into `AGENTS.md`.
+
+## 11. Current Durable Direction
+
+Default next direction is not a local fix and not repetition of already-proven blocks.
+
+First read `docs/PRODUCT_SYSTEM_CANON.md` section `9.9 Verified Product Work Map — 2026-05-01`.
+
+Verified status:
+
+1. `Console Lifecycle Acceptance Proof` — `PROVEN`;
+2. `Booking Matrix Closure` — `PARTIAL_MECHANISM_PROVEN`;
+3. `Realistic Booking Matrix Closure` — `SCRIPTED_TECHNICAL_PROOF`;
+4. `Observability End-To-End Turn Proof` — `PROVEN`;
+5. `Provider/Channel Readiness Proof` — `BLOCKED_NON_CODE`;
+6. `Beauty Salon v1 Go-Live` — `PARTIAL_NOT_GO_LIVE`.
+
+Allowed next work:
+
+1. keep no-repeat governance and product work-map guards green;
+2. keep `docs/DECISION_LEDGER.yaml` and `scripts/decision_ledger_guard.py` green for status/proof changes;
+3. audit meaningful turns as `decision path + data ownership path`; define the Customer Data Contract before repairing behavior that depends on packs, capabilities, operational DB, RAG/Qdrant, or policy-core context;
+4. treat `DL-2026-05-07-011` focused `FAM-C2/FAM-C3` proof as `FOCUSED_FAM_C2_C3_TECHNICAL_PROOF_NOT_ACCEPTANCE`, then run broader Pack v0 diagnostic coverage before strict Acceptance;
+5. run provider/channel proof only after Chatflow/WhatsApp commercial access is restored;
+6. run final Beauty Salon v1 go-live review only after fresh combined proof and provider status are resolved;
+7. rerun closed Console/observability blocks only if a fresh dated regression artifact proves their status changed.
+
+Do not reopen Console Lifecycle or Observability E2E unless a fresh dated regression artifact proves the status changed. Do not claim booking closure from the old synthetic BM-01..BM-05 matrix or from the 2026-05-03 scripted 16-row matrix. Booking proof downgrade is recorded in `docs/PRODUCT_SYSTEM_CANON.md` sections `9.21` and `9.22`, and in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-03-001`.
+Architecture handoff is closed in `docs/PRODUCT_SYSTEM_CANON.md` section `9.16`; do not repeat it unless a fresh dated regression artifact proves the map is wrong.
+Process optimization is closed in `docs/PRODUCT_SYSTEM_CANON.md` section `9.17`; keep it guarded, but do not reopen it as a product block without fresh dated regression evidence.
+Shadow removal dependency proof is closed in `docs/PRODUCT_SYSTEM_CANON.md` section `9.18`; do not remove canonical API routes/workers while deleting side-service residue.
+Shadow side-service removal is closed in `docs/PRODUCT_SYSTEM_CANON.md` section `9.19`; do not recreate removed side services without a fresh architecture decision.
+Booking matrix reclassification is recorded in `docs/PRODUCT_SYSTEM_CANON.md` section `9.20`; status is `BOOKING_MATRIX_PARTIAL_MECHANISM_PROVEN`.
+Realistic Booking Matrix proof is recorded in `docs/PRODUCT_SYSTEM_CANON.md` section `9.21`; status is `SCRIPTED_TECHNICAL_PROOF` with product summary and Console visibility summary `valid=true`, not `REAL_WORLD_PRODUCT_PROOF`.
+Real-World Salon Acceptance Pack is defined in `docs/PRODUCT_SYSTEM_CANON.md` section `9.23`; status is `OWNER_REVIEWED_CORPUS_V0_AFTER_FAM_C0_DIAGNOSTIC_COMPLETE`, not product proof.
+Internal Pilot Proof is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-03-002`: candidate dialogs may be generated with existing tools, owner-approved rows become an owner-reviewed synthetic messy corpus, Exploration lane uses continue-on-error behavior, behavioral failures do not stop run execution, invalid-run evidence problems do stop, and repairs wait for a failure-family map.
+Quality-runner transport evidence separation is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-03-003`: `--transport-evidence-policy rendered` is dev Exploration only; strict Acceptance requires delivery evidence.
+Tranche B diagnostic is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-03-004`: 10 dialogs / 44 turns, `strict_pass_rate=0.6136`, `human_semantic_valid=false`, still `DIAGNOSTIC_TRANCHE_NOT_PRODUCT_PROOF`.
+Owner-reviewed Pack v0 is in `/tmp/truffles_real_world_salon_pack_20260503/real_world_salon_acceptance_pack_v0_20260503.md` and `.json`; static contract/gates are valid, but this is an internal pilot proxy, not raw production transcript proof.
+Corrected Tranche A diagnostic is `/tmp/truffles_real_world_salon_pack_20260503/exploration_smoke_rendered_v0_20260503/summary.json`; failure-family map is `/tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_a_20260503.md`.
+Tranche B diagnostic is `/tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/summary.json`; manual audit is `/tmp/truffles_real_world_salon_pack_20260503/exploration_tranche_b_rendered_v0_20260503g/manual_audit.json`; failure-family map is `/tmp/truffles_real_world_salon_pack_20260503/failure_family_map_pack_v0_tranche_b_20260503.md`.
+Focused P0 repair is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-04-005`: `FAM-B1` booking-manage cancel/reschedule/admin-confirm now routes to admin-confirmation `HANDOFF`, and `FAM-B3` handoff contact/context follow-up stays `HANDOFF` / `handoff_context_update` instead of booking collect. Evidence: `/tmp/truffles_real_world_salon_pack_20260504/p0_handoff_repair_20260504a/p0_handoff_repair_summary_20260504a.json` (`valid=true`) and release topology `/tmp/truffles_real_world_salon_pack_20260504/release_topology_truth_p0_handoff_20260504a.json` (`valid=true`) on image `truffles-local:real-world-p0-handoff-20260504a`.
+Focused FAM-B2 lifecycle/oracle repair is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-04-006`: pending handoff is the correct runtime lifecycle state, booking-manage follow-ups remain handoff context, manager simulation waits until no later customer context remains, and manager `take` is race-tolerant. Evidence: `/tmp/truffles_real_world_salon_pack_20260504/fam_b2_lifecycle_repair_20260504a/fam_b2_lifecycle_repair_summary_20260504a.json` (`valid=true`, strict/state pass 1.0, manager actions 4/4 OK, expected_state_mismatch=0). This is dev focused mechanism proof, not Pack v0 Acceptance.
+After-P0 Pack v0 diagnostic and FAM-C1 oracle repair are recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-04-007`: after-P0 Tranche B improved to `strict_pass_rate=0.9091` and `hard_fail_rate=0.0`, but remains `semantic_valid=false` and `infra_valid=false`; focused FAM-C1 generic handoff oracle proof is `oracle_valid=true`, not Acceptance. Evidence: `/tmp/truffles_real_world_salon_pack_20260504/exploration_tranche_b_after_p0_20260504a/summary.json`, `/tmp/truffles_real_world_salon_pack_20260504/failure_family_map_pack_v0_tranche_b_after_p0_20260504a.md`, and `/tmp/truffles_real_world_salon_pack_20260504/fam_c_handoff_oracle_repair_20260504a/fam_c_handoff_oracle_repair_summary_20260504a.json`.
+Focused FAM-C0 evidence reliability repair is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-05-008`: expected no-response pending handoff timeouts are soft only with runtime evidence, pending ACK waits until scripted customer turns finish, manager `take` timeout can be advisory when `resolve` follows, and manual audit backlog ignores soft/recovered/advisory runtime classifications. Evidence: `/tmp/truffles_real_world_salon_pack_20260505/fam_c0_evidence_reliability_20260505a/fam_c0_evidence_reliability_summary_20260505a.json` (`FOCUSED_EVIDENCE_RELIABILITY_PROOF_NOT_ACCEPTANCE`, `infra_valid=true`, `strict_pass_rate=1.0`, zero webhook/infra/decision-meta/decision-trace errors). This is proof-runtime evidence only, not Pack v0 Acceptance.
+After-FAM-C0 broader diagnostic is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-05-009`: `/tmp/truffles_real_world_salon_pack_20260505/pack_v0_tranche_b_after_fam_c0_diagnostic_summary_20260505b.json` is `DIAGNOSTIC_AFTER_FAM_C0_NOT_ACCEPTANCE`; complete 10 dialogs / 44 turns, `infra_valid=true`, `strict_pass_rate=0.9545`, `hard_fail_rate=0.0`, zero webhook/infra/decision-meta/decision-trace errors, manager actions 14/14 OK, but `semantic_valid=false`. The slow partial rerun `/tmp/truffles_real_world_salon_pack_20260505/exploration_tranche_b_after_fam_c0_20260505a/INVALID_RUN_DO_NOT_USE.md` is invalid evidence.
+Single-Turn Decision/Data Ownership Audit is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-05-010` and `docs/PRODUCT_SYSTEM_CANON.md` section `9.24`: every meaningful turn must show both decision path and data ownership path. Customer Data Contract ownership is Packs / Knowledge for customer-facing facts/rules, Capabilities for allowed channels/providers/features/tools/fact scopes/handoff policy, Operational DB for executable services/specialists/appointments, RAG / Qdrant as retrieval projection only, and Policy-core context as governed projection into the LLM owner.
+Focused FAM-C2/FAM-C3 repair proof is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-07-011` and `docs/PRODUCT_SYSTEM_CANON.md` section `9.25`: unsupported-service availability stays grounded `FACT` until supported service selection, fact-interruption continuity is preserved, planner-boundary state containment is explicit, and range-time rendering asks for exact time. Evidence: `/tmp/truffles_real_world_salon_pack_20260507/fam_c2_c3_unsupported_focus_20260507h/run/summary.json` has `semantic_valid=true`, `infra_valid=true`, `run_integrity_valid=true`, `strict_pass_rate=1.0`; manual audit is `human_semantic_valid=true`. This is focused technical proof, not Pack v0 Acceptance.
+Broader Pack v0 diagnostic after FAM-C2/FAM-C3 is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-07-012` and `docs/PRODUCT_SYSTEM_CANON.md` section `9.26`: `/tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_booking_manage_continuity_20260507k/run/summary.json` reached `strict_pass_rate=1.0`, but remains historical diagnostic evidence only, not Pack v0 Acceptance.
+Quality-governance/replay-isolation repair is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-07-013` and `docs/PRODUCT_SYSTEM_CANON.md` section `9.27`: `ops/diagnose.py` no longer infers info-answer obligations from handoff/human wording, pending payment/media handoff no-response evidence is soft only with handoff context, and `--jid-mode unique` now creates run-scoped unique JIDs. `/tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507l/run` is invalid evidence; `/tmp/truffles_real_world_salon_pack_20260507/pack_v0_after_quality_governance_20260507m/run/summary.json` is the current diagnostic with `infra_valid=true`, `info_answer_rate=1.0`, `strict_pass_rate=0.9545`, `hard_fail_rate=0.0227`, and `semantic_valid=false`.
+Business Capability Platform Constitution is recorded in `docs/DECISION_LEDGER.yaml` entry `DL-2026-05-09-014` and `docs/PRODUCT_SYSTEM_CANON.md` section `9.28`: Truffles core is business-agnostic, Beauty Salon v1 is the first proof vertical, frameworks are optional orchestration tools only, and lexicons/regex/RAG are evidence layers only.
+Current repair order after 2026-05-07 quality-governance diagnostic: fix the Pack v0 multi-service scenario/oracle expectation first, then repair the policy-core booking commit action/tool schema mismatch that produced `policy_core_invalid_schema`; do not patch by row, regex, or weakened metrics.
+Broad `truffles-api/tests/test_intent.py` currently has many stale/failing expectations outside the focused P0 slice. Classify those failures by capability/layer before repair; do not batch-patch tests as acceptance evidence.
+Post-ledger runtime sanity artifacts: release topology `/tmp/truffles_real_world_salon_pack_20260503/release_topology_truth_post_ledger_20260503.json` valid=true, observability `/tmp/truffles_real_world_salon_pack_20260503/observability_truth_post_ledger_20260503.json` valid=true after canonical runtime-profile restart with outbox `local_debug`, go-live data `/tmp/truffles_real_world_salon_pack_20260503/go_live_data_truth_post_ledger_20260503.json` valid=true, provider `/tmp/truffles_real_world_salon_pack_20260503/provider_integration_truth_post_ledger_20260503.json` valid=false for commercial Chatflow/WhatsApp blocker only.
+Surface realism audit is `/tmp/truffles_real_world_salon_pack_20260503/surface_realism_audit_20260503.json`; current candidate corpus uses compact/digit-spaced phone formats and natural time expressions instead of plus/parentheses-heavy phones or colon/dot-heavy times.
+Keep external provider canary blocked until commercial access is restored.
+
+Use strangler-style migration when current implementation is wrong: isolate a minimal working Beauty Salon v1 kernel, prove it, then drain legacy/shadow surfaces after dependency proof.

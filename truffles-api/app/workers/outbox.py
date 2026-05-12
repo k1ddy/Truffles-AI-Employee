@@ -14,6 +14,7 @@ from app.services.outbox_runtime_service import (
     load_outbox_process_settings,
     run_outbox_worker_cycle,
 )
+from app.services.worker_heartbeat_service import touch_worker_heartbeat
 from app.services.runtime_mode_service import get_outbox_worker_mode, is_outbox_worker_enabled
 from app.services.runtime_safety import assert_outbox_worker_startup_safe
 
@@ -145,6 +146,10 @@ async def run_worker():
     metrics_retry_count = 0
     while True:
         try:
+            try:
+                touch_worker_heartbeat("truffles-outbox")
+            except Exception as exc:
+                logger.warning("Outbox heartbeat update failed", extra={"context": {"error": str(exc)[:200]}})
             (
                 interval_seconds,
                 process_settings,

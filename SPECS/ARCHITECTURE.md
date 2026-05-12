@@ -1,13 +1,170 @@
 # ARCHITECTURE — Техническая архитектура Truffles
 
-**Статус:** CANON  
-**Owner:** Top Architect  
-**Обновлено:** 2026-02-02  
-**Scope:** архитектура рантайма, decision graph, компоненты и потоки.  
-**Out of scope:** тарифы/продажи, evidence/CI.  
-**Links:** `SPECS/CONSULTANT.md`, `SPECS/INFRASTRUCTURE.md`, `STATE.md`.
+**Статус:** CANON
+**Owner:** Top Architect
+**Обновлено:** 2026-05-09
+**Scope:** архитектура системы и рантайма, planes, decision graph, компоненты и потоки.
+**Out of scope:** тарифы/продажи, evidence/CI.
+**Links:** `docs/PRODUCT_SYSTEM_CANON.md`, `docs/DECISION_LEDGER.yaml`, `SPECS/CONSULTANT.md`, `SPECS/CONTROL_PLANE.md`, `SPECS/INFRASTRUCTURE.md`, `SPECS/MULTI_TENANT.md`.
 
 **Читай это перед любыми изменениями.**
+---
+
+## 0. Canonical Runtime Direction
+
+Этот документ фиксирует не только текущую инвентаризацию сервера, но и каноническое направление исправления.
+
+### 0.1. Что должно быть правдой
+
+Рабочий сервер для этого продукта должен иметь один semantic hot path:
+
+`Ingress -> policy-core owner -> planner projection -> boundary validate/degrade -> canonical state write -> executor/render -> outbox/provider`
+
+На каждом inbound turn должен существовать один канонический бизнес-результат:
+- `FACT`
+- `COLLECT`
+- `HANDOFF`
+
+Рабочее поведение достигается только когда одновременно верно:
+- `raw owner = green`
+- `final runtime = green`
+- `rescue = no`
+
+### 0.2. Кто имеет право писать смысл
+
+Разрешённые semantic writers:
+- `policy-core LLM`
+- explicit boundary degrade/block contract с reason code
+
+Не являются semantic writers и не могут silently менять meaning:
+- `TurnPlanner`
+- `DialogStateService`
+- `TurnExecutor`
+- legacy compatibility layers
+- prompt snapshot/schema drift
+
+### 0.3. Роли слоёв
+
+- `policy-core LLM` — единственный semantic owner
+- `TurnPlanner` — typed projection owner output в runtime contract
+- `BoundaryValidator` — validate, block, explicit degrade
+- `DialogStateService` — persist/project canonical state, compatibility views вниз
+- `TurnExecutor` — tool execution и rendering по уже принятому contract
+- outbox/provider — доставка и статус транспорта
+
+### 0.4. Что сейчас сломано системно
+
+Текущий сервер несёт смешанную архитектуру:
+- новый runtime path уже существует
+- legacy webhook/session/context mesh всё ещё участвует в live state continuity
+- semantic rule часто живёт в prompt, snapshot, schema, runtime validation, state merge и executor одновременно
+
+Следствия:
+- несколько semantic truths для одного turn
+- downstream reinterpretation после owner
+- `final green` возможен при `raw owner yellow/red`
+- локальный patch по семье не закрывает shared mechanism
+
+### 0.5. Обязательное направление исправления
+
+Быстрый правильный путь такой:
+1. выбрать repeated mechanism
+2. сделать для него один canonical semantic source
+3. синхронизировать prompt/snapshot/schema от него или защитить guards
+4. убрать downstream semantic rewrite для этого mechanism
+5. доказать `raw green / final green / rescue no`
+6. только потом переходить к следующему mechanism
+
+### 0.6. Legacy status
+
+Разделы ниже, помеченные legacy или описывающие `_legacy.py`, являются:
+- инвентаризацией текущего поведения
+- compatibility/decomposition backlog
+
+Они не являются целевой semantic архитектурой.
+
+### 0.7. System planes
+
+Truffles должен читаться как одна система из четырёх связанных плоскостей:
+
+- `Consultant Runtime Plane` — inbound/outbound каналы, semantic hot path, booking/info/handoff поведение.
+- `Console Plane` — основной интерфейс управления для `Platform Admin`, `Platform Support`, `Owner`, `Admin`, `Manager`; отвечает за onboarding, provisioning, publish, ops и support workflows.
+- `Knowledge / Data Plane` — client/domain packs, published artifacts, capability manifests, tenant context, provider config и data isolation.
+- `Observability / Ops Plane` — build fingerprint, health/readiness, alerts, logs, traces, metrics, audit и deploy discipline.
+
+Runtime hot path этого документа относится только к `Consultant Runtime Plane`. Go-live системы в целом обязан учитывать все четыре плоскости.
+
+### 0.8. Architecture operating layers
+
+Every implementation must have one primary layer owner and must not move business meaning across layers silently.
+
+Required layer map:
+
+| Layer | Responsibility | Must Not Own |
+|---|---|---|
+| `Ingress` | receive channel/provider/customer input, authenticate/normalize envelope, attach tenant context | business meaning |
+| `Policy Core` | semantic owner for `FACT / COLLECT / HANDOFF`, slots, intent, next action | transport delivery, DB writes |
+| `Planner` | typed projection from owner output to executable contract | new semantic meaning |
+| `Boundary` | validate, reject, or explicitly degrade with reason code | silent rewrite |
+| `State` | persist/load/project canonical state and compatibility views | invented business meaning |
+| `Executor/Tools` | execute tool calls and render from accepted contract | semantic recovery |
+| `Booking/Calendar` | appointment lifecycle in Postgres `appointments` and Console Calendar APIs | provider calendar as core SoT |
+| `Handoff/Inbox` | human transfer, queue, manager/support workflow state | hidden bot success |
+| `Console` | human admin/operator GUI, RBAC, audit, readiness, tenant control | customer semantic intent |
+| `Knowledge/Data` | tenant facts, packs, capabilities, data readiness, isolation | runtime rule branching per business |
+| `Observability/Ops` | health, logs, traces, metrics, alerts, fingerprints, release proof | product claims without evidence |
+| `Provider` | external channel delivery/status only | booking or customer meaning |
+
+Work process:
+
+`Business capability -> architecture layer -> inventory lookup -> decision record -> implementation -> proof -> impacted docs/inventory update`
+
+Any new development tool, script, architecture test, runtime worker, router, provider adapter, or external dependency must be registered before use with owner, inputs, outputs, run conditions, proof value, and limitations.
+
+### 0.9. Business Capability Platform Contract
+
+Truffles core is a business capability platform.
+
+Core responsibilities:
+
+- tenant/channel envelope and branch context;
+- one policy-core semantic owner;
+- typed planner projection;
+- boundary validation, rejection, or explicit degrade;
+- canonical state write/load/projection;
+- executor/tool/render/outbox execution;
+- Console/Ops proof surfaces and readiness gates.
+
+Vertical responsibilities:
+
+- packs and published knowledge;
+- capability manifests and allowed tools;
+- service/product/inventory/rule/policy data;
+- capability-specific slot and lifecycle contracts;
+- provider/channel configuration.
+
+A new vertical must not add semantic branches to core. It must add or change packs, capabilities, tools, data contracts, and acceptance proof.
+
+### 0.10. Framework And Signal Policy
+
+LangChain, LangGraph, or any other orchestration framework may be evaluated only as workflow infrastructure.
+
+Allowed:
+
+- workflow orchestration;
+- checkpointing;
+- retry/human-in-the-loop mechanics;
+- traceable state transitions that preserve the canonical hot path.
+
+Forbidden:
+
+- framework as semantic owner;
+- framework state as canonical business source of truth;
+- framework graph replacing boundary validation or audit;
+- framework adoption without Decision Ledger entry, inventory update, bounded spike, rollback path, and product-relevant proof.
+
+Lexicons, regex, aliases, normalizers, and RAG retrieval are evidence layers. They may expose candidate signals and facts to the owner, but they must not decide intent, invent business facts, confirm bookings, or override policy-core.
+
 ---
 
 ## 1. Репозиторий и процесс
@@ -33,6 +190,8 @@
 | Кэш/очереди | Redis |
 | Оркестрация | Docker (prod через `restart_api.sh`), Docker Compose (local/infra) |
 | Reverse proxy | Traefik |
+| Observability / tracing | OpenTelemetry + Tempo |
+| Metrics / dashboards | Prometheus + Grafana |
 | WhatsApp | ChatFlow API (`app.chatflow.kz`) |
 | Telegram | Bot API (webhook) |
 | Сервер | VPS 5.188.241.234, порт SSH 222 |
@@ -157,14 +316,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Routing:** gates принимают решения только по snapshot; low‑confidence → rule‑based fallback с фиксацией `fallback_reason`.
 
 #### Outbox payload contract + action gate
-- **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).  
-- **Поведение при ошибке:** `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, outbox не ставится в очередь.  
-- **Timing в БД:** `decision_meta.timing.outbox` + `outbox_messages.meta.timing` (корреляция по `outbox_id`/`inbound_message_id`/`trace_id`).  
-- **Action gate:** если `decision_meta.action` не записан — фиксируем `action_gate` и `action=error` перед commit.  
+- **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).
+- **Поведение при ошибке:** `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, outbox не ставится в очередь.
+- **Timing в БД:** `decision_meta.timing.outbox` + `outbox_messages.meta.timing` (корреляция по `outbox_id`/`inbound_message_id`/`trace_id`).
+- **Action gate:** если `decision_meta.action` не записан — фиксируем `action_gate` и `action=error` перед commit.
 
 #### Stage order snapshot
-- Каноничный порядок стадий фиксируется в `DECISION_STAGE_ORDER_SNAPSHOT` (`truffles-api/app/routers/webhook/trace.py`) и защищён hash‑тестом.  
-- Любая смена порядка стадий → обновить список + test hash (сознательное изменение).  
+- Каноничный порядок стадий фиксируется в `DECISION_STAGE_ORDER_SNAPSHOT` (`truffles-api/app/routers/webhook/trace.py`) и защищён hash‑тестом.
+- Любая смена порядка стадий → обновить список + test hash (сознательное изменение).
 
 #### Observability (DEC-012)
 - Корреляция: `message_id`/`outbox_id`/`trace_id` в логах + decision_meta + outbox meta.
@@ -172,18 +331,18 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - OTel spans в API/outbox/sentinel с атрибутами `message_id`, `outbox_id`, `trace_id`, `client_slug`, `conversation_id`, `branch_id`; Tempo хранит трейсы.
 
 #### Observability roadmap (Phase 2; follow-ups after DEC-012)
-1) Trace retention policy (Tempo)  
-   - Зафиксировать retention для Tempo (L0/L1/L2), бюджет хранения, безопасность.  
-   - Ввести единую схему `trace_event` + экспортер из decision_trace.  
-   - Добавить trace‑viewer и правила retention (L0/L1/L2).  
-   - CI‑гейт: критические стадии не теряются.  
-2) Unified log contract + alerts  
-   - Лог‑схема: обязательные ключи `message_id`, `outbox_id`, `trace_id`, `stage`, `elapsed_ms`.  
-   - Внедрить wrapper в API + outbox + console, добавить алерты (missing_action, outbox_p90, error_rate).  
-   - Обновить `docs/runbooks/INCIDENTS.md` + `docs/runbooks/OUTBOX.md`.  
-3) Stage order snapshot + SOP  
-   - Snapshot уже в коде (Phase 1), добавить SOP “изменение порядка стадий” в `docs/runbooks/TRACE_BUNDLE.md`.  
-   - Любая правка → обновление snapshot hash + запись причины.  
+1) Trace retention policy (Tempo)
+   - Зафиксировать retention для Tempo (L0/L1/L2), бюджет хранения, безопасность.
+   - Ввести единую схему `trace_event` + экспортер из decision_trace.
+   - Добавить trace‑viewer и правила retention (L0/L1/L2).
+   - CI‑гейт: критические стадии не теряются.
+2) Unified log contract + alerts
+   - Лог‑схема: обязательные ключи `message_id`, `outbox_id`, `trace_id`, `stage`, `elapsed_ms`.
+   - Внедрить wrapper в API + outbox + console, добавить алерты (missing_action, outbox_p90, error_rate).
+   - Обновить `docs/runbooks/INCIDENTS.md` + `docs/runbooks/OUTBOX.md`.
+3) Stage order snapshot + SOP
+   - Snapshot уже в коде (Phase 1), добавить SOP “изменение порядка стадий” в `docs/runbooks/TRACE_BUNDLE.md`.
+   - Любая правка → обновление snapshot hash + запись причины.
 
 ### Decision Graph (legacy map, `_legacy.py`)
 Фактическая карта стадий и ранних return в `_handle_webhook_payload` (legacy pipeline). Это **не** целевой оркестратор `decision.py`, а снимок текущего поведения. Целевой канон добавляет стадии `semantic_resolver`, `tool_fact_resolver`, `response_guard`.
@@ -551,9 +710,12 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Если правило отсутствует/не совпало — эскалация (без попытки торга).
 
 ### Booking mode (с/без CRM)
-- `booking_mode`: `collect_preferences` (без провайдера) или `confirm_slots` (live‑провайдер).
-- `availability_provider`: `none` | `google_calendar` | `bitrix` | `amocrm` | `manual`.
-- Если провайдер не задан/недоступен — только сбор предпочтений, **без обещаний слотов**.
+- `booking_mode`: `collect_preferences` (сбор пожеланий) или `confirm_slots` (создание записи через канонический календарь).
+- Канонический календарь Truffles — Console Calendar / Postgres `appointments`; это не Google Calendar.
+- `calendar_provider=local` означает внутренний Console Calendar как основной календарь записи.
+- `availability_provider`: `none` | `google_calendar` | `bitrix` | `amocrm` | `manual`; это внешний источник занятости/интеграции, а не владелец записи.
+- Если `booking_mode=confirm_slots` и `calendar_provider=local`, бот может создать `PENDING_CONFIRMATION` запись во внутреннем календаре без Google.
+- Если внутренний календарь не включён и внешний provider не задан/недоступен — только сбор предпочтений, **без обещаний слотов**.
 
 ### Scheduling core (appointments SoT)
 - Источник истины по записям — Postgres (`appointments`); внешние календари = проекции + источник занятости.
@@ -561,12 +723,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Команды на запись (create/confirm/cancel/reschedule/check‑in) идут с `expected_version` + idempotency; lost‑update запрещён.
 - Синхронизация с провайдерами — **только через outbox**, без прямых вызовов в request‑path.
 - Branch‑scope: календарь, токены, настройки и права строго по `branch_id`, с `timezone` на филиале.
-- При деградации провайдера — fail‑closed на `collect_preferences` + эскалация, без обещаний слотов.
+- При деградации внешнего провайдера — внутренний Console Calendar не блокируется; блокируется только внешняя проекция/sync.
+- Если ветка зависит только от внешнего provider без `calendar_provider=local`, деградация provider → `collect_preferences` + эскалация, без обещаний слотов.
 - Данные бизнеса (мастера, часы, услуги/длительности/буферы) — только из БД/онбординга, без хардкода.
 - Outbound‑sync: изменения `appointments` пишутся в `appointment_sync_states` и отправляются в провайдера только через outbox.
 - Inbound‑sync: внешние события пишутся в `calendar_blocks` (busy) и не переписывают SoT.
 - Конфликты провайдера (edit/delete synced event) → `RESCHEDULE_REQUESTED` + handoff, без авто‑перезаписи.
-- `confirm_slots` разрешён только при здоровом провайдере и свежем sync‑курсорe; иначе `collect_preferences`.
+- `confirm_slots` через `calendar_provider=local` разрешён при рабочем `SchedulingService`; внешний provider health не является блокером внутренней записи.
+- `confirm_slots` через внешний provider разрешён только при здоровом provider и свежем sync‑курсоре; иначе `collect_preferences`.
 - Напоминания/фоллоу‑ап: `reminder_jobs` создаются при записи, отправка — через outbox с consent‑gate.
 
 ### Behavioral Shield (реализовано)

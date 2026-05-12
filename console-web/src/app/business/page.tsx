@@ -7,7 +7,15 @@ import { useMemo } from "react";
 
 import AccessDenied from "@/components/AccessDenied";
 import { ConsolePageError, ConsolePageSkeleton } from "@/components/PageStates";
-import { authApi, businessApi, canAccessConsole, type IncidentItem, type MetricFactMeta } from "@/lib/api-client";
+import {
+    authApi,
+    businessApi,
+    canAccessConsole,
+    type GoNoGoReadinessFinding,
+    type GoNoGoReadinessResponse,
+    type IncidentItem,
+    type MetricFactMeta,
+} from "@/lib/api-client";
 import { getProviderErrorContract } from "@/lib/provider-error-contract";
 import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
@@ -96,6 +104,61 @@ function severityLabel(severity: "critical" | "warn" | "info"): string {
     return "Планово";
 }
 
+function verdictChipClass(verdict?: GoNoGoReadinessResponse["verdict"] | null): string {
+    if (verdict === "blocked") {
+        return "bg-red-100 text-red-800";
+    }
+    if (verdict === "no_go") {
+        return "bg-amber-100 text-amber-800";
+    }
+    return "bg-emerald-100 text-emerald-800";
+}
+
+function verdictLabel(verdict?: GoNoGoReadinessResponse["verdict"] | null): string {
+    if (verdict === "blocked") {
+        return "BLOCKED";
+    }
+    if (verdict === "no_go") {
+        return "NO-GO";
+    }
+    return "GO";
+}
+
+function readinessChipClass(ready: boolean): string {
+    return ready ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800";
+}
+
+function readinessLabel(ready: boolean): string {
+    return ready ? "Готово" : "Не готово";
+}
+
+function findingCategoryLabel(category: GoNoGoReadinessFinding["category"]): string {
+    const labels: Record<GoNoGoReadinessFinding["category"], string> = {
+        provider: "Провайдер",
+        onboarding: "Onboarding",
+        data_trust: "Данные",
+        business: "Бизнес",
+        booking: "Записи",
+        runtime: "Runtime",
+        knowledge: "Знания",
+        support: "Support",
+    };
+    return labels[category] ?? category;
+}
+
+function evidenceChipClass(status: "pass" | "warn" | "fail" | "unknown"): string {
+    if (status === "pass") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (status === "fail") {
+        return "bg-red-100 text-red-800";
+    }
+    if (status === "warn") {
+        return "bg-amber-100 text-amber-800";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
 type BusinessNowStep = {
     id: string;
     title: string;
@@ -139,6 +202,24 @@ export default function BusinessPage() {
         queryKey: ["business-summary"],
         queryFn: async () => {
             const response = await businessApi.getSummary();
+            return response.data;
+        },
+        enabled: !!session && canReadBusiness,
+        refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
+    });
+
+    const {
+        data: readinessData,
+        isLoading: readinessLoading,
+        error: readinessError,
+        refetch: refetchReadiness,
+        isFetching: readinessFetching,
+    } = useQuery({
+        queryKey: ["business-go-no-go-readiness"],
+        queryFn: async () => {
+            const response = await businessApi.getGoNoGoReadiness();
             return response.data;
         },
         enabled: !!session && canReadBusiness,
@@ -320,12 +401,13 @@ export default function BusinessPage() {
                     <button
                         onClick={() => {
                             refetch();
+                            refetchReadiness();
                         }}
                         className="btn-ghost"
-                        disabled={isFetching}
+                        disabled={isFetching || readinessFetching}
                         data-testid="business-refresh"
                     >
-                        {isFetching ? "Обновляю..." : "Обновить"}
+                        {isFetching || readinessFetching ? "Обновляю..." : "Обновить"}
                     </button>
                     <Link href="/insights" className="btn-ghost">Открыть аналитику</Link>
                 </div>
@@ -342,6 +424,165 @@ export default function BusinessPage() {
                         {statusChipLabel(data.status)}
                     </span>
                 </div>
+            </section>
+
+            <section
+                className="mb-4 rounded-xl border border-border/60 bg-card p-4"
+                data-testid="business-go-no-go-card"
+            >
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <p className="text-sm text-muted-foreground">Go/No-Go запуска</p>
+                        <h2 className="mt-1 text-xl font-semibold text-foreground">
+                            {readinessData?.status_label ?? "Проверяем готовность запуска..."}
+                        </h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Единый verdict по onboarding, provider, данным, бизнес-сводке и internal calendar.
+                        </p>
+                    </div>
+                    {readinessData ? (
+                        <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${verdictChipClass(readinessData.verdict)}`}
+                            data-testid="business-go-no-go-verdict"
+                        >
+                            {verdictLabel(readinessData.verdict)}
+                        </span>
+                    ) : (
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                            {readinessLoading ? "LOADING" : "UNKNOWN"}
+                        </span>
+                    )}
+                </div>
+
+                {readinessError ? (
+                    <div
+                        className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900"
+                        data-testid="business-go-no-go-error"
+                    >
+                        Не удалось загрузить Go/No-Go readiness. Не считайте бизнес готовым, пока этот статус неизвестен.
+                    </div>
+                ) : readinessLoading && !readinessData ? (
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm text-muted-foreground">
+                        Загружаем readiness verdict...
+                    </div>
+                ) : readinessData ? (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Внешний канал</p>
+                                <p
+                                    className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${readinessChipClass(readinessData.external_channel_ready)}`}
+                                    data-testid="business-go-no-go-external-channel"
+                                >
+                                    {readinessLabel(readinessData.external_channel_ready)}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    Chatflow/WhatsApp должен быть оплачен и доступен для external go-live.
+                                </p>
+                            </div>
+                            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Internal booking</p>
+                                <p
+                                    className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${readinessChipClass(readinessData.internal_booking_ready)}`}
+                                    data-testid="business-go-no-go-internal-booking"
+                                >
+                                    {readinessLabel(readinessData.internal_booking_ready)}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    Internal Console Calendar не зависит от WhatsApp и Google Calendar.
+                                </p>
+                            </div>
+                            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Data trust</p>
+                                <p
+                                    className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${readinessChipClass(readinessData.data_trust_ready)}`}
+                                    data-testid="business-go-no-go-data-trust"
+                                >
+                                    {readinessLabel(readinessData.data_trust_ready)}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    Данные и знания должны быть достаточно свежими для запуска.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <h3 className="text-sm font-semibold">Blockers</h3>
+                                    <span className="text-xs text-muted-foreground">{readinessData.blockers.length} шт.</span>
+                                </div>
+                                {readinessData.blockers.length ? (
+                                    <div className="mt-3 space-y-2" data-testid="business-go-no-go-blockers">
+                                        {readinessData.blockers.slice(0, 6).map((blocker) => (
+                                            <article key={`${blocker.category}:${blocker.code}`} className="rounded-md border border-red-200/80 bg-red-50 p-2 text-red-950">
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <p className="text-sm font-semibold">{blocker.code}</p>
+                                                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800">
+                                                        {findingCategoryLabel(blocker.category)}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-1 text-xs">{blocker.detail}</p>
+                                                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                                                    {blocker.owner_lane ? <span>owner: {blocker.owner_lane}</span> : null}
+                                                    {blocker.href ? <Link href={blocker.href} className="btn-ghost text-xs">Открыть</Link> : null}
+                                                </div>
+                                            </article>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 text-sm text-muted-foreground">Обязательных blockers нет.</p>
+                                )}
+                            </div>
+
+                            <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <h3 className="text-sm font-semibold">Evidence</h3>
+                                    <span className="text-xs text-muted-foreground">{readinessData.evidence.length} sources</span>
+                                </div>
+                                <div className="mt-3 space-y-2" data-testid="business-go-no-go-evidence">
+                                    {readinessData.evidence.map((item) => (
+                                        <article key={item.id} className="rounded-md border border-border/60 bg-background p-2">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <p className="text-sm font-semibold">{item.id}</p>
+                                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${evidenceChipClass(item.status)}`}>
+                                                    {item.status}
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>
+                                            <p className="mt-1 text-[10px] text-muted-foreground">source: {item.source}</p>
+                                        </article>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {readinessData.actions.length ? (
+                            <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="business-go-no-go-actions">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <h3 className="text-sm font-semibold">Следующие действия</h3>
+                                    <span className="text-xs text-muted-foreground">{readinessData.actions.length} шт.</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                    {readinessData.actions.slice(0, 4).map((action) => (
+                                        <article key={action.id} className="rounded-md border border-border/60 bg-background p-2">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <p className="text-sm font-semibold">{action.title}</p>
+                                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${actionChipClass(action.severity)}`}>
+                                                    {severityLabel(action.severity)}
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 text-xs text-muted-foreground">{action.description}</p>
+                                            <div className="mt-2">
+                                                <Link href={action.href} className="btn-ghost text-xs">Открыть действие</Link>
+                                            </div>
+                                        </article>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
             </section>
 
             {billingBlockedIncident && (

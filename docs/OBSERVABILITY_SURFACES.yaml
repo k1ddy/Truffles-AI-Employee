@@ -1,0 +1,179 @@
+version: 2026-05-02.v1
+contract_name: observability_surface_truth
+
+repo_contract:
+  required_file_tokens:
+    - path: TECH.md
+      tokens:
+        - docs/OBSERVABILITY_SURFACES.yaml
+        - scripts/observability_truth.py
+    - path: SPECS/SYSTEM_REFERENCE.md
+      tokens:
+        - docs/OBSERVABILITY_SURFACES.yaml
+        - scripts/observability_truth.py
+    - path: SPECS/INFRASTRUCTURE.md
+      tokens:
+        - docs/OBSERVABILITY_SURFACES.yaml
+        - scripts/observability_truth.py
+    - path: STRUCTURE.md
+      tokens:
+        - docs/OBSERVABILITY_SURFACES.yaml
+        - scripts/observability_truth.py
+        - truffles-api/tests/architecture/test_observability_truth.py
+
+live_inputs:
+  prometheus_api_url: http://localhost:9090/api/v1/targets
+  prometheus_config_path: /home/zhan/infrastructure/prometheus.yml
+
+proofs:
+  prometheus_targets:
+    - id: prometheus-self-target
+      job: prometheus
+      scrape_url: http://localhost:9090/metrics
+      description: Prometheus must scrape itself
+    - id: truffles-api-target
+      job: truffles-api
+      scrape_url: http://truffles-api:8000/metrics
+      description: Runtime API metrics must be scraped
+
+  http_checks:
+    - id: truffles-console-web-root
+      docker_container: truffles-console-web
+      docker_network: truffles_internal-net
+      docker_port: 3000
+      path: /
+      expect_substring: Truffles Console
+      description: Console GUI root is reachable from the runtime network
+    - id: truffles-api-metrics-endpoint
+      url: http://localhost:8000/metrics
+      expect_substring: "# HELP"
+      description: Runtime API metrics endpoint is reachable
+    - id: console-v1-health
+      url: http://localhost:8000/console/v1/health
+      expect_json:
+        status: ok
+        database: connected
+        redis: connected
+      description: Console control-plane health endpoint is reachable through the runtime API
+    - id: database-health-metric
+      url: http://localhost:8000/metrics
+      expect_substring: "health_check_database_status 1.0"
+      description: Runtime metrics export database health
+    - id: qdrant-health-metric
+      url: http://localhost:8000/metrics
+      expect_substring: "health_check_qdrant_status 1.0"
+      description: Runtime metrics export Qdrant health
+    - id: knowledge-activation-health-metric
+      url: http://localhost:8000/metrics
+      expect_substring: "health_check_knowledge_activation_status 1.0"
+      description: Runtime metrics export knowledge activation health
+    - id: outbox-worker-heartbeat-metric
+      url: http://localhost:8000/metrics
+      expect_substring: "worker_heartbeat_status{worker=\"truffles-outbox\"} 1.0"
+      description: Runtime metrics export healthy outbox worker heartbeat
+    - id: sentinel-worker-heartbeat-metric
+      url: http://localhost:8000/metrics
+      expect_substring: "worker_heartbeat_status{worker=\"truffles-sentinel\"} 1.0"
+      description: Runtime metrics export healthy sentinel worker heartbeat
+    - id: knowledge-activation-service-health
+      url: http://localhost:8015/health
+      expect_json:
+        status: ok
+        service: knowledge_activation_service
+      description: Knowledge activation service health endpoint is reachable
+    - id: grafana-health
+      url: http://localhost:3001/api/health
+      expect_json:
+        database: ok
+      description: Grafana health endpoint is reachable
+    - id: tempo-metrics
+      url: http://localhost:3200/metrics
+      expect_substring: "# HELP"
+      description: Tempo metrics endpoint is reachable
+
+  shadow_state_checks: []
+
+  yaml_checks:
+    - id: grafana-prometheus-datasource
+      path: /home/zhan/infrastructure/grafana/provisioning/datasources/prometheus.yml
+      expected_datasource_names:
+        - Prometheus
+      description: Grafana provisioned Prometheus datasource exists
+    - id: grafana-tempo-datasource
+      path: /home/zhan/infrastructure/grafana/provisioning/datasources/tempo.yml
+      expected_datasource_names:
+        - Tempo
+      description: Grafana provisioned Tempo datasource exists
+
+  json_checks:
+    - id: truffles-api-dashboard
+      path: /home/zhan/infrastructure/grafana/dashboards/truffles-api.json
+      expected_title: Truffles API
+      description: Runtime dashboard exists in Grafana provisioning directory
+
+required_surfaces:
+  - surface: prometheus
+    plane: observability
+    proof_ids:
+      - prometheus-self-target
+      - grafana-prometheus-datasource
+    description: Prometheus must be both scraped and wired into Grafana
+  - surface: truffles-api
+    plane: runtime
+    proof_ids:
+      - truffles-api-target
+      - truffles-api-metrics-endpoint
+      - truffles-api-dashboard
+    description: Runtime API must have scrape, endpoint, and dashboard coverage
+  - surface: grafana
+    plane: observability
+    proof_ids:
+      - grafana-health
+      - grafana-prometheus-datasource
+      - grafana-tempo-datasource
+    description: Grafana itself must be healthy and wired to the main datasources
+  - surface: tempo
+    plane: observability
+    proof_ids:
+      - tempo-metrics
+      - grafana-tempo-datasource
+    description: Tempo must expose metrics and be reachable from Grafana
+  - surface: truffles-console-web
+    plane: control_plane
+    proof_ids:
+      - truffles-console-web-root
+      - console-v1-health
+    description: Console GUI and control-plane health must both be reachable
+  - surface: truffles-outbox
+    plane: runtime_worker
+    proof_ids:
+      - outbox-worker-heartbeat-metric
+    description: Outbox worker must emit a healthy heartbeat into runtime metrics
+  - surface: truffles-knowledge-activation
+    plane: runtime_worker
+    proof_ids:
+      - knowledge-activation-health-metric
+      - knowledge-activation-service-health
+      - console-v1-health
+    description: Knowledge activation health must be visible through metrics, service health, and console health
+  - surface: truffles-sentinel
+    plane: runtime_worker
+    proof_ids:
+      - sentinel-worker-heartbeat-metric
+    description: Sentinel worker must emit a healthy heartbeat into runtime metrics
+  - surface: postgres
+    plane: infra
+    proof_ids:
+      - database-health-metric
+      - console-v1-health
+    description: Database health must be visible in metrics and console health
+  - surface: redis
+    plane: infra
+    proof_ids:
+      - console-v1-health
+    description: Redis availability must be visible through console health
+  - surface: qdrant
+    plane: infra
+    proof_ids:
+      - qdrant-health-metric
+    description: Qdrant health must be visible in runtime metrics

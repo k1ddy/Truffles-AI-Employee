@@ -34,7 +34,6 @@
         "truffles-api/app/routers/webhook/http.py",
         "truffles-api/app/routers/message.py",
         "truffles-api/app/routers/provider_gateway.py",
-        "truffles-api/app/routers/decision_core.py",
         "truffles-api/app/services/console_consultant_verification.py",
         "truffles-api/app/services/outbox_runtime_service.py"
       ],

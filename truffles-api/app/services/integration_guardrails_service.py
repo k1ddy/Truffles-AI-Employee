@@ -61,6 +61,21 @@ def _parse_int_env(name: str, default: int) -> int:
     return max(parsed, 1)
 
 
+def _parse_bool_env(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _should_hard_degrade_reason(reason: str) -> bool:
+    if reason not in _DEGRADE_REASONS:
+        return False
+    if reason == REASON_NO_RECENT_INBOUND:
+        return _parse_bool_env("INTEGRATION_WATCHDOG_NO_RECENT_INBOUND_DEGRADES", default=False)
+    return True
+
+
 def _extract_instance_id_from_metadata(metadata: dict | None) -> str | None:
     if not isinstance(metadata, dict):
         return None
@@ -229,7 +244,7 @@ def report_integration_incident(
 
     alert_error("Integration incident", payload)
 
-    if branch and reason in _DEGRADE_REASONS:
+    if branch and _should_hard_degrade_reason(reason):
         changed = degrade_branch_integration(
             db,
             branch=branch,
@@ -334,7 +349,12 @@ def _evaluate_branch_watchdog_reason(
     if last_inbound_at is not None and last_inbound_at <= stale_cutoff:
         context["check"] = REASON_NO_RECENT_INBOUND
         context["stale_after_minutes"] = stale_after_minutes
-        return REASON_NO_RECENT_INBOUND, context, remediated
+        context["check_severity"] = "warning"
+        context["warning_reason"] = REASON_NO_RECENT_INBOUND
+        if _parse_bool_env("INTEGRATION_WATCHDOG_NO_RECENT_INBOUND_DEGRADES", default=False):
+            context["check_severity"] = "degrade"
+            return REASON_NO_RECENT_INBOUND, context, remediated
+        return None, context, remediated
 
     return None, context, remediated
 

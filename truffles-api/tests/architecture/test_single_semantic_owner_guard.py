@@ -2,9 +2,27 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import shutil
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = ROOT / "scripts"
+SUPPORT_COPY_PATHS = (
+    "prompts/llm_policy_core.md",
+    "truffles-api/app/services/policy_prompt_snapshot_service.py",
+    "truffles-api/app/services/policy_vocabulary_snapshot_service.py",
+    "truffles-api/app/schemas/intent.py",
+    "truffles-api/app/services/intent_service.py",
+    "truffles-api/app/core/turn_planner.py",
+    "truffles-api/app/core/consultant_runtime.py",
+    "truffles-api/app/routers/webhook/decision.py",
+    "ops/diagnose.py",
+)
+SUPPORT_PACKAGE_INITS = (
+    "truffles-api/app/__init__.py",
+    "truffles-api/app/services/__init__.py",
+    "truffles-api/app/schemas/__init__.py",
+)
 
 
 def load_module(name: str, path: Path):
@@ -33,11 +51,39 @@ def _seed_guard_repo(repo: Path, module) -> None:
         if not path.exists():
             path.write_text("", encoding="utf-8")
 
+    for relative_path in SUPPORT_COPY_PATHS:
+        source = ROOT / relative_path
+        target = repo / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    for relative_path in SUPPORT_PACKAGE_INITS:
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("", encoding="utf-8")
+
+
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "guard@example.com"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Guard Tester"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+
 
 def test_single_semantic_owner_guard_matches_current_repo() -> None:
     module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
 
     assert module.evaluate(ROOT) == []
+
+
+def test_single_semantic_owner_guard_scopes_core_runtime_files_for_hardcode_scan() -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+
+    assert module._is_hardcode_scope_file("truffles-api/app/core/turn_executor.py")
+    assert module._is_hardcode_scope_file("truffles-api/app/core/consultant_runtime.py")
+    assert not module._is_hardcode_scope_file("truffles-api/tests/test_demo_salon_eval.py")
 
 
 def test_single_semantic_owner_guard_flags_raw_service_fallback(tmp_path: Path) -> None:
@@ -187,5 +233,89 @@ def test_single_semantic_owner_guard_flags_unknown_canonical_model_copy_writer(t
     violations = module.evaluate(repo)
     assert any(
         "unexpected canonical write signature" in item and "kind=call.model_copy_update" in item
+        for item in violations
+    )
+
+
+def test_single_semantic_owner_guard_flags_phrase_branching_in_core_diff(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+    _init_git_repo(repo)
+
+    target = repo / "truffles-api" / "app" / "core" / "turn_executor.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "def leak(message_text):\n"
+        "    if \"маникюр\" in message_text:\n"
+        "        return 'collect'\n"
+        "    return 'ok'\n",
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo, base_ref="HEAD")
+    assert any("forbidden semantic hardcode diff line" in item and "turn_executor.py" in item for item in violations)
+
+
+def test_single_semantic_owner_guard_allows_marked_technical_diff(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+    _init_git_repo(repo)
+
+    target = repo / "truffles-api" / "app" / "core" / "turn_executor.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "def leak(message_text):\n"
+        "    if \"маникюр\" in message_text:  # hardcode-gate: allow\n"
+        "        return 'collect'\n"
+        "    return 'ok'\n",
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo, base_ref="HEAD")
+    assert not any("forbidden semantic hardcode diff line" in item for item in violations)
+
+
+def test_single_semantic_owner_guard_runs_semantic_contract_sync_subguard(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+
+    prompt_path = repo / "prompts" / "llm_policy_core.md"
+    prompt_path.write_text(
+        prompt_path.read_text(encoding="utf-8").replace(
+            "{{GENERATED_MIXED_FIRST_TURN_FACT_CONTRACT_BLOCK}}",
+            "",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo)
+    assert any(
+        "semantic_contract_sync_guard.py" in item and "generated contract marker exactly once" in item
+        for item in violations
+    )
+
+
+def test_single_semantic_owner_guard_runs_boundary_rewrite_subguard(tmp_path: Path) -> None:
+    module = load_module("single_semantic_owner_guard", SCRIPTS / "single_semantic_owner_guard.py")
+    repo = tmp_path / "repo"
+    _seed_guard_repo(repo, module)
+
+    runtime_path = repo / "truffles-api" / "app" / "core" / "consultant_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace(
+            'decision_meta["boundary_normalization_used"] = bool(',
+            'decision_meta["boundary_normalization_used_missing"] = bool(',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    violations = module.evaluate(repo)
+    assert any(
+        "boundary_rewrite_guard.py" in item and "missing required boundary rewrite snippet" in item
         for item in violations
     )

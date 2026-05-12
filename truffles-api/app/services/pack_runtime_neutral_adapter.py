@@ -95,6 +95,32 @@ def _merge_truth_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[
     return merged
 
 
+def _resolve_domain_pack(truth: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(truth, dict):
+        return None
+    domain_pack = truth.get("domain_pack")
+    if isinstance(domain_pack, dict):
+        return domain_pack
+    client_pack = truth.get("client_pack")
+    if isinstance(client_pack, dict) and isinstance(client_pack.get("domain_pack"), dict):
+        return client_pack["domain_pack"]
+    return None
+
+
+def _merge_domain_pack_context(
+    runtime_truth: dict[str, Any],
+    fallback_truth: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if _resolve_domain_pack(runtime_truth) is not None:
+        return runtime_truth
+    fallback_domain_pack = _resolve_domain_pack(fallback_truth)
+    if fallback_domain_pack is None:
+        return runtime_truth
+    merged = dict(runtime_truth)
+    merged["domain_pack"] = fallback_domain_pack
+    return merged
+
+
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     runtime_truth = get_runtime_truth()
     if runtime_truth is not None:
@@ -112,7 +138,10 @@ def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
                 if not runtime_truth.truth:
                     return fallback_truth
                 return _merge_truth_overlay(fallback_truth, runtime_truth.truth)
-            return runtime_truth.truth
+            return _merge_domain_pack_context(
+                runtime_truth.truth,
+                _load_yaml_truth_cached(client_slug),
+            )
         if not runtime_allow_fallback:
             return {}
     truth = _load_yaml_truth_cached(client_slug)

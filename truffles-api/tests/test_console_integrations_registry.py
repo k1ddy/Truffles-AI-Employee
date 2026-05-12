@@ -231,6 +231,78 @@ def test_build_branch_integration_status_rebind_required_forces_error():
     assert "provider_binding_rebind_required" in result.drift_issues
 
 
+def test_build_branch_integration_status_payment_rejected_forces_error():
+    branch = _make_branch(instance_id="instance-1")
+    client_id = uuid4()
+    now = datetime.now(timezone.utc)
+    result = console_router._build_branch_integration_status(
+        client_id=client_id,
+        client_slug="demo",
+        branch=branch,
+        has_telegram_bot_token=True,
+        stale_after_minutes=30,
+        last_inbound_at=now - timedelta(minutes=1),
+        last_inbound_instance_id="instance-1",
+        now=now,
+        provider_binding=console_router._ProviderBindingLifecycle(
+            provider="chatflow",
+            instance_id="instance-1",
+            webhook_status="pending",
+            owner="platform-admin",
+            rebind_required=False,
+            alert_state="critical",
+            notes="commercially_unavailable: unpaid_or_not_enabled",
+            payment_status="rejected",
+        ),
+    )
+
+    assert result.status == "error"
+    assert result.provider_binding_payment_status == "rejected"
+    assert "provider_binding_payment_rejected" in result.drift_issues
+
+
+def test_provider_lifecycle_payment_rejected_prioritizes_renewal_action(monkeypatch):
+    now = datetime.now(timezone.utc)
+    client_id = uuid4()
+    branch_id = uuid4()
+    status = ConsoleBranchIntegrationStatus(
+        client_id=client_id,
+        client_slug="demo",
+        branch_id=branch_id,
+        branch_slug="branch-a",
+        branch_name="Branch A",
+        is_active=True,
+        instance_id="instance-1",
+        telegram_chat_id="12345",
+        webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+        webhook_url_valid=True,
+        whatsapp_status="ok",
+        telegram_status="ok",
+        provider_binding_payment_status="rejected",
+        provider_binding_alert_state="critical",
+        drift_issues=["provider_binding_payment_rejected"],
+        status="error",
+    )
+    branch = SimpleNamespace(id=branch_id, slug="branch-a", name="Branch A", phone="+77000000001")
+
+    monkeypatch.setattr(console_router, "_resolve_sla_action_for_scope", lambda *_args, **_kwargs: None)
+
+    item = console_router._build_provider_lifecycle_item(
+        db=Mock(),
+        status=status,
+        branch=branch,
+        company_id=uuid4(),
+        company_name="Company",
+        domain_key="beauty",
+        generated_at=now,
+        now=now,
+    )
+
+    assert item.priority == "p0"
+    assert item.next_action == "provider_renewal_confirmed"
+    assert "provider_binding_payment_rejected" in item.blockers
+
+
 def test_build_provider_lifecycle_item_applies_sla_profile_action_override(monkeypatch):
     now = datetime.now(timezone.utc)
     client_id = uuid4()

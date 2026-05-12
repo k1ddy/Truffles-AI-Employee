@@ -3,8 +3,15 @@ from app.models.agent_identity import AgentIdentity
 from app.models.agent_link_token import AgentLinkToken
 from app.models.agent_membership import AgentMembership
 from app.models.alert_event import AlertEvent
+from app.models.appointment import Appointment
+from app.models.appointment_audit import AppointmentAudit
+from app.models.appointment_service import AppointmentService
+from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.booking import Booking
 from app.models.branch import Branch
+from app.models.calendar_block import CalendarBlock
+from app.models.calendar_connection import CalendarConnection
+from app.models.calendar_sync_cursor import CalendarSyncCursor
 from app.models.client import Client
 from app.models.client_capability import ClientCapability
 from app.models.client_onboarding_contract import ClientOnboardingContract
@@ -29,6 +36,7 @@ from app.models.console_saved_view import ConsoleSavedView
 from app.models.conversation import Conversation
 from app.models.conversation_human_lock import ConversationHumanLock
 from app.models.domain_capability_template import DomainCapabilityTemplate
+from app.models.google_calendar_token import GoogleCalendarToken
 from app.models.handover import Handover
 from app.models.inbox_event import InboxEvent
 from app.models.knowledge_activation_job import KnowledgeActivationJob
@@ -45,6 +53,7 @@ from app.models.outbox_message import OutboxMessage
 from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
 from app.models.reference_pack import ReferencePack
+from app.models.service import Service
 from app.models.sla_profile_version import SlaProfileVersion
 from app.models.specialist import Specialist
 from app.models.tenants_fleet_cache import TenantsFleetCache
@@ -68,9 +77,16 @@ __all__ = [
     "AgentMembership",
     "AgentIdentity",
     "AgentLinkToken",
+    "Appointment",
+    "AppointmentAudit",
+    "AppointmentService",
+    "AppointmentSyncState",
     "Branch",
     "AlertEvent",
     "Booking",
+    "CalendarBlock",
+    "CalendarConnection",
+    "CalendarSyncCursor",
     "User",
     "Conversation",
     "Message",
@@ -97,8 +113,10 @@ __all__ = [
     "ConsoleSavedView",
     "ConversationHumanLock",
     "DomainCapabilityTemplate",
+    "GoogleCalendarToken",
     "Prompt",
     "ReferencePack",
+    "Service",
     "SlaProfileVersion",
     "OutboxMessage",
     "OutboxStatusEvent",

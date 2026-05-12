@@ -1,7 +1,13 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
+from app.core import consultant_runtime
+from app.core.consultant_runtime import ConsultantRuntime, PreparedConversation
+from app.models import Conversation, OutboxMessage
+from app.schemas.webhook import WebhookRequest
 from app.services import outbox_runtime_service as outbox_runtime
 from app.workers import outbox
 
@@ -41,6 +47,332 @@ def test_scoped_outbox_process_request_defaults_from_runtime_settings(monkeypatc
     assert request.include_without_conversation is True
     assert request.archive_pending_limit == 9
     assert request.allowed_branch_ids == ("branch-a", "branch-b")
+
+
+def _prepared_conversation(*, user_message=None) -> PreparedConversation:
+    client_id = uuid4()
+    branch_id = uuid4()
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        branch_id=branch_id,
+        state="bot_active",
+        context={},
+    )
+    return PreparedConversation(
+        client=SimpleNamespace(id=client_id, name="demo_salon"),
+        user=SimpleNamespace(id=uuid4()),
+        conversation=conversation,
+        user_message=user_message,
+        remote_jid="77015705555@s.whatsapp.net",
+        branch_id=branch_id,
+        tenant_context={
+            "client_id": str(client_id),
+            "branch_id": str(branch_id),
+            "client_slug": "demo_salon",
+            "source": "webhook",
+        },
+        instance_id="instance-1",
+        source="webhook",
+    )
+
+
+def _webhook_request(message_id: str = "msg-1") -> WebhookRequest:
+    return WebhookRequest.model_validate(
+        {
+            "client_slug": "demo_salon",
+            "body": {
+                "message": "Хочу записаться",
+                "messageType": "text",
+                "metadata": {
+                    "messageId": message_id,
+                    "remoteJid": "77015705555@s.whatsapp.net",
+                    "timestamp": 1777470000,
+                    "instanceId": "instance-1",
+                },
+            },
+        }
+    )
+
+
+def test_consultant_runtime_enqueue_only_writes_outbox(monkeypatch):
+    captured: dict[str, object] = {}
+    prepared = _prepared_conversation(
+        user_message=SimpleNamespace(message_metadata={}),
+    )
+
+    def _enqueue_outbox_message(_db, **kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        consultant_runtime,
+        "enqueue_outbox_message",
+        _enqueue_outbox_message,
+    )
+    db = SimpleNamespace(commit=lambda: captured.setdefault("committed", True))
+
+    response = ConsultantRuntime()._enqueue_inbound_for_outbox(
+        db,
+        payload=_webhook_request(),
+        prepared=prepared,
+    )
+
+    assert response.success is True
+    assert response.message == "Accepted"
+    assert response.bot_response is None
+    assert captured["client_id"] == prepared.client.id
+    assert captured["conversation_id"] == prepared.conversation.id
+    assert captured["branch_id"] == prepared.branch_id
+    assert captured["inbound_message_id"] == "msg-1"
+    assert captured["payload_json"]["tenant_context"]["client_id"] == str(prepared.client.id)
+    assert captured["payload_json"]["tenant_context"]["branch_id"] == str(prepared.branch_id)
+    assert prepared.user_message.message_metadata["decision_meta"]["outbox_enqueue"] == "enqueued"
+    assert prepared.conversation.context["decision_trace"][-1]["stage"] == "outbox"
+
+
+def test_consultant_runtime_skip_persist_persists_before_transport_failure_raise(monkeypatch):
+    saved_messages: list[SimpleNamespace] = []
+    prepared = _prepared_conversation()
+
+    def _save_message(_db, conversation_id, client_id, role, content, *, message_metadata):
+        message = SimpleNamespace(
+            conversation_id=conversation_id,
+            client_id=client_id,
+            role=role,
+            content=content,
+            message_metadata=dict(message_metadata),
+        )
+        saved_messages.append(message)
+        return message
+
+    class _FailedResult:
+        error = RuntimeError("provider unavailable")
+
+        @staticmethod
+        def is_ok():
+            return False
+
+    monkeypatch.setattr(consultant_runtime, "save_message", _save_message)
+    monkeypatch.setattr(consultant_runtime, "send_message_safe", lambda *_args, **_kwargs: _FailedResult())
+
+    runtime = ConsultantRuntime()
+    bot_response = runtime._send_and_persist_reply(
+        object(),
+        prepared=prepared,
+        reply=SimpleNamespace(reply_kind="fact", text="Ответ"),
+        payload=_webhook_request(),
+        enqueue_only=False,
+        skip_persist=True,
+    )
+
+    assert saved_messages
+    assert saved_messages[0].message_metadata["transport_status"] == "failed"
+    assert bot_response is saved_messages[0]
+    with pytest.raises(RuntimeError, match="ChatFlow delivery failed"):
+        runtime._raise_delivery_failure_after_commit(
+            skip_persist=True,
+            bot_response=bot_response,
+        )
+
+
+@pytest.mark.asyncio
+async def test_outbox_webhook_delivery_failure_marks_failed_without_retry(monkeypatch):
+    client_id = uuid4()
+    branch_id = uuid4()
+    conversation_id = uuid4()
+    outbox_id = uuid4()
+    outbox_row = SimpleNamespace(id=outbox_id, meta={})
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        branch_id=branch_id,
+        context={},
+        state="bot_active",
+    )
+
+    class _Query:
+        def __init__(self, result):
+            self._result = result
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return self._result
+
+    class _Db:
+        def __init__(self):
+            self.commits = 0
+            self.rollbacks = 0
+
+        def query(self, model):
+            if model is OutboxMessage:
+                return _Query(outbox_row)
+            if model is Conversation:
+                return _Query(conversation)
+            return _Query(None)
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    async def _delivery_failed(*_args, **_kwargs):
+        raise RuntimeError(
+            "ChatFlow delivery failed: [CHATFLOW_ERROR] Outbound blocked by transport mode guard"
+        )
+
+    statuses: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "app.core.consultant_core_v2.handle_webhook_payload",
+        _delivery_failed,
+    )
+    monkeypatch.setattr(
+        outbox_runtime,
+        "mark_outbox_status",
+        lambda _db, *, outbox_id, status, last_error=None, next_attempt_at=None: statuses.append(
+            {
+                "outbox_id": outbox_id,
+                "status": status,
+                "last_error": last_error,
+                "next_attempt_at": next_attempt_at,
+            }
+        ),
+    )
+    monkeypatch.setattr(outbox_runtime, "record_outbox_latency", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "record_delivery_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "alert_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_runtime, "_find_message_by_message_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        outbox_runtime,
+        "_find_message_by_conversation_created_at",
+        lambda *_args, **_kwargs: None,
+    )
+
+    db = _Db()
+    results = await outbox_runtime.process_claimed_outbox_rows(
+        db,
+        [
+            {
+                "id": outbox_id,
+                "payload_json": {
+                    "client_slug": "demo_salon",
+                    "body": {
+                        "messageType": "text",
+                        "message": "Хочу записаться",
+                        "metadata": {
+                            "remoteJid": "79990000000@s.whatsapp.net",
+                            "messageId": "msg-1",
+                        },
+                    },
+                    "tenant_context": {
+                        "client_id": str(client_id),
+                        "client_slug": "demo_salon",
+                        "branch_id": str(branch_id),
+                        "source": "webhook",
+                    },
+                },
+                "attempts": 1,
+                "conversation_id": conversation_id,
+                "client_id": client_id,
+                "branch_id": branch_id,
+                "inbound_message_id": "msg-1",
+                "created_at": datetime(2026, 4, 29, 10, 0, tzinfo=timezone.utc),
+            }
+        ],
+        settings=outbox_runtime.OutboxProcessSettings(
+            limit=10,
+            idle_seconds=1,
+            max_wait_seconds=1,
+            max_attempts=5,
+            retry_backoff_seconds=2.0,
+            stale_seconds=120,
+        ),
+    )
+
+    assert results == {"claimed": 1, "sent": 0, "failed": 1, "retry_scheduled": 0}
+    assert db.rollbacks == 0
+    assert statuses == [
+        {
+            "outbox_id": outbox_id,
+            "status": "FAILED",
+            "last_error": "ChatFlow delivery failed: [CHATFLOW_ERROR] Outbound blocked by transport mode guard",
+            "next_attempt_at": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_type", "handler_name"),
+    [
+        (outbox_runtime.OUTBOX_EVENT_CALENDAR_SYNC_OUTBOUND, "process_outbound_sync_event"),
+        (outbox_runtime.OUTBOX_EVENT_KNOWLEDGE_SYNC, "process_knowledge_sync_event"),
+    ],
+)
+async def test_process_claimed_outbox_rows_marks_sent_for_internal_outbox_events(
+    monkeypatch,
+    event_type,
+    handler_name,
+):
+    marked: list[dict[str, object]] = []
+    client_id = "11111111-1111-1111-1111-111111111111"
+
+    monkeypatch.setattr(outbox_runtime, handler_name, lambda **_kwargs: (True, None))
+    monkeypatch.setattr(
+        outbox_runtime,
+        "mark_outbox_status",
+        lambda _db, *, outbox_id, status, last_error=None, next_attempt_at=None: marked.append(
+            {
+                "outbox_id": outbox_id,
+                "status": status,
+                "last_error": last_error,
+                "next_attempt_at": next_attempt_at,
+            }
+        ),
+    )
+
+    results = await outbox_runtime.process_claimed_outbox_rows(
+        object(),
+        [
+            {
+                "id": "row-1",
+                "payload_json": {
+                    "schema_version": "outbox.v1",
+                    "event_type": event_type,
+                    "client_id": client_id,
+                    "tenant_context": {
+                        "client_id": client_id,
+                        "source": "system",
+                    },
+                },
+                "attempts": 1,
+                "conversation_id": None,
+                "client_id": client_id,
+                "branch_id": None,
+                "inbound_message_id": None,
+                "created_at": datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+            }
+        ],
+        settings=outbox_runtime.OutboxProcessSettings(
+            limit=10,
+            idle_seconds=8,
+            max_wait_seconds=10,
+            max_attempts=5,
+            retry_backoff_seconds=2.0,
+            stale_seconds=120,
+        ),
+    )
+
+    assert results == {"claimed": 1, "sent": 1, "failed": 0, "retry_scheduled": 0}
+    assert marked == [
+        {
+            "outbox_id": "row-1",
+            "status": "SENT",
+            "last_error": None,
+            "next_attempt_at": None,
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from functools import lru_cache
+from typing import Any
 
-from app.services.pack_runtime_service import _normalize_text, get_system_lexicon_list
+from rapidfuzz import fuzz, process
+
+from app.services.pack_runtime_service import (
+    _normalize_text,
+    get_system_lexicon_list,
+    load_system_lexicons,
+    load_yaml_truth,
+)
 from app.services.signal_manifest_service import (
     get_booking_layout_swap_map,
     get_booking_regex_pattern,
@@ -112,6 +121,143 @@ def parse_iso_datetime(value: str | None) -> datetime | None:
         )
     except ValueError:
         return None
+
+
+def _merge_datetime_lexicon(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_datetime_lexicon(dict(merged[key]), value)
+        else:
+            merged[key] = value
+    return merged
+
+
+@lru_cache(maxsize=16)
+def load_datetime_lexicon(client_slug: str | None) -> dict[str, Any]:
+    system_lexicons = load_system_lexicons()
+    system_datetime = (
+        system_lexicons.get("datetime_lexicon")
+        if isinstance(system_lexicons, dict)
+        else None
+    )
+    truth = load_yaml_truth(client_slug)
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    domain_datetime = (
+        domain_pack.get("datetime_lexicon")
+        if isinstance(domain_pack, dict)
+        else None
+    )
+    merged: dict[str, Any] = dict(system_datetime) if isinstance(system_datetime, dict) else {}
+    if isinstance(domain_datetime, dict):
+        merged = _merge_datetime_lexicon(merged, domain_datetime)
+    return merged
+
+
+@lru_cache(maxsize=16)
+def build_datetime_variant_index(client_slug: str | None) -> tuple[
+    dict[str, str],
+    set[str],
+    list[tuple[tuple[str, ...], str, str]],
+]:
+    lexicon = load_datetime_lexicon(client_slug)
+    variant_map: dict[str, str] = {}
+    canonical_set: set[str] = set()
+    entries: list[tuple[tuple[str, ...], str, str]] = []
+
+    for group_name in ("days", "dayparts", "months"):
+        group = lexicon.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for payload in group.values():
+            if not isinstance(payload, dict):
+                continue
+            canonical_raw = payload.get("canonical_ru")
+            if not isinstance(canonical_raw, str):
+                continue
+            canonical = _normalize_text(canonical_raw)
+            if not canonical:
+                continue
+            canonical_set.add(canonical)
+            variant_map.setdefault(canonical, canonical)
+            entries.append((tuple(canonical.split()), canonical, canonical))
+            for lang_key in ("ru", "kk", "en"):
+                variants = payload.get(lang_key)
+                if not isinstance(variants, list):
+                    continue
+                for variant in variants:
+                    if not isinstance(variant, str):
+                        continue
+                    normalized = _normalize_text(variant)
+                    if not normalized:
+                        continue
+                    variant_map[normalized] = canonical
+                    entries.append((tuple(normalized.split()), canonical, normalized))
+
+    entries.sort(key=lambda item: len(item[0]), reverse=True)
+    return variant_map, canonical_set, entries
+
+
+def canonicalize_datetime_text(
+    message_text: str,
+    *,
+    client_slug: str | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    normalized = _normalize_text(message_text)
+    if not normalized:
+        return "", []
+
+    variant_map, canonical_set, entries = build_datetime_variant_index(client_slug)
+    if not variant_map:
+        return normalized, []
+
+    tokens = normalized.split()
+    matches: list[dict[str, Any]] = []
+    replaced_tokens: list[str] = []
+    idx = 0
+    while idx < len(tokens):
+        matched = False
+        for variant_tokens, canonical, variant in entries:
+            if not variant_tokens:
+                continue
+            size = len(variant_tokens)
+            if idx + size <= len(tokens) and tuple(tokens[idx : idx + size]) == variant_tokens:
+                replaced_tokens.append(canonical)
+                matches.append({"variant": variant, "canonical": canonical, "method": "direct"})
+                idx += size
+                matched = True
+                break
+        if not matched:
+            replaced_tokens.append(tokens[idx])
+            idx += 1
+
+    variants = list(variant_map.keys())
+    for token_index, token in enumerate(replaced_tokens):
+        if token in canonical_set or len(token) < 2:
+            continue
+        if any(char.isdigit() for char in token):
+            continue
+        match = process.extractOne(token, variants, scorer=fuzz.ratio)
+        if not match:
+            continue
+        variant, score, _ = match
+        threshold = 92 if len(token) <= 4 else 88
+        if score < threshold:
+            continue
+        canonical = variant_map.get(variant)
+        if not canonical or canonical == token:
+            continue
+        replaced_tokens[token_index] = canonical
+        matches.append(
+            {
+                "variant": variant,
+                "canonical": canonical,
+                "method": "fuzzy",
+                "score": score,
+            }
+        )
+
+    return " ".join(replaced_tokens), matches
 
 
 def has_explicit_date_signal(value: str | None) -> bool:

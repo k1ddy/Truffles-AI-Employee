@@ -17,8 +17,12 @@ def _load_quality_helpers():
 
     wanted_assignments = {
         "CHAOS_BOOKING_REPLY_TYPES",
+        "LLM_QUALITY_KNOWN_STATES",
+        "LLM_QUALITY_INFO_TAGS",
+        "LLM_QUALITY_TAG_HINTS",
         "LLM_QUALITY_THRESHOLDS",
         "LLM_QUALITY_THRESHOLD_DIRECTIONS",
+        "LLM_QUALITY_TAG_HINTS_RE",
         "LLM_QUALITY_REGRESSION_KEYS",
         "LLM_QUALITY_BLOCKING_REASONS",
         "LLM_QUALITY_HQ1_CLASSES",
@@ -58,11 +62,26 @@ def _load_quality_helpers():
         "LLM_QUALITY_SCENARIO_REALISM_MIN_TURN_COUNT",
         "LLM_QUALITY_ORACLE_ALIGNMENT_VALUES",
         "LLM_QUALITY_ORACLE_WINNER_VALUES",
+        "LLM_QUALITY_OUTBOX_SUCCESS_STATUSES",
+        "LLM_QUALITY_OUTBOX_FAILURE_STATUSES",
+        "LLM_QUALITY_OUTBOX_PENDING_STATUSES",
+        "LLM_QUALITY_CALENDAR_INTENTS",
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_normalize_expect_token",
+        "_llm_quality_normalize_reason_token",
+        "_llm_quality_generate_unique_jid",
+        "_llm_quality_pick_jid",
+        "_llm_quality_sorted_unique",
+        "_llm_quality_turn_reason_tokens",
+        "_llm_quality_is_soft_runtime_error_classification",
         "_llm_quality_effective_intent",
+        "_llm_quality_is_handoff_effect_meta",
+        "_llm_quality_has_pending_question_interaction_contract",
         "_llm_quality_is_timeout_degrade_reason",
+        "_llm_quality_is_policy_core_infra_reason",
+        "_llm_quality_policy_core_degrade_reason",
         "_clean_webhook_secret",
         "_llm_quality_secret_fingerprint",
         "_llm_quality_resolve_expected_webhook_secret",
@@ -71,6 +90,19 @@ def _load_quality_helpers():
         "_llm_quality_baseline_is_canonical",
         "_llm_quality_build_infra_status",
         "_llm_quality_build_delivery_acceptance_status",
+        "_llm_quality_is_timeout_error",
+        "_decision_meta_ready",
+        "_llm_quality_expectation_tokens",
+        "_llm_quality_expect_targets_specialist_followup",
+        "_llm_quality_apply_booking_collect_expectations",
+        "_llm_quality_should_infer_info_tags_from_text",
+        "_llm_quality_infer_info_tags",
+        "_llm_quality_expected_no_response_handoff_context",
+        "_llm_quality_decision_meta_timeout_is_soft",
+        "_llm_quality_webhook_timeout_is_recovered",
+        "_llm_quality_has_booking_prompt_markers",
+        "_llm_quality_allows_fact_interrupt_booking_continuation",
+        "_llm_quality_has_mix_info_booking",
         "_llm_quality_compute_invariant_metrics",
         "_llm_quality_check_thresholds",
         "_llm_quality_check_regression",
@@ -111,6 +143,10 @@ def _load_quality_helpers():
         "_llm_quality_collect_artifact_integrity",
         "_llm_quality_collect_evidence_handoff_status",
         "_llm_quality_build_governance_closure_status",
+        "_llm_quality_normalize_outbox_status",
+        "_llm_quality_resolve_outbox_status",
+        "_llm_quality_outbox_delivery_state",
+        "_llm_quality_has_bot_reply",
         "_llm_quality_is_iso_timestamp",
         "_llm_quality_extract_chain_id",
         "_llm_quality_extract_oracle_conflict_count",
@@ -138,7 +174,17 @@ def _load_quality_helpers():
         "_llm_quality_collect_hq1_classes",
         "_llm_quality_should_expect_booking_progress",
         "_llm_quality_should_promote_judge_fail",
+        "_llm_quality_is_booking_manage_admin_handoff",
         "_llm_quality_collect_human_semantic_strict_reasons",
+        "_llm_quality_turn_bot_text",
+        "_llm_quality_turn_user_text",
+        "_llm_quality_normalize_dialog_text",
+        "_llm_quality_row_effect",
+        "_llm_quality_dialog_user_slot_tokens",
+        "_llm_quality_text_has_exact_clock_time",
+        "_llm_quality_dialog_known_slot_tokens",
+        "_llm_quality_dialog_has_business_effect",
+        "_llm_quality_analyze_dialog_business_quality",
     }
 
     selected_nodes = []
@@ -196,6 +242,157 @@ def _done_manual_audit_payload(run_dir: Path, run_id: str, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_dialog_business_quality_catches_repeated_slot_loop():
+    ns = _load_quality_helpers()
+    analyze = ns["_llm_quality_analyze_dialog_business_quality"]
+
+    rows = [
+        {
+            "dialog_id": "d-loop",
+            "dialog_index": 1,
+            "turn_index": index,
+            "dialog_goal": "multi-service booking",
+            "turn_text": user_text,
+            "response_text": "На какую услугу хотите записаться?",
+            "conversation_state": "bot_active",
+            "turn_tags": tags,
+            "booking_slots": {},
+            "decision_meta": {
+                "outcome": "collect",
+                "expected_reply_type": "service_choice",
+            },
+        }
+        for index, user_text, tags in [
+            (1, "маникюр педикюр керек", ["service", "multi_service"]),
+            (2, "ертең", ["date"]),
+            (3, "на 5 30 вечера", ["time"]),
+            (4, "Амина", ["name"]),
+            (5, "7014445566", ["phone"]),
+        ]
+    ]
+
+    result = analyze(rows)
+    dialog = result["dialogs"][0]
+
+    assert result["valid"] is False
+    assert "repeated_question_loop" in dialog["reasons"]
+    assert "ignored_user_slot" in dialog["reasons"]
+    assert "asked_already_provided_slot" in dialog["reasons"]
+    assert result["rates"]["dialog_business_success_rate"] == 0.0
+
+
+def test_dialog_business_quality_accepts_slot_collect_progress():
+    ns = _load_quality_helpers()
+    analyze = ns["_llm_quality_analyze_dialog_business_quality"]
+
+    result = analyze(
+        [
+            {
+                "dialog_id": "d-progress",
+                "dialog_index": 1,
+                "turn_index": 1,
+                "dialog_goal": "booking collect",
+                "turn_text": "можно на брови завтра на 5 30 вечера",
+                "response_text": "Как вас зовут?",
+                "conversation_state": "bot_active",
+                "turn_tags": ["service", "date", "time"],
+                "booking_slots": {"service": "брови", "datetime": "завтра 17:30"},
+                "decision_meta": {"outcome": "collect", "expected_reply_type": "name"},
+            }
+        ]
+    )
+
+    assert result["valid"] is True
+    assert result["dialogs"][0]["known_slots"] == ["datetime", "service"]
+    assert result["rates"]["dialog_business_success_rate"] == 1.0
+
+
+def test_dialog_business_quality_does_not_treat_handoff_identity_as_booking_slot_loss():
+    ns = _load_quality_helpers()
+    analyze = ns["_llm_quality_analyze_dialog_business_quality"]
+
+    result = analyze(
+        [
+            {
+                "dialog_id": "d-handoff",
+                "dialog_index": 1,
+                "turn_index": 1,
+                "dialog_goal": "complaint handoff",
+                "turn_text": "у меня жалоба на услугу",
+                "response_text": "Передам администратору, подскажите имя и номер.",
+                "conversation_state": "manager_active",
+                "turn_tags": [],
+                "decision_meta": {"outcome": "handoff", "expected_reply_type": None},
+            },
+            {
+                "dialog_id": "d-handoff",
+                "dialog_index": 1,
+                "turn_index": 2,
+                "dialog_goal": "complaint handoff",
+                "turn_text": "Амина 7014445566",
+                "response_text": "Спасибо, администратор свяжется с вами.",
+                "conversation_state": "manager_active",
+                "turn_tags": ["name", "phone"],
+                "decision_meta": {"outcome": "handoff", "expected_reply_type": None},
+            },
+        ]
+    )
+
+    assert result["valid"] is True
+    assert result["dialogs"][0]["ignored_slots"] == []
+    assert result["rates"]["dialog_business_success_rate"] == 1.0
+
+
+def test_dialog_business_quality_allows_exact_time_followup_for_vague_daypart():
+    ns = _load_quality_helpers()
+    analyze = ns["_llm_quality_analyze_dialog_business_quality"]
+
+    result = analyze(
+        [
+            {
+                "dialog_id": "d-vague-time",
+                "dialog_index": 1,
+                "turn_index": 1,
+                "dialog_goal": "booking collect",
+                "turn_text": "пятница вечером",
+                "response_text": "Подскажите, пожалуйста, точное время.",
+                "conversation_state": "bot_active",
+                "turn_tags": ["date", "time_alt"],
+                "booking_slots": {"service": "маникюр", "datetime": "пятница вечером"},
+                "decision_meta": {"outcome": "collect", "expected_reply_type": "time"},
+            }
+        ]
+    )
+
+    assert "asked_already_provided_slot" not in result["dialogs"][0]["reasons"]
+    assert result["dialogs"][0]["provided_exact_slots"] == []
+
+
+def test_dialog_business_quality_blocks_time_followup_after_exact_split_clock():
+    ns = _load_quality_helpers()
+    analyze = ns["_llm_quality_analyze_dialog_business_quality"]
+
+    result = analyze(
+        [
+            {
+                "dialog_id": "d-exact-time",
+                "dialog_index": 1,
+                "turn_index": 1,
+                "dialog_goal": "booking collect",
+                "turn_text": "завтра 5 30 вечера",
+                "response_text": "Подскажите, пожалуйста, точное время.",
+                "conversation_state": "bot_active",
+                "turn_tags": ["date", "time"],
+                "booking_slots": {"service": "брови"},
+                "decision_meta": {"outcome": "collect", "expected_reply_type": "time"},
+            }
+        ]
+    )
+
+    assert "asked_already_provided_slot" in result["dialogs"][0]["reasons"]
+    assert result["dialogs"][0]["provided_exact_slots"] == ["datetime"]
 
 
 def test_webhook_secret_preflight_enforces_branch_secret_match():
@@ -370,6 +567,248 @@ def test_infra_status_marks_invalid_on_outbox_delivery_failures():
     assert "outbox_delivery_timeout" in status["reasons"]
 
 
+def test_pending_handoff_context_decision_meta_timeout_is_soft():
+    ns = _load_quality_helpers()
+    soft_timeout = ns["_llm_quality_decision_meta_timeout_is_soft"]
+
+    assert soft_timeout(
+        meta_error="timeout",
+        meta={"outbox_enqueue": "enqueued", "outbox_inbound_message_id": "m1"},
+        state="pending",
+        expected_response=False,
+        expected_action="handoff",
+        expected_reply_type=None,
+        expected_reply=None,
+        turn_tags=["handoff", "phone"],
+    )
+
+
+def test_pending_payment_context_decision_meta_timeout_is_soft():
+    ns = _load_quality_helpers()
+    soft_timeout = ns["_llm_quality_decision_meta_timeout_is_soft"]
+
+    assert soft_timeout(
+        meta_error="timeout",
+        meta={"outbox_enqueue": "enqueued", "outbox_inbound_message_id": "m1"},
+        state="pending",
+        expected_response=False,
+        expected_action=None,
+        expected_reply_type=None,
+        expected_reply=None,
+        turn_tags=["media", "payment"],
+    )
+
+
+def test_pending_handoff_context_decision_meta_timeout_not_soft_for_expected_reply():
+    ns = _load_quality_helpers()
+    soft_timeout = ns["_llm_quality_decision_meta_timeout_is_soft"]
+
+    assert not soft_timeout(
+        meta_error="timeout",
+        meta={"outbox_enqueue": "enqueued", "outbox_inbound_message_id": "m1"},
+        state="bot_active",
+        expected_response=True,
+        expected_action="handoff",
+        expected_reply_type=None,
+        expected_reply=None,
+        turn_tags=["handoff", "human"],
+    )
+
+
+def test_recovered_webhook_timeout_requires_no_response_handoff_evidence():
+    ns = _load_quality_helpers()
+    recovered = ns["_llm_quality_webhook_timeout_is_recovered"]
+
+    assert recovered(
+        response_error="timeout: timed out",
+        conversation_id="conv1",
+        meta={"action": "handoff", "source": "llm_policy_core"},
+        trace_entries=[{"stage": "consultant_runtime", "decision": "handoff"}],
+        state="pending",
+        expected_response=False,
+        expected_action="handoff",
+        expected_reply_type=None,
+        expected_reply=None,
+        turn_tags=["handoff"],
+        semantic_reasons=[],
+    )
+    assert not recovered(
+        response_error="timeout: timed out",
+        conversation_id="conv1",
+        meta={"action": "handoff", "source": "llm_policy_core"},
+        trace_entries=[{"stage": "consultant_runtime", "decision": "handoff"}],
+        state="bot_active",
+        expected_response=True,
+        expected_action="handoff",
+        expected_reply_type=None,
+        expected_reply=None,
+        turn_tags=["handoff"],
+        semantic_reasons=["missing_bot_reply"],
+    )
+
+
+def test_soft_decision_meta_timeout_is_not_manual_audit_backlog_reason():
+    ns = _load_quality_helpers()
+    reason_tokens = ns["_llm_quality_turn_reason_tokens"]
+
+    assert "decision_meta_missing" not in reason_tokens(
+        {
+            "decision_meta_error": "timeout",
+            "decision_meta_error_classification": "soft_expected_no_response_handoff_context",
+            "evaluation": {"strict_ok": True, "strict_reasons": []},
+        }
+    )
+    assert "decision_meta_missing" in reason_tokens(
+        {
+            "decision_meta_error": "timeout",
+            "evaluation": {"strict_ok": True, "strict_reasons": []},
+        }
+    )
+
+
+def test_handoff_human_text_does_not_infer_master_info_request():
+    ns = _load_quality_helpers()
+    should_infer = ns["_llm_quality_should_infer_info_tags_from_text"]
+    infer_tags = ns["_llm_quality_infer_info_tags"]
+
+    assert "master" in infer_tags("лучше с мастером поговорить")
+    assert not should_infer(
+        turn_tags=["handoff", "human"],
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_reply_matched=None,
+        meta={"action": "handoff", "outcome": "HANDOFF"},
+        trace_entries=[],
+    )
+
+
+def test_plain_master_question_still_infers_info_request():
+    ns = _load_quality_helpers()
+    should_infer = ns["_llm_quality_should_infer_info_tags_from_text"]
+
+    assert should_infer(
+        turn_tags=[],
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_reply_matched=None,
+        meta={"action": "fact", "outcome": "FACT"},
+        trace_entries=[],
+    )
+
+
+def test_unique_jid_mode_generates_run_scoped_jids_even_with_allowlist():
+    ns = _load_quality_helpers()
+    pick_jid = ns["_llm_quality_pick_jid"]
+
+    first = pick_jid(["77015705555@s.whatsapp.net"], 0, None, "unique", run_id="run-a")
+    second = pick_jid(["77015705555@s.whatsapp.net"], 1, None, "unique", run_id="run-a")
+    repeat = pick_jid(["77015705555@s.whatsapp.net"], 0, None, "unique", run_id="run-a")
+    other_run = pick_jid(["77015705555@s.whatsapp.net"], 0, None, "unique", run_id="run-b")
+
+    assert first != "77015705555@s.whatsapp.net"
+    assert first != second
+    assert first == repeat
+    assert first != other_run
+
+
+def test_multi_service_service_choice_oracle_does_not_require_brittle_reason():
+    ns = _load_quality_helpers()
+    apply_collect_expectations = ns["_llm_quality_apply_booking_collect_expectations"]
+
+    expectations = apply_collect_expectations(
+        {
+            "reply_type": "service_choice",
+            "state": "bot_active",
+            "meta": {
+                "expected_reply_type": "service_choice",
+                "expected_reply_contract_reason": "multi_service_booking_clarify",
+            },
+            "meta_any": {
+                "expected_reply_type": ["service_choice"],
+                "expected_reply_contract_reason": ["multi_service_booking_clarify"],
+            },
+            "trace_contains": [
+                {
+                    "stage": "question_contract",
+                    "expected_reply_type": "service_choice",
+                    "reason": "multi_service_booking_clarify",
+                }
+            ],
+        },
+        {"booking", "multi_service"},
+    )
+
+    assert expectations["meta"]["expected_reply_type"] == "service_choice"
+    assert expectations["meta_any"]["expected_reply_type"] == ["service_choice"]
+    assert "expected_reply_reason" not in expectations["meta"]
+    assert "expected_reply_contract_reason" not in expectations["meta"]
+    assert "expected_reply_reason" not in expectations["meta_any"]
+    assert "expected_reply_contract_reason" not in expectations["meta_any"]
+    assert expectations["trace_contains"] == [
+        {
+            "stage": "question_contract",
+            "expected_reply_type": "service_choice",
+        }
+    ]
+
+
+def test_service_choice_collect_without_slot_write_is_not_booking_stall():
+    ns = _load_quality_helpers()
+    should_expect_progress = ns["_llm_quality_should_expect_booking_progress"]
+
+    assert not should_expect_progress(
+        "service_choice",
+        ["booking", "multi_service"],
+        {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "collect",
+            "tool_decision": "service",
+            "expected_reply_type": "service_choice",
+        },
+    )
+
+
+def test_fact_interrupt_can_answer_and_continue_booking_without_mix_failure():
+    ns = _load_quality_helpers()
+    has_mix = ns["_llm_quality_has_mix_info_booking"]
+
+    assert not has_mix(
+        meta={
+            "action": "fact",
+            "outcome": "FACT",
+            "tool_action": "catalog.service_query",
+            "expected_reply_type": "time",
+            "active_question_relation": "generic_info_interrupt",
+            "info_sections": ["pricing", "duration"],
+        },
+        outbox_text=(
+            "Окрашивание — 120 мин — 15000 ₸.\n\n"
+            "На какую дату и время вам удобно?"
+        ),
+    )
+
+
+def test_fact_interrupt_mix_guard_still_blocks_unrelated_fact_booking_prompt():
+    ns = _load_quality_helpers()
+    has_mix = ns["_llm_quality_has_mix_info_booking"]
+
+    assert has_mix(
+        meta={
+            "action": "fact",
+            "outcome": "FACT",
+            "tool_action": "catalog.service_query",
+            "expected_reply_type": "time",
+            "active_question_relation": "stale_context",
+            "info_sections": ["pricing"],
+        },
+        outbox_text=(
+            "Окрашивание — 120 мин — 15000 ₸.\n\n"
+            "На какую дату и время вам удобно?"
+        ),
+    )
+
+
 def test_delivery_acceptance_marks_waiver_for_billing_blocked():
     ns = _load_quality_helpers()
     build_delivery = ns["_llm_quality_build_delivery_acceptance_status"]
@@ -499,6 +938,38 @@ def test_timeout_degrade_reason_classifier_detects_deadline_and_timeout_markers(
     assert is_timeout("policy_error:deadline_exceeded") is True
     assert is_timeout("provider_timeout") is True
     assert is_timeout("policy_validation:low_confidence") is False
+
+
+def test_policy_core_planner_degrade_is_hard_quality_reason():
+    ns = _load_quality_helpers()
+    degrade_reason = ns["_llm_quality_policy_core_degrade_reason"]
+
+    assert (
+        degrade_reason(
+            {
+                "intent": "planner_degrade",
+                "source": "consultant_runtime",
+                "reason_code": "planner:invalid_schema",
+                "root_reason_code": "policy_core:invalid_schema",
+                "interaction_owner": "turn_planner_degrade",
+                "policy_core_trace": {"error": "invalid_schema"},
+            }
+        )
+        == "policy_core_invalid_schema"
+    )
+    assert (
+        degrade_reason(
+            {
+                "decision_trace": {
+                    "intent": "planner_degrade",
+                    "root_reason_code": "policy_core:timeout",
+                },
+                "policy_core_trace": {"error": "timeout"},
+            }
+        )
+        == "policy_core_degrade_timeout"
+    )
+    assert degrade_reason({"action": "fact", "source": "llm_policy_core"}) is None
 
 
 def test_rewrite_governance_blocks_missing_and_unknown_reason_codes():
@@ -679,6 +1150,52 @@ def test_rewrite_governance_ignores_semantic_override_audit_without_effective_ch
     assert status["rewrite_turns"] == 0
     assert "post_llm_semantic_rewrite_budget_exceeded" not in status["blocking_counts"]
     assert status["valid"] is True
+
+
+def test_rewrite_governance_accepts_boundary_semantic_normalization_reason_code():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_override_reason_code": "boundary_semantic_normalization",
+            "llm_policy_core": {
+                "semantic_arbiter": {
+                    "audit": {
+                        "intent_override_count": 1,
+                        "action_changed": False,
+                        "intent_changed": True,
+                        "tool_action_changed": False,
+                        "intent_override_reason_codes": ["boundary_semantic_normalization"],
+                    }
+                },
+                "semantic_intent_overrides": [
+                    {
+                        "reason_code": "boundary_semantic_normalization",
+                        "from_intent": "hours",
+                        "to_intent": "location",
+                    }
+                ],
+            },
+        },
+    )
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=1.0,
+        max_keyword_override_rate=1.0,
+    )
+
+    assert status["valid"] is True
+    assert status["rewrite_turns"] == 1
+    assert status.get("rewrite_reason_unknown_turns", 0) == 0
+    assert status.get("rewrite_reason_missing_turns", 0) == 0
+    assert status["semantic_intent_override_turns"] == 1
+    assert status["reason_counts"]["boundary_semantic_normalization"] == 1
 
 
 def test_rewrite_governance_excludes_non_semantic_contract_guard_from_budget():
@@ -1244,6 +1761,7 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
         run_economy_gate="block",
         manual_audit_gate="block",
         tool_evidence_policy="strict",
+        transport_evidence_policy="delivery",
         fail_on_thresholds=True,
         fail_on_regression=True,
         allow_weak_oracle=False,
@@ -1273,6 +1791,7 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
         run_economy_gate="warn",
         manual_audit_gate="warn",
         tool_evidence_policy="auto",
+        transport_evidence_policy="rendered",
         fail_on_thresholds=False,
         fail_on_regression=False,
         allow_weak_oracle=True,
@@ -1296,6 +1815,7 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
     assert "acceptance_requires_run_economy_block" in invalid["reasons"]
     assert "acceptance_requires_manual_audit_block" in invalid["reasons"]
     assert "acceptance_requires_tool_evidence_strict" in invalid["reasons"]
+    assert "acceptance_requires_transport_evidence_delivery" in invalid["reasons"]
     assert "acceptance_disallows_allow_judge_off" in invalid["reasons"]
     assert "acceptance_disallows_allow_no_code_delta" in invalid["reasons"]
     assert "acceptance_disallows_skip_outbox" in invalid["reasons"]
@@ -1303,6 +1823,63 @@ def test_quality_constant_acceptance_lane_requires_canonical_envelope():
     assert "acceptance_requires_timeout_gte_30" in invalid["reasons"]
     assert "acceptance_requires_poll_timeout_gte_25" in invalid["reasons"]
     assert "acceptance_requires_trace_timeout_gte_25" in invalid["reasons"]
+
+
+def test_quality_constant_dev_lane_allows_rendered_transport_policy():
+    ns = _load_quality_helpers()
+    build = ns["_llm_quality_build_quality_constant_status"]
+
+    status = build(
+        mode="block",
+        lane="dev",
+        scenarios_file="/tmp/booking_quality/dev/scenarios.json",
+        run_mode="llm",
+        count=3,
+        include_media=False,
+        scenario_coverage="booking",
+        judge_mode="off",
+        run_economy_gate="warn",
+        manual_audit_gate="off",
+        tool_evidence_policy="auto",
+        transport_evidence_policy="rendered",
+        fail_on_thresholds=False,
+        fail_on_regression=False,
+        allow_weak_oracle=False,
+        allow_incomplete_run_artifacts=True,
+        allow_judge_off=True,
+        allow_no_code_delta=False,
+        skip_outbox=False,
+        update_baseline=False,
+        timeout_profile="fast-replay",
+        timeout=20,
+        poll_timeout=16,
+        trace_timeout=16,
+    )
+
+    assert status["valid"] is True
+    assert status["transport_evidence_policy"] == "rendered"
+
+
+def test_llm_quality_rendered_transport_counts_outbox_text_as_reply():
+    ns = _load_quality_helpers()
+    has_reply = ns["_llm_quality_has_bot_reply"]
+
+    assert has_reply(
+        outbox_summary={"count": 1, "status": "PROCESSING"},
+        outbox_payload_status="PROCESSING",
+        outbox_text="Передаю диалог менеджеру.",
+        outbox_text_source="outbox_payload",
+        inline_response_text=None,
+        transport_evidence_policy="delivery",
+    ) is False
+    assert has_reply(
+        outbox_summary={"count": 1, "status": "PROCESSING"},
+        outbox_payload_status="PROCESSING",
+        outbox_text="Передаю диалог менеджеру.",
+        outbox_text_source="assistant_message",
+        inline_response_text=None,
+        transport_evidence_policy="rendered",
+    ) is True
 
 
 def test_quality_constant_dev_lane_disallows_baseline_update_only():
@@ -1624,6 +2201,7 @@ def test_replay_command_forces_unique_jid_and_reset():
         remote_jid=None,
         allow_non_allowlist=False,
         skip_outbox=False,
+        transport_evidence_policy="delivery",
         reset_before_dialog=False,
         max_failures=0,
     )
@@ -1658,6 +2236,7 @@ def test_replay_command_skips_allow_non_allowlist_when_skip_outbox():
         remote_jid=None,
         allow_non_allowlist=False,
         skip_outbox=True,
+        transport_evidence_policy="rendered",
         reset_before_dialog=True,
         max_failures=0,
     )
@@ -1670,6 +2249,8 @@ def test_replay_command_skips_allow_non_allowlist_when_skip_outbox():
     assert "--reset-before-dialog" in parts
     assert "--skip-outbox" in parts
     assert "--allow-non-allowlist" not in parts
+    assert "--transport-evidence-policy" in parts
+    assert parts[parts.index("--transport-evidence-policy") + 1] == "rendered"
 
 
 def test_validate_scenario_artifacts_blocks_missing_summary_and_brief(tmp_path):
@@ -1900,6 +2481,33 @@ def test_hq1_classifier_ignores_check_booking_confirmation_without_handoff_signa
     }
 
     assert "handoff_miss" not in classify(record)
+
+
+def test_llm_quality_allows_check_booking_admin_handoff_after_not_found_lookup():
+    ns = _load_quality_helpers()
+    is_admin_handoff = ns["_llm_quality_is_booking_manage_admin_handoff"]
+
+    meta = {
+        "action": "handoff",
+        "intent": "check_booking",
+        "tool_action": "handoff",
+        "tool_decision": "handoff",
+        "semantic_contract": {
+            "capability": "booking_manage",
+            "requested_effect": "handoff_to_human",
+            "tool_action_hint": "handoff",
+            "needs_human": True,
+        },
+    }
+
+    assert is_admin_handoff(
+        state="pending",
+        meta=meta,
+    ) is True
+    assert is_admin_handoff(
+        state="pending",
+        meta={"action": "handoff", "intent": "check_booking", "tool_action": "handoff"},
+    ) is False
 
 
 def test_booking_progress_expectation_ignores_book_slot_conflict():

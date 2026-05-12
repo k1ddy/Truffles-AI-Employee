@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -114,6 +114,75 @@ def test_report_integration_incident_without_branch(monkeypatch):
     assert changed is False
     assert events == ["integration_incident"]
     assert len(error_alerts) == 1
+
+
+def test_no_recent_inbound_is_warning_by_default(monkeypatch):
+    now = datetime.now(timezone.utc)
+    branch = _branch()
+
+    monkeypatch.delenv("INTEGRATION_WATCHDOG_NO_RECENT_INBOUND_DEGRADES", raising=False)
+    monkeypatch.setattr(guardrails, "derive_webhook_secret_from_instance", lambda _instance: "secret")
+    monkeypatch.setattr(
+        guardrails,
+        "_latest_inbound_for_branch",
+        lambda *_args, **_kwargs: (
+            now - timedelta(minutes=121),
+            {"instanceId": branch.instance_id},
+        ),
+    )
+    monkeypatch.setattr(
+        guardrails,
+        "_latest_outbound_for_branch",
+        lambda *_args, **_kwargs: now - timedelta(minutes=1),
+    )
+
+    reason, context, remediated = guardrails._evaluate_branch_watchdog_reason(
+        Mock(),
+        branch=branch,
+        now=now,
+        stale_after_minutes=120,
+        reply_timeout_minutes=10,
+        auto_remediate_secret=False,
+    )
+
+    assert reason is None
+    assert remediated is False
+    assert context["check"] == guardrails.REASON_NO_RECENT_INBOUND
+    assert context["check_severity"] == "warning"
+    assert context["warning_reason"] == guardrails.REASON_NO_RECENT_INBOUND
+
+
+def test_no_recent_inbound_can_still_be_strict_degrade(monkeypatch):
+    now = datetime.now(timezone.utc)
+    branch = _branch()
+
+    monkeypatch.setenv("INTEGRATION_WATCHDOG_NO_RECENT_INBOUND_DEGRADES", "1")
+    monkeypatch.setattr(guardrails, "derive_webhook_secret_from_instance", lambda _instance: "secret")
+    monkeypatch.setattr(
+        guardrails,
+        "_latest_inbound_for_branch",
+        lambda *_args, **_kwargs: (
+            now - timedelta(minutes=121),
+            {"instanceId": branch.instance_id},
+        ),
+    )
+    monkeypatch.setattr(
+        guardrails,
+        "_latest_outbound_for_branch",
+        lambda *_args, **_kwargs: now - timedelta(minutes=1),
+    )
+
+    reason, context, _remediated = guardrails._evaluate_branch_watchdog_reason(
+        Mock(),
+        branch=branch,
+        now=now,
+        stale_after_minutes=120,
+        reply_timeout_minutes=10,
+        auto_remediate_secret=False,
+    )
+
+    assert reason == guardrails.REASON_NO_RECENT_INBOUND
+    assert context["check_severity"] == "degrade"
 
 
 def test_run_watchdog_applies_degrade_recover_and_commit(monkeypatch):

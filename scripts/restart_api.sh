@@ -11,6 +11,9 @@ VERIFY_RETRIES="${VERIFY_RETRIES:-30}"
 VERIFY_SLEEP_SECONDS="${VERIFY_SLEEP_SECONDS:-1}"
 EXPECTED_GIT_COMMIT="${EXPECTED_GIT_COMMIT:-}"
 EXPECTED_VERSION="${EXPECTED_VERSION:-}"
+OUTBOX_WORKER_MODE_OVERRIDE="${OUTBOX_WORKER_MODE_OVERRIDE:-}"
+DATABASE_LOCAL_CIDRS="${DATABASE_LOCAL_CIDRS:-}"
+WEBHOOK_ENQUEUE_ONLY_OVERRIDE="${WEBHOOK_ENQUEUE_ONLY_OVERRIDE:-}"
 
 RUN_MIGRATIONS="${RUN_MIGRATIONS:-1}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/app/migrations}"
@@ -40,6 +43,11 @@ if [ "$PULL_IMAGE" = "1" ]; then
   docker pull "$IMAGE_NAME"
 fi
 
+if [ "$VERIFY_VERSION" != "1" ] && { [ -n "$EXPECTED_GIT_COMMIT" ] || [ -n "$EXPECTED_VERSION" ]; }; then
+  echo "VERIFY_VERSION=0 but expected runtime fingerprint was provided; forcing VERIFY_VERSION=1." >&2
+  VERIFY_VERSION=1
+fi
+
 if [ "$RUN_MIGRATIONS" = "1" ]; then
   if [ ! -f "$API_ENV_FILE" ]; then
     echo "ERROR: API env file not found: $API_ENV_FILE" >&2
@@ -56,6 +64,16 @@ fi
 
 docker rm -f truffles-api >/dev/null 2>&1 || true
 cd "$API_WORKDIR"
+extra_env_args=()
+if [ -n "$OUTBOX_WORKER_MODE_OVERRIDE" ]; then
+  extra_env_args+=(-e "OUTBOX_WORKER_MODE=$OUTBOX_WORKER_MODE_OVERRIDE")
+fi
+if [ -n "$DATABASE_LOCAL_CIDRS" ]; then
+  extra_env_args+=(-e "DATABASE_LOCAL_CIDRS=$DATABASE_LOCAL_CIDRS")
+fi
+if [ -n "$WEBHOOK_ENQUEUE_ONLY_OVERRIDE" ]; then
+  extra_env_args+=(-e "WEBHOOK_ENQUEUE_ONLY=$WEBHOOK_ENQUEUE_ONLY_OVERRIDE")
+fi
 docker run -d --name truffles-api \
   --env-file .env \
   --network truffles_internal-net \
@@ -71,6 +89,7 @@ docker run -d --name truffles-api \
   --add-host auth.truffles.kz:172.20.0.2 \
   -e CONSOLE_OIDC_JWKS_URL=https://auth.truffles.kz/realms/truffles/protocol/openid-connect/certs \
   -e CONSOLE_OIDC_ISSUER=https://auth.truffles.kz/realms/truffles \
+  "${extra_env_args[@]}" \
   "$IMAGE_NAME"
 
 expected_ref="${EXPECTED_IMAGE:-$IMAGE_NAME}"

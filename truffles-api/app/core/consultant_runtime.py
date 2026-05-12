@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.binding_plan import BindingPlanV1
 from app.core.boundary_validator import BoundaryOverride, BoundaryValidator
 from app.core.dialog_state_service import DialogState, DialogStateService
@@ -32,7 +33,9 @@ from app.routers.webhook.trace import (
     _record_decision_trace,
     _update_message_decision_metadata,
 )
+from app.schemas.outbox_payload import validate_outbox_payload
 from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services.booking_transition_owner import PHONE_SOURCE_REMOTE_JID, PHONE_SOURCE_USER_PROFILE
 from app.services.capabilities_runtime import build_runtime_capabilities, set_runtime_capabilities
 from app.services.chatflow_service import get_instance_id, send_message_safe
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
@@ -47,6 +50,7 @@ from app.services.knowledge_runtime import (
     should_allow_truth_fallback,
 )
 from app.services.message_service import save_message
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
 from app.services.state_service import apply_simulation_context, transition_state
 
@@ -162,11 +166,17 @@ class ConsultantRuntime:
                 now=now,
                 skip_persist=skip_persist,
             )
+            if enqueue_only and not skip_persist:
+                return self._enqueue_inbound_for_outbox(
+                    db,
+                    payload=payload,
+                    prepared=prepared,
+                )
             runtime_state = self._load_runtime_state(
                 prepared.conversation,
                 state_hint=(payload.body.message or ""),
             )
-            control_response, runtime_state = self._handle_control_turn(
+            control_response, runtime_state, control_bot_response = self._handle_control_turn(
                 db,
                 payload=payload,
                 prepared=prepared,
@@ -177,6 +187,10 @@ class ConsultantRuntime:
             )
             if control_response is not None:
                 db.commit()
+                self._raise_delivery_failure_after_commit(
+                    skip_persist=skip_persist,
+                    bot_response=control_bot_response,
+                )
                 return control_response
             self._prime_runtime_context(
                 db,
@@ -208,11 +222,36 @@ class ConsultantRuntime:
                 if outbox_created_at is not None:
                     decision.meta.setdefault("outbox_created_at", outbox_created_at.isoformat())
 
+            # Policy-Core v3 shadow-run (DL-2026-05-11-020). Off by default;
+            # gated by settings.policy_core_v3_enabled AND env wiring. Fire-
+            # and-forget; never affects the customer reply.
+            if settings.policy_core_v3_enabled:
+                try:
+                    from app.policy_core_v3_shadow_hook import (
+                        dispatch_fire_and_forget as _v3_shadow_dispatch,
+                    )
+
+                    _v3_shadow_dispatch(
+                        tenant_id=str(prepared.client.id),
+                        conversation_id=str(prepared.conversation.id),
+                        current_message=payload.body.message or "",
+                        legacy_decision=decision,
+                    )
+                except Exception:  # pragma: no cover - rule §1: shadow never affects hot path
+                    pass
+
             planner_boundary_artifact = self._build_planner_boundary_artifact(
                 decision=decision,
                 boundary_override=boundary_override,
             )
             if planner_boundary_artifact is not None:
+                self._write_planner_boundary_state(
+                    prepared=prepared,
+                    runtime_state=runtime_state,
+                    planner_boundary_artifact=planner_boundary_artifact,
+                    boundary_override=boundary_override,
+                    now=now,
+                )
                 if self._should_activate_handoff(
                     decision=decision,
                     boundary_override=boundary_override,
@@ -250,6 +289,10 @@ class ConsultantRuntime:
                     delivered=bool(bot_response),
                 )
                 db.commit()
+                self._raise_delivery_failure_after_commit(
+                    skip_persist=skip_persist,
+                    bot_response=bot_response,
+                )
                 return WebhookResponse(
                     success=True,
                     message="Handled",
@@ -330,6 +373,10 @@ class ConsultantRuntime:
                 delivered=bool(bot_response),
             )
             db.commit()
+            self._raise_delivery_failure_after_commit(
+                skip_persist=skip_persist,
+                bot_response=bot_response,
+            )
             return WebhookResponse(
                 success=True,
                 message="Handled",
@@ -339,6 +386,12 @@ class ConsultantRuntime:
         except HTTPException:
             raise
         except Exception as exc:  # pragma: no cover - runtime safety net
+            if (
+                skip_persist
+                and isinstance(exc, RuntimeError)
+                and str(exc).strip().startswith("ChatFlow delivery failed")
+            ):
+                raise
             logger.exception(
                 "Consultant runtime failed",
                 extra={
@@ -430,8 +483,14 @@ class ConsultantRuntime:
                 allow_internal_source=internal_simulation_source,
             )
 
-        user_message = None
-        if not skip_persist:
+        if skip_persist:
+            user_message = self._find_existing_user_message(
+                db,
+                client_id=client.id,
+                conversation_id=conversation.id,
+                message_id=getattr(metadata, "messageId", None) if metadata else None,
+            )
+        else:
             user_message = self._persist_user_message(
                 db,
                 conversation=conversation,
@@ -453,6 +512,131 @@ class ConsultantRuntime:
             tenant_context=tenant_context,
             instance_id=instance_id,
             source=source,
+        )
+
+    def _find_existing_user_message(
+        self,
+        db: Session,
+        *,
+        client_id: UUID,
+        conversation_id: UUID,
+        message_id: str | None,
+    ) -> Message | None:
+        if not message_id:
+            return None
+        token = message_id.strip()
+        if not token:
+            return None
+        return (
+            db.query(Message)
+            .filter(
+                Message.client_id == client_id,
+                Message.conversation_id == conversation_id,
+                Message.role == "user",
+                or_(
+                    Message.message_metadata["message_id"].astext == token,
+                    Message.message_metadata["messageId"].astext == token,
+                ),
+            )
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+
+    def _enqueue_inbound_for_outbox(
+        self,
+        db: Session,
+        *,
+        payload: WebhookRequest,
+        prepared: PreparedConversation,
+    ) -> WebhookResponse:
+        metadata = payload.body.metadata
+        message_id = getattr(metadata, "messageId", None) if metadata else None
+        timestamp = getattr(metadata, "timestamp", None) if metadata else None
+        inbound_message_id = build_inbound_message_id(
+            message_id,
+            prepared.remote_jid,
+            timestamp,
+            payload.body.message,
+        )
+        payload_json = payload.model_dump(exclude_none=True, mode="json")
+        tenant_context = dict(payload_json.get("tenant_context") or {})
+        tenant_context.update(
+            {
+                "client_id": str(prepared.client.id),
+                "client_slug": prepared.client.name,
+                "source": prepared.source or tenant_context.get("source") or "webhook",
+            }
+        )
+        if prepared.branch_id:
+            tenant_context["branch_id"] = str(prepared.branch_id)
+        if prepared.instance_id:
+            tenant_context["instance_id"] = prepared.instance_id
+        payload_json["tenant_context"] = {
+            key: value for key, value in tenant_context.items() if value is not None
+        }
+        payload_json["client_slug"] = prepared.client.name
+
+        validated_payload, payload_error = validate_outbox_payload(
+            payload_json,
+            expected_client_slug=prepared.client.name,
+        )
+        if payload_error:
+            _record_decision_trace(
+                prepared.conversation,
+                {
+                    "stage": "outbox_payload_guard",
+                    "decision": "reject",
+                    "reason": payload_error,
+                    "state": prepared.conversation.state,
+                },
+            )
+            if prepared.user_message is not None:
+                _update_message_decision_metadata(
+                    prepared.user_message,
+                    {
+                        "action_error": "outbox_payload_invalid",
+                        "outbox_payload_error": payload_error,
+                    },
+                )
+            db.commit()
+            return WebhookResponse(
+                success=False,
+                message="Invalid outbox payload",
+                conversation_id=prepared.conversation.id,
+            )
+
+        outbox_payload = validated_payload.model_dump(exclude_none=True, mode="json")
+        enqueued = enqueue_outbox_message(
+            db,
+            client_id=prepared.client.id,
+            conversation_id=prepared.conversation.id,
+            branch_id=prepared.branch_id,
+            inbound_message_id=inbound_message_id,
+            payload_json=outbox_payload,
+        )
+        _record_decision_trace(
+            prepared.conversation,
+            {
+                "stage": "outbox",
+                "decision": "enqueue_only",
+                "reason": "enqueued" if enqueued else "duplicate",
+                "state": prepared.conversation.state,
+            },
+        )
+        if prepared.user_message is not None:
+            _update_message_decision_metadata(
+                prepared.user_message,
+                {
+                    "outbox_enqueue": "enqueued" if enqueued else "duplicate",
+                    "outbox_inbound_message_id": inbound_message_id,
+                },
+            )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message="Accepted",
+            conversation_id=prepared.conversation.id,
+            bot_response=None,
         )
 
     def _load_runtime_state(
@@ -480,10 +664,10 @@ class ConsultantRuntime:
         now: datetime,
         enqueue_only: bool,
         skip_persist: bool,
-    ) -> tuple[WebhookResponse | None, LoadedRuntimeState]:
+    ) -> tuple[WebhookResponse | None, LoadedRuntimeState, Message | None]:
         message_text = payload.body.message
         if not _should_reset_session_memory(message_text):
-            return None, runtime_state
+            return None, runtime_state, None
 
         reset_snapshot = self._reset_runtime_context(
             prepared.conversation,
@@ -509,7 +693,7 @@ class ConsultantRuntime:
             state_hint=(message_text or ""),
         )
         if not _is_session_reset_only_message(message_text):
-            return None, runtime_state
+            return None, runtime_state, None
 
         reply = ReplyEnvelope(
             channel=prepared.conversation.channel or "whatsapp",
@@ -552,6 +736,7 @@ class ConsultantRuntime:
                 bot_response=reply.text,
             ),
             runtime_state,
+            bot_response,
         )
 
     def _reset_runtime_context(
@@ -938,6 +1123,7 @@ class ConsultantRuntime:
                 pending_contract,
                 current_goal=active_goal,
                 booking_payload=runtime_state.booking_state,
+                semantic_contract=semantic_contract,
             )
             if resume_pending_contract:
                 profile["resume_pending_question_contract"] = resume_pending_contract
@@ -1119,6 +1305,9 @@ class ConsultantRuntime:
                     "pending_question_target",
                     "active_question_relation",
                     "alternate_datetime",
+                    "requested_effect",
+                    "tool_action_hint",
+                    "needs_human",
                     "grounding_provenance",
                 ):
                     if key not in contract and key in owner_semantic_contract:
@@ -1150,6 +1339,9 @@ class ConsultantRuntime:
             "pending_question_act",
             "pending_question_target",
             "active_question_relation",
+            "requested_effect",
+            "tool_action_hint",
+            "needs_human",
             "grounding_provenance",
         ):
             if key not in contract and key in execution_semantic_contract:
@@ -1201,6 +1393,19 @@ class ConsultantRuntime:
             payload.pop(key, None)
         return payload
 
+    @classmethod
+    def _merge_runtime_decision_meta(
+        cls,
+        existing: Any,
+        current: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        for key in _PROTECTED_RUNTIME_DECISION_META_FIELDS:
+            if key not in current:
+                merged.pop(key, None)
+        merged.update(current)
+        return merged
+
     @staticmethod
     def _fresh_turn_trace_seed(existing_trace: Any) -> list[dict[str, Any]]:
         trace_items = []
@@ -1229,9 +1434,12 @@ class ConsultantRuntime:
         now: datetime,
     ) -> RuntimeExecutionResult:
         user_phone = prepared.user.phone
+        user_phone_source = PHONE_SOURCE_USER_PROFILE if user_phone else None
         if not user_phone and prepared.remote_jid:
             digits = "".join(ch for ch in prepared.remote_jid.split("@", 1)[0] if ch.isdigit())
             user_phone = digits or None
+            if user_phone:
+                user_phone_source = PHONE_SOURCE_REMOTE_JID
         return self.executor.execute(
             decision,
             db=db,
@@ -1241,6 +1449,7 @@ class ConsultantRuntime:
             booking_state=runtime_state.booking_state,
             user_name=prepared.user.name,
             user_phone=user_phone,
+            user_phone_source=user_phone_source,
             now=now,
             conversation_id=prepared.conversation.id,
         )
@@ -1306,6 +1515,40 @@ class ConsultantRuntime:
         if isinstance(runtime_payload, dict):
             runtime_payload["semantic_runtime_path"] = self.semantic_runtime_path
         return updated_context, dialog_state
+
+    def _write_planner_boundary_state(
+        self,
+        *,
+        prepared: PreparedConversation,
+        runtime_state: LoadedRuntimeState,
+        planner_boundary_artifact: Any,
+        boundary_override: BoundaryOverride | None,
+        now: datetime,
+    ) -> dict[str, Any]:
+        reason_code = (
+            boundary_override.reason_code
+            if isinstance(boundary_override, BoundaryOverride)
+            else "planner_boundary"
+        )
+        updated_context = self.dialog_state.reset_runtime_continuity(
+            runtime_state.context,
+            now=now,
+            reason=reason_code,
+        )
+        dialog_state = planner_boundary_artifact.turn_result.dialog_state
+        runtime_payload = {
+            "schema_version": "consultant_runtime.v1",
+            "dialog_state": dialog_state.model_dump(mode="json", exclude_none=True),
+            "updated_at": now.isoformat(),
+            "semantic_runtime_path": self.semantic_runtime_path,
+            "boundary_state": {
+                "reason_code": reason_code,
+                "planner_boundary_signal": True,
+            },
+        }
+        updated_context["consultant_runtime"] = runtime_payload
+        prepared.conversation.context = updated_context
+        return updated_context
 
     def _activate_handoff(
         self,
@@ -1384,22 +1627,19 @@ class ConsultantRuntime:
         metadata = payload.body.metadata
         transport_status = "skipped"
         transport_reason = None
-        if not skip_persist:
-            assistant_message = save_message(
-                db,
-                prepared.conversation.id,
-                prepared.client.id,
-                "assistant",
-                reply.text,
-                message_metadata={
-                    "source": _RUNTIME_ENTRYPOINT_NAME,
-                    "reply_kind": reply.reply_kind,
-                },
-            )
-        else:
-            assistant_message = None
+        assistant_message = save_message(
+            db,
+            prepared.conversation.id,
+            prepared.client.id,
+            "assistant",
+            reply.text,
+            message_metadata={
+                "source": _RUNTIME_ENTRYPOINT_NAME,
+                "reply_kind": reply.reply_kind,
+            },
+        )
 
-        if enqueue_only or skip_persist or self._should_skip_send(prepared, metadata):
+        if enqueue_only or self._should_skip_send(prepared, metadata):
             transport_reason = "transport_suppressed"
         else:
             instance_id = prepared.instance_id or get_instance_id(
@@ -1422,7 +1662,7 @@ class ConsultantRuntime:
                     transport_reason = None
                 else:
                     transport_status = "failed"
-                    transport_reason = type(result.error).__name__ if result.error else "delivery_failed"
+                    transport_reason = str(result.error) if result.error else "delivery_failed"
             else:
                 transport_status = "failed"
                 transport_reason = "transport_target_missing"
@@ -1434,6 +1674,30 @@ class ConsultantRuntime:
                 assistant_meta["transport_reason"] = transport_reason
             assistant_message.message_metadata = assistant_meta
         return assistant_message
+
+    @staticmethod
+    def _delivery_failure_reason(bot_response: Message | None) -> str | None:
+        if bot_response is None:
+            return None
+        metadata = bot_response.message_metadata
+        if not isinstance(metadata, dict):
+            return None
+        if metadata.get("transport_status") != "failed":
+            return None
+        reason = metadata.get("transport_reason") or "delivery_failed"
+        return str(reason)
+
+    def _raise_delivery_failure_after_commit(
+        self,
+        *,
+        skip_persist: bool,
+        bot_response: Message | None,
+    ) -> None:
+        if not skip_persist:
+            return
+        reason = self._delivery_failure_reason(bot_response)
+        if reason:
+            raise RuntimeError(f"ChatFlow delivery failed: {reason}")
 
     def _record_turn_trace(
         self,
@@ -1758,6 +2022,39 @@ class ConsultantRuntime:
             decision_meta["source_detail"] = decision.source
         if policy_core_trace:
             decision_meta["policy_core_trace"] = policy_core_trace
+            boundary_normalization_used = policy_core_trace.get("boundary_normalization_used")
+            if boundary_normalization_used is not None:
+                decision_meta["boundary_normalization_used"] = bool(
+                    boundary_normalization_used
+                )
+            boundary_normalization_events = policy_core_trace.get(
+                "boundary_normalization_events"
+            )
+            if isinstance(boundary_normalization_events, list) and boundary_normalization_events:
+                decision_meta["boundary_normalization_events"] = list(
+                    boundary_normalization_events
+                )
+            override_reason_code = policy_core_trace.get("llm_policy_override_reason_code")
+            if isinstance(override_reason_code, str) and override_reason_code.strip():
+                decision_meta["llm_policy_override_reason_code"] = override_reason_code.strip()
+            override_reason_codes = policy_core_trace.get("llm_policy_override_reason_codes")
+            if isinstance(override_reason_codes, list) and override_reason_codes:
+                decision_meta["llm_policy_override_reason_codes"] = list(
+                    override_reason_codes
+                )
+            semantic_intent_overrides = policy_core_trace.get("semantic_intent_overrides")
+            semantic_arbiter_audit = policy_core_trace.get("semantic_arbiter_audit")
+            llm_policy_core_meta: dict[str, Any] = {}
+            if isinstance(semantic_intent_overrides, list) and semantic_intent_overrides:
+                llm_policy_core_meta["semantic_intent_overrides"] = list(
+                    semantic_intent_overrides
+                )
+            if isinstance(semantic_arbiter_audit, dict) and semantic_arbiter_audit:
+                llm_policy_core_meta["semantic_arbiter"] = {
+                    "audit": dict(semantic_arbiter_audit)
+                }
+            if llm_policy_core_meta:
+                decision_meta["llm_policy_core"] = llm_policy_core_meta
         if execution_meta:
             decision_meta.update(execution_meta)
         decision_meta["runtime_trace_contract"] = runtime_trace_contract_payload
@@ -1770,7 +2067,10 @@ class ConsultantRuntime:
                 if isinstance(user_meta.get("decision_meta"), dict)
                 else {}
             )
-            user_meta["decision_meta"] = {**existing, **decision_meta}
+            user_meta["decision_meta"] = self._merge_runtime_decision_meta(
+                existing,
+                decision_meta,
+            )
             user_message.message_metadata = user_meta
         if bot_response is not None:
             bot_meta = dict(bot_response.message_metadata or {})
@@ -1779,7 +2079,10 @@ class ConsultantRuntime:
                 if isinstance(bot_meta.get("decision_meta"), dict)
                 else {}
             )
-            bot_meta["decision_meta"] = {**existing, **decision_meta}
+            bot_meta["decision_meta"] = self._merge_runtime_decision_meta(
+                existing,
+                decision_meta,
+            )
             bot_response.message_metadata = bot_meta
 
     def _derive_contract_action(

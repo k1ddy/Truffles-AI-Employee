@@ -1,6 +1,7 @@
 from app.services.llm_quality_contracts import (
     apply_booking_scenario_active_time_specialist_followup_expectations,
     extract_expectations,
+    sanitize_booking_scenario_llm_turns,
 )
 
 
@@ -12,6 +13,16 @@ def test_extract_expectations_strips_handoff_action_for_booking_turn():
         }
     )
     assert expect["action"] is None
+
+
+def test_sanitize_booking_scenario_master_fallback_works_without_context():
+    turns = sanitize_booking_scenario_llm_turns(
+        [{"kind": "text", "text": "", "tags": ["master"]}],
+        {},
+        None,
+    )
+
+    assert turns[0]["text"] == "Можно к мастеру Алия?"
 
 
 def test_extract_expectations_keeps_handoff_action_for_handoff_turn():

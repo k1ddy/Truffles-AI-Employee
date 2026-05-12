@@ -1,3 +1,5 @@
+import json
+import logging
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -25,6 +27,45 @@ webhook_trace = _load_webhook_trace()
 class DummyMessage:
     def __init__(self, metadata=None):
         self.message_metadata = metadata
+
+
+class _FakeSpanContext:
+    is_valid = True
+    trace_id = int("1234567890abcdef1234567890abcdef", 16)
+    span_id = int("1234567890abcdef", 16)
+
+
+class _FakeSpan:
+    def get_span_context(self):
+        return _FakeSpanContext()
+
+
+class _FakeTrace:
+    @staticmethod
+    def get_current_span():
+        return _FakeSpan()
+
+
+def test_json_formatter_injects_current_otel_trace_context(monkeypatch):
+    monkeypatch.setattr(logging_config, "trace", _FakeTrace)
+    record = logging.LogRecord(
+        name="truffles.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+    record.context = {"trace_id": None, "message_id": "msg-1"}
+
+    payload = json.loads(logging_config.JSONFormatter().format(record))
+
+    assert payload["trace_id"] == "1234567890abcdef1234567890abcdef"
+    assert payload["span_id"] == "1234567890abcdef"
+    assert payload["context"]["trace_id"] == "1234567890abcdef1234567890abcdef"
+    assert payload["context"]["span_id"] == "1234567890abcdef"
+    assert payload["context"]["message_id"] == "msg-1"
 
 
 def test_merge_message_timing_adds_pipeline_ms():

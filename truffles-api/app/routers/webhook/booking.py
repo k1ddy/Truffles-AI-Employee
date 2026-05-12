@@ -78,6 +78,9 @@ from app.services.ai_service import (
 )
 from app.services.appointment_service import SchedulingService
 from app.services.booking_signal_service import (
+    canonicalize_datetime_text as _canonicalize_datetime_text_impl,
+)
+from app.services.booking_signal_service import (
     clean_name_candidate as _clean_name_candidate_impl,
 )
 from app.services.booking_signal_service import (
@@ -393,61 +396,7 @@ def _canonicalize_datetime_text(
     *,
     client_slug: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    normalized = _normalize_text(message_text)
-    if not normalized:
-        return "", []
-
-    variant_map, canonical_set, entries = _build_datetime_variant_index(client_slug)
-    if not variant_map:
-        return normalized, []
-
-    tokens = normalized.split()
-    matches: list[dict[str, Any]] = []
-    replaced_tokens: list[str] = []
-    idx = 0
-    while idx < len(tokens):
-        matched = False
-        for variant_tokens, canonical, variant in entries:
-            if not variant_tokens:
-                continue
-            size = len(variant_tokens)
-            if idx + size <= len(tokens) and tuple(tokens[idx : idx + size]) == variant_tokens:
-                replaced_tokens.append(canonical)
-                matches.append({"variant": variant, "canonical": canonical, "method": "direct"})
-                idx += size
-                matched = True
-                break
-        if not matched:
-            replaced_tokens.append(tokens[idx])
-            idx += 1
-
-    variants = list(variant_map.keys())
-    for token_index, token in enumerate(replaced_tokens):
-        if token in canonical_set or len(token) < 2:
-            continue
-        if any(char.isdigit() for char in token):
-            continue
-        match = process.extractOne(token, variants, scorer=fuzz.ratio)
-        if not match:
-            continue
-        variant, score, _ = match
-        threshold = 92 if len(token) <= 4 else 88
-        if score < threshold:
-            continue
-        canonical = variant_map.get(variant)
-        if not canonical or canonical == token:
-            continue
-        replaced_tokens[token_index] = canonical
-        matches.append(
-            {
-                "variant": variant,
-                "canonical": canonical,
-                "method": "fuzzy",
-                "score": score,
-            }
-        )
-
-    return " ".join(replaced_tokens), matches
+    return _canonicalize_datetime_text_impl(message_text, client_slug=client_slug)
 
 def _resolve_datetime_offline(
     message_text: str,

@@ -9,13 +9,17 @@
 | Файл | Назначение | Кому |
 |------|------------|------|
 | `STATE.md` | Состояние, план, backlog, история | Архитектор (каждую сессию) |
-| `AGENTS.md` | Принципы работы, роли, ошибки | Архитектор (каждую сессию) |
+| `AGENTS.md` | Truffles Decision Constitution: operating role, platform target, semantic-owner laws, technology/signal laws, no-go rules | Архитектор/Brain/Hands (каждую сессию) |
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
 | `docs/SESSION_INDEX.md` | Индекс активных сессий (single source of truth) | Архитектор/Brain/Hands |
 | `docs/SESSIONS/` | Логи сессий (контекст, планы, worktree/branch) | Архитектор/Brain/Hands |
 | `docs/SESSIONS/SESSION_TEMPLATE.md` | Шаблон сессионного лога | Архитектор/Brain/Hands |
 | `docs/BLOCK_GRAPH.yaml` | Граф блоков (BLOCK_ID/DEPENDS_ON/UNLOCKS/status) для zero-context исполнения | Архитектор/Brain/Hands |
+| `docs/PRODUCT_SYSTEM_CANON.md` | Human-facing product/system front door: what Truffles sells, business capability platform contract, planes, roles, Beauty v1 acceptance, source-of-truth hierarchy, and blockers | Owner/Architect/Brain/Hands |
+| `docs/BEAUTY_SALON_V1_CAPABILITY_MAP.md` | Business capability map for the first Beauty Salon v1 vertical: required capabilities, planes, proof, non-goals, and blocker surfaces | Owner/Architect/Brain/Hands |
+| `docs/CONSOLE_PLANE_ACCEPTANCE_MAP.md` | Console Plane acceptance map for Beauty Salon v1: roles, lifecycle rows, proof requirements, known gaps, and no-go rules | Owner/Architect/Brain/Hands |
+| `docs/DECISION_LEDGER.yaml` | Concise Decision & Action Ledger: required entries for mechanism changes, architecture decisions, blocker/status changes, tool/script changes, proof downgrade/invalidation, and single-turn data-ownership process decisions | Owner/Architect/Brain/Hands |
 | `docs/DECISIONS/` | Архитектурные DEC и управляющие решения | Архитектор/Brain |
 | `docs/DECISIONS/DEC-2026-03-30-consultant-core-architecture-recovery-governing-decision.md` | Governing DEC: consultant-core architecture recovery, full authority topology rules, and anti-partial-closure law | Архитектор/Brain/Hands |
 | `docs/DECISIONS/DEC-2026-03-31-consultant-core-whole-system-architecture-closure-governing-decision.md` | Governing DEC: whole-system closure after canary completion, accelerated wave order, no-replay-before-architecture-close, and block-closeout reporting discipline | Архитектор/Brain/Hands |
@@ -23,6 +27,10 @@
 | `docs/SOURCE_OF_TRUTH.yaml` | Machine-readable source-of-truth map для architecture-recovery sequencing, allowed touch, and freeze enforcement | Архитектор/Brain/Hands |
 | `docs/LEGACY_SUNSET.yaml` | Sunset/freeze карта mixed-authority legacy consultant surfaces under the architecture-recovery program | Архитектор/Brain/Hands |
 | `docs/ACTIVE_PROGRAM.md` | Активная phased program summary для live-code reproof closeout и следующего acceptance lane | Архитектор/Brain/Hands |
+| `docs/RELEASE_TOPOLOGY_TRUTH.yaml` | Machine-readable release topology contract: required cohort, optional active services, and shadow-runtime target states for deploy truth | OPS/Architect/Brain/Hands |
+| `docs/OBSERVABILITY_SURFACES.yaml` | Machine-readable observability contract: required surfaces, current proofs, and explicit coverage gaps | OPS/Architect/Brain/Hands |
+| `docs/GO_LIVE_DATA_READINESS.yaml` | Machine-readable go-live tenant data readiness contract for the first Beauty v1 target, with fleet residuals kept visible | OPS/Architect/Brain/Hands |
+| `docs/PROVIDER_INTEGRATION_READINESS.yaml` | Machine-readable provider/webhook integration readiness contract for the first Beauty v1 target, separating hard failures from stale-traffic warnings | OPS/Architect/Brain/Hands |
 | `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-architecture-closure-master-program-a922.md` | Whole-system accelerated master program: waves, truth-correction/reopen phases, merge order, and final closure criteria | Архитектор/Brain/Hands |
 | `docs/TASK_PACKAGES/TP-2026-03-31-consultant-core-whole-system-closure-program-reset-a922.md` | Active reset block that switches the repo from canary replay-next to whole-system closure and blocks canon/state sync after micro-fixes | Архитектор/Brain/Hands |
 | `docs/REPORTS/2026-03-31-consultant-core-whole-system-closure-program-reset-a922.md` | Closeout report for the whole-system program reset block | Архитектор/Brain/Hands |
@@ -78,9 +86,16 @@
 | `scripts/legacy_mesh_drain_guard.py` | Guard that freezes the whole-system Legacy Mesh Drain block: mounted package import drain, shadow-only router residuals, and app-runtime importer proof | Архитектор/Brain/Hands |
 | `scripts/whole_system_governance_closure_guard.py` | Historical closure guard kept for audit history; no longer the active proof layer after truth correction reopened the invariant | Архитектор/Brain/Hands |
 | `scripts/closure_claim_truth_guard.py` | Active guard that blocks closure claims while known live semantic-owner and post-owner reconstruction evidence remains in code | Архитектор/Brain/Hands |
+| `scripts/closure_rescue_claim_guard.py` | Deterministic bundle guard: blocks `closed/fixed/green/success` claims unless semantic audit explicitly declares `raw owner`, `final runtime`, and `rescue`, with stricter `green/green/no` requirements for behavioral closure | Архитектор/Brain/Hands |
+| `scripts/boundary_rewrite_guard.py` | Deterministic static guard that freezes boundary semantic rewrite observability, trace/meta propagation, and the whitelisted `boundary_semantic_normalization` reason-code path so rewrite cannot become silent or spread into new app/ops surfaces | Архитектор/Brain/Hands |
+| `scripts/semantic_contract_sync_guard.py` | Deterministic local guard that freezes the generated mixed-turn semantic contract as the single source for full prompt, compact prompt, and vocabulary sync, and blocks boundary payload literals that drift outside declared token coverage | Архитектор/Brain/Hands |
+| `scripts/semantic_preflight.py` | Thin semantic preflight entrypoint that runs the required source-tree guard and optional bundle closure guard in one cheap command | Архитектор/Brain/Hands |
 | `scripts/semantic_owner_reopen_guard.py` | Active guard for the semantic-owner reopen block: system-control synthetic decisions must stay non-semantic and downstream reconstruction suppression must remain in code | Архитектор/Brain/Hands |
 | `scripts/system_reproof_guard.py` | Active guard for the live-code reproof block: canonical pending-resume restore plus canonical outbox runner convergence must remain in code | Архитектор/Brain/Hands |
 | `scripts/authority_registry_block_guard.py` | Block-2-specific guard that freezes registry honesty, owner-status wording, and required guard wiring while authority-registry work remains active | Архитектор/Brain/Hands |
+| `scripts/policy_core_v3_shadow_dryrun.py` | Standalone dry-run for the Policy-Core v3 shadow path: loads `packs/beauty_salon_v1/`, fabricates one turn, invokes the shadow runner with a mock LLM, and prints a `ComparisonRecord` JSON. PoC artifact for SPECS/SHADOW_RUN_V3.md (Phase B.1); not wired into runtime. | Architect/Brain/Hands |
+| `scripts/policy_core_v3_shadow_corpus_run.py` | Replays a `policy_core_v3_corpus.CorpusDialog` JSONL through `run_shadow` with oracle/drift/degrade mock LLM, writing a `ComparisonRecord` JSONL. PoC for SPECS/SHADOW_RUN_V3.md Phase B.3; consumes `truffles-api/tests/corpora/*.jsonl`. | Architect/Brain/Hands |
+| `scripts/policy_core_v3_shadow_aggregate.py` | Aggregates a `ComparisonRecord` JSONL into a divergence histogram report (intent_match_rate, v3_degrade_rate, tool match/mismatch, latency p50/p95). PoC for SPECS/SHADOW_RUN_V3.md Phase B.3. | Architect/Brain/Hands |
 | `truffles-api/tests/architecture/test_recovery_execution_guard.py` | Architecture test for recovery execution lock alignment across canon, packet, and source-of-truth | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_whole_system_program_guard.py` | Architecture test for the active whole-system program reset guard | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_authority_freeze_guard.py` | Architecture test for the active whole-system Authority Freeze guard and caller-surface artifacts | Архитектор/Brain/Hands |
@@ -91,6 +106,10 @@
 | `truffles-api/tests/architecture/test_operational_entrypoint_dedupe_guard.py` | Architecture test for the active whole-system Operational Entrypoint Dedupe topology guard | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_whole_system_governance_closure_guard.py` | Historical architecture test for the invalidated final-closure guard | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_closure_claim_truth_guard.py` | Architecture test for the active truth-correction guard that keeps closure claims aligned to live code | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_closure_rescue_claim_guard.py` | Architecture test for the deterministic bundle guard that rejects closure claims without explicit raw/final/rescue evidence | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_boundary_rewrite_guard.py` | Architecture test for the static guard that freezes boundary rewrite observability and the `boundary_semantic_normalization` whitelist path | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_semantic_contract_sync_guard.py` | Architecture test for the local sync guard that keeps the generated semantic contract aligned across prompt, compact snapshot, and vocabulary surfaces | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_semantic_preflight.py` | Architecture test for the unified semantic preflight entrypoint over repo and bundle guards | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_semantic_owner_reopen_guard.py` | Architecture test for the semantic-owner reopen guard and its live-code markers | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_system_reproof_guard.py` | Architecture test for the live-code reproof guard covering continuity restore and canonical outbox runner convergence | Архитектор/Brain/Hands |
 | `truffles-api/tests/architecture/test_authority_registry_block_guard.py` | Architecture test for the block-2-only authority-registry honesty guard | Архитектор/Brain/Hands |
@@ -139,7 +158,8 @@
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (`outbox`, `knowledge_activation`, `sentinel`) | OPS |
 | `scripts/restart_knowledge_activation_service.sh` | Shadow restart для Knowledge Activation Service (`/knowledge-activation/process`, port `8015`) с image verify + `/health` poll | OPS |
 | `scripts/restart_api.sh` | Канонический деплой API (migration gate + version verify) | OPS |
-| `scripts/restart_release.sh` | Канонический release API+workers (+ optional activation service + canary artifact) | OPS |
+| `scripts/restart_release.sh` | Канонический release API+workers+console (+ optional activation service + topology truth / canary artifacts) | OPS |
+| `scripts/release_runtime_profile.py` | Derives a coherent runtime release profile from env + docker network truth (`OUTBOX_WORKER_MODE`, `DATABASE_LOCAL_CIDRS`) before API/worker restart so release/runtime mode cannot drift silently | OPS/Architect |
 | `scripts/knowledge_activation_postdeploy.sh` | Post-deploy wrapper: reuse `release_guard`, optionally run tenant closeout, and emit machine-readable proof manifest/summary | OPS/Brain |
 | `scripts/check_migration_governance.py` | Governance check для SQL миграций (naming/frozen ops migrations) | Backend/OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
@@ -164,6 +184,10 @@
 | `scripts/continuity_state_normalization_guard.py` | Deterministic guard: proves canonical runtime writes reproject `context_manager`, `session_memory`, and `pending_resume` continuity from `DialogState` on the active slice | Architect/Backend |
 | `scripts/proof_path_guard.py` | Diff-based guard: блокирует proof-path drift и proof-only imports | Architect/Backend |
 | `scripts/arch_guard.py` | Единый architecture gate (`source_of_truth` consistency + governance guards) | Architect/Backend/QA |
+| `scripts/tool_inventory_guard.py` | Guard that enforces registered scripts and architecture tests before new development tooling can be created or used | Architect/Backend/QA |
+| `scripts/decision_ledger_guard.py` | Guard that enforces the Decision & Action Ledger schema, current proof downgrade/FAM-C0 evidence-reliability entries, and no scripted-proof-as-product-proof regression | Architect/Brain/QA |
+| `scripts/product_work_map_guard.py` | Guard that freezes the verified Beauty Salon v1 product work map, handoff closure, side-service removal, no-repeat status for proven Console/Observability blocks, and scripted booking proof classification | Architect/Backend/QA |
+| `scripts/shadow_removal_dependency_truth.py` | Static/live truth proof for stopped shadow side-service removal readiness; blocks production callers, deploy references, and live container dependencies | Architect/Backend/QA/OPS |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
 | `scripts/booking_confirm_verify.sh` | Runbook скрипт: booking confirm verification + evidence | QA/OPS/Brain |
@@ -171,15 +195,20 @@
 | `scripts/booking_quality_matrix_resumable.sh` | Resumable LLM-quality matrix runner (skip completed, retry/backoff, stop-the-line, report/state) | QA/OPS/Brain |
 | `scripts/quality_artifact_report.py` | Отчёт по последним llm‑quality артефактам (по часам/типам) | QA/OPS/Brain |
 | `scripts/platform_admin_control_loop.sh` | Единый wrapper Platform Admin control-loop (`kpi guard + anti-drift + optional e2e`) | OPS/Brain/QA |
-| `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
-| `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
-| `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
-| `scripts/restart_decision_core.sh` | Перезапуск Decision Core (shadow) | OPS |
-| `scripts/restart_outbox_service.sh` | Перезапуск Outbox Service (shadow) | OPS |
 | `scripts/restart_console_web.sh` | Пересборка + перезапуск Console Web (build info) | OPS/Frontend |
+| `scripts/release_topology_truth.py` | Live truth inspector for required release cohort (`api/workers/console/optional activation`) and removed-shadow topology drift | OPS/Architect |
+| `scripts/observability_truth.py` | Live truth inspector for required observability surfaces across Prometheus, Grafana, Tempo, runtime, and worker heartbeats | OPS/Architect |
+| `scripts/observability_e2e_turn_truth.py` | Live truth inspector for one correlated consultant turn across runtime, outbox worker, DB metadata, logs, Tempo, metrics, provider blocker, and Console health | OPS/Architect |
+| `scripts/go_live_data_truth.py` | Live truth inspector for first go-live tenant data readiness against `docs/GO_LIVE_DATA_READINESS.yaml`, without hiding fleet data residuals | OPS/Architect |
+| `scripts/provider_integration_truth.py` | Live truth inspector for first go-live tenant provider/webhook readiness against `docs/PROVIDER_INTEGRATION_READINESS.yaml`, without treating stale traffic as provider failure | OPS/Architect |
+| `truffles-api/tests/architecture/test_tool_inventory_guard.py` | Architecture test for the development tool/test inventory guard and its missing-entry failure mode | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_decision_ledger_guard.py` | Architecture test for the Decision & Action Ledger schema, required current entry, and stale product-proof claim blocking | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_observability_e2e_turn_truth.py` | Architecture test for the correlated turn observability proof verdict and trace/timing extraction | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_product_work_map_guard.py` | Architecture test for the verified product work-map guard, stale-open-blocker failure mode, and handoff-closure regression | Архитектор/Brain/Hands |
+| `truffles-api/tests/architecture/test_shadow_removal_dependency_truth.py` | Architecture test for shadow side-service removal dependency proof and blocking production-reference classification | Архитектор/Brain/Hands |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
-| `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
+| `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report`/`llm-quality`; owns dev proof-runtime evidence classification for no-response handoff timeouts, pending ACK scheduling, manager-simulation advisory handling, manual-audit family output, quality-governance inference suppression, and run-scoped unique-JID replay isolation | QA/OPS/Brain |
 | `ops/console_platform_admin_kpi_snapshot.py` | Weekly KPI snapshot для Platform Admin (runtime + LOC + UX/e2e signals) | Brain/OPS/QA |
 | `ops/platform_admin_remediation_assist.py` | Deterministic remediation-assist plan/brief generator from Platform Admin KPI snapshot | Brain/OPS/QA |
 | `ops/console_owner_admin_kpi_snapshot.py` | KPI snapshot для Owner/Admin (`T+0/T+24`, impact baseline/replay, fail-fast guard) | Brain/OPS/QA |
@@ -198,7 +227,12 @@
 | `truffles-api/app/services/console_consultant_verification.py` | Owner/Admin consultant verification overview + safe simulation session service | Backend |
 | `truffles-api/app/services/console_knowledge_preflight.py` | Knowledge publish preflight helpers (`draft_hash`, recent validate gate) | Backend |
 | `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
+| `truffles-api/app/services/capability_manifest_service.py` | Capability decision facade for allowed fact scopes, handoff policy, and tool protocol decisions | Backend/Architect |
+| `truffles-api/app/services/capability_registry_snapshot_service.py` | Runtime capability registry snapshot used by policy/tool guards for fact/tool/handoff allow/deny decisions | Backend/Architect |
 | `truffles-api/app/services/knowledge_runtime.py` | Runtime published pack truth (knowledge_versions → demo_salon resolver) | Backend |
+| `truffles-api/app/services/policy_context_snapshot_service.py` | Policy-core context projection: allowed tool actions, info/consult refs, capability cards, service cards, and consult cards | Backend/Architect |
+| `truffles-api/app/services/knowledge_service.py` | Qdrant/BGE knowledge search and formatting; retrieval projection only, not semantic owner or core booking truth | Backend/Architect |
+| `truffles-api/app/services/pack_runtime_service.py` | Neutral pack runtime facade over active pack truth and service/fact helpers; participates in Customer Data Contract evidence | Backend/Architect |
 | `truffles-api/app/services/pack_compiler_service.py` | Pack compiler (compiled artifacts, hashing, schema validation) | Backend/Architect |
 | `truffles-api/app/core/` | Typed target consultant runtime core scaffolding (`planner/boundary/executor/dialog_state/realizer`) | Backend/Architect |
 | `truffles-api/app/core/booking_prompt_owner.py` | Canonical non-frozen booking-prompt candidate owner for initial booking prompt resolution and timeout-recovery shaping | Backend/Architect |
@@ -208,7 +242,7 @@
 | `truffles-api/app/core/boundary_validator.py` | Typed `BoundaryOverride` seam for deterministic boundary validation | Backend/Architect |
 | `truffles-api/app/core/dialog_state_service.py` | Typed `DialogState` seam for future single continuity writer; now also owns expected-reply/question-contract plus session-memory question-writer, session-memory normalization, canonical referent shaping, session-memory freshness, ancillary context-carrier writer bridges, and carryover manager-writer bridges | Backend/Architect |
 | `truffles-api/app/core/fact_plane.py` | Typed fact-plane contracts and normalization helpers (`FactRequestV1 -> FactPlanV1 -> FactResultV1`) for owner-requested, binding-authorized, and resolver-emitted fact scope | Backend/Architect |
-| `truffles-api/app/services/llm_quality_contracts.py` | Shared proof-path expectation/scenario-contract owner extracted from proof-only `ops/diagnose.py` and `scripts/booking_dialog_scenarios.py`, including booking-scenario merge, post-coverage repair, and llm-turn sanitize orchestration | Backend/QA/Architect |
+| `truffles-api/app/services/llm_quality_contracts.py` | Shared proof-path expectation/scenario-contract owner extracted from proof-only `ops/diagnose.py` and `scripts/booking_dialog_scenarios.py`, including booking-scenario merge, booking-manage and generic handoff context sanitation, post-coverage repair, and llm-turn sanitize orchestration | Backend/QA/Architect |
 | `truffles-api/app/core/response_realizer.py` | Typed reply envelope seam for future response realization | Backend/Architect |
 | `truffles-api/app/core/turn_executor.py` | Typed `TurnResult`/owner-cutover/bounded-boundary execution seam for future core execution pipeline; now also owns planner-owner artifact assembly and bounded runtime-exception plus preflight/ignore boundary request carriers | Backend/Architect |
 | `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
@@ -238,15 +272,7 @@
 | `truffles-api/app/models/marketing_suppression.py` | Manual/automatic suppression registry | Backend |
 | `truffles-api/app/models/outbox_status_event.py` | DB model for outbox status events (analytics) | Backend |
 | `truffles-api/app/models/tenants_fleet_prewarm_job.py` | Durable prewarm dispatch queue model for tenants fleet cache rebuild | Backend |
-| `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
-| `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
-| `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
-| `truffles-api/app/decision_core_app.py` | Отдельный app для Decision Core | Backend |
-| `truffles-api/app/outbox_service_app.py` | Отдельный app для Outbox Service | Backend |
 | `truffles-api/app/knowledge_activation_service_app.py` | Отдельный app для Knowledge Activation Service | Backend |
-| `truffles-api/app/routers/inbox_service.py` | Router для Inbox Service | Backend |
-| `truffles-api/app/routers/decision_core.py` | Router для Decision Core | Backend |
-| `truffles-api/app/routers/outbox_service.py` | Router для Outbox Service | Backend |
 | `truffles-api/app/routers/knowledge_activation_service.py` | Router для Knowledge Activation Service | Backend |
 | `truffles-api/app/workers/knowledge_activation.py` | Dedicated worker for direct `knowledge_activation_jobs` claiming / processing / stuck detection | Backend |
 | `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
@@ -1239,7 +1265,7 @@
 | `truffles-api/app/services/escalation_service.py`, `manager_message_service.py`, `reminder_service.py` | Эскалация/SLA |
 | `truffles-api/app/services/agent_link_service.py` | Telegram linking tokens |
 | `truffles-api/app/services/knowledge_service.py`, `pack_runtime_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM (`demo_salon_knowledge.py` остаётся adapter-совместимостью) |
-| `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py` | Надежность/алерты |
+| `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py`, `worker_heartbeat_service.py` | Надежность/алерты/worker liveness |
 | `truffles-api/app/services/console_idempotency.py` | Идемпотентность мутаций Console API |
 
 **Данные и контракты:**
@@ -1352,6 +1378,7 @@ truffles-api/
 │   │   ├── reminder_service.py       # Напоминания по open handovers
 │   │   ├── outbox_service.py         # Outbox enqueue/claim/status
 │   │   ├── health_service.py         # self-heal инвариантов
+│   │   ├── worker_heartbeat_service.py # Redis-backed worker liveness heartbeats for ops truth
 │   │   ├── telegram_service.py       # Telegram API wrapper
 │   │   ├── chatflow_service.py       # Отправка сообщений в WhatsApp (ChatFlow)
 │   │   └── learning_service.py       # Qdrant upsert по ответам owner
@@ -1498,6 +1525,14 @@ truffles-api/
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
 | `truffles-api/tests/test_cross_domain_signal_contract_suite.py` | Unit: cross-domain info/booking/tool_registry contract on two non-salon runtime packs |
 | `truffles-api/tests/architecture/` | Deterministic architecture guard tests (legacy freeze, continuity writer, authority registry, proof blackbox, packet consistency) | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_release_topology_truth.py` | Deterministic contract for release topology truth over required release cohort and removed-shadow topology drift | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_release_runtime_profile.py` | Deterministic contract for the derived release/runtime profile that normalizes outbox worker mode and local Docker-network DB CIDRs before restart | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_outbox_runtime_model_registry.py` | Deterministic contract for the active outbox/calendar worker import graph: clean-process mapper configuration must not depend on incidental model import order | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_observability_truth.py` | Deterministic contract for observability surface truth over required proofs and worker heartbeat visibility | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_shadow_removal_dependency_truth.py` | Deterministic contract for stopped shadow side-service dependency proof before removal | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_go_live_data_truth.py` | Deterministic contract for first go-live tenant data readiness truth and visible fleet residual reporting | QA/Backend/Architect |
+| `truffles-api/tests/architecture/test_provider_integration_truth.py` | Deterministic contract for first go-live tenant provider/webhook readiness truth and stale-inbound warning separation | QA/Backend/Architect |
+| `truffles-api/tests/test_worker_heartbeat_service.py` | Unit: Redis-backed worker heartbeat persistence/snapshot contract for ops truth | QA/Backend |
 | `truffles-api/tests/architecture/test_authority_registry.py` | Deterministic contract for the machine-readable authority registry, compatibility carrier inventory, and dead-surface registry | QA/Backend/Architect |
 | `truffles-api/tests/architecture/test_truth_carrier_freeze.py` | Deterministic contract for the truth-carrier freeze law: precedence, guarded tokens, booking/queue/aux carriers, and expiry metadata | QA/Backend/Architect |
 | `truffles-api/tests/architecture/test_legacy_mesh_caller_proof.py` | Deterministic contract for the legacy caller-proof base and import-graph guard over mounted/unmounted/shadow-only legacy surfaces | QA/Backend/Architect |

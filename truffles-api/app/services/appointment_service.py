@@ -310,21 +310,30 @@ class SchedulingService:
         return slots
 
     def get_specialist_services(self, specialist: Specialist) -> List[Dict[str, Any]]:
-        services = (
+        filters = [
+            SpecialistService.specialist_id == specialist.id,
+            SpecialistService.is_active == True,
+            Service.client_id == specialist.client_id,
+            Service.is_active == True,
+        ]
+        if specialist.branch_id:
+            filters.append(Service.branch_id == specialist.branch_id)
+
+        linked_services = (
             self.db.query(SpecialistService, Service)
             .join(Service, SpecialistService.service_id == Service.id)
-            .filter(SpecialistService.specialist_id == specialist.id)
+            .filter(*filters)
             .all()
         )
 
-        if services:
+        if linked_services:
             return [
                 {
                     "name": svc.name,
                     "duration_min": link.duration_min or svc.duration_min,
                     "price": link.price or svc.price,
                 }
-                for link, svc in services
+                for link, svc in linked_services
             ]
 
         return specialist.services or []
@@ -356,8 +365,10 @@ class SchedulingService:
         branch = self._get_branch(branch_id)
         if not branch:
             raise BranchNotFoundError(f"Branch {branch_id} not found")
-        resolved_confirmation = confirmation_policy or "manager"
-        if isinstance(branch.booking_settings, dict):
+        resolved_confirmation = confirmation_policy
+        if resolved_confirmation is None:
+            resolved_confirmation = "manager"
+        if confirmation_policy is None and isinstance(branch.booking_settings, dict):
             resolved_confirmation = branch.booking_settings.get("confirmation_policy", resolved_confirmation)
 
         appointment = Appointment(

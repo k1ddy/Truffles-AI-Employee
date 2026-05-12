@@ -316,6 +316,22 @@ def main() -> int:
             print(f'arch_guard: FAIL: {error}', file=sys.stderr)
         return 1
 
+    shadow_removal_dependency_truth = root / 'scripts' / 'shadow_removal_dependency_truth.py'
+    if shadow_removal_dependency_truth.exists():
+        subprocess.run([sys.executable, str(shadow_removal_dependency_truth), '--repo-root', str(root)], cwd=root, check=True)
+
+    tool_inventory_guard = root / 'scripts' / 'tool_inventory_guard.py'
+    if tool_inventory_guard.exists():
+        subprocess.run([sys.executable, str(tool_inventory_guard), '--repo-root', str(root)], cwd=root, check=True)
+
+    decision_ledger_guard = root / 'scripts' / 'decision_ledger_guard.py'
+    if decision_ledger_guard.exists():
+        subprocess.run([sys.executable, str(decision_ledger_guard), '--repo-root', str(root)], cwd=root, check=True)
+
+    product_work_map_guard = root / 'scripts' / 'product_work_map_guard.py'
+    if product_work_map_guard.exists():
+        subprocess.run([sys.executable, str(product_work_map_guard), '--repo-root', str(root)], cwd=root, check=True)
+
     subprocess.run([sys.executable, str(root / 'scripts' / 'build_agent_packet.py'), '--check'], cwd=root, check=True)
 
     for script_name in guard_scripts_for_active_block(truth):

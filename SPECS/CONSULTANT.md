@@ -2,20 +2,99 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-02-02  
+**Обновлено:** 2026-05-09
 **Scope:** поведение бота (info/consult/booking), LAW/policy/clarify, формат ответа.  
 **Out of scope:** реализация, evidence/CI.  
-**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`, `STATE.md`.
+**Links:** `docs/PRODUCT_SYSTEM_CANON.md`, `docs/DECISION_LEDGER.yaml`, `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`.
 
 **Источник правды по поведению бота.**  
 **Создано:** 2025-12-06
 
 ---
 
+## 0. CANONICAL PRODUCT CONTRACT
+
+Этот документ описывает продуктовый контракт, а не локальные runtime-эвристики.
+
+### 0.1. Что считается правильной системой
+
+На каждый inbound turn система должна прийти ровно к одному исходу:
+- `FACT`
+- `COLLECT`
+- `HANDOFF`
+
+Система считается рабочей только когда одновременно верно:
+- смысл turn определяется один раз
+- downstream слои не переписывают этот смысл молча
+- `raw owner = green`
+- `final runtime = green`
+- `rescue = no`
+
+### 0.2. Как это должно работать
+
+- Один semantic owner определяет, что хочет пользователь, что уже grounded, и какой следующий шаг нужен.
+- Boundary может только валидировать, блокировать или деградировать.
+- State хранит и проецирует канонический контракт.
+- Executor исполняет этот контракт и формирует ответ, но не придумывает новый смысл.
+
+### 0.3. Что продукт не должен считать успехом
+
+Нельзя считать правильным поведением:
+- `final green` через скрытый rescue
+- silent semantic rewrite после owner
+- восстановление business meaning из legacy state вместо owner contract
+- patch-by-patch исправления отдельных фраз как основную стратегию развития
+
+### 0.4. Главный бизнес-инвариант
+
+Пользователь должен получать устойчивый рабочий путь:
+- узнать факты
+- продолжить запись
+- перейти к менеджеру при необходимости
+
+Если соседняя формулировка ломает тот же путь, механизм не исправлен.
+
+### 0.5. Minimum runtime proof for go-live
+
+Runtime часть `Beauty Salon v1` считается готовой только если одновременно доказаны все обязательные capability surfaces:
+
+- **Fact delivery:** обязательные fact-классы (`address`, `hours`, `services`, `prices`, `duration`, `masters`, `rules`) идут через `FACT`, pack/tool truth и trace/meta.
+- **Booking intake:** representative booking matrix проходит как один механизм, а не по отдельным demo paths.
+- **Booking commit:** точное подтверждение записи идёт только через реальный provider/tool outcome.
+- **Handoff:** переход в менеджера прозрачен, наблюдаем и не теряет контекст.
+
+Минимальный runtime proof для любой такой строки:
+- `raw owner = green`
+- `final runtime = green`
+- `rescue = no`
+- exact proof artifact
+- narrow remeasure artifact
+- manual semantic audit
+- trace/meta для inbound, owner, boundary, state, executor и final action
+
+Если capability требует workaround, hidden rescue или green только на локальном slice, runtime go-live не достигнут.
+
+### 0.6. Capability And Knowledge Boundary
+
+Консультант не является универсальным chatbot.
+
+Он является runtime-проекцией бизнес-capability:
+
+- `FACT` отвечает только из business data: packs, operational DB, approved tools, and governed retrieval projections.
+- `COLLECT` собирает typed slots для выбранной capability: booking, lead, order, support ticket, or another explicit contract.
+- `HANDOFF` создаёт видимый human workflow со статусом, контекстом и audit/trace.
+
+LLM владеет смыслом turn. Lexicons, regex, aliases, normalizers, and RAG retrieval are allowed only as evidence/candidate-fact inputs. They must not become a hidden semantic owner.
+
+Future verticals such as retail, clinics, education, repair services, and other niches must extend behavior through packs, capabilities, tools, and data contracts. They must not add hardcoded core intent branches.
+
+---
+
 ## СТАТУС РЕАЛИЗАЦИИ (DERIVED, НЕ ИСТОЧНИК ИСТИНЫ)
 
-_Актуальный статус и evidence — в `STATE.md`._
-_Любые статусы ниже — DERIVED; единственный источник истины — `STATE.md`._
+_Актуальная product/system truth — в `docs/PRODUCT_SYSTEM_CANON.md`, `docs/DECISION_LEDGER.yaml`, live probes, and dated artifacts._
+_`STATE.md` is history/evidence only, not the product oracle._
+_Любые статусы ниже — DERIVED and must not override live runtime or canon evidence._
 
 | Правило | Статус |
 |---------|--------|
@@ -151,8 +230,12 @@ _Примечание:_ текущая реализация fact resolver опи
 
 **Tool registry (calendar/catalog):**
 - `calendar.list_slots`: `date` или `start_at`, optional `duration_min/specialist_id`; при отсутствии даты → COLLECT и `expected_reply_type=time`.
-- `calendar.book_slot`: `start_at/end_at`, optional `specialist_id/service_query/customer_name/customer_phone`; при нездоровом провайдере → collect_preferences без обещания слота.
-- `calendar.get_booking`: `appointment_id` (optional, иначе по последней записи разговора).
+- `calendar.book_slot`: `start_at/end_at`, optional `specialist_id/service_query/customer_name/customer_phone`; при `calendar_provider=local` создаёт запись во внутреннем Console Calendar/Postgres `appointments` без зависимости от Google Calendar.
+- При внешнем provider (`google_calendar`/CRM) tool учитывает provider health/sync; при нездоровом внешнем provider без внутреннего календаря → collect_preferences без обещания слота.
+- `calendar.get_booking`: `appointment_id` optional; if it is absent, lookup may use
+  `service_query/customer_name/customer_phone/lookup_datetime` and then conversation
+  fallback. Lookup verifies existing internal `appointments`; it does not invent or
+  confirm a booking.
 - `calendar.reschedule`: `appointment_id + start_at/end_at` → `RESCHEDULE_REQUESTED`, outbox‑sync, пересборка напоминаний.
 - `calendar.cancel`: `appointment_id + reason` → `CANCELLED`, outbox‑sync, отмена напоминаний.
 - `catalog.service_query`: `service_query` (или slot_state.service) → длительность/цена/мастера из БД.

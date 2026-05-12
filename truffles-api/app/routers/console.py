@@ -198,6 +198,9 @@ from app.schemas.console import (
     ConsoleFleetAttentionResponse,
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
+    ConsoleGoNoGoReadinessEvidence,
+    ConsoleGoNoGoReadinessFinding,
+    ConsoleGoNoGoReadinessResponse,
     ConsoleHealthResponse,
     ConsoleHumanLockPauseRequest,
     ConsoleHumanLockStatus,
@@ -8258,6 +8261,10 @@ def _build_branch_integration_status(
         status = "error"
         if "provider_binding_rebind_required" not in drift_issues:
             drift_issues.append("provider_binding_rebind_required")
+    if branch.is_active and binding.payment_status == "rejected":
+        status = "error"
+        if "provider_binding_payment_rejected" not in drift_issues:
+            drift_issues.append("provider_binding_payment_rejected")
     if branch.is_active and binding.expiry_status == "expired":
         status = "error"
         if "provider_binding_expired" not in drift_issues:
@@ -8425,6 +8432,12 @@ def _resolve_provider_ops_decision(
     if item.provider_binding_rebind_required:
         reasons.append("provider_binding_rebind_required")
         recommended_action = "provider_complete_rebind"
+        _promote("p0")
+
+    if item.provider_binding_payment_status == "rejected":
+        reasons.append("provider_binding_payment_rejected")
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "provider_renewal_confirmed"
         _promote("p0")
 
     if item.provider_binding_expiry_status == "expired":
@@ -15354,6 +15367,40 @@ async def get_business_summary(
         unresolved_cases=unresolved_cases,
         first_response_p90_seconds=first_response_p90_seconds,
     )
+    go_no_go_blockers: list[str] = []
+    go_no_go_note: Optional[str] = None
+    readiness_branch_id = context.effective_branch_id or context.selected_branch_id
+    if readiness_branch_id:
+        readiness_branch = (
+            db.query(Branch)
+            .filter(Branch.id == readiness_branch_id, Branch.client_id == context.client.id)
+            .first()
+        )
+        if readiness_branch:
+            scorecard = build_onboarding_scorecard(db, readiness_branch)
+            readiness_kernel = getattr(scorecard, "readiness_kernel", None)
+            raw_blockers = getattr(readiness_kernel, "blocker_codes", None) if readiness_kernel else None
+            if raw_blockers:
+                go_no_go_blockers = [str(item) for item in raw_blockers if item]
+            elif not scorecard.ready:
+                go_no_go_blockers = [str(item) for item in (scorecard.missing or []) if item]
+            if go_no_go_blockers or not scorecard.ready:
+                status = "unhealthy"
+                go_no_go_note = ", ".join(go_no_go_blockers[:5]) if go_no_go_blockers else "scorecard_not_ready"
+                status_label = "Запуск заблокирован: проверьте Go/No-Go readiness перед операционной работой."
+                actions.insert(
+                    0,
+                    ConsoleBusinessActionItem(
+                        id="review_go_no_go_readiness",
+                        severity="critical",
+                        title="Разберите блокеры запуска",
+                        description=(
+                            "Go/No-Go не готов"
+                            + (f": {go_no_go_note}" if go_no_go_note else ".")
+                        ),
+                        href="/onboarding",
+                    ),
+                )
     if reminder_delivery_failures_today > 0:
         actions.insert(
             0,
@@ -15500,6 +15547,15 @@ async def get_business_summary(
             sample_size=no_show_followup_pending,
         ),
     }
+    if readiness_branch_id:
+        metric_meta["go_no_go_readiness"] = _build_metric_meta(
+            kind="fact",
+            source="onboarding_scorecard",
+            as_of=now.isoformat(),
+            scope="branch",
+            sample_size=len(go_no_go_blockers),
+            note=go_no_go_note or "ready",
+        )
 
     return ConsoleBusinessSummaryResponse(
         generated_at=now.isoformat(),
@@ -15519,6 +15575,465 @@ async def get_business_summary(
         unresolved_cases=unresolved_cases,
         oldest_unresolved_minutes=oldest_unresolved_minutes,
         first_response_p90_seconds=first_response_p90_seconds,
+        actions=actions,
+        metric_meta=metric_meta,
+    )
+
+
+def _resolve_go_no_go_branch(context: Any, db: Session) -> Branch:
+    branch_id = getattr(context, "effective_branch_id", None) or getattr(context, "selected_branch_id", None)
+    if branch_id is None:
+        context_branches = list(getattr(context, "branches", []) or [])
+        if len(context_branches) == 1:
+            branch_id = getattr(context_branches[0], "id", None)
+    if branch_id is None:
+        raise ConsoleAPIError(
+            400,
+            "BRANCH_REQUIRED",
+            "Select a branch to evaluate Go/No-Go readiness",
+        )
+
+    branch = (
+        db.query(Branch)
+        .filter(Branch.id == branch_id, Branch.client_id == context.client.id)
+        .first()
+    )
+    if branch is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    return branch
+
+
+def _resolve_go_no_go_company_id(context: Any) -> Optional[UUID]:
+    company_id = getattr(getattr(context, "client", None), "company_id", None)
+    if company_id:
+        return company_id
+    companies = list(getattr(context, "companies", []) or [])
+    if len(companies) == 1:
+        return getattr(companies[0], "id", None)
+    return None
+
+
+def _resolve_internal_booking_readiness(branch: Branch) -> tuple[bool, str, dict[str, str | None]]:
+    settings = branch.booking_settings if isinstance(getattr(branch, "booking_settings", None), dict) else {}
+    calendar_provider = _normalize_optional_domain_slug_token(settings.get("calendar_provider"))
+    availability_provider = _normalize_optional_domain_slug_token(settings.get("availability_provider"))
+    booking_mode = _normalize_optional_domain_slug_token(settings.get("booking_mode"))
+
+    internal_calendar_tokens = {
+        "local",
+        "console",
+        "console_calendar",
+        "internal",
+        "postgres",
+        "truffles",
+        "truffles_calendar",
+    }
+    external_calendar_tokens = {"google", "google_calendar", "bitrix", "amocrm"}
+    meta = {
+        "calendar_provider": calendar_provider,
+        "availability_provider": availability_provider,
+        "booking_mode": booking_mode,
+    }
+
+    if calendar_provider in internal_calendar_tokens:
+        return True, "internal_console_calendar", meta
+    if (
+        booking_mode == "confirm_slots"
+        and availability_provider in {None, "none", "manual", "local", "console_calendar"}
+        and calendar_provider not in external_calendar_tokens
+    ):
+        return True, "internal_console_calendar", meta
+    if calendar_provider in external_calendar_tokens or availability_provider in external_calendar_tokens:
+        return False, "external_calendar_provider_required", meta
+    if booking_mode == "collect_preferences":
+        return False, "booking_collect_preferences_only", meta
+    return False, "booking_settings_missing", meta
+
+
+def _build_go_no_go_provider_status(
+    *,
+    db: Session,
+    context: Any,
+    branch: Branch,
+    now: datetime,
+) -> ConsoleBranchIntegrationStatus:
+    token_row = (
+        db.query(ClientSettings.telegram_bot_token)
+        .filter(ClientSettings.client_id == branch.client_id)
+        .first()
+    )
+    telegram_token = token_row[0] if token_row else None
+    observed = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=[branch.client_id],
+    ).get(branch.id)
+    last_inbound_at: Optional[datetime] = observed[0] if observed else None
+    last_inbound_instance_id: Optional[str] = observed[1] if observed else None
+    provider_binding = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=[branch.client_id],
+        branches=[branch],
+        now=now,
+    ).get(branch.id)
+    return _build_branch_integration_status(
+        client_id=branch.client_id,
+        client_slug=getattr(context.client, "name", None) or str(branch.client_id),
+        branch=branch,
+        has_telegram_bot_token=bool(_normalize_optional_text(telegram_token)),
+        stale_after_minutes=_INTEGRATION_DEFAULT_STALE_MINUTES,
+        last_inbound_at=last_inbound_at,
+        last_inbound_instance_id=last_inbound_instance_id,
+        now=now,
+        provider_binding=provider_binding,
+    )
+
+
+def _append_console_action_once(
+    actions: list[ConsoleBusinessActionItem],
+    action: ConsoleBusinessActionItem,
+) -> None:
+    if any(existing.id == action.id for existing in actions):
+        return
+    actions.append(action)
+
+
+@router.get(
+    "/business/go-no-go-readiness",
+    response_model=ConsoleGoNoGoReadinessResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_go_no_go_readiness(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleGoNoGoReadinessResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access Go/No-Go readiness",
+    )
+
+    now = datetime.now(timezone.utc)
+    branch = _resolve_go_no_go_branch(context, db)
+    company_id = _resolve_go_no_go_company_id(context)
+    business_summary = await get_business_summary(request=request, db=db)
+    data_trust = await get_business_data_trust(request=request, db=db)
+    scorecard = build_onboarding_scorecard(db, branch)
+    readiness_kernel = getattr(scorecard, "readiness_kernel", None)
+    provider_status = _build_go_no_go_provider_status(db=db, context=context, branch=branch, now=now)
+    provider_decision = _resolve_provider_ops_decision(provider_status)
+
+    blockers: list[ConsoleGoNoGoReadinessFinding] = []
+    warnings: list[ConsoleGoNoGoReadinessFinding] = []
+    evidence: list[ConsoleGoNoGoReadinessEvidence] = []
+    actions: list[ConsoleBusinessActionItem] = []
+
+    raw_readiness_blockers = (
+        list(getattr(readiness_kernel, "blocker_codes", []) or [])
+        if readiness_kernel is not None
+        else []
+    )
+    onboarding_blockers = [str(item) for item in raw_readiness_blockers if item]
+    if not onboarding_blockers and not scorecard.ready:
+        onboarding_blockers = [str(item) for item in (scorecard.missing or []) if item]
+    onboarding_ready = bool(scorecard.ready) and not onboarding_blockers
+    evidence.append(
+        ConsoleGoNoGoReadinessEvidence(
+            id="onboarding_scorecard",
+            status="pass" if onboarding_ready else "fail",
+            source="onboarding_scorecard",
+            href="/onboarding",
+            blocking=not onboarding_ready,
+            summary="Onboarding readiness passed" if onboarding_ready else "Onboarding readiness has blocking gaps",
+            meta={
+                "scorecard_status": "pass" if scorecard.ready else "fail",
+                "blockers": ", ".join(onboarding_blockers) if onboarding_blockers else None,
+            },
+        )
+    )
+    for code in onboarding_blockers:
+        blockers.append(
+            ConsoleGoNoGoReadinessFinding(
+                code=code,
+                severity="blocker",
+                category="onboarding",
+                title="Go/No-Go onboarding blocker",
+                detail=f"Onboarding readiness kernel blocks launch: {code}",
+                source="onboarding_scorecard.readiness_kernel",
+                href="/onboarding",
+                owner_lane="Platform Admin",
+                blocking_go_live=True,
+            )
+        )
+    if not onboarding_ready:
+        _append_console_action_once(
+            actions,
+            ConsoleBusinessActionItem(
+                id="review_go_no_go_readiness",
+                title="Разберите блокеры запуска",
+                description="Go/No-Go readiness не готов: " + (", ".join(onboarding_blockers) or "scorecard_not_ready"),
+                href="/onboarding",
+                severity="critical",
+            ),
+        )
+
+    provider_reasons = []
+    provider_priority: Optional[str] = None
+    provider_next_action: Optional[str] = None
+    if provider_decision:
+        provider_priority, provider_next_action, provider_reasons = provider_decision
+    elif provider_status.drift_issues:
+        provider_reasons = list(provider_status.drift_issues)
+    provider_ready = provider_status.status == "ok" and not provider_reasons
+    external_channel_ready = provider_ready
+    evidence.append(
+        ConsoleGoNoGoReadinessEvidence(
+            id="provider_channel",
+            status="pass" if provider_ready else ("fail" if provider_status.status == "error" else "warn"),
+            source="provider_lifecycle",
+            href="/integrations",
+            blocking=not provider_ready,
+            summary="External provider channel is ready" if provider_ready else "External provider channel is not ready",
+            meta={
+                "status": provider_status.status,
+                "whatsapp_status": provider_status.whatsapp_status,
+                "payment_status": provider_status.provider_binding_payment_status,
+                "alert_state": provider_status.provider_binding_alert_state,
+                "priority": provider_priority,
+                "next_action": provider_next_action,
+            },
+        )
+    )
+    for reason in provider_reasons:
+        blockers.append(
+            ConsoleGoNoGoReadinessFinding(
+                code=str(reason),
+                severity="blocker",
+                category="provider",
+                title="External provider channel blocker",
+                detail=f"External channel cannot be used for go-live until provider issue is resolved: {reason}",
+                source="provider_lifecycle",
+                href="/integrations",
+                owner_lane=provider_status.provider_binding_owner or "Platform Admin",
+                blocking_go_live=True,
+                blocks_external_channel=True,
+                blocks_internal_booking=False,
+            )
+        )
+    if not provider_ready:
+        _append_console_action_once(
+            actions,
+            ConsoleBusinessActionItem(
+                id=provider_next_action or "review_provider_lifecycle",
+                title="Разберите внешний канал",
+                description="Chatflow/WhatsApp или provider lifecycle блокирует внешний go-live.",
+                href="/integrations",
+                severity="critical" if provider_status.status == "error" else "warn",
+            ),
+        )
+
+    internal_booking_ready, booking_reason, booking_meta = _resolve_internal_booking_readiness(branch)
+    evidence.append(
+        ConsoleGoNoGoReadinessEvidence(
+            id="internal_console_calendar_booking",
+            status="pass" if internal_booking_ready else "fail",
+            source="branch.booking_settings",
+            href="/calendar",
+            blocking=not internal_booking_ready,
+            summary=(
+                "Internal Console Calendar booking is ready"
+                if internal_booking_ready
+                else "Internal Console Calendar booking is not ready"
+            ),
+            meta={
+                "reason": booking_reason,
+                "calendar_provider": booking_meta.get("calendar_provider"),
+                "availability_provider": booking_meta.get("availability_provider"),
+                "booking_mode": booking_meta.get("booking_mode"),
+            },
+        )
+    )
+    if not internal_booking_ready:
+        blockers.append(
+            ConsoleGoNoGoReadinessFinding(
+                code=booking_reason,
+                severity="blocker",
+                category="booking",
+                title="Internal booking blocker",
+                detail="Internal Console Calendar booking is not configured as a ready local booking path.",
+                source="branch.booking_settings",
+                href="/calendar",
+                owner_lane="Platform Admin",
+                blocking_go_live=True,
+                blocks_internal_booking=True,
+            )
+        )
+        _append_console_action_once(
+            actions,
+            ConsoleBusinessActionItem(
+                id="configure_internal_calendar_booking",
+                title="Настройте внутренний календарь",
+                description="Internal Console Calendar должен быть готов независимо от Google Calendar и WhatsApp.",
+                href="/calendar",
+                severity="critical",
+            ),
+        )
+
+    data_trust_ready = data_trust.status == "healthy"
+    data_trust_blocks = data_trust.status == "unhealthy"
+    evidence.append(
+        ConsoleGoNoGoReadinessEvidence(
+            id="business_data_trust",
+            status="pass" if data_trust_ready else ("fail" if data_trust_blocks else "warn"),
+            source="business_data_trust",
+            href="/business/data-trust",
+            blocking=data_trust_blocks,
+            summary=data_trust.status_label,
+            meta={
+                "status": data_trust.status,
+                "knowledge_stale_hours": data_trust.knowledge_stale_hours,
+                "critical_audit_events_24h": data_trust.critical_audit_events_24h,
+            },
+        )
+    )
+    if data_trust_blocks:
+        blockers.append(
+            ConsoleGoNoGoReadinessFinding(
+                code="data_trust_unhealthy",
+                severity="blocker",
+                category="data_trust",
+                title="Data trust blocks launch",
+                detail=data_trust.status_label,
+                source="business_data_trust",
+                href="/business/data-trust",
+                owner_lane="Platform Admin",
+                blocking_go_live=True,
+            )
+        )
+    elif not data_trust_ready:
+        warnings.append(
+            ConsoleGoNoGoReadinessFinding(
+                code="data_trust_degraded",
+                severity="warning",
+                category="data_trust",
+                title="Data trust needs attention",
+                detail=data_trust.status_label,
+                source="business_data_trust",
+                href="/business/data-trust",
+            )
+        )
+    for action in data_trust.actions:
+        _append_console_action_once(actions, action)
+
+    business_ready = business_summary.status == "healthy"
+    evidence.append(
+        ConsoleGoNoGoReadinessEvidence(
+            id="business_summary",
+            status="pass" if business_ready else ("fail" if business_summary.status == "unhealthy" else "warn"),
+            source="business_summary",
+            href="/business",
+            blocking=business_summary.status == "unhealthy",
+            summary=business_summary.status_label,
+            meta={"status": business_summary.status},
+        )
+    )
+    if business_summary.status == "unhealthy":
+        blockers.append(
+            ConsoleGoNoGoReadinessFinding(
+                code="business_summary_unhealthy",
+                severity="blocker",
+                category="business",
+                title="Business summary blocks launch",
+                detail=business_summary.status_label,
+                source="business_summary",
+                href="/business",
+                owner_lane="Owner/Admin",
+                blocking_go_live=True,
+            )
+        )
+    elif business_summary.status == "degraded":
+        warnings.append(
+            ConsoleGoNoGoReadinessFinding(
+                code="business_summary_degraded",
+                severity="warning",
+                category="business",
+                title="Business summary needs attention",
+                detail=business_summary.status_label,
+                source="business_summary",
+                href="/business",
+            )
+        )
+    for action in business_summary.actions:
+        _append_console_action_once(actions, action)
+
+    runtime_ready = True
+    evidence.append(
+        ConsoleGoNoGoReadinessEvidence(
+            id="runtime_api",
+            status="pass",
+            source="runtime:/admin/version",
+            href="/ops",
+            blocking=False,
+            summary="Runtime API served this readiness response.",
+            meta={"git_commit": os.environ.get("GIT_COMMIT") or None},
+        )
+    )
+
+    if blockers:
+        verdict = "blocked"
+        status_label = "Запуск заблокирован: есть обязательные Go/No-Go blockers."
+    elif warnings:
+        verdict = "no_go"
+        status_label = "Запуск не рекомендуется: есть предупреждения readiness."
+    else:
+        verdict = "go"
+        status_label = "Можно запускать: обязательные readiness checks зелёные."
+
+    metric_meta = {
+        "verdict": _build_metric_meta(
+            kind="fact",
+            source="console_go_no_go_composition",
+            as_of=now.isoformat(),
+            scope="branch",
+            sample_size=len(blockers),
+            note=verdict,
+        ),
+        "external_channel_ready": _build_metric_meta(
+            kind="fact",
+            source="provider_lifecycle",
+            as_of=now.isoformat(),
+            scope="branch",
+            sample_size=1,
+            note=str(external_channel_ready).lower(),
+        ),
+        "internal_booking_ready": _build_metric_meta(
+            kind="fact",
+            source="branch.booking_settings",
+            as_of=now.isoformat(),
+            scope="branch",
+            sample_size=1,
+            note=booking_reason,
+        ),
+    }
+
+    return ConsoleGoNoGoReadinessResponse(
+        generated_at=now.isoformat(),
+        company_id=company_id,
+        client_id=context.client.id,
+        branch_id=branch.id,
+        verdict=verdict,
+        status_label=status_label,
+        external_channel_ready=external_channel_ready,
+        internal_booking_ready=internal_booking_ready,
+        provider_ready=provider_ready,
+        onboarding_ready=onboarding_ready,
+        data_trust_ready=data_trust_ready,
+        business_ready=business_ready,
+        runtime_ready=runtime_ready,
+        blockers=blockers,
+        warnings=warnings,
+        evidence=evidence,
         actions=actions,
         metric_meta=metric_meta,
     )

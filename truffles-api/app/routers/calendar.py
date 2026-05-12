@@ -1431,7 +1431,7 @@ async def get_slots(
             tz = ZoneInfo("Asia/Almaty")
         parsed_date = parsed_date.replace(tzinfo=tz)
         slots = service.get_available_slots(
-            specialist_id=UUID(specialist_id),
+            specialist_id=specialist_id,
             date=parsed_date,
             duration_minutes=duration,
             client_id=context.client.id,
@@ -1441,7 +1441,7 @@ async def get_slots(
     
     return SlotsResponse(
         date=date,
-        specialist_id=specialist_id,
+        specialist_id=str(specialist_id),
         specialist_name=specialist.name,
         duration_minutes=duration,
         slots=[

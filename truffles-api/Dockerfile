@@ -6,12 +6,12 @@ ARG APP_VERSION="unknown"
 ARG GIT_COMMIT="unknown"
 ARG BUILD_TIME="unknown"
 
+COPY truffles-api/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 ENV APP_VERSION=$APP_VERSION
 ENV GIT_COMMIT=$GIT_COMMIT
 ENV BUILD_TIME=$BUILD_TIME
-
-COPY truffles-api/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
 COPY truffles-api/pyproject.toml .
 COPY truffles-api/app/ ./app/

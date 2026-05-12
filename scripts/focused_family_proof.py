@@ -50,6 +50,28 @@ class RuntimeClientContext:
     webhook_secret_source: str | None
 
 
+def runtime_fingerprint_payload(fingerprint: RuntimeFingerprint) -> dict[str, Any]:
+    return {
+        "endpoint": fingerprint.endpoint,
+        "expected_commit": fingerprint.expected_commit,
+        "runtime_commit": fingerprint.runtime_commit,
+        "runtime_version": fingerprint.runtime_version,
+        "runtime_build_time": fingerprint.runtime_build_time,
+        "valid": fingerprint.valid,
+        "reasons": list(fingerprint.reasons),
+    }
+
+
+def format_runtime_fingerprint_failure(fingerprint: RuntimeFingerprint) -> str:
+    return (
+        "focused-family-proof: runtime fingerprint failed "
+        f"(endpoint={fingerprint.endpoint}, "
+        f"expected_commit={fingerprint.expected_commit or 'unknown'}, "
+        f"runtime_commit={fingerprint.runtime_commit or 'unknown'}, "
+        f"reasons={','.join(fingerprint.reasons) or 'unknown'})"
+    )
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -614,7 +636,7 @@ def _read_turns(args: argparse.Namespace) -> list[str]:
 
 
 def _default_remote_jid() -> str:
-    suffix = int(time.time() * 1000) % 10_000_000_000
+    suffix = uuid4().int % 10_000_000_000
     return f"7999{suffix:010d}@s.whatsapp.net"
 
 
@@ -693,10 +715,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         timeout=args.request_timeout,
     )
     if not fingerprint.valid:
-        raise SystemExit(
-            "focused-family-proof: runtime fingerprint failed "
-            f"(reasons={','.join(fingerprint.reasons)})"
-        )
+        raise SystemExit(format_runtime_fingerprint_failure(fingerprint))
 
     db_user = _resolve_db_user(
         explicit=args.db_user,
@@ -813,15 +832,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "client_slug": context.client_slug,
         "conversation_id": conversation_id,
         "remote_jid": remote_jid,
-        "runtime_fingerprint": {
-            "endpoint": fingerprint.endpoint,
-            "expected_commit": fingerprint.expected_commit,
-            "runtime_commit": fingerprint.runtime_commit,
-            "runtime_version": fingerprint.runtime_version,
-            "runtime_build_time": fingerprint.runtime_build_time,
-            "valid": fingerprint.valid,
-            "reasons": list(fingerprint.reasons),
-        },
+        "runtime_fingerprint": runtime_fingerprint_payload(fingerprint),
         "tenant_context": {
             "client_id": context.client_id,
             "client_slug": context.client_slug,

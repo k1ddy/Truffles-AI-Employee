@@ -133,6 +133,45 @@ def test_parse_booking_datetime_handles_dateparser_timezone_conflict():
     assert parsed is None
 
 
+def test_turn_executor_parse_booking_datetime_uses_pack_month_lexicon():
+    from app.core.turn_executor import TurnExecutor
+
+    parsed = TurnExecutor._parse_booking_datetime(
+        "24 qantar 16:00",
+        now=datetime(2026, 5, 3, 12, 0, tzinfo=timezone.utc),
+        client_slug="demo_salon",
+    )
+
+    assert parsed is not None
+    assert (parsed.month, parsed.day, parsed.hour, parsed.minute) == (1, 24, 16, 0)
+
+
+def test_turn_executor_parse_booking_datetime_accepts_split_clock_with_daypart():
+    from app.core.turn_executor import TurnExecutor
+
+    parsed = TurnExecutor._parse_booking_datetime(
+        "завтра 6 30 вечера",
+        now=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+        client_slug="demo_salon",
+    )
+
+    assert parsed is not None
+    assert (parsed.month, parsed.day, parsed.hour, parsed.minute) == (5, 9, 18, 30)
+
+
+def test_turn_executor_parse_booking_datetime_accepts_kz_relative_day():
+    from app.core.turn_executor import TurnExecutor
+
+    parsed = TurnExecutor._parse_booking_datetime(
+        "ертең 5 30 вечера",
+        now=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+        client_slug="demo_salon",
+    )
+
+    assert parsed is not None
+    assert (parsed.month, parsed.day, parsed.hour, parsed.minute) == (5, 9, 17, 30)
+
+
 def test_is_appointment_overlap_integrity_error_detects_constraint_name():
     exc = Exception('conflicting key value violates exclusion constraint "appointments_no_overlap"')
     assert booking_router._is_appointment_overlap_integrity_error(exc) is True
@@ -1736,6 +1775,129 @@ def test_tool_registry_get_booking_not_found_time_followup_asks_datetime_only():
     assert "номер телефона" not in lowered
 
 
+def test_tool_registry_get_booking_not_found_with_full_reference_does_not_repeat_slot_prompt():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ) as get_booking_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={
+                "customer_name": "Айгуль",
+                "customer_phone": "87012223344",
+                "service_query": "Маникюр",
+                "lookup_datetime": "завтра вечером",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="да подтвердите что все ок",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+    lowered = (result.response_text or "").casefold()
+    assert "передам администратору" in lowered
+    assert "примерную дату и время" not in lowered
+    assert result.decision_meta.get("lookup_by_reference") is True
+    _, kwargs = get_booking_mock.call_args
+    assert kwargs["customer_phone"] == "87012223344"
+    assert kwargs["lookup_datetime"] == "завтра вечером"
+
+
+def test_get_booking_finds_by_customer_phone_service_and_lookup_datetime():
+    branch = SimpleNamespace(id=uuid4(), client_id=uuid4())
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        client_id=branch.client_id,
+        branch_id=branch.id,
+        status="PENDING_CONFIRMATION",
+        customer_name="Айгуль",
+        customer_phone="87012223344",
+        start_at=datetime(2026, 5, 9, 18, 30, tzinfo=timezone.utc),
+    )
+
+    class AppointmentQuery:
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return [appointment]
+
+        def first(self):
+            return None
+
+    class ServiceNameQuery:
+        def filter(self, *_args):
+            return self
+
+        def scalar(self):
+            return "Маникюр"
+
+    db = Mock()
+    db.query.side_effect = lambda query_target: (
+        AppointmentQuery() if query_target is Appointment else ServiceNameQuery()
+    )
+
+    found, error = tool_registry_service._get_booking(
+        db,
+        appointment_id=None,
+        conversation_id=uuid4(),
+        branch=branch,
+        service_query="Маникюр",
+        customer_phone="87012223344",
+        lookup_datetime="завтра вечером",
+        now=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+        timezone_name="Asia/Almaty",
+    )
+
+    assert error is None
+    assert found is appointment
+
+
+def test_get_booking_rejects_service_date_lookup_without_customer_identity():
+    branch = SimpleNamespace(id=uuid4(), client_id=uuid4())
+
+    class AppointmentQuery:
+        def filter(self, *_args):
+            raise AssertionError("service/date lookup without customer identity must not query appointments")
+
+    db = Mock()
+    db.query.return_value = AppointmentQuery()
+
+    found, error = tool_registry_service._get_booking(
+        db,
+        appointment_id=None,
+        conversation_id=uuid4(),
+        branch=branch,
+        service_query="Маникюр",
+        customer_name=None,
+        customer_phone=None,
+        lookup_datetime="завтра вечером",
+        now=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+        timezone_name="Asia/Almaty",
+    )
+
+    assert found is None
+    assert error == "appointment_not_found"
+
+
 def test_tool_registry_book_slot_conflict_verification_mentions_confirmation_failure():
     db = Mock()
     branch = SimpleNamespace(
@@ -2478,6 +2640,36 @@ def test_create_appointment_commit_false_does_not_rollback_inside_service():
     db.rollback.assert_not_called()
 
 
+def test_create_appointment_explicit_confirmation_policy_overrides_branch_default():
+    db = Mock()
+    service = SchedulingService(db)
+    branch_id = uuid4()
+    client_id = uuid4()
+    start_at = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+    end_at = start_at + timedelta(minutes=45)
+
+    with patch.object(
+        service,
+        "_get_branch",
+        return_value=SimpleNamespace(booking_settings={"confirmation_policy": "client"}),
+    ):
+        appointment = service.create_appointment(
+            client_id=client_id,
+            branch_id=branch_id,
+            specialist_id=None,
+            start_at=start_at,
+            end_at=end_at,
+            customer_name="Лена",
+            customer_phone="77011112233",
+            service_type=None,
+            confirmation_policy="manager",
+            commit=False,
+        )
+
+    assert appointment.confirmation_policy == "manager"
+    db.rollback.assert_not_called()
+
+
 def test_booking_create_write_boundary_rolls_back_only_inner_write_on_real_session():
     engine = create_engine("sqlite:///:memory:")
     SessionLocal = sessionmaker(bind=engine)
@@ -2989,6 +3181,126 @@ def test_tool_registry_book_slot_blocks_on_token_expired_provider_health():
     assert result.error_code == "provider_unavailable"
     assert result.decision_meta.get("provider_reason") == "token_expired"
     assert book_slot_mock.called is False
+
+
+def test_tool_registry_book_slot_console_calendar_bypasses_google_health_and_sync():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={
+            "booking_mode": "confirm_slots",
+            "availability_provider": "none",
+            "calendar_provider": "local",
+        },
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        specialist_id=specialist.id,
+        status="PENDING_CONFIRMATION",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        side_effect=AssertionError("console calendar booking must not check Google health"),
+    ) as health_mock, patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ) as book_slot_mock, patch.object(
+        tool_registry_service,
+        "enqueue_appointment_sync",
+        side_effect=AssertionError("console calendar booking must not enqueue Google sync"),
+    ) as enqueue_mock, patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ) as reminders_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={
+                "start_at": "2026-02-20T10:00:00",
+                "customer_name": "Лена",
+                "customer_phone": "+77011112233",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name=None,
+            user_phone=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.response_text == "Заявка на запись принята. Менеджер подтвердит время."
+    assert result.decision_meta.get("tool_decision") == "ok"
+    assert result.decision_meta.get("availability_provider") == "console_calendar"
+    assert result.decision_meta.get("raw_availability_provider") == "none"
+    assert result.decision_meta.get("calendar_provider") == "local"
+    assert result.decision_meta.get("external_sync_required") is False
+    assert result.decision_meta.get("appointment_status") == "PENDING_CONFIRMATION"
+    assert result.trace.get("availability_provider") == "console_calendar"
+    assert result.trace.get("external_sync_required") is False
+    health_mock.assert_not_called()
+    enqueue_mock.assert_not_called()
+    _, book_kwargs = book_slot_mock.call_args
+    assert book_kwargs["commit"] is False
+    assert book_kwargs["confirmation_policy"] == "manager"
+    _, reminder_kwargs = reminders_mock.call_args
+    assert reminder_kwargs["commit"] is False
+
+
+def test_tool_registry_book_slot_collects_preferences_without_confirm_slot_provider():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={
+            "booking_mode": "collect_preferences",
+            "availability_provider": "manual",
+            "calendar_provider": "local",
+        },
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        side_effect=AssertionError("collect-preferences mode must not check Google health"),
+    ) as health_mock, patch.object(tool_registry_service, "_book_slot") as book_slot_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={
+                "start_at": "2026-02-20T10:00:00",
+                "customer_name": "Лена",
+                "customer_phone": "+77011112233",
+            },
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name=None,
+            user_phone=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "collect_preferences"
+    assert result.decision_meta.get("tool_decision") == "collect_preferences"
+    assert result.decision_meta.get("booking_blocked_reason") == "booking_mode_collect_preferences"
+    assert result.decision_meta.get("availability_provider") == "manual"
+    assert result.decision_meta.get("calendar_provider") == "local"
+    assert result.decision_meta.get("external_sync_required") is False
+    health_mock.assert_not_called()
+    book_slot_mock.assert_not_called()
 
 
 def test_tool_registry_blocks_action_when_capabilities_deny_token():

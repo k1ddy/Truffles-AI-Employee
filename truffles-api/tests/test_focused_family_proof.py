@@ -2,6 +2,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_module():
     script_path = Path(__file__).resolve().parents[2] / "scripts" / "focused_family_proof.py"
@@ -47,6 +49,19 @@ def test_build_turn_payload_includes_runtime_tenant_context():
         "source": "webhook",
         "origin_source": "focused_family_proof",
     }
+
+
+def test_default_remote_jid_is_unique_and_phone_like():
+    mod = _load_module()
+
+    first = mod._default_remote_jid()
+    second = mod._default_remote_jid()
+
+    assert first != second
+    assert first.startswith("7999")
+    assert first.endswith("@s.whatsapp.net")
+    assert second.startswith("7999")
+    assert second.endswith("@s.whatsapp.net")
 
 
 def test_validate_runtime_fingerprint_detects_commit_mismatch(monkeypatch):
@@ -170,3 +185,34 @@ def test_extract_turn_snapshot_returns_canonical_evidence():
             },
         }
     ]
+
+
+def test_main_hard_fails_before_webhook_when_runtime_fingerprint_is_invalid(monkeypatch, tmp_path):
+    mod = _load_module()
+
+    monkeypatch.setattr(mod, "_read_turns", lambda _args: ["Проверьте запись"])
+    monkeypatch.setattr(mod, "_resolve_expected_commit", lambda _explicit=None: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    monkeypatch.setattr(
+        mod,
+        "validate_runtime_fingerprint",
+        lambda **_kwargs: mod.RuntimeFingerprint(
+            endpoint="http://127.0.0.1:18189/admin/version",
+            expected_commit="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            runtime_commit="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            runtime_version="main",
+            runtime_build_time="2026-04-14T00:00:00Z",
+            valid=False,
+            reasons=("git_commit_mismatch",),
+        ),
+    )
+
+    def _unexpected(*_args, **_kwargs):
+        raise AssertionError("proof flow should stop before touching DB/runtime clients")
+
+    monkeypatch.setattr(mod, "_resolve_db_user", _unexpected)
+    monkeypatch.setattr(mod, "resolve_runtime_client_context", _unexpected)
+
+    with pytest.raises(SystemExit, match="git_commit_mismatch"):
+        mod.main(["--turn", "Проверьте запись", "--output", str(tmp_path / "proof.json")])
+
+    assert not (tmp_path / "proof.json").exists()

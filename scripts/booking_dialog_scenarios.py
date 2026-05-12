@@ -54,7 +54,7 @@ PHONES = [
 
 DAYS = ["в пятницу", "в субботу", "в воскресенье", "завтра", "на выходных"]
 TIME_RANGES = ["после 18", "после 19", "вечером", "в районе 17:30"]
-TIME_EXACT = ["на 19:00", "на 18:30", "на 20:00", "на 17:45"]
+TIME_EXACT = ["на 19:00", "на 18:30", "на 20:00", "на 17:30"]
 REFERENCE_MEDIA_IMAGE_PATH = "/home/zhan/TrufflesLogoClear.png"
 REFERENCE_MEDIA_IMAGE_NAME = "TrufflesLogoClear.png"
 
@@ -634,7 +634,7 @@ KK_SURFACE_TEMPLATES_BY_TAG = {
     "ask_about_requested_slot": "Қай уақытқа жазылған дұрыс?",
     "slot_constraint": "Түстен кейін болғаны ыңғайлы.",
     "slot_compare": "Таңертең жақсы ма, әлде кешке ме?",
-    "mixed_fill_plus_question": "18:00-ден кейін болады, бірақ таңертең жақсы ма, әлде кешке ме?",
+    "mixed_fill_plus_question": "18-ден кейін болады, бірақ таңертең жақсы ма, әлде кешке ме?",
     "name": "Атым {name}.",
     "phone": "Нөмірім {phone}.",
     "confirm": "Иә, растаймын.",
@@ -661,7 +661,7 @@ MIXED_SURFACE_TEMPLATES_BY_TAG = {
     "ask_about_requested_slot": "Қай уақытқа жазылған дұрыс вообще?",
     "slot_constraint": "Түстен кейін болғаны ыңғайлы вообще.",
     "slot_compare": "Таңертең жақсы ма, әлде кешке ме вообще?",
-    "mixed_fill_plus_question": "18:00-ден кейін болады, бірақ таңертең жақсы ма, әлде кешке ме?",
+    "mixed_fill_plus_question": "18-ден кейін болады, бірақ таңертең жақсы ма, әлде кешке ме?",
     "name": "Менің атым {name}.",
     "phone": "Мой номер {phone}.",
     "confirm": "Иә, подтверждаю.",
@@ -786,7 +786,7 @@ KK_SYNONYM_TEMPLATES_BY_TAG = {
     "ask_about_requested_slot": "Қай уақытқа жазылған дұрыс, айтып жібересіз бе?",
     "slot_constraint": "Маған түстен кейін ыңғайлырақ.",
     "slot_compare": "Таңертең жақсы ма, әлде кешке ме, айтып жіберіңізші?",
-    "mixed_fill_plus_question": "18:00-ден кейін бола ма, бірақ таңертең жақсы ма, әлде кешке ме?",
+    "mixed_fill_plus_question": "18-ден кейін бола ма, бірақ таңертең жақсы ма, әлде кешке ме?",
     "name": "Атым {name} деп жазып қойыңыз.",
     "phone": "Байланыс нөмірім {phone}.",
     "confirm": "Иә, маған солай ыңғайлы.",
@@ -1337,30 +1337,86 @@ def _apply_semantic_variation(
 def _format_phone_variant(phone: str) -> str:
     digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
     if len(digits) == 11 and digits[0] in {"7", "8"}:
-        national = "8" + digits[1:]
-        return (
-            f"{national[0]} ({national[1:4]}) {national[4:7]}-"
-            f"{national[7:9]}-{national[9:11]}"
-        )
+        countryless = digits[1:]
+        national = "8" + countryless
+        variants = [
+            national,
+            countryless,
+            f"{national[:4]} {national[4:7]} {national[7:9]} {national[9:11]}",
+            f"{countryless[:3]} {countryless[3:6]} {countryless[6:8]} {countryless[8:10]}",
+        ]
+        return variants[sum(int(ch) for ch in digits) % len(variants)]
     return str(phone or "")
+
+
+def _spoken_evening_hour(hour: int) -> str:
+    hour_12 = hour - 12 if hour > 12 else hour
+    words = {
+        1: "час",
+        2: "два",
+        3: "три",
+        4: "четыре",
+        5: "пять",
+        6: "шесть",
+        7: "семь",
+        8: "восемь",
+        9: "девять",
+        10: "десять",
+        11: "одиннадцать",
+        12: "двенадцать",
+    }
+    return words.get(hour_12, str(hour_12))
+
+
+def _natural_time_phrase(hour: int, minute: str) -> str:
+    hour_12 = hour - 12 if hour > 12 else hour
+    if minute == "00":
+        variants = [
+            f"{hour_12} вечера",
+            f"вечером в {_spoken_evening_hour(hour)}",
+        ]
+    elif minute == "30":
+        variants = [
+            f"{hour} 30",
+            f"{hour_12} 30 вечера",
+            f"вечером в {hour_12} 30",
+        ]
+    elif minute == "45":
+        variants = [
+            f"{hour} 45",
+            f"ближе к {hour_12 + 1} вечера",
+            f"{hour_12} 45 вечера",
+        ]
+    else:
+        variants = [
+            f"{hour} {minute}",
+            f"{hour_12} {minute} вечера",
+        ]
+    return variants[(hour + int(minute)) % len(variants)]
 
 
 def _format_time_variant(value: str) -> str:
     text = str(value or "").strip()
-    match = re.search(r"(\d{1,2}):(\d{2})", text)
+    match = re.search(r"(\d{1,2})[:.](\d{2})", text)
     if not match:
         if text.startswith("после ") and text[6:].isdigit():
-            return f"после {text[6:]}:00"
+            hour = int(text[6:])
+            return f"после {_spoken_evening_hour(hour)}"
         if text == "вечером":
             return "ближе к вечеру"
         return text
-    hour = match.group(1)
+    hour = int(match.group(1))
     minute = match.group(2)
+    phrase = _natural_time_phrase(hour, minute)
     if text.startswith("на "):
-        return f"к {hour}.{minute}"
+        return f"на {phrase}"
+    if text.startswith("к "):
+        return f"к {phrase}"
     if text.startswith("после "):
-        return f"после {hour}:{minute}"
-    return text.replace(":", ".")
+        return f"после {phrase}"
+    if text.startswith("в районе "):
+        return f"примерно {phrase}"
+    return text[: match.start()] + phrase + text[match.end() :]
 
 
 def _format_day_variant(value: str) -> str:
@@ -1376,10 +1432,10 @@ def _format_day_variant(value: str) -> str:
 
 def _format_time_range_variant(value: str) -> str:
     mapping = {
-        "после 18": "после 18:00",
-        "после 19": "после 19:00",
+        "после 18": "после шести",
+        "после 19": "после семи",
         "вечером": "ближе к вечеру",
-        "в районе 17:30": "примерно к 17.30",
+        "в районе 17:30": "примерно 5 30 вечера",
     }
     return mapping.get(str(value or "").strip(), _format_time_variant(value))
 
@@ -1806,13 +1862,13 @@ def _generate_template_dialog(
         language_profile=language_profile,
         rng=rng,
     )
+    turns = _apply_surface_noise(turns, ctx, surface_noise_profile=surface_noise_profile, rng=rng)
     turns = _apply_slot_format_variation(
         turns,
         ctx,
         slot_format_profile=slot_format_profile,
         language_profile=language_profile,
     )
-    turns = _apply_surface_noise(turns, ctx, surface_noise_profile=surface_noise_profile, rng=rng)
 
     return {
         "dialog_id": f"{template['id']}-{rng.randint(1000, 9999)}",

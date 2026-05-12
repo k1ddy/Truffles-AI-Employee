@@ -9,6 +9,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.models.appointment import Appointment  # noqa: F401
+from app.models.service import Service  # noqa: F401
 
 
 class AppointmentService(Base):
@@ -24,5 +26,7 @@ class AppointmentService(Base):
     buffer_after_min = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    # Import the target models above so this mapper does not depend on incidental
+    # package import order on worker/runtime paths.
     appointment = relationship("Appointment")
     service = relationship("Service")

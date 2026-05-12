@@ -1,14 +1,76 @@
 # ИНФРАСТРУКТУРА И КАЧЕСТВО
 
-**Статус:** CANON  
-**Owner:** Top Architect  
-**Обновлено:** 2026-01-15  
-**Scope:** инфраструктура, безопасность, тесты, CI/CD, мониторинг.  
-**Out of scope:** продуктовые обещания, бизнес‑политики.  
+**Статус:** CANON
+**Owner:** Top Architect
+**Обновлено:** 2026-04-18
+**Scope:** инфраструктура, production stack, observability, безопасность, тесты, CI/CD, мониторинг.
+**Out of scope:** продуктовые обещания, бизнес‑политики.
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `TECH.md`, `STATE.md`.
 
-**Источник правды по требованиям инфраструктуры/качества. Статус и evidence — только в `STATE.md` (см. `docs/TECH_STATUS.md`).**  
+**Источник правды по требованиям инфраструктуры/качества. Статус и evidence — только в `STATE.md` (см. `docs/TECH_STATUS.md`).**
 **Создано:** 2025-12-11
+
+---
+
+## PRODUCTION CONTRACT (CANON)
+
+Этот документ нельзя читать как список разрозненных серверных задач. Для Truffles production-контур обязателен целиком:
+
+- `Consultant Runtime Plane` должен обслуживать диалоги и tools.
+- `Console Plane` должен иметь тот же production-контур наблюдаемости и контроля, что и runtime.
+- `Observability / Ops Plane` обязателен как часть продукта, а не как опциональная “поддержка потом”.
+
+### Mandatory production stack
+
+| Компонент | Роль | Обязателен для production |
+|----------|------|---------------------------|
+| `truffles-api` | API boundary для runtime и control-plane surfaces | Да |
+| `outbox / background workers` | доставка, retries, scheduled jobs, side-effects | Да |
+| PostgreSQL | operational source of truth | Да |
+| Redis | queues, locks, cache, worker coordination | Да |
+| Qdrant | tenant-scoped knowledge retrieval | Да |
+| Traefik | ingress, TLS, routing | Да |
+| OpenTelemetry | end-to-end traces и correlation context | Да |
+| Prometheus | metrics collection и alert inputs | Да |
+| Grafana | dashboards для ops/support/admin | Да |
+| Tempo / Loki contour | traces/log aggregation and investigation | Да |
+
+### Runtime and deploy discipline
+
+- production deploy должен идти через immutable image и воспроизводимую сборку;
+- каждый runtime обязан отдавать build fingerprint (`git_commit`, `build_time`, version);
+- health/readiness/startup checks обязательны для runtime и control-plane entrypoints;
+- traces, logs и metrics должны коррелироваться через `message_id`, `outbox_id`, `trace_id` и tenant context;
+- alerting обязателен для деградаций runtime, outbox, provider и critical ops surfaces;
+- background/outbox execution не должен скрываться внутри web-only path;
+- ручная мутация живых контейнеров (`docker cp`, ad-hoc patching inside runtime) не является допустимым production process.
+
+### Minimum ops proof
+
+Ops часть go-live считается готовой только если production stack не просто развёрнут, а наблюдаем и доказуем:
+
+| Surface | Что должно быть доказано | Minimum ops proof |
+|---------|--------------------------|-------------------|
+| Build / deploy integrity | runtime и console работают на ожидаемом immutable build | fingerprint (`git_commit`, `build_time`), reproducible deploy path |
+| Health / readiness | деградации видны до live-proof и до customer impact | health/readiness/startup checks for active services |
+| Trace / log / metric correlation | runtime, workers и control-plane actions коррелируются | `message_id` / `outbox_id` / `trace_id` / tenant context across telemetry |
+| Alerts | critical failures не обнаруживаются только со слов клиента | alert rules for runtime, outbox, provider, ops surfaces |
+| Worker / outbox execution | background delivery живёт как отдельная доказуемая responsibility | worker health, idempotency, retries, auditability |
+| Rollback / recovery discipline | откат и восстановление не зависят от ad-hoc container surgery | documented rollback, recovery path, no in-container patching |
+
+### Observability contract
+
+Observability не должна существовать как набор устных допущений или session-only проверок.
+
+- required observability surfaces и явные gaps должны жить в `docs/OBSERVABILITY_SURFACES.yaml`;
+- live truth command должен быть один: `python3 scripts/observability_truth.py --repo-root . --output <artifact>`;
+- runtime worker liveness must be observable through shared proofs, not session notes; current contract uses `worker_heartbeat_*` metrics plus `/admin/health/check`;
+- если required surface не имеет proof mapping, это считается реальным ops gap, а не “неформальным TODO”;
+- Prometheus/Grafana/Tempo existence сама по себе не доказывает whole-system observability.
+
+### Reading rule for the rest of this file
+
+Разделы ниже, помеченные `DERIVED`, являются историческими снимками и backlog-заметками. Канонические требования для production определяются этим верхним разделом плюс `SPECS/ARCHITECTURE.md`, `SPECS/CONTROL_PLANE.md` и `STRATEGY/REQUIREMENTS.md`.
 
 ---
 
@@ -226,10 +288,10 @@ def test_message_creates_response(db_session, mock_llm):
     # Arrange
     client = create_test_client(db_session)
     user = create_test_user(db_session)
-    
+
     # Act
     response = process_message(db_session, client.id, user.id, "привет")
-    
+
     # Assert
     assert response is not None
     assert "помочь" in response.lower()
@@ -280,23 +342,23 @@ jobs:
         working-directory: truffles-api
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
           cache-dependency-path: truffles-api/requirements.txt
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov ruff
-      
+
       - name: Lint
         run: ruff check app tests
-      
+
       - name: Run tests
         run: pytest tests/ -q
 
@@ -306,21 +368,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Build metadata
         id: meta
         run: echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -416,7 +478,7 @@ class JSONFormatter(logging.Formatter):
 def setup_logging():
     handler = logging.StreamHandler()
     handler.setFormatter(JSONFormatter())
-    
+
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
@@ -449,11 +511,11 @@ ALERT_CHAT_ID = os.environ["ALERT_CHAT_ID"]  # ID чата для алертов
 def send_alert(level: str, message: str, context: dict = None):
     """Отправить алерт в Telegram."""
     emoji = {"INFO": "ℹ️", "WARNING": "⚠️", "ERROR": "❌", "CRITICAL": "🔥"}
-    
+
     text = f"{emoji.get(level, '📢')} *{level}*\n\n{message}"
     if context:
         text += f"\n\n```\n{json.dumps(context, indent=2)}\n```"
-    
+
     try:
         httpx.post(
             f"https://api.telegram.org/bot{ALERT_BOT_TOKEN}/sendMessage",

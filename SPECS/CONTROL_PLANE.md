@@ -1,10 +1,10 @@
 # CONTROL PLANE — Консоль как управляющая плоскость
 
-**Статус:** CANON  
-**Owner:** Top Architect  
-**Обновлено:** 2026-02-08  
-**Scope:** Web‑Console как Control Plane, роли/RBAC, IA, онбординг, capabilities, Knowledge Studio, Team/Calendar, Inbox UX, API границы, фазы работ.  
-**Out of scope:** реализация, миграции БД, UI‑макеты, доказательства.  
+**Статус:** CANON
+**Owner:** Top Architect
+**Обновлено:** 2026-04-21
+**Scope:** Web‑Console как Control Plane, роли/RBAC, IA, онбординг, capabilities, Knowledge Studio, Team/Calendar, Inbox UX, API границы, фазы работ.
+**Out of scope:** реализация, миграции БД, UI‑макеты, доказательства.
 **Links:** `STATE.md`, `docs/IMPERIUM_DECISIONS.yaml`, `SPECS/ESCALATION.md`, `SPECS/MULTI_TENANT.md`, `docs/CONSOLE_GUIDE.md`, `STRATEGY/TECH_ROADMAP.md`, `STRATEGY/REQUIREMENTS.md`, `docs/REPORTS/2026-02-08-enterprise-fleet-program.md`.
 
 ---
@@ -15,6 +15,12 @@
 - **Web‑first:** Web Console — основной профессиональный интерфейс. Telegram — paging/fallback.
 - **Truth‑first:** факты/правила — в каноне и данных; UI только управляет ими.
 - **Fail‑closed:** без валидного tenant‑контекста действия невозможны.
+- **Main system GUI:** Console Plane — основной интерфейс управления для `Platform Admin` от онбординга до техподдержки и для tenant-ролей внутри разрешённого контекста.
+
+**Lifecycle ownership:**
+- `Platform Admin` ведёт клиента через `onboarding -> provisioning -> publish -> activation -> support`.
+- `Platform Support` использует Console для диагностики и управляемого вмешательства, а не для скрытого runtime bypass.
+- `Owner/Admin/Manager` работают в Console как в основной рабочей системе; Telegram остаётся paging/fallback surface, не источником истины.
 
 ---
 
@@ -138,6 +144,12 @@
 - `channels`: whatsapp/telegram/instagram
 - `providers`: availability_provider, crm_provider, calendar_provider
 - `features`: booking_mode, knowledge_upload, analytics, auto_learn
+
+Calendar contract for Platform Admin:
+- `calendar_provider=local` is the internal Console Calendar / Postgres `appointments` booking source of truth.
+- `availability_provider` describes optional external busy/sync providers (`google_calendar`, CRM, manual), not the core booking owner.
+- Chatflow/WhatsApp readiness is a channel/commercial status and must not be used as proof that booking is or is not available inside Console.
+- If Chatflow/WhatsApp is unpaid, disabled, or commercially unavailable, Console/Ops must show that as an explicit provider blocker. Future work must not infer channel health from missing logs or from unrelated booking behavior.
 
 **Почему так:** масштабируется без постоянных миграций, позволяет точечные overrides.
 
@@ -323,6 +335,20 @@ Pack‑файл — **генерируемый артефакт** при publish
 6) **Rollback:** описан и проверяем (UI/knowledge/deploy).
 - Никаких хардкодов знаний — только через структурные данные + валидацию.
 - Никаких изменений в core‑поведении без Task Package и evidence.
+
+### 15.1 Minimum control-plane proof
+
+Control Plane часть go-live считается готовой только если нижеуказанные surfaces доказаны как рабочие:
+
+| Capability | Что должно быть в Console | Minimum control-plane proof |
+|-----------|----------------------------|-----------------------------|
+| Onboarding / provisioning | platform-admin может довести branch/client до activation path | wizard/go-no-go gate; draft protection; capability-aware validation |
+| Knowledge publish | owner/admin может валидировать, публиковать и откатывать знания | publish history; rollback; invalid draft blocked fail-closed |
+| Inbox / handoff handling | manager/support видит случаи, статус, контекст, действия | queue/chat/details visibility; role gating; audit trail |
+| Support diagnostics | support/admin имеет gated diagnostics, не обходя runtime truth | explain/trace/ops surfaces visible; no hidden runtime bypass |
+| RBAC / tenant context | выбор и ограничения контекста enforced в UI/API | selection_required / branch_selection_required / no implicit tenant access |
+
+Если один из этих surfaces не доказан, Console Plane не может считаться go-live ready, даже при зелёном runtime.
 
 ---
 

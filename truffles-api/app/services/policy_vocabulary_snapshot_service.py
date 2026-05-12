@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from itertools import combinations
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,6 +14,9 @@ from app.schemas.intent import (
     SEMANTIC_RESOLUTION_MODE_VALUES,
     SEMANTIC_SUBJECT_KIND_VALUES,
     SEMANTIC_TEMPORAL_SCOPE_VALUES,
+)
+from app.services.policy_prompt_snapshot_service import (
+    policy_core_generated_contract_semantic_tokens,
 )
 
 
@@ -40,6 +43,31 @@ class PolicyCoreVocabularySnapshotV1(BaseModel):
             "capability": frozenset(self.capabilities),
             "temporal_scope": frozenset(self.temporal_scopes),
             "resolution_mode": frozenset(self.resolution_modes),
+            "requested_effect": frozenset(
+                {
+                    "collect_missing_input",
+                    "commit_booking",
+                    "deliver_grounded_fact",
+                    "handoff_to_human",
+                    "retrieve_booking",
+                }
+            ),
+            "tool_action_hint": frozenset(
+                {
+                    "calendar.book_slot",
+                    "calendar.cancel",
+                    "calendar.get_booking",
+                    "calendar.list_slots",
+                    "calendar.reschedule",
+                    "catalog.location",
+                    "catalog.portfolio",
+                    "catalog.service_query",
+                    "collect",
+                    "consult",
+                    "handoff",
+                    "info",
+                }
+            ),
             "pending_question_act": frozenset(self.pending_question_acts),
             "pending_question_target": frozenset(self.pending_question_targets),
             "active_question_relation": frozenset(self.active_question_relations),
@@ -48,7 +76,7 @@ class PolicyCoreVocabularySnapshotV1(BaseModel):
 
 @lru_cache(maxsize=1)
 def build_policy_core_vocabulary_snapshot() -> PolicyCoreVocabularySnapshotV1:
-    return PolicyCoreVocabularySnapshotV1(
+    snapshot = PolicyCoreVocabularySnapshotV1(
         intents=(
             "booking",
             "check_booking",
@@ -57,6 +85,7 @@ def build_policy_core_vocabulary_snapshot() -> PolicyCoreVocabularySnapshotV1:
             "duration",
             "location",
             "hours",
+            "promotions",
             "master_query",
             "consult",
             "greeting",
@@ -75,6 +104,40 @@ def build_policy_core_vocabulary_snapshot() -> PolicyCoreVocabularySnapshotV1:
         pending_question_targets=tuple(sorted(SEMANTIC_PENDING_QUESTION_TARGET_VALUES)),
         active_question_relations=tuple(sorted(SEMANTIC_ACTIVE_QUESTION_RELATION_VALUES)),
     )
+    _validate_generated_contract_vocabulary_sync(snapshot)
+    return snapshot
+
+
+def _validate_generated_contract_vocabulary_sync(
+    snapshot: PolicyCoreVocabularySnapshotV1,
+) -> None:
+    required = policy_core_generated_contract_semantic_tokens()
+    allowlists = {
+        "intents": frozenset(snapshot.intents),
+        "actions": frozenset(snapshot.actions),
+        "expected_reply_types": frozenset(snapshot.expected_reply_types),
+        "next_questions": frozenset(snapshot.next_questions),
+        "subject_kinds": frozenset(snapshot.subject_kinds),
+        "capabilities": frozenset(snapshot.capabilities),
+        "temporal_scopes": frozenset(snapshot.temporal_scopes),
+        "resolution_modes": frozenset(snapshot.resolution_modes),
+        "pending_question_acts": frozenset(snapshot.pending_question_acts),
+        "pending_question_targets": frozenset(snapshot.pending_question_targets),
+        "active_question_relations": frozenset(snapshot.active_question_relations),
+    }
+    missing: dict[str, list[str]] = {}
+    for category, values in required.items():
+        allowed = allowlists.get(category)
+        if allowed is None:
+            continue
+        missing_values = sorted(value for value in values if value not in allowed)
+        if missing_values:
+            missing[category] = missing_values
+    if missing:
+        raise ValueError(
+            "policy_core_generated_contract_vocabulary_sync_failed:"
+            f" {missing}"
+        )
 
 
 @lru_cache(maxsize=1)
@@ -129,7 +192,67 @@ def _build_sparse_object_anyof(
     }
 
 
-def build_policy_core_response_format(allowed_tool_actions: Iterable[str]) -> dict[str, Any]:
+def _build_strict_response_format_field_schema(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, bool):
+        return {"type": "boolean", "enum": [value]}
+    if isinstance(value, str):
+        return {"type": "string", "enum": [value]}
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        normalized_items = [item for item in value if item]
+        if not normalized_items:
+            return {"type": "array", "items": {"type": "string"}, "maxItems": 0}
+        allowed_items = list(dict.fromkeys(normalized_items))
+        return {
+            "type": "array",
+            "items": {"type": "string", "enum": allowed_items},
+            "minItems": len(normalized_items),
+            "maxItems": len(normalized_items),
+        }
+    if isinstance(value, Mapping):
+        schema_keys = {
+            "type",
+            "enum",
+            "anyOf",
+            "allOf",
+            "oneOf",
+            "properties",
+            "required",
+            "items",
+            "additionalProperties",
+            "minLength",
+            "maxLength",
+            "minItems",
+            "maxItems",
+            "minimum",
+            "maximum",
+        }
+        if any(key in value for key in schema_keys):
+            return dict(value)
+        properties: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            nested_schema = _build_strict_response_format_field_schema(nested_value)
+            if nested_schema is None:
+                continue
+            properties[key] = nested_schema
+        if properties:
+            return {
+                "type": "object",
+                "additionalProperties": False,
+                "required": list(properties.keys()),
+                "properties": properties,
+            }
+    return None
+
+
+def build_policy_core_response_format(
+    allowed_tool_actions: Iterable[str],
+    *,
+    forced_field_values: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     snapshot = build_policy_core_vocabulary_snapshot()
     allowed_actions = [
         value.strip()
@@ -242,6 +365,14 @@ def build_policy_core_response_format(allowed_tool_actions: Iterable[str]) -> di
             "resolver_version": nullable_string,
         },
     }
+    if isinstance(forced_field_values, Mapping):
+        for key, forced_value in forced_field_values.items():
+            if key not in schema["properties"]:
+                continue
+            forced_schema = _build_strict_response_format_field_schema(forced_value)
+            if forced_schema is None:
+                continue
+            schema["properties"][key] = forced_schema
     schema["required"] = list(schema["properties"].keys())
     return {
         "type": "json_schema",
@@ -253,8 +384,52 @@ def build_policy_core_response_format(allowed_tool_actions: Iterable[str]) -> di
     }
 
 
+def build_policy_core_focused_response_format(
+    allowed_tool_actions: Iterable[str],
+    *,
+    forced_field_values: Mapping[str, Any],
+) -> dict[str, Any]:
+    forced_tool_action = forced_field_values.get("tool_action_hint")
+    focused_allowed_tool_actions = (
+        [forced_tool_action]
+        if isinstance(forced_tool_action, str) and forced_tool_action.strip()
+        else allowed_tool_actions
+    )
+    response_format = build_policy_core_response_format(
+        focused_allowed_tool_actions,
+        forced_field_values=None,
+    )
+    schema = response_format["json_schema"]["schema"]
+    properties = schema["properties"]
+    volatile_value_fields = {
+        "alternate_datetime",
+        "entity_refs",
+        "referents",
+        "resolver_id",
+        "resolver_version",
+        "risk_signals",
+        "slots",
+    }
+    focused_properties = {
+        key: properties[key]
+        for key in forced_field_values
+        if key in properties
+    }
+    for key, forced_value in forced_field_values.items():
+        if key not in focused_properties or key in volatile_value_fields:
+            continue
+        forced_schema = _build_strict_response_format_field_schema(forced_value)
+        if forced_schema is not None:
+            focused_properties[key] = forced_schema
+    schema["properties"] = focused_properties
+    schema["required"] = list(focused_properties.keys())
+    response_format["json_schema"]["name"] = "llm_policy_core_focused_output"
+    return response_format
+
+
 __all__ = [
     "PolicyCoreVocabularySnapshotV1",
+    "build_policy_core_focused_response_format",
     "build_policy_core_response_format",
     "build_policy_core_vocabulary_snapshot",
     "policy_core_semantic_contract_allowlists",

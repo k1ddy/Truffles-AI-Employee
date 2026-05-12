@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping, NamedTuple
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,8 +21,11 @@ from app.core.fact_plane import (
 )
 from app.core.response_realizer import ReplyEnvelope, ResponseRealizer
 from app.core.runtime_trace_contract import RuntimeTraceContractV1
+from app.core.semantic_decision import SemanticDecisionV1
 from app.core.turn_planner import DecisionOutcome, PolicyDecision, TurnPlanner
 from app.schemas.turn_outcome import TurnOutcome, TurnOutcomeObservability
+from app.services.booking_transition_owner import PHONE_SOURCE_REMOTE_JID
+from app.services.booking_signal_service import canonicalize_datetime_text
 
 ToolStatus = Literal["ok", "degraded", "blocked", "skipped"]
 TurnContractStatus = Literal["ok", "degraded", "blocked"]
@@ -240,6 +245,7 @@ class TurnExecutor:
         user_name: str | None,
         user_phone: str | None,
         now: datetime,
+        user_phone_source: str | None = None,
         conversation_id: Any | None = None,
     ) -> RuntimeExecutionResult:
         merged_booking = self._merge_booking_slots(booking_state, decision.slots)
@@ -281,11 +287,15 @@ class TurnExecutor:
             return self._execute_booking_confirmation(
                 decision,
                 db=db,
+                message_text=message_text,
+                client_slug=client_slug,
                 branch_id=branch_id,
                 booking_state=merged_booking,
                 user_name=user_name,
                 user_phone=user_phone,
+                user_phone_source=user_phone_source,
                 now=now,
+                conversation_id=conversation_id,
             )
         return self._execute_fact(
             decision,
@@ -391,6 +401,7 @@ class TurnExecutor:
                     prompt = self._build_partial_datetime_slot_constraint_prompt(
                         service_name=merged_slots.get("service"),
                         candidate_datetime=candidate_datetime,
+                        known_slots=merged_slots,
                     )
                 else:
                     candidate_phrase = self._format_booking_candidate_datetime_phrase(
@@ -420,6 +431,29 @@ class TurnExecutor:
                         pending_question_contract=pending_question_contract,
                     ),
                 )
+        if (
+            next_slot == "service"
+            and self._booking_service_value_is_composite(merged_slots.get("service"))
+            and all(self._normalize_booking_slot(merged_slots.get(slot)) for slot in ("datetime", "name", "phone"))
+        ):
+            return RuntimeExecutionResult(
+                text=(
+                    "Вижу, что нужны несколько услуг в один визит. "
+                    "Автоматически такую запись не подтверждаю, передаю администратору с вашими данными."
+                ),
+                tool_action="handoff",
+                tool_decision="multi_service_requires_admin",
+                meta=self._attach_semantic_contract_meta(
+                    decision,
+                    {
+                        "slot_values": merged_slots,
+                        "handoff_reason_code": "multi_service_requires_admin",
+                    },
+                    semantic_contract=semantic_contract,
+                    pending_question_contract=pending_question_contract,
+                ),
+                request_handoff=True,
+            )
         prompt = self._build_collect_prompt(
             next_slot=next_slot,
             prompt_map=prompt_map,
@@ -455,6 +489,25 @@ class TurnExecutor:
             next_slot or "",
             "Подскажите, пожалуйста, следующий удобный слот.",
         )
+        if next_slot == "service" and self._booking_service_value_is_composite(
+            merged_slots.get("service")
+        ):
+            service_value = self._normalize_execution_text(merged_slots.get("service"))
+            known_parts = []
+            for slot, label in (
+                ("datetime", "время"),
+                ("name", "имя"),
+                ("phone", "телефон"),
+            ):
+                value = self._normalize_execution_text(merged_slots.get(slot))
+                if value:
+                    known_parts.append(f"{label}: {value}")
+            known_text = f" Уже есть: {', '.join(known_parts)}." if known_parts else ""
+            return (
+                f"Вижу несколько услуг: {service_value}. "
+                "Для автоматической записи выберите одну услугу; если нужны обе, передам администратору."
+                f"{known_text}"
+            )
         if self._should_use_time_only_collect_prompt(
             next_slot=next_slot,
             merged_slots=merged_slots,
@@ -479,6 +532,13 @@ class TurnExecutor:
         if not specialist_name:
             return prompt
         return f"Хорошо, ориентир по мастеру — {specialist_name}. {prompt}"
+
+    @classmethod
+    def _booking_service_value_is_composite(cls, value: Any) -> bool:
+        normalized = cls._normalize_execution_text(value)
+        if not normalized:
+            return False
+        return bool(re.search(r"\s+(?:и|мен|және|and)\s+|[,/;+]", normalized, re.IGNORECASE))
 
     def _should_use_time_only_collect_prompt(
         self,
@@ -549,20 +609,35 @@ class TurnExecutor:
         *,
         service_name: str | None,
         candidate_datetime: str,
+        known_slots: Mapping[str, Any] | None = None,
     ) -> str:
         normalized_datetime = cls._normalize_booking_slot(candidate_datetime) or candidate_datetime.strip()
         normalized_service = cls._normalize_execution_text(service_name)
+        known_parts = []
+        if isinstance(known_slots, Mapping):
+            for slot, label in (("name", "имя"), ("phone", "телефон")):
+                value = cls._normalize_execution_text(known_slots.get(slot))
+                if value:
+                    known_parts.append(f"{label}: {value}")
+        known_text = f" Уже есть: {', '.join(known_parts)}." if known_parts else ""
         if normalized_service:
             return (
                 f"Понял, {normalized_datetime} по услуге «{normalized_service}». "
-                "Подскажите, пожалуйста, точное время."
+                f"{known_text} Подскажите, пожалуйста, точное время."
             )
-        return f"Понял, {normalized_datetime}. Подскажите, пожалуйста, точное время."
+        return f"Понял, {normalized_datetime}.{known_text} Подскажите, пожалуйста, точное время."
 
     @classmethod
     def _candidate_datetime_has_exact_clock_time(cls, candidate_datetime: str) -> bool:
         normalized = cls._normalize_booking_slot(candidate_datetime) or candidate_datetime.strip()
-        return ":" in normalized
+        if re.search(r"\b(?:после|до|с|со|after|before|from|until)\b", normalized, re.IGNORECASE):
+            return False
+        return bool(
+            re.search(
+                r"(?<!\d)(?:[01]?\d|2[0-3])(?:[:.]\s*|\s+)[0-5]\d(?!\d)",
+                normalized,
+            )
+        )
 
     @classmethod
     def _format_booking_candidate_datetime_phrase(cls, candidate_datetime: str) -> str:
@@ -604,17 +679,56 @@ class TurnExecutor:
             )
         return prompt
 
-    def _maybe_append_promotions_booking_followup(
+    def _build_fact_booking_followup_prompt(
         self,
         *,
+        prompt_key: str,
+        pending_question_contract: dict[str, Any] | None,
+        semantic_contract: Mapping[str, Any] | None,
+    ) -> str:
+        if prompt_key != "datetime":
+            return self._BOOKING_PROMPTS[prompt_key]
+        pending_payload = pending_question_contract or {}
+        semantic_payload = semantic_contract if isinstance(semantic_contract, Mapping) else {}
+        relation = self._normalize_fact_hint(
+            pending_payload.get("active_question_relation")
+            or semantic_payload.get("active_question_relation")
+        )
+        pending_act = self._normalize_fact_hint(
+            pending_payload.get("pending_question_act")
+            or semantic_payload.get("pending_question_act")
+        )
+        candidate_datetime = self._normalize_booking_slot(
+            pending_payload.get("alternate_datetime")
+        ) or self._normalize_booking_slot(semantic_payload.get("alternate_datetime"))
+        if (
+            relation == "generic_info_interrupt"
+            and pending_act == "slot_constraint"
+            and candidate_datetime
+            and not self._candidate_datetime_has_exact_clock_time(candidate_datetime)
+        ):
+            service_payload = self._semantic_referents(
+                dict(semantic_payload) if isinstance(semantic_payload, dict) else None
+            ).get("service")
+            service_name = self._normalize_execution_text(
+                service_payload.get("value")
+            ) if isinstance(service_payload, dict) else None
+            return self._build_partial_datetime_slot_constraint_prompt(
+                service_name=service_name,
+                candidate_datetime=candidate_datetime,
+            )
+        return self._BOOKING_PROMPTS[prompt_key]
+
+    def _maybe_append_fact_booking_followup(
+        self,
+        *,
+        decision: PolicyDecision,
         response_text: str,
         tool_action: str,
         tool_meta: Mapping[str, Any] | None,
         pending_question_contract: dict[str, Any] | None,
         semantic_contract: Mapping[str, Any] | None,
     ) -> str:
-        if tool_action != "catalog.service_query":
-            return response_text
         prompt_key = self._normalize_booking_slot((pending_question_contract or {}).get("next_question"))
         expected_reply_type = self._normalize_booking_slot(
             (pending_question_contract or {}).get("expected_reply_type")
@@ -624,6 +738,28 @@ class TurnExecutor:
                 prompt_key = "service"
             elif expected_reply_type == "time":
                 prompt_key = "datetime"
+            elif expected_reply_type in {"name", "phone"}:
+                prompt_key = expected_reply_type
+        if prompt_key not in self._BOOKING_PROMPTS:
+            return response_text
+        user_goal = self._normalize_booking_slot(decision.semantic_frame.user_goal)
+        if user_goal is None and isinstance(decision.semantic_decision, SemanticDecisionV1):
+            user_goal = self._normalize_booking_slot(decision.semantic_decision.goal)
+        if user_goal != "booking":
+            return response_text
+        relation = self._normalize_fact_hint(
+            (pending_question_contract or {}).get("active_question_relation")
+            or (semantic_contract or {}).get("active_question_relation")
+        )
+        if relation == "generic_info_interrupt":
+            followup_prompt = self._build_fact_booking_followup_prompt(
+                prompt_key=prompt_key,
+                pending_question_contract=pending_question_contract,
+                semantic_contract=semantic_contract,
+            )
+            if followup_prompt in response_text:
+                return response_text
+            return f"{response_text}\n\n{followup_prompt}"
         if prompt_key not in {"service", "datetime"}:
             return response_text
         subject_kind = str((semantic_contract or {}).get("subject_kind") or "").strip().casefold() or None
@@ -631,10 +767,55 @@ class TurnExecutor:
             return response_text
         if prompt_key == "datetime" and subject_kind != "service":
             return response_text
-        info_sections = normalize_fact_ref_list((tool_meta or {}).get("info_sections") or [])
-        if "promotions" not in info_sections:
+        if tool_action not in {"catalog.service_query", "catalog.location", "info"}:
             return response_text
-        followup_prompt = self._BOOKING_PROMPTS[prompt_key]
+        info_sections = normalize_fact_ref_list((tool_meta or {}).get("info_sections") or [])
+        info_section_set = set(info_sections)
+        capability = self._normalize_booking_slot((semantic_contract or {}).get("capability"))
+        is_promotions_followup = capability == "promotions" and "promotions" in info_sections
+        is_hours_location_general_followup = (
+            capability in {"hours", "location"} and info_section_set == {"hours", "location"}
+        )
+        is_hours_service_followup = (
+            capability == "hours"
+            and "hours" in info_sections
+            and bool({"pricing", "duration", "services_overview"} & info_section_set)
+        )
+        is_service_multifact_followup = (
+            capability in {"pricing", "duration"}
+            and len(
+                {"pricing", "duration", "services_overview", "master", "contact", "parking"}
+                & info_section_set
+            )
+            > 1
+            and bool({"pricing", "duration"} & info_section_set)
+        )
+        is_service_single_fact_followup = (
+            capability in self._FIRST_FACT_FAMILY_COMPOSABLE_SERVICE_REFS
+            and capability in info_sections
+        )
+        is_location_service_followup = (
+            capability == "location"
+            and "location" in info_sections
+            and bool({"pricing", "duration", "services_overview"} & info_section_set)
+        )
+        if prompt_key == "service":
+            should_append = is_promotions_followup or is_hours_location_general_followup
+        else:
+            should_append = (
+                is_promotions_followup
+                or is_hours_service_followup
+                or is_location_service_followup
+                or is_service_single_fact_followup
+                or is_service_multifact_followup
+            )
+        if not should_append:
+            return response_text
+        followup_prompt = self._build_fact_booking_followup_prompt(
+            prompt_key=prompt_key,
+            pending_question_contract=pending_question_contract,
+            semantic_contract=semantic_contract,
+        )
         if followup_prompt in response_text:
             return response_text
         return f"{response_text}\n\n{followup_prompt}"
@@ -762,9 +943,17 @@ class TurnExecutor:
                     semantic_contract,
                     master_meta,
                 )
+                response_text = self._maybe_append_fact_booking_followup(
+                    decision=decision,
+                    response_text=master_reply.response.strip(),
+                    tool_action=resolved_tool_action,
+                    tool_meta=master_meta,
+                    pending_question_contract=pending_question_contract,
+                    semantic_contract=semantic_contract,
+                )
                 finalized_master_meta = _fact_meta(
                     master_meta,
-                    response_text=master_reply.response.strip(),
+                    response_text=response_text,
                     resolution_source="master_pack",
                     current_semantic_contract=semantic_contract,
                     fallback_fact_refs=["master"],
@@ -772,7 +961,7 @@ class TurnExecutor:
                 )
                 if finalized_master_meta is not None:
                     return RuntimeExecutionResult(
-                        text=master_reply.response.strip(),
+                        text=response_text,
                         tool_action=resolved_tool_action,
                         tool_decision=master_reply.intent or "master",
                         meta=finalized_master_meta,
@@ -816,7 +1005,8 @@ class TurnExecutor:
                     )
                 )
                 if composed_response_parts and len(composed_emitted_refs) > 1:
-                    composed_text = self._maybe_append_promotions_booking_followup(
+                    composed_text = self._maybe_append_fact_booking_followup(
+                        decision=decision,
                         response_text="\n\n".join(composed_response_parts),
                         tool_action=resolved_tool_action,
                         tool_meta={
@@ -925,7 +1115,8 @@ class TurnExecutor:
                             for secondary_text in secondary_response_parts:
                                 if secondary_text not in composed_text_parts:
                                     composed_text_parts.append(secondary_text)
-                            composed_text = self._maybe_append_promotions_booking_followup(
+                            composed_text = self._maybe_append_fact_booking_followup(
+                                decision=decision,
                                 response_text="\n\n".join(composed_text_parts),
                                 tool_action=resolved_tool_action,
                                 tool_meta={
@@ -973,7 +1164,8 @@ class TurnExecutor:
                                     tool_decision="multi_truth_composed",
                                     meta=finalized_composed_meta,
                                 )
-                response_text = self._maybe_append_promotions_booking_followup(
+                response_text = self._maybe_append_fact_booking_followup(
+                    decision=decision,
                     response_text=tool_result.response_text.strip(),
                     tool_action=resolved_tool_action,
                     tool_meta=tool_meta,
@@ -1987,22 +2179,33 @@ class TurnExecutor:
         decision: PolicyDecision,
         *,
         db: Any,
+        message_text: str | None,
+        client_slug: str | None,
         branch_id: Any,
         booking_state: dict[str, Any] | None,
         user_name: str | None,
         user_phone: str | None,
         now: datetime,
+        user_phone_source: str | None = None,
+        conversation_id: Any | None = None,
     ) -> RuntimeExecutionResult:
-        from app.services.appointment_service import AppointmentConflictError, SchedulingService
+        from app.services.tool_registry_service import execute_tool_action
 
         merged_slots = self._merge_booking_slots(booking_state, decision.slots)
+        resolved_tool_action, projected_tool_args, tool_execution_projection = (
+            self._binding_tool_call_payload(decision)
+        )
         semantic_contract = self._build_execution_semantic_contract(
             decision,
             booking_state=merged_slots,
             service_name=merged_slots.get("service"),
         )
         pending_question_contract = self._build_execution_pending_question_contract(decision)
-        missing_slot = self._first_missing_booking_slot(merged_slots)
+        missing_slot = self._first_missing_booking_slot(
+            merged_slots,
+            user_phone=user_phone,
+            user_phone_source=user_phone_source,
+        )
         if missing_slot is not None:
             prompt = self._BOOKING_PROMPTS.get(missing_slot, self._BOOKING_PROMPTS["service"])
             return RuntimeExecutionResult(
@@ -2031,7 +2234,11 @@ class TurnExecutor:
                 request_handoff=True,
             )
 
-        start_at = self._parse_booking_datetime(merged_slots.get("datetime"), now=now)
+        start_at = self._parse_booking_datetime(
+            merged_slots.get("datetime"),
+            now=now,
+            client_slug=client_slug,
+        )
         if start_at is None:
             return RuntimeExecutionResult(
                 text=self._BOOKING_PROMPTS["datetime"],
@@ -2049,58 +2256,63 @@ class TurnExecutor:
         end_at = start_at + timedelta(minutes=duration_minutes)
         customer_name = merged_slots.get("name") or user_name or "Клиент"
         customer_phone = merged_slots.get("phone") or user_phone
-        try:
-            appointment = SchedulingService(db).create_appointment(
-                client_id=decision.meta["client_id"],
-                branch_id=branch_id,
-                specialist_id=None,
-                start_at=start_at,
-                end_at=end_at,
-                customer_name=customer_name,
-                customer_phone=customer_phone,
-                service_type=merged_slots.get("service"),
-                conversation_id=decision.meta.get("conversation_id"),
-                status="CONFIRMED",
-                source="bot",
-                confirmation_policy="client",
-                commit=False,
-            )
-        except AppointmentConflictError:
-            return RuntimeExecutionResult(
-                text="Это время уже занято. Подскажите другую дату и время, пожалуйста.",
-                tool_action="collect",
-                tool_decision="datetime_conflict",
-                meta=self._attach_semantic_contract_meta(
-                    decision,
-                    {
-                    "slot_values": merged_slots,
-                    "next_slot": "datetime",
-                    "booking_incomplete": True,
-                    },
-                    semantic_contract=semantic_contract,
-                    pending_question_contract=pending_question_contract,
-                ),
-            )
-        confirmation_text = (
-            f"Готово, записал вас на {merged_slots['service']} "
-            f"на {start_at.astimezone(start_at.tzinfo).strftime('%d.%m %H:%M')}."
+        tool_args = dict(projected_tool_args)
+        tool_args["service_query"] = merged_slots["service"]
+        tool_args["start_at"] = start_at.isoformat()
+        tool_args["end_at"] = end_at.isoformat()
+        tool_args["customer_name"] = customer_name
+        if customer_phone:
+            tool_args["customer_phone"] = customer_phone
+
+        tool_result = execute_tool_action(
+            db,
+            tool_action=resolved_tool_action,
+            tool_args=tool_args,
+            conversation_id=conversation_id,
+            branch_id=branch_id,
+            client_slug=client_slug,
+            service_query=merged_slots["service"],
+            message_text=message_text,
+            expected_reply_type=(
+                pending_question_contract.get("expected_reply_type")
+                if isinstance(pending_question_contract, dict)
+                else None
+            ),
+            now=now,
+            user_name=user_name,
+            user_phone=user_phone,
+            user_phone_source=user_phone_source,
+            semantic_contract=semantic_contract,
+        )
+        tool_meta = (
+            dict(tool_result.decision_meta)
+            if isinstance(tool_result.decision_meta, dict)
+            else {}
+        )
+        tool_meta["slot_values"] = merged_slots
+        tool_meta["tool_execution_projection"] = {
+            **tool_execution_projection,
+            "start_at": tool_args["start_at"],
+            "end_at": tool_args["end_at"],
+            "customer_name": customer_name,
+            "customer_phone_present": bool(customer_phone),
+        }
+        tool_decision = str(
+            tool_meta.get("tool_decision")
+            or tool_result.error_code
+            or ("ok" if tool_result.ok else "error")
         )
         return RuntimeExecutionResult(
-            text=confirmation_text,
-            tool_action="calendar.book_slot",
-            tool_decision="ok",
+            text=(tool_result.response_text or "").strip(),
+            tool_action=resolved_tool_action,
+            tool_decision=tool_decision,
             meta=self._attach_semantic_contract_meta(
                 decision,
-                {
-                "slot_values": merged_slots,
-                "appointment_id": str(appointment.id),
-                "service": merged_slots.get("service"),
-                "datetime": merged_slots.get("datetime"),
-                },
+                tool_meta,
                 semantic_contract=semantic_contract,
                 pending_question_contract=pending_question_contract,
             ),
-            clear_booking=True,
+            clear_booking=bool(tool_result.ok and tool_decision == "ok"),
         )
 
     @staticmethod
@@ -2140,42 +2352,156 @@ class TurnExecutor:
         return merged
 
     @staticmethod
-    def _first_missing_booking_slot(booking_slots: dict[str, str]) -> str | None:
+    def _first_missing_booking_slot(
+        booking_slots: dict[str, str],
+        *,
+        user_phone: str | None = None,
+        user_phone_source: str | None = None,
+    ) -> str | None:
         for slot_key in ("service", "datetime", "name"):
             if slot_key not in booking_slots:
                 return slot_key
+        if "phone" not in booking_slots:
+            normalized_source = str(user_phone_source or "").strip().casefold()
+            if not user_phone or normalized_source == PHONE_SOURCE_REMOTE_JID:
+                return "phone"
         return None
 
     @staticmethod
-    def _parse_booking_datetime(value: str | None, *, now: datetime) -> datetime | None:
+    def _parse_natural_booking_datetime(
+        value: str,
+        *,
+        now: datetime,
+    ) -> datetime | None:
+        normalized = " ".join(value.split()).casefold()
+        if not normalized:
+            return None
+        tz = ZoneInfo("Asia/Almaty")
+        base = (now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)).astimezone(tz)
+        target_date = None
+        if re.search(r"\b(?:сегодня|бүгін|буг[іи]н|bug[ui]n)\b", normalized, re.IGNORECASE):
+            target_date = base.date()
+        elif re.search(r"\b(?:завтра|ертең|ертен|erten|erteñ)\b", normalized, re.IGNORECASE):
+            target_date = (base + timedelta(days=1)).date()
+        elif re.search(r"\b(?:послезавтра|бүрсігүні|бурс[іи]гун[іи]|bursiguni)\b", normalized, re.IGNORECASE):
+            target_date = (base + timedelta(days=2)).date()
+        else:
+            weekdays = (
+                (0, r"\bпонедельник(?:а|у|е)?\b"),
+                (1, r"\bвторник(?:а|у|е)?\b"),
+                (2, r"\bсред(?:а|у|е|ы)\b"),
+                (3, r"\bчетверг(?:а|у|е)?\b"),
+                (4, r"\bпятниц(?:а|у|е|ы)\b"),
+                (5, r"\bсуббот(?:а|у|е|ы)\b"),
+                (6, r"\bвоскресень(?:е|я|ю)\b"),
+            )
+            for weekday, pattern in weekdays:
+                if re.search(pattern, normalized, re.IGNORECASE):
+                    delta_days = (weekday - base.weekday()) % 7
+                    if delta_days == 0:
+                        delta_days = 7
+                    target_date = (base + timedelta(days=delta_days)).date()
+                    break
+        if target_date is None:
+            return None
+        time_match = re.search(
+            r"\b(?:(?:в|к|на)\s*)?(?P<hour>[01]?\d|2[0-3])"
+            r"(?:[:.]\s*|\s+)(?P<minute>[0-5]\d)"
+            r"(?:\s*(?P<part>утра|дня|вечера|ночи))?\b",
+            normalized,
+            re.IGNORECASE,
+        )
+        if time_match is None:
+            time_match = re.search(
+                r"\b(?:в|к|на)\s*(?P<hour>[01]?\d|2[0-3])"
+                r"(?:\s*час(?:а|ов)?)?(?:\s*(?P<part>утра|дня|вечера|ночи))?\b",
+                normalized,
+                re.IGNORECASE,
+            )
+        if time_match is None:
+            return None
+        hour = int(time_match.group("hour"))
+        minute = int(time_match.groupdict().get("minute") or 0)
+        part = (time_match.groupdict().get("part") or "").casefold()
+        if part in {"вечера", "дня"} and 1 <= hour <= 11:
+            hour += 12
+        elif part == "ночи" and hour == 12:
+            hour = 0
+        return datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
+            hour,
+            minute,
+            tzinfo=tz,
+        )
+
+    @staticmethod
+    def _parse_booking_datetime(
+        value: str | None,
+        *,
+        now: datetime,
+        client_slug: str | None = None,
+    ) -> datetime | None:
         if not isinstance(value, str) or not value.strip():
             return None
         normalized_now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            parsed = None
-        if parsed is None:
-            try:
-                import dateparser
+        raw_value = value.strip()
+        parse_candidates = [raw_value]
+        lowered = raw_value.casefold()
+        for prefix in ("на ", "в ", "во ", "к ", "ко "):
+            if lowered.startswith(prefix) and len(raw_value) > len(prefix):
+                parse_candidates.append(raw_value[len(prefix) :].strip())
+                break
+        for candidate in list(parse_candidates):
+            normalized_candidate = re.sub(
+                r"\b(?:на|в|во|к|ко)\s+(?=(?:[01]?\d|2[0-3])[:.][0-5]\d\b)",
+                "",
+                candidate,
+                flags=re.IGNORECASE,
+            ).strip()
+            if normalized_candidate and normalized_candidate not in parse_candidates:
+                parse_candidates.append(normalized_candidate)
+            canonical_candidate, _ = canonicalize_datetime_text(
+                candidate,
+                client_slug=client_slug,
+            )
+            if canonical_candidate and canonical_candidate not in parse_candidates:
+                parse_candidates.append(canonical_candidate)
 
-                parsed = dateparser.parse(
-                    value,
-                    languages=["ru", "en"],
-                    settings={
-                        "RELATIVE_BASE": normalized_now,
-                        "TIMEZONE": "Asia/Almaty",
-                        "RETURN_AS_TIMEZONE_AWARE": True,
-                        "PREFER_DATES_FROM": "future",
-                    },
-                )
-            except Exception:
+        for candidate in parse_candidates:
+            parsed = TurnExecutor._parse_natural_booking_datetime(
+                candidate,
+                now=normalized_now,
+            )
+            if parsed is not None:
+                return parsed
+            try:
+                parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            except ValueError:
                 parsed = None
-        if parsed is None:
-            return None
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=normalized_now.tzinfo)
-        return parsed
+            if parsed is None:
+                try:
+                    import dateparser
+
+                    parsed = dateparser.parse(
+                        candidate,
+                        languages=["ru", "en"],
+                        settings={
+                            "RELATIVE_BASE": normalized_now,
+                            "TIMEZONE": "Asia/Almaty",
+                            "RETURN_AS_TIMEZONE_AWARE": True,
+                            "PREFER_DATES_FROM": "future",
+                        },
+                    )
+                except Exception:
+                    parsed = None
+            if parsed is None:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=normalized_now.tzinfo)
+            return parsed
+        return None
 
     @staticmethod
     def _resolve_duration_minutes(db: Any, *, branch_id: Any, service_name: str | None) -> int:

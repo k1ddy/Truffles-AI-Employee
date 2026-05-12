@@ -249,6 +249,10 @@ def project_policy_tool_binding(
     if customer_phone and tool_entry and tool_entry.accepts_customer_phone:
         projected_args["customer_phone"] = customer_phone
 
+    lookup_datetime = _normalize_text(slots.get("datetime"))
+    if lookup_datetime and tool_entry and tool_entry.accepts_lookup_datetime:
+        projected_args["lookup_datetime"] = lookup_datetime
+
     projected_args = _sanitize_projected_tool_args(
         tool_action=resolved_tool_action,
         tool_args=projected_args,

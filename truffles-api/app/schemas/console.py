@@ -1538,6 +1538,65 @@ class ConsoleBusinessSummaryResponse(BaseModel):
     metric_meta: dict[str, ConsoleMetricFactMeta] = {}
 
 
+ConsoleGoNoGoVerdict = Literal["go", "no_go", "blocked"]
+ConsoleGoNoGoFindingSeverity = Literal["blocker", "warning", "info"]
+ConsoleGoNoGoFindingCategory = Literal[
+    "provider",
+    "onboarding",
+    "data_trust",
+    "business",
+    "booking",
+    "runtime",
+    "knowledge",
+    "support",
+]
+
+
+class ConsoleGoNoGoReadinessFinding(BaseModel):
+    code: str
+    severity: ConsoleGoNoGoFindingSeverity
+    category: ConsoleGoNoGoFindingCategory
+    title: str
+    detail: str
+    source: str
+    href: Optional[str] = None
+    owner_lane: Optional[str] = None
+    blocking_go_live: bool = False
+    blocks_external_channel: bool = False
+    blocks_internal_booking: bool = False
+
+
+class ConsoleGoNoGoReadinessEvidence(BaseModel):
+    id: str
+    status: Literal["pass", "warn", "fail", "unknown"]
+    source: str
+    summary: str
+    href: Optional[str] = None
+    blocking: bool = False
+    meta: dict[str, str | int | float | bool | None] = {}
+
+
+class ConsoleGoNoGoReadinessResponse(BaseModel):
+    generated_at: str
+    company_id: Optional[UUID] = None
+    client_id: UUID
+    branch_id: UUID
+    verdict: ConsoleGoNoGoVerdict
+    status_label: str
+    external_channel_ready: bool
+    internal_booking_ready: bool
+    provider_ready: bool
+    onboarding_ready: bool
+    data_trust_ready: bool
+    business_ready: bool
+    runtime_ready: bool
+    blockers: list[ConsoleGoNoGoReadinessFinding] = []
+    warnings: list[ConsoleGoNoGoReadinessFinding] = []
+    evidence: list[ConsoleGoNoGoReadinessEvidence] = []
+    actions: list[ConsoleBusinessActionItem] = []
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
+
+
 class ConsoleConsultantVerificationReadinessCard(BaseModel):
     id: str
     title: str

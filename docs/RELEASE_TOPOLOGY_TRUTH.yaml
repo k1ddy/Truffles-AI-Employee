@@ -1,0 +1,61 @@
+version: 2026-04-19.v1
+contract_name: release_topology_truth
+required_release_cohort: runtime_api_workers_console
+
+repo_contract:
+  release_script: scripts/restart_release.sh
+  compose_file: truffles-api/docker-compose.yml
+  required_release_script_tokens:
+    - 'CONSOLE_SCRIPT="${CONSOLE_SCRIPT:-${SCRIPT_DIR}/restart_console_web.sh}"'
+    - 'RESTART_CONSOLE_WEB="${RESTART_CONSOLE_WEB:-1}"'
+    - 'RUN_RELEASE_TOPOLOGY_TRUTH="${RUN_RELEASE_TOPOLOGY_TRUTH:-1}"'
+    - 'RELEASE_TOPOLOGY_TRUTH_SCRIPT="${RELEASE_TOPOLOGY_TRUTH_SCRIPT:-${SCRIPT_DIR}/release_topology_truth.py}"'
+    - 'bash "$CONSOLE_SCRIPT"'
+    - 'topology_truth_cmd=('
+    - '"$TOPOLOGY_TRUTH_PYTHON"'
+    - '"$RELEASE_TOPOLOGY_TRUTH_SCRIPT"'
+  required_compose_container_tokens:
+    - "container_name: truffles-outbox"
+    - "container_name: truffles-knowledge-activation"
+    - "container_name: truffles-sentinel"
+    - "container_name: truffles-console-web"
+
+required_services:
+  - name: truffles-api
+    plane: runtime
+    commit_source: admin_version
+    build_source: admin_version
+    image_cohort: runtime_main
+    description: canonical runtime API
+  - name: truffles-outbox
+    plane: runtime_worker
+    env_commit_key: GIT_COMMIT
+    env_build_key: BUILD_TIME
+    image_cohort: runtime_main
+    description: canonical outbox worker
+  - name: truffles-knowledge-activation
+    plane: runtime_worker
+    env_commit_key: GIT_COMMIT
+    env_build_key: BUILD_TIME
+    image_cohort: runtime_main
+    description: canonical knowledge activation worker
+  - name: truffles-sentinel
+    plane: runtime_worker
+    env_commit_key: GIT_COMMIT
+    env_build_key: BUILD_TIME
+    image_cohort: runtime_main
+    description: canonical sentinel worker
+  - name: truffles-console-web
+    plane: control_plane
+    env_commit_key: NEXT_PUBLIC_BUILD_SHA
+    env_build_key: NEXT_PUBLIC_BUILD_TIME
+    description: main control-plane GUI
+
+optional_active_services:
+  - name: truffles-knowledge-activation-service
+    plane: runtime_side_service
+    env_commit_key: GIT_COMMIT
+    env_build_key: BUILD_TIME
+    description: activation HTTP sidecar
+
+shadow_services: []

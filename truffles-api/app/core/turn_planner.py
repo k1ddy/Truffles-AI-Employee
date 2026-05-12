@@ -579,6 +579,26 @@ class TurnPlanner:
                 value = self._normalize_token(payload.get(field_name))
             if value is not None:
                 contract[field_name] = value
+        requested_effect = self._normalize_token(
+            frame_payload.get("requested_effect") or payload.get("requested_effect")
+        )
+        tool_action_hint = self._normalize_token(
+            capability_selection.get("tool_action_hint")
+            or payload.get("tool_action_hint")
+            or payload.get("tool_action")
+        )
+        needs_human = frame_payload.get("needs_human") is True or payload.get("needs_manager") is True
+        if (
+            requested_effect == "handoff_to_human"
+            or tool_action_hint == "handoff"
+            or needs_human
+        ):
+            if requested_effect:
+                contract["requested_effect"] = requested_effect
+            if tool_action_hint:
+                contract["tool_action_hint"] = tool_action_hint
+            if needs_human:
+                contract["needs_human"] = True
         referents = self._normalize_referents(
             frame_payload.get("referents")
             if isinstance(frame_payload.get("referents"), dict)
@@ -819,6 +839,14 @@ class TurnPlanner:
             ("contract_repair_retry_used", "contract_repair_retry_used"),
             ("contract_repair_reason", "contract_repair_reason"),
             ("contract_repair_input", "contract_repair_input"),
+            ("boundary_normalization_used", "boundary_normalization_used"),
+            ("boundary_normalization_events", "boundary_normalization_events"),
+            ("focused_start_booking_exact_datetime", "focused_start_booking_exact_datetime"),
+            ("focused_interrupt_variant", "focused_interrupt_variant"),
+            ("llm_policy_override_reason_code", "llm_policy_override_reason_code"),
+            ("llm_policy_override_reason_codes", "llm_policy_override_reason_codes"),
+            ("semantic_intent_overrides", "semantic_intent_overrides"),
+            ("semantic_arbiter_audit", "semantic_arbiter_audit"),
         ):
             value = payload.get(result_key)
             if value is not None:

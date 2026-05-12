@@ -248,20 +248,53 @@ def _filter_fact_refs(namespace: str, refs: list[str]) -> list[str]:
     return filtered
 
 
-def _build_service_cards(client_slug: str | None) -> list[dict[str, Any]]:
-    normalized_client_slug = _trim_policy_core_context_text(client_slug, max_chars=64)
-    if not normalized_client_slug:
-        return []
+def _resolve_domain_pack(truth: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(truth, dict):
+        return None
+    domain_pack = truth.get("domain_pack")
+    if isinstance(domain_pack, dict):
+        return domain_pack
+    client_pack = truth.get("client_pack")
+    if isinstance(client_pack, dict) and isinstance(client_pack.get("domain_pack"), dict):
+        return client_pack["domain_pack"]
+    return None
 
-    from app.services.pack_runtime_service import get_pack_runtime
 
-    try:
-        truth = get_pack_runtime(normalized_client_slug).load_yaml_truth()
-    except Exception:
-        return []
+def _resolve_services_catalog(truth: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(truth, dict):
+        return None
+    services_catalog = truth.get("services_catalog")
+    if isinstance(services_catalog, dict):
+        return services_catalog
+    client_pack = truth.get("client_pack")
+    if isinstance(client_pack, dict) and isinstance(client_pack.get("services_catalog"), dict):
+        return client_pack["services_catalog"]
+    return None
 
-    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
-    taxonomy = domain_pack.get("service_taxonomy") if isinstance(domain_pack, dict) else None
+
+def _collect_service_card_items(
+    *raw_groups: list[Any] | tuple[Any, ...] | None,
+) -> list[str]:
+    collected: list[str] = []
+    seen: set[str] = set()
+    for raw_group in raw_groups:
+        if not isinstance(raw_group, (list, tuple)):
+            continue
+        for raw_value in raw_group:
+            token = _trim_policy_core_context_text(raw_value, max_chars=40)
+            if not token:
+                continue
+            fingerprint = token.casefold()
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            collected.append(token)
+            if len(collected) >= POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX:
+                return collected
+    return collected
+
+
+def _build_service_taxonomy_cards(taxonomy: dict[str, Any] | None) -> list[dict[str, Any]]:
     categories = taxonomy.get("categories") if isinstance(taxonomy, dict) else None
     if not isinstance(categories, list):
         return []
@@ -285,39 +318,17 @@ def _build_service_cards(client_slug: str | None) -> list[dict[str, Any]]:
         if label:
             card["label"] = label
 
-        includes: list[str] = []
-        seen_includes: set[str] = set()
-        for raw_value in list(raw_category.get("includes_ru") or []) + list(
-            raw_category.get("includes_kk") or []
-        ):
-            token = _trim_policy_core_context_text(raw_value, max_chars=40)
-            if not token:
-                continue
-            fingerprint = token.casefold()
-            if fingerprint in seen_includes:
-                continue
-            seen_includes.add(fingerprint)
-            includes.append(token)
-            if len(includes) >= POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX:
-                break
+        includes = _collect_service_card_items(
+            raw_category.get("includes_ru"),
+            raw_category.get("includes_kk"),
+        )
         if includes:
             card["includes"] = includes
 
-        synonyms: list[str] = []
-        seen_synonyms: set[str] = set()
-        for raw_value in list(raw_category.get("synonyms_ru") or []) + list(
-            raw_category.get("synonyms_kk") or []
-        ):
-            token = _trim_policy_core_context_text(raw_value, max_chars=40)
-            if not token:
-                continue
-            fingerprint = token.casefold()
-            if fingerprint in seen_synonyms:
-                continue
-            seen_synonyms.add(fingerprint)
-            synonyms.append(token)
-            if len(synonyms) >= POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX:
-                break
+        synonyms = _collect_service_card_items(
+            raw_category.get("synonyms_ru"),
+            raw_category.get("synonyms_kk"),
+        )
         if synonyms:
             card["synonyms"] = synonyms
 
@@ -327,6 +338,82 @@ def _build_service_cards(client_slug: str | None) -> list[dict[str, Any]]:
         if len(cards) >= POLICY_CORE_CONTEXT_CARD_LIMIT:
             break
     return cards
+
+
+def _build_services_catalog_cards(services_catalog: dict[str, Any] | None) -> list[dict[str, Any]]:
+    services = services_catalog.get("services") if isinstance(services_catalog, dict) else None
+    if not isinstance(services, list):
+        return []
+
+    cards: list[dict[str, Any]] = []
+    for raw_service in services:
+        if not isinstance(raw_service, dict):
+            continue
+        card: dict[str, Any] = {
+            "kind": "service_catalog",
+            "source": "pack_runtime",
+        }
+        label = _trim_policy_core_context_text(raw_service.get("name"), max_chars=64)
+        if label:
+            card["label"] = label
+
+        service_id = _trim_policy_core_context_text(raw_service.get("quick_price_key"), max_chars=32)
+        if service_id:
+            card["id"] = service_id.casefold()
+        elif label:
+            card["id"] = label.casefold().replace(" ", "_")
+
+        includes = _collect_service_card_items(
+            [label] if label else None,
+            raw_service.get("aliases"),
+            raw_service.get("price_items"),
+        )
+        if includes:
+            card["includes"] = includes
+
+        if len(card) <= 2:
+            continue
+        cards.append(card)
+        if len(cards) >= POLICY_CORE_CONTEXT_CARD_LIMIT:
+            break
+    return cards
+
+
+def _build_service_cards(client_slug: str | None) -> list[dict[str, Any]]:
+    normalized_client_slug = _trim_policy_core_context_text(client_slug, max_chars=64)
+    if not normalized_client_slug:
+        return []
+
+    from app.services.pack_runtime_service import get_pack_runtime
+
+    try:
+        truth = get_pack_runtime(normalized_client_slug).load_yaml_truth()
+    except Exception:
+        return []
+
+    domain_pack = _resolve_domain_pack(truth)
+    taxonomy = domain_pack.get("service_taxonomy") if isinstance(domain_pack, dict) else None
+    taxonomy_cards = _build_service_taxonomy_cards(taxonomy)
+    catalog_cards = _build_services_catalog_cards(_resolve_services_catalog(truth))
+    if taxonomy_cards:
+        merged_cards = list(taxonomy_cards)
+        seen_ids = {
+            str(card.get("id")).casefold()
+            for card in merged_cards
+            if card.get("id")
+        }
+        for card in catalog_cards:
+            card_id = str(card.get("id")).casefold() if card.get("id") else ""
+            if card_id and card_id in seen_ids:
+                continue
+            if card_id:
+                seen_ids.add(card_id)
+            merged_cards.append(card)
+            if len(merged_cards) >= POLICY_CORE_CONTEXT_CARD_LIMIT:
+                break
+        return merged_cards
+
+    return catalog_cards
 
 
 def build_policy_core_context_snapshot(

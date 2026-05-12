@@ -426,9 +426,9 @@ channels:
   telegram: true
   instagram: false
 providers:
-  availability_provider: none        # none | google_calendar | bitrix | amocrm | manual
+  availability_provider: none        # external busy/sync provider: none | google_calendar | bitrix | amocrm | manual
   crm_provider: none                 # none | amocrm | bitrix | custom
-  calendar_provider: local           # none | google_calendar | local
+  calendar_provider: local           # primary booking calendar: none | google_calendar | local
 features:
   booking_mode: collect_preferences  # collect_preferences | confirm_slots
   knowledge_upload: true
@@ -510,13 +510,15 @@ client_pack:
 client_pack:
   booking:
     booking_mode: collect_preferences   # collect_preferences | confirm_slots
-    availability_provider: none         # none | google_calendar | bitrix | amocrm | manual
+    availability_provider: none         # external busy/sync provider: none | google_calendar | bitrix | amocrm | manual
+    calendar_provider: local            # internal Console Calendar/Postgres appointments
 ```
 
-Если `availability_provider` = `none/manual` (включая Excel/TXT), бот **не обещает слоты**, только собирает предпочтения.
+Если `calendar_provider=local` и `booking_mode=confirm_slots`, бот создаёт запись во внутреннем Console Calendar/Postgres `appointments`; Google Calendar не является обязательным календарём.
+Если `calendar_provider` не включён и `availability_provider` = `none/manual` (включая Excel/TXT), бот **не обещает слоты**, только собирает предпочтения.
 Branch‑overrides допустимы для `booking_mode`, `availability_provider`, `confirmation_policy` и `timezone`.
 Календарь и токены по умолчанию **per‑branch**, без кросс‑branch доступа.
-`confirm_slots` разрешён только при здоровом провайдере и свежем sync‑курсоре; иначе fallback в `collect_preferences`.
+Для внутреннего календаря `confirm_slots` зависит от `SchedulingService`; для внешнего provider `confirm_slots` разрешён только при здоровом provider и свежем sync‑курсоре, иначе fallback в `collect_preferences`.
 
 **Оплата (только info):**
 ```yaml

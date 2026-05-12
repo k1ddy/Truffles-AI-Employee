@@ -1,0 +1,47 @@
+version: 2026-04-19.v1
+contract_name: go_live_data_readiness
+objective: first_beauty_v1_target_data_readiness
+
+target:
+  client_slug: demo_salon
+  branch_slug: main
+  vertical: beauty
+  description: First Beauty Salon v1 go-live target; validates product data readiness without hiding fleet residuals.
+
+repo_contract:
+  required_file_tokens:
+    - path: TECH.md
+      tokens:
+        - docs/GO_LIVE_DATA_READINESS.yaml
+        - scripts/go_live_data_truth.py
+    - path: SPECS/SYSTEM_REFERENCE.md
+      tokens:
+        - docs/GO_LIVE_DATA_READINESS.yaml
+        - scripts/go_live_data_truth.py
+    - path: STRUCTURE.md
+      tokens:
+        - docs/GO_LIVE_DATA_READINESS.yaml
+        - scripts/go_live_data_truth.py
+        - truffles-api/tests/architecture/test_go_live_data_truth.py
+
+required_target_checks:
+  branch_active: true
+  branch_go_live_state: approved
+  active_knowledge_status: published
+  minimum_data_contract_version: minimum_data_contract.v2
+  minimum_data_contract_ready: true
+  knowledge_safe_mode: false
+  operational_service_integrity: true
+
+report_only_checks:
+  integration_state: true
+  knowledge_sync_status: true
+  fleet_active_branch_residuals: true
+  published_candidate_residuals: true
+
+residual_policy:
+  separate_runtime_health_from_product_data_readiness: true
+  do_not_hide_fleet_missing_branches: true
+  do_not_mutate_business_payloads_by_default: true
+  target_data_ready_does_not_imply_provider_integration_ready: true
+  target_data_ready_does_not_imply_booking_semantic_closure: true

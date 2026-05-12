@@ -30,9 +30,11 @@ from app.services.llm_quality_contracts import (
     apply_booking_scenario_service_grounded_booking_expectations,
     apply_booking_scenario_service_grounded_booking_progress_interrupt_expectations,
     booking_scenario_expectation_has_contract_reason,
+    booking_scenario_looks_like_booking_manage_context_followup,
     booking_scenario_looks_like_check_booking_followup,
     booking_scenario_looks_like_generic_booking_request,
     booking_scenario_looks_like_reschedule_followup,
+    booking_scenario_looks_like_unsupported_service_inquiry,
     booking_scenario_normalize_active_name_master_info_tags,
     booking_scenario_normalize_active_time_master_info_tags,
     booking_scenario_normalize_active_time_specialist_master_tags,
@@ -44,6 +46,7 @@ from app.services.llm_quality_contracts import (
     booking_scenario_normalize_slot_compare_partial_date_constraint_tags,
     booking_scenario_normalize_stateful_booking_tags,
     booking_scenario_orphan_pending_question_expect_override,
+    booking_scenario_booking_manage_context_expect_override,
     booking_scenario_time_collect_expect_override,
     clear_booking_scenario_multi_service_info_interrupt_followup_expectations,
     has_booking_scenario_orphan_pending_question_tags,
@@ -51,6 +54,7 @@ from app.services.llm_quality_contracts import (
     rewrite_booking_scenario_check_booking_followup_tags,
     rewrite_booking_scenario_orphan_pending_question_tags,
     rewrite_booking_scenario_reschedule_followup_tags,
+    sanitize_booking_scenario_llm_turns,
 )
 from app.services.scenario_contract_compiler import (
     compile_active_time_specialist_followup_expectations,
@@ -199,6 +203,65 @@ def test_merge_expectations_sanitizes_handoff_override_without_handoff_tags():
     assert expect["expected_reply"] is True
 
 
+def test_sanitize_booking_manage_followups_keep_handoff_context():
+    turns = sanitize_booking_scenario_llm_turns(
+        [
+            {"kind": "text", "text": "мне надо отменить запись", "tags": ["cancel", "handoff"]},
+            {"kind": "text", "text": "маникюр завтра на 7 вечера", "tags": ["service", "date", "time"]},
+            {"kind": "text", "text": "Лена 87071112233", "tags": ["name", "phone"]},
+        ],
+        {},
+        None,
+    )
+
+    assert turns[1]["tags"] == ["cancel", "service", "date", "time", "handoff"]
+    assert turns[1]["expect"]["action"] == "handoff"
+    assert turns[1]["expect"]["state"] == "pending"
+    assert turns[2]["tags"] == ["cancel", "name", "phone", "handoff"]
+    assert turns[2]["expect"]["action"] == "handoff"
+    assert turns[2]["expect"]["expected_reply"] is None
+
+
+def test_sanitize_complaint_handoff_followups_keep_pending_context():
+    turns = sanitize_booking_scenario_llm_turns(
+        [
+            {
+                "kind": "text",
+                "text": "мне испортили покрытие, хочу чтобы админ связался",
+                "tags": ["complaint", "handoff", "human"],
+            },
+            {"kind": "text", "text": "Марина 87024445566", "tags": ["name", "phone"]},
+        ],
+        {},
+        None,
+    )
+
+    assert turns[1]["tags"] == ["handoff", "name", "phone"]
+    assert turns[1]["expect"]["action"] == "handoff"
+    assert turns[1]["expect"]["state"] == "pending"
+    assert turns[1]["expect"]["expected_reply"] is None
+
+
+def test_sanitize_medical_handoff_human_followup_does_not_expect_new_reply():
+    turns = sanitize_booking_scenario_llm_turns(
+        [
+            {
+                "kind": "text",
+                "text": "аллергия и воспаление, можно депиляцию?",
+                "tags": ["medical", "safety", "handoff"],
+            },
+            {"kind": "text", "text": "лучше с мастером поговорить", "tags": ["handoff", "human"]},
+        ],
+        {},
+        None,
+    )
+
+    assert turns[1]["tags"] == ["handoff", "human"]
+    assert turns[1]["expect"]["action"] == "handoff"
+    assert turns[1]["expect"]["state"] == "pending"
+    assert turns[1]["expect"]["expected_reply"] is None
+
+
 def test_shared_partial_date_slot_constraint_helper_rewrites_into_time_collect():
     rewritten_tags, changed = booking_scenario_normalize_partial_date_slot_constraint_tags(
         "Мне нужно записаться на завтра.",
@@ -249,6 +312,8 @@ def test_shared_followup_helpers_normalize_booking_management_tags():
         "check_booking",
         "price",
     ]
+    assert booking_scenario_looks_like_booking_manage_context_followup(["date", "phone"])
+    assert not booking_scenario_looks_like_booking_manage_context_followup(["booking", "date"])
 
 
 def test_shared_followup_helpers_return_detached_expect_payloads():
@@ -258,6 +323,9 @@ def test_shared_followup_helpers_return_detached_expect_payloads():
 
     fresh_orphan_expect = booking_scenario_orphan_pending_question_expect_override()
     assert fresh_orphan_expect["meta_any"]["expected_reply_type"] == ["service_choice"]
+    manage_expect = booking_scenario_booking_manage_context_expect_override()
+    manage_expect["state"] = "mutated"
+    assert booking_scenario_booking_manage_context_expect_override()["state"] == "pending"
     assert fresh_orphan_expect["trace_contains"] == [
         {
             "stage": "question_contract",
@@ -529,6 +597,18 @@ def test_shared_booking_progress_helpers_shape_multi_service_and_service_grounde
     assert clarified["expected_reply"] is True
     assert clarified["meta"]["expected_reply_contract_reason"] == "multi_service_booking_clarify"
     assert clarified["meta_any"]["expected_reply_type"] == ["service_choice"]
+
+    connectorless = apply_booking_scenario_multi_service_booking_clarify_expectations(
+        {},
+        tags=["booking", "multi_service"],
+        text="маникюр педикюр керек",
+        service_candidates=("маникюр", "педикюр"),
+        ctx=None,
+    )
+
+    assert connectorless["reply_type"] == "service_choice"
+    assert connectorless["expected_reply"] is True
+    assert connectorless["meta_any"]["expected_reply_type"] == ["service_choice"]
 
     grounded = apply_booking_scenario_service_grounded_booking_expectations(
         {
@@ -1202,6 +1282,55 @@ def test_sanitize_llm_turns_preserves_time_collect_across_generic_info_interrupt
     assert not any(
         entry.get("stage") == "question_contract"
         and entry.get("expected_reply_type") == "service_choice"
+        for entry in (expect.get("trace_contains") or [])
+    )
+
+
+def test_unsupported_service_followup_does_not_expect_booking_collect():
+    turns = [
+        {
+            "kind": "text",
+            "text": "делаете пирсинг?",
+            "tags": ["interrupt", "consult"],
+            "expect": {},
+        },
+        {
+            "kind": "text",
+            "text": "если да хочу записаться сегодня вечером",
+            "tags": ["booking", "date", "time"],
+            "expect": {
+                "action": "collect",
+                "reply_type": "time",
+                "meta_any": {"expected_reply_type": ["time"]},
+                "trace_contains": [
+                    {"stage": "question_contract", "expected_reply_type": "time"}
+                ],
+            },
+        },
+    ]
+
+    sanitized = sanitize_booking_scenario_llm_turns(turns, {}, random.Random(33))
+
+    assert booking_scenario_looks_like_unsupported_service_inquiry(
+        "делаете пирсинг?",
+        ["interrupt", "consult"],
+    )
+    first_expect = sanitized[0].get("expect") or {}
+    assert first_expect.get("action") == "fact"
+    assert first_expect.get("reply_type") is None
+    assert (first_expect.get("meta_any") or {}).get("action") == ["fact"]
+
+    expect = sanitized[1].get("expect") or {}
+    assert expect.get("action") == "fact"
+    assert expect.get("reply_type") is None
+    assert (expect.get("meta_any") or {}).get("action") == ["fact"]
+    assert (expect.get("meta_any") or {}).get("intent") == [
+        "services_overview",
+        "out_of_domain",
+    ]
+    assert "expected_reply_type" not in (expect.get("meta_any") or {})
+    assert not any(
+        entry.get("stage") == "question_contract"
         for entry in (expect.get("trace_contains") or [])
     )
 
@@ -2472,8 +2601,8 @@ def test_sanitize_llm_turns_multi_service_booking_request_stays_service_choice()
     turns = [
         {
             "kind": "text",
-            "text": "Мне нужен маникюр и педикюр.",
-            "tags": ["booking"],
+            "text": "маникюр педикюр керек",
+            "tags": ["booking", "multi_service"],
             "expect": {
                 "reply_type": "time",
                 "meta_any": {
@@ -6099,8 +6228,19 @@ def test_apply_slot_format_variation_preserves_expect_and_tags():
 
     joined = " ".join(turn["text"].lower() for turn in mutated)
     assert any(token in joined for token in ("на пятницу", "на субботу", "на воскресенье", "на завтра", "в выходные"))
-    assert any(token in joined for token in ("после 18:00", "после 19:00", "ближе к вечеру", "примерно к 17.30", "к "))
-    assert any(token in joined for token in ("8 (",))
+    assert any(
+        token in joined
+        for token in (
+            "после шести",
+            "после семи",
+            "ближе к вечеру",
+            "примерно 5 30 вечера",
+            "вечера",
+        )
+    )
+    assert "+7" not in joined
+    assert "(" not in joined
+    assert any(token in joined for token in ("870", "701", "702", "707", "778"))
     assert mutated[0]["tags"] == turns[0]["tags"]
     assert mutated[1]["expect"] == turns[1]["expect"]
 
@@ -6134,7 +6274,10 @@ def test_apply_slot_format_variation_updates_transliterated_surface():
 
     joined = " ".join(turn["text"].lower() for turn in mutated)
     assert any(token in joined for token in ("na pyatnitsu", "na subbotu", "na zavtra", "v vyhodnye"))
-    assert any(token in joined for token in ("18:00", "19:00", "17.30", "8 ("))
+    assert any(token in joined for token in ("posle shesti", "posle semi", "blizhe k vecheru", "5 30 vechera", "vechera"))
+    assert "+7" not in joined
+    assert "(" not in joined
+    assert any(token in joined for token in ("870", "701", "702", "707", "778"))
     assert mutated[0]["tags"] == translit_turns[0]["tags"]
 
 
